@@ -18,11 +18,11 @@ My shell of choice is `zsh` with [oh-my-zsh](https://github.com/ohmyzsh/ohmyzsh)
 
 ### 🔌 Shell Plugins
 
-Plugins are either installed as git repo submodules or explicitly in the setup script:
+Plugins are installed via `zinit` or the setup script:
 
 - `fzf`: Fuzzy finder enabled in shell reverse search and in `vim`
-- `oh-my-zsh`: Shell framework that enables themes and plugins
 - `powerlevel10k`: Stunning yet functional shell prompt
+- `zinit`: Shell framework that enables themes and plugins
 - `zsh-autosuggestions`: Pseudo auto-completion like in `fish` shell
 - `zsh-highlighting`: Emphasizes, as you write, if a command/file/directory is missing (usually due to a typo)
 
