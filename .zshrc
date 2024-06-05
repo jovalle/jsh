@@ -82,8 +82,8 @@ source $HOME/.jsh/envvars.zsh
 source $HOME/.jsh/functions.zsh
 
 # Shell integrations
-eval "$(fzf --zsh)"
-eval "$(zoxide init zsh)"
+source <(fzf --zsh)
+source <(zoxide init zsh --cmd j)
 
 # Local variables
 [ -f $JSH_CUSTOM ] && source $JSH_CUSTOM
