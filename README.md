@@ -18,8 +18,6 @@ My shell of choice is `zsh` with [oh-my-zsh](https://github.com/ohmyzsh/ohmyzsh)
 
 ### 🔌 Shell Plugins
 
-Plugins are installed via `zinit` or the setup script:
-
 - `fzf`: Fuzzy finder enabled in shell reverse search and in `vim`
 - `powerlevel10k`: Stunning yet functional shell prompt
 - `zinit`: Shell framework that enables themes and plugins
@@ -49,11 +47,7 @@ Project includes custom configs for `iTerm2` and `vscode`.
 
 ## 🐣 Prerequisites
 
-The only prereq not handled by this repo is the installation of `task`.
-
-```sh
-sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d
-```
+Taskfile is a needed! Install via `./install-task.sh`.
 
 ### Font
 
