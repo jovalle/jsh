@@ -81,6 +81,9 @@ source $HOME/.jsh/colors.zsh
 source $HOME/.jsh/envvars.zsh
 source $HOME/.jsh/functions.zsh
 
+# Prioritize upstream fzf
+export PATH=$HOME/.fzf/bin:$PATH
+
 # Shell integrations
 source <(fzf --zsh)
 source <(zoxide init zsh --cmd j)
