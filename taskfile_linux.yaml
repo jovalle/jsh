@@ -3,21 +3,43 @@
 version: "3"
 
 vars:
-  packages: git software-properties-common build-essential zlib1g-dev fzf libncurses5-dev libgdbm-dev libnss3-dev libssl-dev libreadline-dev libffi-dev libsqlite3-dev wget libbz2-dev zsh python3
+  packages: ansible ansible-lint awscli btop build-essential fzf git glances golang jq kubecolor kubectx kubetail libbz2-dev libffi-dev libgdbm-dev libncurses5-dev libnss3-dev libreadline-dev libsqlite3-dev libssl-dev netcat-openbsd neofetch neovim nmap podman python3 rsync software-properties-common stow thefuck tldr tmux wget zlib1g-dev zoxide zsh
 
 tasks:
   default:
     deps:
       - upgrade
       - install
+      - install-kubectl
 
   upgrade:
     desc: Upgrade OS and installed packages
     cmds:
-      - sudo apt update
-      - sudo apt upgrade -y
+      - apt update
+      - apt upgrade -y
 
   install:
     desc: Install packages
     cmds:
-      - sudo apt install -y {{.packages}}
+      - apt install -y {{.packages}}
+
+  install-kubectl:
+    desc: Procure kubectl binary
+    vars:
+      version:
+        sh: curl -L -s https://dl.k8s.io/release/stable.txt
+      os:
+        sh: uname -s | tr '[:upper:]' '[:lower:]'
+      arch:
+        sh: dpkg --print-architecture
+    cmds:
+      - curl -LO "https://dl.k8s.io/release/{{.version}}/bin/{{.os}}/{{.arch}}/kubectl"
+      - install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+      - rm -f ./kubectl
+    generates:
+      - /usr/local/bin/kubectl
+    preconditions:
+      - command -v curl
+      - command -v install
+    status:
+      - test -x /usr/local/bin/kubectl
