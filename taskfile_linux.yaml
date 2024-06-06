@@ -8,20 +8,24 @@ vars:
 tasks:
   default:
     deps:
-      - upgrade
       - install
       - install-kubectl
 
+  update:
+    desc: Update local repos
+    cmd: apt update
+
   upgrade:
     desc: Upgrade OS and installed packages
-    cmds:
-      - apt update
-      - apt upgrade -y
+    deps:
+      - update
+    cmd: apt upgrade -y
 
   install:
     desc: Install packages
-    cmds:
-      - apt install -y {{.packages}}
+    deps:
+      - update
+    cmd: apt install -y {{.packages}}
 
   install-kubectl:
     desc: Procure kubectl binary
