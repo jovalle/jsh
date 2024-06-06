@@ -15,9 +15,17 @@ tasks:
 
   install:
     desc: Install packages and stow
-    deps: [os]
+    deps:
+      - os
     tasks:
       - stow
+
+  install-fzf:
+    desc: Run upstream install
+    cmds:
+      - '{{.ROOT_DIR}}/.fzf/install --all --no-zsh'
+    preconditions:
+      - test -x {{.ROOT_DIR}}/.fzf/install
 
   stow:
     desc: Propagate dotfiles from the current directory to the home directory
