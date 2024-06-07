@@ -72,6 +72,7 @@
   "terminal.integrated.defaultProfile.linux": "zsh",
   "terminal.integrated.defaultProfile.windows": "Debian (WSL)",
   "terminal.integrated.fontFamily": "MesloLGS Nerd Font, MesloLGS NF, Menlo",
+  "terminal.integrated.fontSize": 12,
   "terminal.integrated.profiles.linux": {
     "bash": {
       "icon": "terminal-bash",
