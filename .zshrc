@@ -7,6 +7,7 @@ fi
 
 # Default environment variables
 export CLICOLORS=1 # Colorize as much as possible
+export DEFAULT_REMOTE_HOST=mothership # My go-to `rcode` shortcut
 export EDITOR=vim # Line editor
 export JSH=$HOME/.jsh # Ideal location
 export JSH_CUSTOM=$HOME/.jsh_local # Ideal location
@@ -333,3 +334,4 @@ ipmi() { # ipmi: Common ipmitool shortcuts with no plaintext password
   ipmitool -I lanplus -H ${IPMI_HOST} -U ${IPMI_USER} -f ${IPMI_CRED_FILE} $@
 }
 quiet() { [[ $# == 0 ]] && &> /dev/null || "$*" &> /dev/null ; } # quiet: Mute output of a command or redirection
+rcode() { code --remote ssh-remote+${1:-${DEFAULT_REMOTE_HOST}} ${2:-/etc/${1:-${DEFAULT_REMOTE_HOST}}} } # rcode: Open remote dir in vscode
