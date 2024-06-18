@@ -53,8 +53,9 @@
   "redhat.telemetry.enabled": false,
   "remote.SSH.configFile": "~/.ssh/config",
   "remote.SSH.remotePlatform": {
-    "192.168.31.2": "linux",
-    "192.168.31.3": "linux"
+    "mothership": "linux",
+    "stargate": "linux",
+    "watchtower": "linux"
   },
   "remote.SSH.suppressWindowsSshWarning": true,
   "remote.SSH.useExecServer": true,
