@@ -8,6 +8,7 @@ fi
 # Default environment variables
 export CLICOLORS=1 # Colorize as much as possible
 export DEFAULT_REMOTE_HOST=mothership # My go-to `rcode` shortcut
+export DIRENV_LOG_FORMAT= # Silence direnv for p10k
 export EDITOR=vim # Line editor
 export JSH=$HOME/.jsh # Ideal location
 export JSH_CUSTOM=$HOME/.jsh_local # Ideal location
@@ -42,6 +43,11 @@ zinit light zsh-users/zsh-syntax-highlighting
 zinit light zsh-users/zsh-completions
 zinit light zsh-users/zsh-autosuggestions
 zinit light Aloxaf/fzf-tab
+
+# Pull and build direnv once
+zinit as"program" make'!' atclone'./direnv hook zsh > zhook.zsh' \
+    atpull'%atclone' pick"direnv" src"zhook.zsh" for \
+        direnv/direnv
 
 # Load snippets
 zinit snippet OMZP::git

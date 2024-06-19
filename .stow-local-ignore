@@ -4,6 +4,7 @@
 .gitignore
 .gitmodules
 .stfolder
+.zsh_history
 LICENSE
 VERSION
 \w.*\.(jpeg|md|sh|yaml|zsh)
