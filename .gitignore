@@ -1,5 +1,6 @@
 *.cache*
 *.last-run
+*.log
 *.netrwhist
 *.stTheme.cache
 *.sublime-project
@@ -28,6 +29,13 @@
 ._*
 .apdisk
 .com.apple.timemachine.donotpresent
+.config/argocd
+.config/containers
+.config/iterm2
+.config/karabiner
+.config/qBittorrent
+.config/raycast
+.config/thefuck
 .fseventsd
 .fzf
 .history
@@ -46,6 +54,7 @@
 GitHub.sublime-settings
 Network\ Trash\ Folder
 Temporary\ Items
+__pycache__
 bh_unicode_properties.cache
 node_modules
 oscrypto-ca-bundle.crt
