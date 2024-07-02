@@ -242,7 +242,6 @@ alias wget='wget -c' # Preferred 'wget' implementation (resume download)
 alias whatis='declare -f' # Print function definition
 alias which='type -a' # Preferred 'which' implementation
 command -v eza >/dev/null 2>&1 && alias ls='eza --git --color=always --icons=always'
-command -v kubecolor >/dev/null 2>&1 && alias kubectl='kubecolor'
 command -v nvim >/dev/null 2>&1 && alias vim='nvim'
 
 # Prioritize upstream fzf
