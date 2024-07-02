@@ -51,7 +51,6 @@ zinit as"program" make'!' atclone'./direnv hook zsh > zhook.zsh' \
 
 # Load snippets
 zinit snippet OMZP::git
-zinit snippet OMZP::sudo
 zinit snippet OMZP::archlinux
 zinit snippet OMZP::aws
 zinit snippet OMZP::kubectl
@@ -241,8 +240,11 @@ alias w='watch -n1 -d -t ' # Faster watch, highlight changes and no title
 alias wget='wget -c' # Preferred 'wget' implementation (resume download)
 alias whatis='declare -f' # Print function definition
 alias which='type -a' # Preferred 'which' implementation
+
+# Conditional aliases (order-specific)
 command -v eza >/dev/null 2>&1 && alias ls='eza --git --color=always --icons=always'
 command -v nvim >/dev/null 2>&1 && alias vim='nvim'
+command -v hx >/dev/null 2>&1 && alias vim='hx'
 
 # Prioritize upstream fzf
 export PATH=$HOME/.fzf/bin:$PATH
