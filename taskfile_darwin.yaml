@@ -11,16 +11,25 @@ tasks:
   default:
     deps:
       - set-symlinks
-      - configure-iterm2
-      - configure-vscode
       - install-packages
       - install-casks
       - install-links
+      - configure-firefox
+      - configure-iterm2
+      - configure-vscode
 
   set-symlinks:
     desc: Set up symlinks to dotfiles
     cmds:
       - ln -sf /opt/homebrew/bin/ggrep /opt/homebrew/bin/grep
+
+  configure-firefox:
+    desc: Tweak Firefox using Betterfox + own enhancements
+    cmds:
+      - ln -sf $HOME/.jsh/configs/user.js $HOME/Library/Application\ Support/Firefox/Profiles/*.default-release/user.js
+    preconditions:
+      - test -d /Applications/Firefox.app
+      - test -d $HOME/Library/Application\ Support/Firefox/Profiles/
 
   configure-iterm2:
     desc: Set iTerm2 to read config from local copy
