@@ -47,3 +47,16 @@ tasks:
       - command -v install
     status:
       - test -x /usr/local/bin/kubectl
+
+  install-nerd-font:
+    desc: Procure Meslo Nerd Font
+    cmds:
+      - curl -L https://github.com/ryanoasis/nerd-fonts/releases/latest/download/Meslo.tar.xz -o /tmp/meslo.tar.gz
+      - tar -xvf /tmp/meslo.tar.gz -C /usr/share/fonts
+    generates:
+      - /usr/share/fonts/MesloLGSDZNerdFont-Regular.ttf
+    preconditions:
+      - command -v curl
+      - command -v tar
+    status:
+      - test -f /usr/share/fonts/MesloLGSDZNerdFont-Regular.ttf
