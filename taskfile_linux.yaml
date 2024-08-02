@@ -3,7 +3,7 @@
 version: "3"
 
 vars:
-  packages: git software-properties-common build-essential zlib1g-dev fzf grc libncurses5-dev libgdbm-dev libnss3-dev libssl-dev libreadline-dev libffi-dev libsqlite3-dev wget libbz2-dev zsh python3
+  packages: git software-properties-common build-essential zlib1g-dev fzf grc libncurses5-dev libgdbm-dev libnss3-dev libssl-dev libreadline-dev libffi-dev libsqlite3-dev stow wget libbz2-dev zsh python3
 
 tasks:
   default:
@@ -13,19 +13,19 @@ tasks:
 
   update:
     desc: Update local repos
-    cmd: apt update
+    cmd: sudo apt update
 
   upgrade:
     desc: Upgrade OS and installed packages
     deps:
       - update
-    cmd: apt upgrade -y
+    cmd: sudo apt upgrade -y
 
   install:
     desc: Install packages
     deps:
       - update
-    cmd: apt install -y {{.packages}}
+    cmd: sudo apt install -y {{.packages}}
 
   install-kubectl:
     desc: Procure kubectl binary

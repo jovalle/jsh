@@ -13,17 +13,20 @@ tasks:
     cmd: task -l
     silent: true
 
+  git:
+    desc: Update git repo
+    cmds:
+      - git submodule update --init
+
   install:
     desc: Install packages and stow
     deps:
-      - os
-    tasks:
-      - stow
+      - task: git
 
   install-fzf:
     desc: Run upstream install
     cmds:
-      - '{{.ROOT_DIR}}/.fzf/install --all --no-zsh'
+      - '{{.ROOT_DIR}}/.fzf/install --bin --no-zsh'
     preconditions:
       - test -x {{.ROOT_DIR}}/.fzf/install
 
