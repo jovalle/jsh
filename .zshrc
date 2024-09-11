@@ -249,6 +249,9 @@ command -v hx >/dev/null 2>&1 && alias vim='hx'
 # Prioritize upstream fzf
 export PATH=$HOME/.fzf/bin:$PATH
 
+# Add krew plugins
+[ -d ${KREW_ROOT:-$HOME/.krew} ] && export PATH=${KREW_ROOT:-$HOME/.krew}/bin:$PATH
+
 # Shell integrations
 [ -f "/opt/homebrew/bin/brew" ] && source <(/opt/homebrew/bin/brew shellenv)
 command -v fzf 2>/dev/null 1>&2 && source <(fzf --zsh)
