@@ -4,10 +4,15 @@ version: "3"
 
 vars:
   packages:
+    - ansible
+    - btop
     - build-essential
+    - dkms
     - fzf
     - git
+    - glances
     - grc
+    - htop
     - libbz2-dev
     - libffi-dev
     - libgdbm-dev
@@ -16,17 +21,27 @@ vars:
     - libreadline-dev
     - libsqlite3-dev
     - libssl-dev
+    - make
+    - neovim
+    - nvme-cli
     - python3
+    - realtek-rtl88xxau-dkms
+    - s-tui
     - software-properties-common
     - stow
+    - syncthing
     - wget
     - zlib1g-dev
     - zsh
+
+  services:
+    - syncthing@${USER}.service
 
 tasks:
   default:
     deps:
       - install-packages
+      - enable-services
       - install-kubectl
       - install-vscode
       - install-nerd-font
@@ -78,6 +93,23 @@ tasks:
       - command -v install
     status:
       - test -x /usr/local/bin/kubectl
+
+  enable-service:
+    desc: Start and enable services
+    cmds:
+      - sudo systemctl enable {{.service}}
+      - sudo systemctl start {{.service}}
+    requires:
+      vars: ['service']
+
+  enable-services:
+    cmds:
+      - for: {var: services, split: ' '}
+        task: enable-service
+        vars:
+          service: '{{.ITEM}}'
+    requires:
+      vars: ['services']
 
   install-vscode:
     desc: Procure and install VSCode

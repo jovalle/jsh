@@ -5,49 +5,46 @@ version: "3"
 vars:
   packages:
     - age
-    - alfred
     - ansible
     - ansible-lint
+    - argocd
     - awscli
     - bat
     - btop
-    - caffeine
     - cilium-cli
     - cloudflared
     - corepack
     - coreutils
     - cryptography
     - direnv
-    - discord
     - exiftool
     - ffmpeg
-    - firefox
     - fluxcd/tap/flux
-    - font-meslo-lg-nerd-font
     - fzf
     - git-delta
     - glances
+    - gnu-sed
+    - gnutls
     - go
-    - google-chrome
+    - go-task
     - govc
     - grc
     - grep
     - helm
     - helmfile
+    - hugo
     - ipmitool
-    - istat-menus
-    - ipmitool
-    - iterm2
     - johanhaleby/kubetail/kubetail
     - jq
     - k3sup
     - kind
     - krew
     - kubecm
+    - kubecolor
     - kubectx
     - kubernetes-cli
+    - kubescape
     - kubetail
-    - lens
     - libassuan
     - libde265
     - libev
@@ -77,66 +74,88 @@ vars:
     - mos
     - ncurses
     - neofetch
+    - neovim
     - netcat
     - nettle
     - nmap
     - node
     - npm
-    - npth
     - nvim
     - oniguruma
-    - openexr
-    - openjpeg
-    - openssl@1.1
-    - p11-kit
-    - pcre
-    - pcre2
     - perl
-    - pinentry
     - pkg-config
-    - plex
-    - plexamp
     - podman
     - poetry
+    - python-certifi
+    - python-cryptography
     - python-dateutil
     - python-distlib
     - python-filelock
     - python-jinja
     - python-lxml
+    - python-markupsafe
     - python-platformdirs
     - python-pyparsing
     - python-pytz
     - python3
     - pyyaml
     - qemu
-    - raspberry-pi-imager
+    - readline
     - rsync
     - siderolabs/tap/talosctl
-    - signal
-    - slack
     - sops
+    - sshpass
     - stow
-    - sublime-text
+    - syncthing
     - tailscale
     - talosctl
-    - telegram
     - terraform
-    - tg-pro
-    - thefuck
+    - tesseract
     - tldr
     - tmux
-    - vagrant
-    - visual-studio-code
+    - tree
+    - tree-sitter
+    - unbound
+    - utf8proc
     - virtualenv
     - watch
     - wireshark
-    - zoom
+    - xz
+    - z
+    - z3
     - zoxide
     - zsh-completions
   casks:
+    - alfred
     - alt-tab
-    - docker
-    - mpv
+    - brave-browser
+    - caffeine
+    - chatgpt
+    - discord
+    - drawio
+    - fantastical
+    - firefox
+    - font-meslo-lg-nerd-font
+    - foobar2000
+    - google-chrome
+    - iterm2
+    - lens
+    - mos
+    - notion
+    - omnidisksweeper
+    - orbstack
+    - plex
+    - plexamp
+    - raspberry-pi-imager
+    - signal
+    - slack
+    - spotify
+    - stolendata-mpv # app, not just CLI like `mpv`
+    - sublime-text
+    - telegram
+    - tg-pro
+    - visual-studio-code
+    - zoom
   links:
     - ansible
     - python3
