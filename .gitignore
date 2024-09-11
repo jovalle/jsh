@@ -47,7 +47,7 @@
 .sops
 .ssh
 .stfolder
-.talos/config
+.talos
 .vault
 .vim/bundle/*
 .vim/plugged/*
