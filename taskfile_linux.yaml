@@ -3,13 +3,32 @@
 version: "3"
 
 vars:
-  packages: git software-properties-common build-essential zlib1g-dev fzf grc libncurses5-dev libgdbm-dev libnss3-dev libssl-dev libreadline-dev libffi-dev libsqlite3-dev stow wget libbz2-dev zsh python3
+  packages:
+    - build-essential
+    - fzf
+    - git
+    - grc
+    - libbz2-dev
+    - libffi-dev
+    - libgdbm-dev
+    - libncurses5-dev
+    - libnss3-dev
+    - libreadline-dev
+    - libsqlite3-dev
+    - libssl-dev
+    - python3
+    - software-properties-common
+    - stow
+    - wget
+    - zlib1g-dev
+    - zsh
 
 tasks:
   default:
     deps:
-      - install
+      - install-packages
       - install-kubectl
+      - install-vscode
       - install-nerd-font
 
   update:
@@ -22,11 +41,22 @@ tasks:
       - update
     cmd: sudo apt upgrade -y
 
-  install:
-    desc: Install packages
+  add-repos:
+    desc: Configure additional package repos
+    cmds:
+      - curl -s https://syncthing.net/release-key.txt | sudo tee /etc/apt/trusted.gpg.d/syncthing.asc
+      - echo "deb https://apt.syncthing.net/ syncthing stable" | sudo tee /etc/apt/sources.list.d/syncthing.list
+    generates:
+      - /etc/apt/sources.list.d/syncthing.list
+
+  install-packages:
+    desc: Iterate through packages for install
     deps:
+      - add-repos
       - update
-    cmd: sudo apt install -y {{.packages}}
+    cmd: sudo apt install -y {{range .packages}}{{.}} {{end}}
+    requires:
+      vars: ['packages']
 
   install-kubectl:
     desc: Procure kubectl binary
@@ -39,7 +69,7 @@ tasks:
         sh: dpkg --print-architecture
     cmds:
       - curl -LO "https://dl.k8s.io/release/{{.version}}/bin/{{.os}}/{{.arch}}/kubectl"
-      - install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+      - sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
       - rm -f ./kubectl
     generates:
       - /usr/local/bin/kubectl
@@ -48,6 +78,12 @@ tasks:
       - command -v install
     status:
       - test -x /usr/local/bin/kubectl
+
+  install-vscode:
+    desc: Procure and install VSCode
+    cmds:
+      - curl -L "https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-x64" -o /tmp/code-linux-x64.deb
+      - sudo apt install -y /tmp/code-linux-x64.deb
 
   install-nerd-font:
     desc: Procure Meslo Nerd Font

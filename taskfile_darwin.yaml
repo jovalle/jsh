@@ -3,17 +3,152 @@
 version: "3"
 
 vars:
-  packages: age alfred ansible ansible-lint awscli bat btop caffeine cilium-cli cloudflared corepack coreutils cryptography direnv discord exiftool ffmpeg firefox fluxcd/tap/flux font-meslo-lg-nerd-font fzf git-delta glances go google-chrome govc grc grep helm helmfile ipmitool istat-menus ipmitool iterm2 johanhaleby/kubetail/kubetail jq k3sup kind krew kubecm kubectx kubernetes-cli kubetail lens libassuan libde265 libev libevent libffi libgcrypt libgpg-error libheif libidn2 libksba liblqr libomp libpng libtasn1 libtiff libtool libunistring libusb libvirt libyaml little-cms2 llvm lua mailsy mas minikube mos ncurses neofetch netcat nettle nmap node npm npth nvim oniguruma openexr openjpeg openssl@1.1 p11-kit pcre pcre2 perl pinentry pkg-config plex plexamp podman poetry python-dateutil python-distlib python-filelock python-jinja python-lxml python-platformdirs python-pyparsing python-pytz python3 pyyaml qemu raspberry-pi-imager rsync siderolabs/tap/talosctl signal slack sops stow sublime-text tailscale talosctl telegram terraform tg-pro thefuck tldr tmux vagrant visual-studio-code virtualenv watch wireshark zoom zoxide zsh-completions
-  casks: alt-tab docker mpv
-  links: ansible python3
+  packages:
+    - age
+    - alfred
+    - ansible
+    - ansible-lint
+    - awscli
+    - bat
+    - btop
+    - caffeine
+    - cilium-cli
+    - cloudflared
+    - corepack
+    - coreutils
+    - cryptography
+    - direnv
+    - discord
+    - exiftool
+    - ffmpeg
+    - firefox
+    - fluxcd/tap/flux
+    - font-meslo-lg-nerd-font
+    - fzf
+    - git-delta
+    - glances
+    - go
+    - google-chrome
+    - govc
+    - grc
+    - grep
+    - helm
+    - helmfile
+    - ipmitool
+    - istat-menus
+    - ipmitool
+    - iterm2
+    - johanhaleby/kubetail/kubetail
+    - jq
+    - k3sup
+    - kind
+    - krew
+    - kubecm
+    - kubectx
+    - kubernetes-cli
+    - kubetail
+    - lens
+    - libassuan
+    - libde265
+    - libev
+    - libevent
+    - libffi
+    - libgcrypt
+    - libgpg-error
+    - libheif
+    - libidn2
+    - libksba
+    - liblqr
+    - libomp
+    - libpng
+    - libtasn1
+    - libtiff
+    - libtool
+    - libunistring
+    - libusb
+    - libvirt
+    - libyaml
+    - little-cms2
+    - llvm
+    - lua
+    - mailsy
+    - mas
+    - minikube
+    - mos
+    - ncurses
+    - neofetch
+    - netcat
+    - nettle
+    - nmap
+    - node
+    - npm
+    - npth
+    - nvim
+    - oniguruma
+    - openexr
+    - openjpeg
+    - openssl@1.1
+    - p11-kit
+    - pcre
+    - pcre2
+    - perl
+    - pinentry
+    - pkg-config
+    - plex
+    - plexamp
+    - podman
+    - poetry
+    - python-dateutil
+    - python-distlib
+    - python-filelock
+    - python-jinja
+    - python-lxml
+    - python-platformdirs
+    - python-pyparsing
+    - python-pytz
+    - python3
+    - pyyaml
+    - qemu
+    - raspberry-pi-imager
+    - rsync
+    - siderolabs/tap/talosctl
+    - signal
+    - slack
+    - sops
+    - stow
+    - sublime-text
+    - tailscale
+    - talosctl
+    - telegram
+    - terraform
+    - tg-pro
+    - thefuck
+    - tldr
+    - tmux
+    - vagrant
+    - visual-studio-code
+    - virtualenv
+    - watch
+    - wireshark
+    - zoom
+    - zoxide
+    - zsh-completions
+  casks:
+    - alt-tab
+    - docker
+    - mpv
+  links:
+    - ansible
+    - python3
 
 tasks:
   default:
     deps:
-      - set-symlinks
+      - install-homebrew
       - install-packages
       - install-casks
       - install-links
+      - set-symlinks
       - configure-firefox
       - configure-iterm2
       - configure-vscode
@@ -41,63 +176,31 @@ tasks:
     desc: Override VSCode settings with local copy using symlink
     cmds:
       - ln -sf $HOME/.jsh/configs/vscode.settings.json "$HOME/Library/Application Support/Code/User/settings.json"
+    generates:
+      - "$HOME/Library/Application Support/Code/User/settings.json"
 
   install-homebrew:
     desc: Install Homebrew
     cmd: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
-  brew-install:
-    desc: Install package using brew
-    cmd: brew install {{.package}} --force
-    requires:
-      vars: ['package']
-
-  brew-install-cask:
-    desc: Install cask using brew
-    cmd: brew install --cask {{.cask}} --force
-    requires:
-      vars: ['cask']
-
-  brew-link:
-    desc: Link local binary with homebrew variant
-    cmd: brew link {{.link}}
-    requires:
-      vars: ['link']
-
   install-packages:
-    desc: Iterate through packages for install
-    #deps: [install-homebrew]
-    cmds:
-      - for: {var: packages, split: ' '}
-        task: brew-install
-        vars:
-          package: '{{.ITEM}}'
+    desc: Install brew packages
+    cmd: brew install {{range .packages}}{{.}} {{end}}
     requires:
       vars: ['packages']
 
   install-casks:
-    desc: Iterate through casks for install
-    #deps: [install-homebrew]
-    cmds:
-      - for: {var: casks, split: ' '}
-        task: brew-install-cask
-        vars:
-          cask: '{{.ITEM}}'
+    desc: Install brew casks
+    cmd: brew install --cask {{range .casks}}{{.}} {{end}}
     requires:
       vars: ['casks']
 
   install-links:
-    desc: Iterate through packages for linking
-    #deps: [install-homebrew]
-    cmds:
-      - for: {var: links, split: ' '}
-        task: brew-link
-        vars:
-          link: '{{.ITEM}}'
+    desc: Link packages as default
+    cmd: brew install {{range .links}}{{.}} {{end}}
     requires:
       vars: ['links']
 
-  brew-upgrade:
+  upgrade:
     desc: Upgrade brew packages
-    #deps: [install-homebrew]
     cmd: brew upgrade
