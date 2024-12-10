@@ -1,6 +1,7 @@
 /****************************************************************************
  * My enhancements                                                          *
 ****************************************************************************/
+user_pref("browser.compactmode.show", true);
 user_pref("browser.safebrowsing.downloads.remote.block_dangerous", false);
 user_pref("browser.shell.checkDefaultBrowser", true);
 user_pref("browser.urlbar.suggest.recentsearches", false);
