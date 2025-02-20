@@ -1,44 +1,85 @@
 ---
 # yaml-language-server: $schema=https://taskfile.dev/schema.json
-version: "3"
 
-dotenv: ['.env', '{{.ENV}}/.env.', '{{.HOME}}/.env']
-
+dotenv:
+  - ".env"
+  - "{{.ENV}}/.env."
+  - "{{.HOME}}/.env"
 includes:
-  os: ./taskfile_{{OS}}.yaml
-
+  os: ".taskfiles/{{OS}}/taskfile.yaml"
 tasks:
+  chsh:
+    cmd: "chsh -s /bin/zsh"
+    desc: Change default shell to zsh
 
   default:
     cmd: task -l
     silent: true
 
-  git:
-    desc: Update git repo
+  fzf:
     cmds:
-      - git submodule update --init
+      - "{{.ROOT_DIR}}/.fzf/install --bin --no-zsh"
+    desc: Run upstream install
+    preconditions:
+      - "test -x {{.ROOT_DIR}}/.fzf/install"
+
+  git:
+    cmds:
+      - "git submodule update --init"
+    desc: Update git repo
+
+  homebrew:
+    cmd: /bin/bash -c "$(curl -fsSL
+      https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    desc: Install Homebrew
 
   install:
-    desc: Install packages and stow
-    deps:
-      - task: git
-      - task: os
+    cmds:
+      - task: install-casks
+      - task: install-formulae
+      - task: install-links
+
+  install-casks:
+    cmd: brew install --cask {{range .casks}}{{.}} {{end}}
+    desc: Install brew casks
+    requires:
+      vars:
+        - casks
+
+  install-formulae:
+    cmd: brew install {{range .formulae}}{{.}} {{end}}
+    desc: Install brew formulae
+    requires:
+      vars:
+        - formulae
+
+  install-links:
+    cmd: brew install {{range .links}}{{.}} {{end}}
+    desc: Link packages as default
+    requires:
+      vars:
+        - links
+
+  setup:
     cmds:
       - task: stow
-
-  install-fzf:
-    desc: Run upstream install
-    cmds:
-      - '{{.ROOT_DIR}}/.fzf/install --bin --no-zsh'
-    preconditions:
-      - test -x {{.ROOT_DIR}}/.fzf/install
+      - task: chsh
+    deps:
+      - task: git
+      - task: homebrew
+      - task: os
+      - task: install
+      - task: fzf
+    desc: Provision installations and configurations
 
   stow:
+    cmd: "stow . --adopt"
     desc: Propagate dotfiles from the current directory to the home directory
-    dir: '{{.ROOT_DIR}}'
-    cmd: stow . --adopt
+    dir: "{{.ROOT_DIR}}"
 
   uninstall:
+    cmd: "stow -D ."
     desc: Retract dotfiles from home directory
-    dir: '{{.ROOT_DIR}}'
-    cmd: stow -D .
+    dir: "{{.ROOT_DIR}}"
+
+version: 3
