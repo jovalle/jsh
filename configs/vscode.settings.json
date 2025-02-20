@@ -30,14 +30,15 @@
   "editor.hover.delay": 1000,
   "editor.minimap.enabled": false,
   "editor.rulers": [
-    120
+    160
   ],
-  "editor.stickyScroll.enabled": false,
+  "editor.stickyScroll.enabled": true,
   "editor.tabSize": 2,
   "editor.wordWrap": "on",
   "explorer.autoReveal": false,
   "explorer.confirmDelete": false,
   "explorer.confirmDragAndDrop": false,
+  "explorer.confirmPasteNative": false,
   "files.associations": {
     "*.list": "dotenv"
   },
@@ -56,11 +57,13 @@
   "go.toolsManagement.autoUpdate": true,
   "go.useLanguageServer": true,
   "makefile.configureOnOpen": true,
+  "material-icon-theme.folders.theme": "specific",
   "redhat.telemetry.enabled": false,
   "remote.SSH.configFile": "~/.ssh/config",
   "remote.SSH.remotePlatform": {
     "mothership": "linux",
     "stargate": "linux",
+    "starport": "linux",
     "watchtower": "linux"
   },
   "remote.SSH.suppressWindowsSshWarning": true,
@@ -119,6 +122,7 @@
       "source": "PowerShell"
     }
   },
+  "terminal.integrated.stickyScroll.enabled": true,
   "vim.useSystemClipboard": true,
   "vs-kubernetes": {
     "vs-kubernetes.crd-code-completion": "disabled",
@@ -126,17 +130,21 @@
     "vs-kubernetes.helm-path.mac": "/opt/homebrew/bin/helm",
     "vs-kubernetes.kubectl-path.mac": "/opt/homebrew/bin/kubectl",
     "vs-kubernetes.minikube-path.mac": "/opt/homebrew/bin/minikube",
+    "vscode-kubernetes.helm-path-linux": "/home/jay/.local/state/vs-kubernetes/tools/helm/linux-amd64/helm",
     "vscode-kubernetes.helm-path.linux": "/home/jay/.vs-kubernetes/tools/helm/linux-amd64/helm",
     "vscode-kubernetes.helm-path.mac": "/opt/homebrew/bin/helm",
+    "vscode-kubernetes.kubectl-path-linux": "/home/jay/.local/state/vs-kubernetes/tools/kubectl/kubectl",
     "vscode-kubernetes.kubectl-path.linux": "/home/jay/.vs-kubernetes/tools/kubectl/kubectl",
     "vscode-kubernetes.kubectl-path.mac": "/opt/homebrew/bin/kubectl",
+    "vscode-kubernetes.minikube-path-linux": "/home/jay/.local/state/vs-kubernetes/tools/minikube/linux-amd64/minikube",
     "vscode-kubernetes.minikube-path-mac": "/Users/jay/.vs-kubernetes/tools/minikube/darwin-arm64/minikube",
-    "vscode-kubernetes.minikube-path.linux": "/home/jay/.vs-kubernetes/tools/minikube/linux-amd64/minikube",
+    "vscode-kubernetes.minikube-path.linux": "/home/jay/.vs-kubernetes/tools/minikube/linux-amd64/minikube"
   },
   "workbench.editorAssociations": {
     "*.plist": "default"
   },
   "workbench.iconTheme": "material-icon-theme",
   "workbench.sideBar.location": "right",
-  "workbench.startupEditor": "none"
+  "workbench.startupEditor": "none",
+  "workbench.tree.enableStickyScroll": true
 }
