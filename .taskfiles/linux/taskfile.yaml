@@ -2,6 +2,7 @@
 # yaml-language-server: $schema=https://taskfile.dev/schema.json
 
 tasks:
+
   add-repos:
     cmds:
       - curl -s https://syncthing.net/release-key.txt -o
@@ -11,8 +12,9 @@ tasks:
     desc: Configure additional package repos
     generates:
       - /etc/apt/sources.list.d/syncthing.list
+
   default:
-    deps:
+    tasks:
       - install
       - enable-services
 
@@ -24,16 +26,6 @@ tasks:
     requires:
       vars:
         - service
-
-  enable-services:
-    cmds:
-      - for: { split: " ", var: services }
-        task: enable-service
-        vars:
-          service: "{{.ITEM}}"
-    requires:
-      vars:
-        - services
 
   install:
     cmds:
@@ -107,13 +99,13 @@ tasks:
 
   install-packages:
     cmd: apt install -y {{range .packages}}{{.}} {{end}}
-    deps:
-      - add-repos
-      - update
     desc: Iterate through packages for install
     requires:
       vars:
         - packages
+    tasks:
+      - add-repos
+      - update
 
   install-vscode:
     cmds:
@@ -129,9 +121,9 @@ tasks:
 
   upgrade:
     cmd: sudo apt upgrade -y
-    deps:
-      - update
     desc: Upgrade OS and installed packages
+    tasks:
+      - update
 
 vars:
   formulae:

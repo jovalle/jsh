@@ -5,33 +5,48 @@ dotenv:
   - ".env"
   - "{{.ENV}}/.env."
   - "{{.HOME}}/.env"
+
 includes:
   os: ".taskfiles/{{OS}}/taskfile.yaml"
+
 tasks:
+
   chsh:
-    cmd: "chsh -s /bin/zsh"
+    cmd: chsh -s /bin/zsh
     desc: Change default shell to zsh
+    status:
+      - test "$(basename -- "$SHELL")" == "zsh"
 
   default:
     cmd: task -l
     silent: true
 
-  fzf:
+  enable-services:
     cmds:
-      - "{{.ROOT_DIR}}/.fzf/install --bin --no-zsh"
+      - for: { split: " ", var: services }
+        task: os:enable-service
+        vars:
+          service: "{{.ITEM}}"
+    requires:
+      vars:
+        - services
+
+  fzf:
+    cmd: "{{.ROOT_DIR}}/.fzf/install --bin --no-zsh"
     desc: Run upstream install
     preconditions:
       - "test -x {{.ROOT_DIR}}/.fzf/install"
 
   git:
-    cmds:
-      - "git submodule update --init"
+    cmd: git submodule update --init
     desc: Update git repo
 
   homebrew:
     cmd: /bin/bash -c "$(curl -fsSL
       https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
     desc: Install Homebrew
+    status:
+      - command -v brew
 
   install:
     cmds:
@@ -64,7 +79,6 @@ tasks:
     cmds:
       - task: stow
       - task: chsh
-    deps:
       - task: git
       - task: homebrew
       - task: os
@@ -73,13 +87,17 @@ tasks:
     desc: Provision installations and configurations
 
   stow:
-    cmd: "stow . --adopt"
+    cmd: stow . --adopt
     desc: Propagate dotfiles from the current directory to the home directory
     dir: "{{.ROOT_DIR}}"
 
   uninstall:
-    cmd: "stow -D ."
+    cmd: stow -D .
     desc: Retract dotfiles from home directory
     dir: "{{.ROOT_DIR}}"
+
+  upgrade:
+    cmd: brew upgrade
+    desc: Upgrade brew packages
 
 version: 3

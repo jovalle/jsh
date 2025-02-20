@@ -1,14 +1,19 @@
 ---
 # yaml-language-server: $schema=https://taskfile.dev/schema.json
+
 tasks:
+
   configure-firefox:
     cmds:
-      - ln -sf $HOME/.jsh/configs/user.js $HOME/Library/Application\
-        Support/Firefox/Profiles/*.default-release/user.js
+      - ln -sf $HOME/.jsh/configs/user.js "{{ .FF_DIR }}/user.js"
     desc: Tweak Firefox using Betterfox + own enhancements
     preconditions:
       - test -d /Applications/Firefox.app
       - test -d $HOME/Library/Application\ Support/Firefox/Profiles/
+    vars:
+      FF_DIR:
+        sh: 'find $HOME/Library/Application\ Support/Firefox/Profiles -type d -name
+          "*.default-release"'
 
   configure-iterm2:
     cmds:
@@ -25,43 +30,35 @@ tasks:
     desc: Override VSCode settings with local copy using symlink
     generates:
       - "$HOME/Library/Application Support/Code/User/settings.json"
+
   default:
-    deps:
-      - install-packages
-      - install-casks
-      - install-links
-      - set-symlinks
-      - configure-firefox
-      - configure-iterm2
-      - configure-vscode
+    cmds:
+      - task: set-symlinks
+      - task: configure-firefox
+      - task: configure-iterm2
+      - task: configure-vscode
+
+  enable-service:
+    cmds:
+      - brew services start {{.service}}
+    desc: Start and enable services
+    requires:
+      vars:
+        - service
 
   set-symlinks:
     cmds:
-      - ln -sf /opt/homebrew/bin/ggrep /opt/homebrew/bin/grep
+      - ln -sf $(brew --prefix)/bin/ggrep /usr/local/bin/grep
     desc: Set up symlinks to dotfiles
-
-  upgrade:
-    cmd: brew upgrade
-    desc: Upgrade brew packages
 
 vars:
   casks:
-    - alfred
-    - alt-tab
-    - brave-browser
     - caffeine
-    - chatgpt
     - discord
-    - drawio
     - firefox
     - font-meslo-lg-nerd-font
     - foobar2000
-    - google-chrome
     - iterm2
-    - lens
-    - mos
-    - notion
-    - omnidisksweeper
     - plex
     - plexamp
     - raspberry-pi-imager
@@ -74,10 +71,6 @@ vars:
     - tg-pro
     - visual-studio-code
     - zoom
-  links:
-    - ansible
-    - docker
-    - python3
   formulae:
     - age
     - ansible
@@ -88,20 +81,15 @@ vars:
     - btop
     - cilium-cli
     - cloudflared
-    - corepack
-    - coreutils
-    - cryptography
     - direnv
     - docker
     - exiftool
     - ffmpeg
-    - flox
     - fluxcd/tap/flux
     - fzf
     - git-delta
     - glances
     - gnu-sed
-    - gnutls
     - go
     - go-task
     - govc
@@ -125,61 +113,15 @@ vars:
     - kubescape
     - kubeshark
     - kubetail
-    - libassuan
-    - libde265
-    - libev
-    - libevent
-    - libffi
-    - libgcrypt
-    - libgpg-error
-    - libheif
-    - libidn2
-    - libksba
-    - liblqr
-    - libomp
-    - libpng
-    - libtasn1
-    - libtiff
-    - libtool
-    - libunistring
-    - libusb
     - libvirt
-    - libyaml
-    - little-cms2
-    - llvm
-    - lua
-    - mailsy
-    - mas
-    - minikube
-    - mos
-    - ncdu
-    - ncurses
     - neofetch
     - neovim
     - netcat
-    - nettle
     - nmap
-    - node
-    - npm
     - nvim
-    - oniguruma
-    - perl
-    - pkg-config
     - podman
     - poetry
-    - python-certifi
-    - python-cryptography
-    - python-dateutil
-    - python-distlib
-    - python-filelock
-    - python-jinja
-    - python-lxml
-    - python-markupsafe
-    - python-platformdirs
-    - python-pyparsing
-    - python-pytz
     - python3
-    - pyyaml
     - qemu
     - readline
     - rsync
@@ -190,21 +132,21 @@ vars:
     - syncthing
     - tailscale
     - talosctl
-    - terraform
-    - tesseract
     - tldr
     - tmux
     - tree
     - tree-sitter
     - unbound
-    - utf8proc
     - virtualenv
     - watch
-    - wireshark
     - xz
-    - z
-    - z3
     - zoxide
     - zsh-completions
+  links:
+    - ansible
+    - docker
+    - python3
+  services:
+    - syncthing
 
 version: "3"
