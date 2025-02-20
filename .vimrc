@@ -15,6 +15,9 @@ set background=dark
 " Set number of lines for VIM to remember
 set history=500
 
+" Increase memory limit
+set maxmempattern=5000000
+
 " Enable filetype plugins
 filetype plugin on
 filetype indent on
