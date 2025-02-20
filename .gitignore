@@ -32,11 +32,15 @@
 .com.apple.timemachine.donotpresent
 .config/argocd
 .config/containers
+.config/flipperdevices.com
+.config/fontforge
 .config/iterm2
 .config/karabiner
 .config/qBittorrent
 .config/raycast
 .config/thefuck
+.config/wireshark
+.config/xnviewmp
 .fseventsd
 .fzf
 .history
