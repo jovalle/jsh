@@ -58,12 +58,18 @@
   "go.useLanguageServer": true,
   "makefile.configureOnOpen": true,
   "material-icon-theme.folders.theme": "specific",
+  "python.defaultInterpreterPath": "/usr/local/bin/python",
   "redhat.telemetry.enabled": false,
   "remote.SSH.configFile": "~/.ssh/config",
   "remote.SSH.remotePlatform": {
+    "gateway": "linux",
     "mothership": "linux",
+    "ms-01": "linux",
+    "ms-02": "linux",
+    "ms-03": "linux",
     "stargate": "linux",
     "starport": "linux",
+    "warpgate": "linux",
     "watchtower": "linux"
   },
   "remote.SSH.suppressWindowsSshWarning": true,
@@ -140,6 +146,7 @@
     "vscode-kubernetes.minikube-path-mac": "/Users/jay/.vs-kubernetes/tools/minikube/darwin-arm64/minikube",
     "vscode-kubernetes.minikube-path.linux": "/home/jay/.vs-kubernetes/tools/minikube/linux-amd64/minikube"
   },
+  "workbench.colorTheme": "Default Dark+",
   "workbench.editorAssociations": {
     "*.plist": "default"
   },
