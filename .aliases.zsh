@@ -1,5 +1,12 @@
 # Aliases
 
+# Conditional aliases (order-specific)
+command -v vim >/dev/null 2>&1 && alias vi='vim'
+command -v eza >/dev/null 2>&1 && alias ls='eza --git --color=always --icons=always'
+command -v nvim >/dev/null 2>&1 && alias vim='nvim'
+command -v hx >/dev/null 2>&1 && alias vim='hx'
+
+# General aliases
 alias ..='cd ../' # Go back 1 directory level
 alias .2='cd ../../' # Go back 2 directory levels
 alias .3='cd ../../../' # Go back 3 directory levels
@@ -59,9 +66,8 @@ alias path='echo -e ${PATH//:/\\n}' # path: Echo all executable Paths
 alias perm='stat --printf "%a %n \n "' # perm: Show permission of target in number
 alias please='sudo ' # Politely ask for superuser
 alias pn='pnpm' # Abbreviate pnpm
-alias proxy='http_proxy=$PROXY_ENDPOINT https_proxy=$PROXY_ENDPOINT no_proxy=$PROXY_EXCEPTION' # proxy: set as per env and on command
 alias proxy+="export {{http,https}_proxy,{HTTP,HTTPS}_PROXY}=${PROXY_ENDPOINT}; export {NO_PROXY,no_proxy}=${PROXY_ENDPOINT:-go,localhost}" # proxy+: set as per env and on command
-alias proxy-="unset {{http,https}_proxy,{HTTP,HTTPS}_PROXY,NO_PROXY,no_proxy}" # proxy-: unset proxy env vars
+alias proxy-="unset {{http,https}_proxy,{HTTP,HTTPS}_PROXY}=${PROXY_ENDPOINT}; export {NO_PROXY,no_proxy}=${PROXY_EXCEPTION:-go,localhost}" # proxy-: unset proxy env vars
 alias proxy="{{http,https}_proxy,{HTTP,HTTPS}_PROXY}=${PROXY_ENDPOINT}\ {NO_PROXY,no_proxy}=${PROXY_ENDPOINT:-go,localhost}"
 alias rm='rm -i' # Always prompt before deleting
 alias show_options='shopt' # Show_options: display bash options settings
@@ -73,8 +79,7 @@ alias tf='terraform' # Abbreviation
 alias timestamp='date "+%Y%m%dT%H%M%S"' # Filename ready complete time format
 alias tmux="tmux -2" # Force 256 color support
 alias vscode='open -a "Visual Studio Code"' # VSCode shortcut
-alias vi='vim' # Preferred 'vi' implementation
-alias vz='vi ~/.zshrc' # Open zshrc
+alias vz='vim ~/.zshrc' # Open zshrc
 alias w='watch -n1 -d -t ' # Faster watch, highlight changes and no title
 alias wget='wget -c' # Preferred 'wget' implementation (resume download)
 alias whatis='declare -f' # Print function definition
@@ -103,8 +108,3 @@ if [[ $(which grc 2>/dev/null) == 0 ]]; then
   alias tail='colorize tail'
   alias traceroute='colorize /usr/sbin/traceroute'
 fi
-
-# Conditional aliases (order-specific)
-command -v eza >/dev/null 2>&1 && alias ls='eza --git --color=always --icons=always'
-command -v nvim >/dev/null 2>&1 && alias vim='nvim'
-command -v hx >/dev/null 2>&1 && alias vim='hx'
