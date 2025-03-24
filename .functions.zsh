@@ -95,3 +95,67 @@ nukem() {
 }
 quiet() { [[ $# == 0 ]] && &> /dev/null || "$*" &> /dev/null ; } # quiet: Mute output of a command or redirection
 rcode() { code --remote ssh-remote+${1:-${DEFAULT_REMOTE_HOST}} ${2:-/etc/${1:-${DEFAULT_REMOTE_HOST}}} } # rcode: Open remote dir in vscode
+
+kctx-() { # kctx-: Remove kubeconfig from the default kubeconfig
+  # Check if the kubeconfig file is provided
+  if [ -z "$1" ]; then
+    echo "Usage: $0 <kubeconfig>"
+    return 1
+  fi
+
+  context=$(kubectl config view --kubeconfig=$1 -o jsonpath='{.current-context}')
+
+  # Get the cluster and user associated with the context
+  cluster=$(kubectl config view --kubeconfig=$1 -o jsonpath="{.contexts[?(@.name == \"$context\")].context.cluster}")
+  user=$(kubectl config view --kubeconfig=$1 -o jsonpath="{.contexts[?(@.name == \"$context\")].context.user}")
+
+  # Check if the cluster is uniquely tied to the context
+  if ! kubectl config get-contexts --kubeconfig=$1 --output='name' | grep -q "$cluster"; then
+    kubectl config delete-cluster "$cluster" &>/dev/null
+  fi
+
+  # Check if the user is uniquely tied to the context
+  if ! kubectl config get-contexts --kubeconfig=$1 --output='name' | grep -q "$user"; then
+    kubectl config unset "users.$user" &>/dev/null
+  fi
+
+  # Delete the context
+  kubectl config delete-context "$context" --kubeconfig=$1 &>/dev/null
+}
+
+kctx+() { # kctx+: Append kubeconfig to the default kubeconfig
+  # Check if the kubeconfig file is provided
+  if [ -z "$1" ]; then
+    echo "Usage: $0 <kubeconfig>"
+    return 1
+  fi
+
+  KUBECONFIG_SRC="$1"
+  KUBECONFIG_DST="$HOME/.kube/config"
+
+  # Validate the new kubeconfig
+  KUBECONFIG=$KUBECONFIG_SRC kubectl config view --minify -o jsonpath='{.contexts[*].name}' &>/dev/null
+  if [[ $? != "0" ]]; then
+    echo "Invalid kubeconfig file ($KUBECONFIG_SRC)"
+    return 1
+  fi
+
+  # Ensure the global kubeconfig directory exists
+  KUBECONFIG_DIR=$(dirname $KUBECONFIG_DST)
+  mkdir -p $KUBECONFIG_DIR
+
+  # Stage new kubeconfig
+  KUBECONFIG_TMP=$KUBECONFIG_DIR/.kubeconfig
+  info "cat $KUBECONFIG_DST > $KUBECONFIG_TMP"
+  cat $KUBECONFIG_DST > $KUBECONFIG_TMP
+
+  # Merge kubeconfig files
+  info "KUBECONFIG=$KUBECONFIG_SRC:$KUBECONFIG_TMP kubectl config view --flatten > $KUBECONFIG_DST"
+  KUBECONFIG=$KUBECONFIG_SRC:$KUBECONFIG_TMP kubectl config view --flatten > $KUBECONFIG_DST
+  if [[ $? == "0" ]]; then
+    success "Kubeconfig merged successfully"
+  else
+    echo "Failed to merge kubeconfig files ($KUBECONFIG_SRC:$KUBECONFIG_TMP)"
+    return 1
+  fi
+}
