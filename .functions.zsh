@@ -159,3 +159,12 @@ kctx+() { # kctx+: Append kubeconfig to the default kubeconfig
     return 1
   fi
 }
+
+nukem() { # nukem: Remove finalizers from a namespace
+  if [ -z "$1" ]; then
+    echo "Usage: $0 <namespace>"
+    return 1
+  fi
+
+  kubectl get namespace "${1}" -o json | tr -d "\n" | sed "s/\"finalizers\": \[[^]]\+\]/\"finalizers\": []/" | kubectl replace --raw /api/v1/namespaces/"${1}"/finalize -f -
+}
