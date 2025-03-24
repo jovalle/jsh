@@ -40,6 +40,7 @@
 .config/thefuck
 .config/wireshark
 .config/xnviewmp
+.envrc
 .fseventsd
 .fzf
 .history
@@ -55,6 +56,7 @@
 .vim/bundle/*
 .vim/plugged/*
 .zsh_history
+AppSupport
 GitHub.sublime-settings
 Network\ Trash\ Folder
 Temporary\ Items

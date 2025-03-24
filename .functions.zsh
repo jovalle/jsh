@@ -70,7 +70,7 @@ http2ssh() { # http2ssh: Convert gitconfig URL from HTTP(S) to SSH (Credit: gith
   warn ""
 
   git remote set-url origin $NEW_URL
-  [[ $# ]] && success "Success" || error "Failed to set new URL origin"
+  [[ $# ]] && success "New URL origin set successfully" || error "Failed to set new URL origin" || return 1
 }
 ipmi() { # ipmi: Common ipmitool shortcuts with no plaintext password
   if [[ $1 == "fan" ]]; then
@@ -80,6 +80,7 @@ ipmi() { # ipmi: Common ipmitool shortcuts with no plaintext password
       return $?
     else
       error "example: ipmi fan 20"
+      return 1
     fi
   fi
 

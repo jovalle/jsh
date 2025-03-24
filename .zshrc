@@ -8,15 +8,17 @@ export CLICOLORS=1 # Colorize as much as possible
 export DEFAULT_REMOTE_HOST=mothership # My go-to `rcode` shortcut
 export DIRENV_LOG_FORMAT= # Silence direnv for p10k
 export EDITOR=vim # Line editor
-export JSH=$HOME/.jsh # Ideal location
-export JSH_CUSTOM=$HOME/.jsh_local # Ideal location
+export GIT_BASE=$HOME/projects
+export JSH=${JSH_ROOT:-$HOME}/.jsh # Ideal location
+export JSH_CUSTOM=$JSH/.jsh_local # Ideal location
 export JSH_VERSION=$(cat $JSH/VERSION) # Not used
-export PATH=$JSH/.bin:$HOME/go/bin:$PATH # Add included bins/scripts and ideal go path
+export PATH=$JSH/.bin:$JSH/.fzf/bin:$HOME/go/bin:$PATH # Add included bins/scripts and ideal go path
 export PYTHONDONTWRITEBYTECODE=1 # No .pyc files when importing
 export SH=${SHELL##*/} # For reference
 export SSHRC_EXTRAS='.inputrc .tmux.conf .vimrc' # Files to take on SSHRC sessions
 export SOPS_AGE_KEY_FILE=$HOME/.sops/age.agekey # May not exist
 export VISUAL=vim # Full screen editor
+export WORK_DIR=$HOME/projects # Default work directory
 export ZINIT_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}/zinit/zinit.git" # Set the directory we want to store zinit and plugins
 
 # Enable Powerlevel10k instant prompt. Should stay close to the top of ~/.zshrc.
@@ -41,17 +43,19 @@ zinit ice depth=1; zinit light romkatv/powerlevel10k
 # Lazily init zsh completions system
 autoload -Uz compinit && compinit
 
+# Load fzf
+git -C $JSH submodule status .fzf &>/dev/null || git -C $JSH submodule update --init #--recursive .fzf
+[[ -x $JSH/.fzf/bin/fzf && $(command -v $JSH/.fzf/bin/fzf) ]] || rm -f $JSH/.fzf/bin/fzf # Check if fzf is executable, delete if not
+[[ ! -f $JSH/.fzf/bin/fzf && -f $JSH/.fzf/install ]] && chmod +x $JSH/.fzf/install && $JSH/.fzf/install --bin # Install fzf if not present
+
 # Load zsh plugins
-zinit light junegunn/fzf
 zinit light Aloxaf/fzf-tab
 zinit light zsh-users/zsh-syntax-highlighting
 zinit light zsh-users/zsh-completions
 zinit light zsh-users/zsh-autosuggestions
 
 # Pull and build direnv once
-zinit as"program" make'!' atclone'./direnv hook zsh > zhook.zsh' \
-    atpull'%atclone' pick"direnv" src"zhook.zsh" for \
-        direnv/direnv
+zinit as"program" make'!' atclone'./direnv hook zsh > zhook.zsh' atpull'%atclone' pick"direnv" src"zhook.zsh" for direnv/direnv
 
 # Load snippets
 zinit snippet OMZP::git
@@ -104,14 +108,13 @@ LISTMAX=0
 # Disable mail checking
 MAILCHECK=0
 
-# Allow comments
-setopt interactivecomments
-
 # History
 HISTSIZE=10000
 HISTFILE=~/.zsh_history
 SAVEHIST=$HISTSIZE
 HISTDUP=erase
+setopt appendhistory
+setopt sharehistory
 setopt hist_ignore_space
 setopt hist_ignore_all_dups
 setopt hist_save_no_dups
@@ -170,7 +173,7 @@ fi
 
 # Color helper functions
 abort() { echo; echo "${red}$@${reset}" 1>&2; exit 1; }
-error() { echo -e ${red}$@${reset}; return 1; }
+error() { echo -e ${red}$@${reset}; }
 warn() { echo -e ${orange}$@${reset}; }
 success() { echo -e ${green}$@${reset}; }
 info() { echo -e ${blue}$@${reset}; }
