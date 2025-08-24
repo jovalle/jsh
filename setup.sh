@@ -4,7 +4,9 @@ set -e
 
 REQUIRED_CMDS=(
   curl
-  docker
+  stow
+  wget
+  zsh
 )
 
 for cmd in "${REQUIRED_CMDS[@]}"; do
