@@ -47,11 +47,13 @@ Project includes custom configs for `iTerm2` and `vscode`.
 
 ## 🐣 Prerequisites
 
-Taskfile is a needed! Install via `./install-task.sh`.
+Taskfile is a needed! Install via `./setup.sh`.
 
 ### Font
 
-p10k recommends [Meslo Nerd Font](https://github.com/ryanoasis/nerd-fonts) and will install it (`p10k configure`) if missing and using iTerm2.
+Using [JetBrainsMono](https://www.jetbrains.com/lp/mono/) with [FiraCode](https://github.com/tonsky/FiraCode) and [Meslo](https://github.com/andreberg/Meslo-Font) as backups.
+
+Installation should procure the fonts automatically but you may need to restart your app(s).
 
 ## 📲 Install
 

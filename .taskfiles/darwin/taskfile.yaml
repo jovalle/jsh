@@ -2,7 +2,6 @@
 # yaml-language-server: $schema=https://taskfile.dev/schema.json
 
 tasks:
-
   configure-firefox:
     cmds:
       - ln -sf $HOME/.jsh/configs/user.js "{{ .FF_DIR }}/user.js"
@@ -12,39 +11,27 @@ tasks:
       - test -d $HOME/Library/Application\ Support/Firefox/Profiles/
     vars:
       FF_DIR:
-        sh: 'find $HOME/Library/Application\ Support/Firefox/Profiles -type d -name
-          "*.default-release"'
+        sh: 'find $HOME/Library/Application\ Support/Firefox/Profiles -type d -name "*.default-release"'
 
   configure-iterm2:
     cmds:
-      - defaults write com.googlecode.iterm2.plist PrefsCustomFolder -string
-        '{{.HOME}}/.config/iterm2'
-      - defaults write com.googlecode.iterm2.plist LoadPrefsFromCustomFolder
-        -bool true
+      - defaults write com.googlecode.iterm2.plist PrefsCustomFolder -string '{{.HOME}}/.config/iterm2'
+      - defaults write com.googlecode.iterm2.plist LoadPrefsFromCustomFolder -bool true
     desc: Set iTerm2 to read config from local copy
 
   configure-vscode:
     cmds:
-      - ln -sf $HOME/.jsh/configs/vscode.settings.json
-        "$HOME/Library/Application Support/Code/User/settings.json"
+      - ln -sf $HOME/.jsh/configs/vscode.settings.json "$HOME/Library/Application Support/Code/User/settings.json"
     desc: Override VSCode settings with local copy using symlink
     generates:
       - "$HOME/Library/Application Support/Code/User/settings.json"
 
   default:
     cmds:
-      - task: set-symlinks
       - task: configure-firefox
       - task: configure-iterm2
       - task: configure-vscode
-
-  enable-service:
-    cmds:
-      - brew services start {{.service}}
-    desc: Start and enable services
-    requires:
-      vars:
-        - service
+      - task: set-symlinks
 
   set-symlinks:
     cmds:
@@ -149,4 +136,4 @@ vars:
   services:
     - syncthing
 
-version: "3"
+version: 3

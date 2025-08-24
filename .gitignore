@@ -37,6 +37,7 @@
 .config/karabiner
 .config/qBittorrent
 .config/raycast
+.config/systemd
 .config/thefuck
 .config/wireshark
 .config/xnviewmp

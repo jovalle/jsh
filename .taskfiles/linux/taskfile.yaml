@@ -2,128 +2,25 @@
 # yaml-language-server: $schema=https://taskfile.dev/schema.json
 
 tasks:
-
-  add-repos:
-    cmds:
-      - curl -s https://syncthing.net/release-key.txt -o
-        /etc/apt/trusted.gpg.d/syncthing.asc
-      - echo "deb https://apt.syncthing.net/ syncthing stable" >
-        /etc/apt/sources.list.d/syncthing.list
-    desc: Configure additional package repos
-    generates:
-      - /etc/apt/sources.list.d/syncthing.list
-
   default:
-    tasks:
-      - install
-      - enable-services
-
-  enable-service:
-    cmds:
-      - sudo systemctl enable {{.service}}
-      - sudo systemctl start {{.service}}
-    desc: Start and enable services
-    requires:
-      vars:
-        - service
-
-  install:
-    cmds:
-      - task: install-packages
-      - task: install-helm
-      - task: install-kubectl
-
-  install-apps:
-    cmds:
-      - task: install-nerd-font
-      - task: install-vscode
-
-  install-helm:
-    cmds:
-      - curl https://baltocdn.com/helm/signing.asc | gpg --dearmor | sudo tee
-        /usr/share/keyrings/helm.gpg > /dev/null
-      - sudo apt-get install apt-transport-https --yes
-      - echo "deb [arch={{.arch}} signed-by=/usr/share/keyrings/helm.gpg]
-        https://baltocdn.com/helm/stable/debian/ all main" | sudo tee
-        /etc/apt/sources.list.d/helm-stable-debian.list
-      - sudo apt-get update
-      - sudo apt-get install helm
-    desc: Procure helm binary
-    generates:
-      - /usr/bin/helm
-    preconditions:
-      - command -v dpkg
-      - command -v apt-get
-    status:
-      - test -x /usr/bin/helm
-    vars:
-      arch:
-        sh: dpkg --print-architecture
-
-  install-kubectl:
-    cmds:
-      - curl -LO
-        "https://dl.k8s.io/release/{{.version}}/bin/{{.os}}/{{.arch}}/kubectl"
-      - sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
-      - rm -f ./kubectl
-    desc: Procure kubectl binary
-    generates:
-      - /usr/local/bin/kubectl
-    preconditions:
-      - command -v curl
-      - command -v install
-    status:
-      - test -x /usr/local/bin/kubectl
-    vars:
-      arch:
-        sh: dpkg --print-architecture
-      os:
-        sh: uname -s | tr '[:upper:]' '[:lower:]'
-      version:
-        sh: curl -L -s https://dl.k8s.io/release/stable.txt
-
-  install-nerd-font:
-    cmds:
-      - curl -L
-        https://github.com/ryanoasis/nerd-fonts/releases/latest/download/Meslo.tar.xz
-        -o /tmp/meslo.tar.gz
-      - sudo tar -xvf /tmp/meslo.tar.gz -C /usr/share/fonts
-    desc: Procure Meslo Nerd Font
-    generates:
-      - /usr/share/fonts/MesloLGSDZNerdFont-Regular.ttf
-    preconditions:
-      - command -v curl
-      - command -v tar
-    status:
-      - test -f /usr/share/fonts/MesloLGSDZNerdFont-Regular.ttf
+    cmd: echo "No tasks for Linux. Moving on."
 
   install-packages:
-    cmd: apt install -y {{range .packages}}{{.}} {{end}}
-    desc: Iterate through packages for install
+    cmds:
+      - task: update
+      - sudo apt install -y {{range .packages}}{{.}} {{end}}
     requires:
       vars:
         - packages
-    tasks:
-      - add-repos
-      - update
-
-  install-vscode:
-    cmds:
-      - curl -L
-        "https://code.visualstudio.com/sha/download?build=stable&os=linux-deb-x64"
-        -o /tmp/code-linux-x64.deb
-      - sudo apt install -y /tmp/code-linux-x64.deb
-    desc: Procure and install VSCode
 
   update:
     cmd: sudo apt update
-    desc: Update local repos
 
   upgrade:
-    cmd: sudo apt upgrade -y
-    desc: Upgrade OS and installed packages
-    tasks:
-      - update
+    cmds:
+      - task: update
+      - sudo apt upgrade -y
+    desc: Upgrade OS packages
 
 vars:
   formulae:
@@ -132,6 +29,7 @@ vars:
     - kind
     - kubectl
     - nerdfetch
+    - syncthing
   packages:
     - ansible
     - btop
@@ -152,16 +50,17 @@ vars:
     - libssl-dev
     - make
     - neovim
+    - net-tools
+    - npm
     - nvme-cli
     - python3
     - s-tui
     - software-properties-common
     - stow
-    - syncthing
     - wget
     - zlib1g-dev
     - zsh
   services:
-    - syncthing@${USER}.service
+    - syncthing
 
-version: "3"
+version: 3

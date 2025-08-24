@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+
+tasks:
+  install-apps:
+    cmd: powershell.exe -NoProfile -ExecutionPolicy Bypass -Command 'Start-Process -FilePath "winget" -ArgumentList "install {{range .apps}}{{.}} {{end}}" -Verb RunAs -Wait'
+
+  install-nerd-fonts:
+    cmd: powershell.exe -NoProfile -ExecutionPolicy Bypass -Command 'Start-Process powershell -ArgumentList "refreshenv; choco install nerd-fonts-firacode nerd-fonts-meslo nerd-fonts-jetbrainsmono -y" -Verb RunAs -Wait'
+
+vars:
+  apps:
+    - Chocolatey.Chocolatey
+    - Git.Git
+    - Microsoft.PowerToys
+    - Microsoft.VisualStudioCode
+    - Microsoft.WindowsTerminal
+    - Mozilla.Firefox
+    - Rufus.Rufus
+    - Syncthing.Syncthing
+    - Zoom.Zoom
+    - mpv.net
+
+version: 3
