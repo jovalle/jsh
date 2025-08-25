@@ -3,8 +3,14 @@
 tasks:
   default:
     cmds:
+      - task: configure-terminal
       - task: install-apps
       - task: install-nerd-fonts
+
+  configure-terminal:
+    cmd: |
+      WSLPATH=$(wslpath -w ~/.config/windows-terminal/settings.json)
+      powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Copy-Item -Path '$WSLPATH' -Destination \"\$([Environment]::GetEnvironmentVariable('LOCALAPPDATA'))\\Packages\\Microsoft.WindowsTerminal_8wekyb3d8bbwe\\LocalState\\settings.json\" -Force"
 
   install-apps:
     cmd: powershell.exe -NoProfile -ExecutionPolicy Bypass -Command 'Start-Process -FilePath "winget" -ArgumentList "install {{range .apps}}{{.}} {{end}}" -Verb RunAs -Wait'
