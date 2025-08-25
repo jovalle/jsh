@@ -8,7 +8,7 @@ dotenv:
 
 includes:
   os: ".taskfiles/{{OS}}/taskfile.yaml"
-  os:windows: ".taskfiles/windows/taskfile.yaml"
+  wsl: ".taskfiles/windows/taskfile.yaml"
 
 tasks:
   chsh:
@@ -40,17 +40,27 @@ tasks:
       - provision
       - setup
     cmds:
+      - task: stow
       - task: chsh
       - task: git
-      - task: install-software
+      - task: install-deps
       - task: os
-      - task: stow
     desc: Provision installations and configurations
 
   install-casks:
     cmd: brew install --cask {{range .casks}}{{.}} {{end}}
     status:
       - test -z "{{.casks}}"
+
+  install-deps:
+    cmds:
+      - task: fzf
+      - task: install-homebrew
+      - task: install-casks
+      - task: install-formulae
+      - task: install-links
+      - task: enable-service
+    desc: Install dependencies
 
   install-formulae:
     cmd: brew install {{range .formulae}}{{.}} {{end}}
@@ -66,25 +76,6 @@ tasks:
     cmd: brew install {{range .links}}{{.}} {{end}}
     status:
       - test -z "{{.links}}"
-
-  install-packages:
-    cmd:
-      task: os:install-packages
-    requires:
-      vars:
-        - packages
-
-  install-software:
-    cmds:
-      - task: fzf
-      - if grep -qi microsoft /proc/version; then task os:windows:install-apps; fi
-      - task: install-packages
-      - task: install-homebrew
-      - task: install-casks
-      - task: install-formulae
-      - task: install-links
-      - task: enable-service
-    desc: Install apps, packages, casks, formulae, and links
 
   stow:
     cmd: stow . --adopt

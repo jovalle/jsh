@@ -3,7 +3,9 @@
 
 tasks:
   default:
-    cmd: echo "No tasks for Linux. Moving on."
+    cmds:
+      - task: install-packages
+      - if grep -qi microsoft /proc/version; then task wsl; fi
 
   install-packages:
     cmds:

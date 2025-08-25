@@ -1,6 +1,11 @@
 # yaml-language-server: $schema=https://taskfile.dev/schema.json
 
 tasks:
+  default:
+    cmds:
+      - task: install-apps
+      - task: install-nerd-fonts
+
   install-apps:
     cmd: powershell.exe -NoProfile -ExecutionPolicy Bypass -Command 'Start-Process -FilePath "winget" -ArgumentList "install {{range .apps}}{{.}} {{end}}" -Verb RunAs -Wait'
 
