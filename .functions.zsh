@@ -1,5 +1,6 @@
 # Functions
 
+caffeinate() { gnome-session-inhibit --inhibit idle:sleep sleep infinity; } # Keep awake
 duh() { # duh: Disk usage per directory, sorted by ascending size
   if [[ $(uname) == "Darwin" ]]; then
     if [[ -n $1 ]]; then

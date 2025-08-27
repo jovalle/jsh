@@ -38,6 +38,8 @@ alias g='grep --color=auto -i' # grep > git
 alias g_="git commit -m" # Git commit
 alias gdiff='git diff --name-only master' # List files changed in this branch compared to master
 alias gdiffcp='gdiff | xargs -I{} rsync --relative {}' # Copy modified files to another dir
+alias git+="git push --set-upstream origin \$(git rev-parse --abbrev-ref HEAD)" # Push current branch to origin
+alias git-='git reset HEAD~1' # Undo last commit
 alias gl="git log --graph --oneline" # Easy commit history
 alias glances='glances -1 -t 0.5' # Faster output from glances
 alias grep='grep --color=auto -i' # Preferred 'grep' implementation
