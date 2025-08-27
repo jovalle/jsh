@@ -54,7 +54,6 @@ alias kns='kubens' # Change kube namespace
 alias l='ls -la' # Long, show hidden files
 alias ls='ls --color' # Show colors
 alias less='less -FSRXc' # Preferred 'less' implementation
-alias md='mkdir -p' # Create directory
 alias mkdir='mkdir -pv' # Preferred 'mkdir' implementation
 alias mountReadWrite='/sbin/mount -uw /' # mountReadWrite: For use when booted into single-user
 alias mv='mv -iv' # Preferred 'mv' implementation
@@ -67,8 +66,7 @@ alias perm='stat --printf "%a %n \n "' # perm: Show permission of target in numb
 alias please='sudo ' # Politely ask for superuser
 alias pn='pnpm' # Abbreviate pnpm
 alias proxy+="export {{http,https}_proxy,{HTTP,HTTPS}_PROXY}=${PROXY_ENDPOINT}; export {NO_PROXY,no_proxy}=${PROXY_ENDPOINT:-go,localhost}" # proxy+: set as per env and on command
-alias proxy-="unset {{http,https}_proxy,{HTTP,HTTPS}_PROXY}=${PROXY_ENDPOINT}; export {NO_PROXY,no_proxy}=${PROXY_EXCEPTION:-go,localhost}" # proxy-: unset proxy env vars
-alias proxy="{{http,https}_proxy,{HTTP,HTTPS}_PROXY}=${PROXY_ENDPOINT}\ {NO_PROXY,no_proxy}=${PROXY_ENDPOINT:-go,localhost}"
+alias proxy-="unset {http,https}_proxy {HTTP,HTTPS}_PROXY {NO_PROXY,no_proxy}" # proxy-: unset proxy env vars
 alias rm='rm -i' # Always prompt before deleting
 alias show_options='shopt' # Show_options: display bash options settings
 alias sshx='eval $(ssh-agent) && ssh-add 2>/dev/null' # sshx: Import SSH keys

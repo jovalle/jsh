@@ -15,7 +15,7 @@ duh() { # duh: Disk usage per directory, sorted by ascending size
     fi
   fi
 }
-extract() { # extract: Extract most know archives with one command
+extract() { # extract: Extract most known archives with one command
   if [ -f "$1" ]
   then
     case "$1" in
@@ -86,17 +86,6 @@ ipmi() { # ipmi: Common ipmitool shortcuts with no plaintext password
 
   ipmitool -I lanplus -H ${IPMI_HOST} -U ${IPMI_USER} -f ${IPMI_CRED_FILE} $@
 }
-nukem() {
-  if [ -z "$1" ]; then
-    echo "Usage: $0 <namespace>"
-    return 1
-  fi
-
-  kubectl get namespace "${1}" -o json | tr -d "\n" | sed "s/\"finalizers\": \[[^]]\+\]/\"finalizers\": []/" | kubectl replace --raw /api/v1/namespaces/"${1}"/finalize -f -
-}
-quiet() { [[ $# == 0 ]] && &> /dev/null || "$*" &> /dev/null ; } # quiet: Mute output of a command or redirection
-rcode() { code --remote ssh-remote+${1:-${DEFAULT_REMOTE_HOST}} ${2:-/etc/${1:-${DEFAULT_REMOTE_HOST}}} } # rcode: Open remote dir in vscode
-
 kctx-() { # kctx-: Remove kubeconfig from the default kubeconfig
   # Check if the kubeconfig file is provided
   if [ -z "$1" ]; then
@@ -123,7 +112,6 @@ kctx-() { # kctx-: Remove kubeconfig from the default kubeconfig
   # Delete the context
   kubectl config delete-context "$context" --kubeconfig=$1 &>/dev/null
 }
-
 kctx+() { # kctx+: Append kubeconfig to the default kubeconfig
   # Check if the kubeconfig file is provided
   if [ -z "$1" ]; then
@@ -160,7 +148,7 @@ kctx+() { # kctx+: Append kubeconfig to the default kubeconfig
     return 1
   fi
 }
-
+mkcd() { mkdir -p "$1" && cd "$1"; } # Make and change into directory
 nukem() { # nukem: Remove finalizers from a namespace
   if [ -z "$1" ]; then
     echo "Usage: $0 <namespace>"
@@ -169,3 +157,9 @@ nukem() { # nukem: Remove finalizers from a namespace
 
   kubectl get namespace "${1}" -o json | tr -d "\n" | sed "s/\"finalizers\": \[[^]]\+\]/\"finalizers\": []/" | kubectl replace --raw /api/v1/namespaces/"${1}"/finalize -f -
 }
+proxy() {
+  PROXY="${PROXY_ENDPOINT:-go,localhost}"
+  env http_proxy="$PROXY" https_proxy="$PROXY" HTTP_PROXY="$PROXY" HTTPS_PROXY="$PROXY" NO_PROXY="$PROXY" no_proxy="$PROXY" "$@"
+}
+quiet() { [[ $# == 0 ]] && &> /dev/null || "$*" &> /dev/null; } # quiet: Mute output of a command or redirection
+rcode() { code --remote ssh-remote+${1:-${DEFAULT_REMOTE_HOST}} ${2:-/etc/${1:-${DEFAULT_REMOTE_HOST}}}; } # rcode: Open remote dir in vscode

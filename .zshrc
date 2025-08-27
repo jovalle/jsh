@@ -183,8 +183,8 @@ info() { echo -e ${blue}$@${reset}; }
 [ -d ${KREW_ROOT:-$HOME/.krew} ] && export PATH=${KREW_ROOT:-$HOME/.krew}/bin:$PATH
 [ -f /home/linuxbrew/.linuxbrew/bin/brew ] && source <(/home/linuxbrew/.linuxbrew/bin/brew shellenv)
 [ -f /opt/homebrew/bin/brew ] && source <(/opt/homebrew/bin/brew shellenv)
-command -v fzf 2>/dev/null 1>&2 && source <(fzf --zsh)
-command -v zoxide 2>/dev/null 1>&2 && source <(zoxide init zsh)
+command -v fzf &>/dev/null && source <(fzf --zsh)
+command -v zoxide &>/dev/null && source <(zoxide init zsh)
 
 # Local variables and overrides
 [ -f "$JSH_CUSTOM" ] && source "$JSH_CUSTOM"
