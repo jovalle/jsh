@@ -21,7 +21,7 @@
   "diffEditor.wordWrap": "on",
   "editor.acceptSuggestionOnEnter": "off",
   "editor.bracketPairColorization.enabled": true,
-  "editor.fontFamily": "MesloLGSDZ Nerd Font Mono, MesloLGSDZ Nerd Font, MesloLGS Nerd Font Mono, MesloLGS Nerd Font, MesloLGS NF, Meslo, Menlo, monospace",
+  "editor.fontFamily": "JetBrainsMono NF, FiraCode Nerd Font, FiraCode NF, MesloLGS Nerd Font Mono, MesloLGS Nerd Font, MesloLGS NF, Meslo, Menlo, monospace",
   "editor.fontLigatures": true,
   "editor.fontSize": 12,
   "editor.guides.bracketPairs": true,
@@ -29,6 +29,7 @@
   "editor.guides.highlightActiveBracketPair": true,
   "editor.hover.delay": 1000,
   "editor.minimap.enabled": false,
+  "editor.multiCursorModifier": "ctrlCmd",
   "editor.rulers": [
     160
   ],
@@ -39,6 +40,7 @@
   "explorer.confirmDelete": false,
   "explorer.confirmDragAndDrop": false,
   "explorer.confirmPasteNative": false,
+  "extensions.ignoreRecommendations": true,
   "files.associations": {
     "*.list": "dotenv"
   },
@@ -47,6 +49,7 @@
   "git.autofetch": true,
   "git.confirmForcePush": false,
   "git.confirmSync": false,
+  "git.enableSmartCommit": true,
   "git.openRepositoryInParentFolders": "always",
   "git.terminalAuthentication": false,
   "gitlens.advanced.messages": {
@@ -67,6 +70,7 @@
     "ms-01": "linux",
     "ms-02": "linux",
     "ms-03": "linux",
+    "nexus": "linux",
     "stargate": "linux",
     "starport": "linux",
     "warpgate": "linux",
@@ -87,7 +91,7 @@
   "terminal.integrated.copyOnSelection": true,
   "terminal.integrated.defaultProfile.linux": "zsh",
   "terminal.integrated.defaultProfile.windows": "Debian (WSL)",
-  "terminal.integrated.fontFamily": "MesloLGSDZ Nerd Font Mono, MesloLGSDZ Nerd Font, MesloLGS Nerd Font Mono, MesloLGS Nerd Font, MesloLGS NF, Meslo, Menlo, monospace",
+  "terminal.integrated.fontFamily": "JetBrainsMono NF, FiraCode Nerd Font, FiraCode NF, MesloLGS Nerd Font Mono, MesloLGS Nerd Font, MesloLGS NF, Meslo, Menlo, monospace",
   "terminal.integrated.fontSize": 12,
   "terminal.integrated.profiles.linux": {
     "bash": {
@@ -151,6 +155,7 @@
     "*.plist": "default"
   },
   "workbench.iconTheme": "material-icon-theme",
+  "workbench.preferredHighContrastColorTheme": "Default Dark+",
   "workbench.sideBar.location": "right",
   "workbench.startupEditor": "none",
   "workbench.tree.enableStickyScroll": true
