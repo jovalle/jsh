@@ -6,6 +6,13 @@ tasks:
     cmds:
       - task: install-packages
       - if grep -qi microsoft /proc/version; then task wsl; fi
+      - task: enable-service
+
+  enable-service:
+    cmd: brew services start {{range .services}}{{.}} {{end}}
+    desc: Start services
+    status:
+      - test -z "{{.services}}"
 
   install-packages:
     cmds:
