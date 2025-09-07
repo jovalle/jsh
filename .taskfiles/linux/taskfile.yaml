@@ -4,8 +4,8 @@
 tasks:
   default:
     cmds:
-      - task: install-packages
       - if grep -qi microsoft /proc/version; then task wsl; fi
+      - task: install-packages
       - task: enable-service
 
   enable-service:
@@ -37,8 +37,10 @@ vars:
     - k9s
     - kind
     - kubectl
-    - nerdfetch
+    - neofetch
+    - sops
     - syncthing
+    - terraform
   packages:
     - ansible
     - btop
@@ -63,6 +65,7 @@ vars:
     - npm
     - nvme-cli
     - python3
+    - rsync
     - s-tui
     - software-properties-common
     - stow

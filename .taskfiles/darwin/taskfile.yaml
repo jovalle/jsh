@@ -35,7 +35,13 @@ tasks:
 
   set-symlinks:
     cmds:
-      - ln -sf $(brew --prefix)/bin/ggrep /usr/local/bin/grep
+      - |
+          if [ -L /usr/local/bin/grep ]; then
+            echo "/usr/local/bin/grep symlink already exists, skipping."
+          else
+            sudo ln -sf $(brew --prefix)/bin/ggrep /usr/local/bin/grep
+            echo "Symlink created for grep."
+          fi
     desc: Set up symlinks to dotfiles
 
 vars:
@@ -67,6 +73,7 @@ vars:
     - bat
     - btop
     - cilium-cli
+    - claude-code
     - cloudflared
     - direnv
     - docker
@@ -86,7 +93,6 @@ vars:
     - helmfile
     - hugo
     - ipmitool
-    - johanhaleby/kubetail/kubetail
     - jq
     - k3sup
     - k9s
@@ -112,7 +118,6 @@ vars:
     - qemu
     - readline
     - rsync
-    - siderolabs/tap/talosctl
     - sops
     - sshpass
     - stow
@@ -121,6 +126,8 @@ vars:
     - talosctl
     - tldr
     - tmux
+    - todoist-app
+    - todoist-cli
     - tree
     - tree-sitter
     - unbound

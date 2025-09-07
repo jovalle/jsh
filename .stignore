@@ -1,0 +1,4 @@
+.fzf/bin/*
+.git/objects/pack/*
+.kube/cache
+.venv

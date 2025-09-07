@@ -1,8 +1,10 @@
 *.cache*
+*.db
 *.gpg
 *.last-run
 *.log
 *.netrwhist
+*.pem
 *.stTheme.cache
 *.sublime-project
 *.sublime-workspace
@@ -38,6 +40,7 @@
 .config/qBittorrent
 .config/raycast
 .config/systemd
+.config/syncthing
 .config/thefuck
 .config/wireshark
 .config/xnviewmp

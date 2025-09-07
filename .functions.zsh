@@ -40,7 +40,7 @@ extract() { # extract: Extract most known archives with one command
 ff() { /usr/bin/find . -name "$@" ; }     # ff: Find file under the current directory
 ffs() { /usr/bin/find . -name "$@"'*' ; } # ffs: Find file whose name starts with a given string
 ffe() { /usr/bin/find . -name '*'"$@" ; } # ffe: Find file whose name ends with a given string
-ffpid() { lsof -t -c "$@" } # ffpid: Find pid of matching process
+ffpid() { lsof -t -c "$@" ; } # ffpid: Find pid of matching process
 http2ssh() { # http2ssh: Convert gitconfig URL from HTTP(S) to SSH (Credit: github.com/m14t/fix_github_https_repo.sh)
   REPO_URL=$(git remote -v | grep -m1 '^origin' | sed -Ene's#.*(https://[^[:space:]]*).*#\1#p')
   if [ -z "$REPO_URL" ]; then
@@ -149,7 +149,7 @@ kctx+() { # kctx+: Append kubeconfig to the default kubeconfig
     return 1
   fi
 }
-mkcd() { mkdir -p "$1" && cd "$1"; } # Make and change into directory
+mkcd() { mkdir -p "$1" && cd "$1" ; } # mkcd: Make and change directory
 nukem() { # nukem: Remove finalizers from a namespace
   if [ -z "$1" ]; then
     echo "Usage: $0 <namespace>"
