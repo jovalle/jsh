@@ -1,4 +1,18 @@
 {
+  "[dockercompose]": {
+    "editor.autoIndent": "advanced",
+    "editor.defaultFormatter": "redhat.vscode-yaml",
+    "editor.insertSpaces": true,
+    "editor.quickSuggestions": {
+      "comments": false,
+      "other": true,
+      "strings": true
+    },
+    "editor.tabSize": 2
+  },
+  "[github-actions-workflow]": {
+    "editor.defaultFormatter": "redhat.vscode-yaml"
+  },
   "[jsonc]": {
     "editor.quickSuggestions": {
       "strings": true
@@ -51,6 +65,7 @@
   "git.confirmSync": false,
   "git.enableSmartCommit": true,
   "git.openRepositoryInParentFolders": "always",
+  "git.replaceTagsWhenPull": true,
   "git.terminalAuthentication": false,
   "gitlens.advanced.messages": {
     "suppressGitMissingWarning": true,
@@ -85,10 +100,12 @@
   ],
   "security.workspace.trust.enabled": false,
   "security.workspace.trust.untrustedFiles": "open",
+  "settingsSync.ignoredExtensions": [],
   "settingsSync.ignoredSettings": [],
   "sync.autoDownload": true,
   "sync.autoUpload": true,
   "sync.quietSync": true,
+  "telemetry.telemetryLevel": "off",
   "terminal.external.osxExec": "iTerm.app",
   "terminal.external.windowsExec": "C:\\WINDOWS\\System32\\wsl.exe",
   "terminal.integrated.copyOnSelection": true,
@@ -153,7 +170,6 @@
     "vscode-kubernetes.minikube-path-mac": "/Users/jay/.vs-kubernetes/tools/minikube/darwin-arm64/minikube",
     "vscode-kubernetes.minikube-path.linux": "/home/jay/.vs-kubernetes/tools/minikube/linux-amd64/minikube"
   },
-  "workbench.colorTheme": "Default Dark+",
   "workbench.editorAssociations": {
     "*.plist": "default"
   },
