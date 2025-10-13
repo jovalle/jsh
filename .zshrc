@@ -5,7 +5,6 @@
 
 # Default environment variables
 export CLICOLORS=1 # Colorize as much as possible
-export DEFAULT_REMOTE_HOST=mothership # My go-to `rcode` shortcut
 export DIRENV_LOG_FORMAT= # Silence direnv for p10k
 export EDITOR=vim # Line editor
 export GIT_BASE=$HOME/projects

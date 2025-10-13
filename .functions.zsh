@@ -163,4 +163,14 @@ proxy() {
   env http_proxy="$PROXY" https_proxy="$PROXY" HTTP_PROXY="$PROXY" HTTPS_PROXY="$PROXY" NO_PROXY="$PROXY" no_proxy="$PROXY" "$@"
 }
 quiet() { [[ $# == 0 ]] && &> /dev/null || "$*" &> /dev/null; } # quiet: Mute output of a command or redirection
-rcode() { code --remote ssh-remote+${1:-${DEFAULT_REMOTE_HOST}} ${2:-/etc/${1:-${DEFAULT_REMOTE_HOST}}}; } # rcode: Open remote dir in vscode
+rcode() { # rcode: Open remote dir in vscode
+  local remote_host="$1"
+  local remote_path="$2"
+
+  if [[ $# -ne 2 ]]; then
+    echo "Usage: rcode <ssh_host> <remote_path>"
+    return 1
+  fi
+
+  code --remote "ssh-remote+${remote_host}" "${remote_path}"
+}
