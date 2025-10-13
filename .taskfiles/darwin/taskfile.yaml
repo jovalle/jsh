@@ -48,6 +48,7 @@ vars:
   casks:
     - caffeine
     - discord
+    - drawio
     - firefox
     - font-meslo-lg-nerd-font
     - foobar2000
@@ -117,6 +118,7 @@ vars:
     - python3
     - qemu
     - readline
+    - ripgrep
     - rsync
     - sops
     - sshpass

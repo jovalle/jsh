@@ -65,6 +65,7 @@ vars:
     - npm
     - nvme-cli
     - python3
+    - ripgrep
     - rsync
     - s-tui
     - software-properties-common

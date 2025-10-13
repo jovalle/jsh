@@ -78,6 +78,7 @@ alias t="touch" # Create file
 alias tf='terraform' # Abbreviation
 alias timestamp='date "+%Y%m%dT%H%M%S"' # Filename ready complete time format
 alias tmux="tmux -2" # Force 256 color support
+alias ts='date +%F-%H%M' # Timestamp (2025-09-20-1022)
 alias vscode='open -a "Visual Studio Code"' # VSCode shortcut
 alias vz='vim ~/.zshrc' # Open zshrc
 alias w='watch -n1 -d -t ' # Faster watch, highlight changes and no title

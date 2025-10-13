@@ -184,6 +184,7 @@ info() { echo -e ${blue}$@${reset}; }
 [ -f /opt/homebrew/bin/brew ] && source <(/opt/homebrew/bin/brew shellenv)
 command -v fzf &>/dev/null && source <(fzf --zsh)
 command -v zoxide &>/dev/null && source <(zoxide init zsh)
+command -v mise &>/dev/null && eval "$(mise activate zsh)" &>/dev/null
 
 # Local variables and overrides
 [ -f "$JSH_CUSTOM" ] && source "$JSH_CUSTOM"
