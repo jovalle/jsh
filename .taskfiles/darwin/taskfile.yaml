@@ -53,6 +53,8 @@ vars:
     - font-meslo-lg-nerd-font
     - foobar2000
     - iterm2
+    - macfuse
+    - mounty
     - plex
     - plexamp
     - raspberry-pi-imager
@@ -76,6 +78,7 @@ vars:
     - cilium-cli
     - claude-code
     - cloudflared
+    - codex
     - direnv
     - docker
     - exiftool
@@ -90,6 +93,7 @@ vars:
     - govc
     - grc
     - grep
+    - gromgit/fuse/ntfs-3g-mac
     - helm
     - helmfile
     - hugo
