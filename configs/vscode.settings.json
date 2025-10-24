@@ -96,6 +96,7 @@
   "remote.SSH.useLocalServer": false,
   "scm.showOutgoingChanges": "never",
   "security.allowedUNCHosts": [
+    "192.168.0.3",
     "wsl.localhost"
   ],
   "security.workspace.trust.enabled": false,

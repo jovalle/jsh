@@ -1,27 +1,4 @@
 /****************************************************************************
- * My enhancements                                                          *
-****************************************************************************/
-user_pref("browser.compactmode.show", true);
-user_pref("browser.safebrowsing.downloads.remote.block_dangerous", false);
-user_pref("browser.shell.checkDefaultBrowser", true);
-user_pref("browser.urlbar.suggest.recentsearches", false);
-user_pref("browser.warnOnQuitShortcut", false);
-user_pref("dom.private-attribution.submission.enabled", false);
-user_pref("dom.security.https_only_mode", true);
-user_pref("extensions.formautofill.addresses.enabled", false);
-user_pref("extensions.formautofill.creditCards.enabled", false);
-user_pref("network.trr.custom_uri", "https://freedns.controld.com/p2");
-user_pref("network.trr.excluded-domains", "techn.is,technis.net");
-user_pref("network.trr.mode", 3);
-user_pref("network.trr.uri", "https://freedns.controld.com/p2");
-user_pref("permissions.default.camera", 2);
-user_pref("permissions.default.microphone", 2);
-user_pref("permissions.default.xr", 2);
-user_pref("places.history.enabled", false);
-user_pref("privacy.donottrackheader.enabled", true);
-user_pref("signon.rememberSignons", false);
-
-/****************************************************************************
  * Betterfox                                                                *
  * "Ad meliora"                                                             *
  * version: 126                                                             *
@@ -74,9 +51,7 @@ user_pref("dom.security.sanitizer.enabled", true);
  * SECTION: SECUREFOX                                                       *
 ****************************************************************************/
 /** TRACKING PROTECTION ***/
-user_pref("browser.contentblocking.category", "standard");
-user_pref("urlclassifier.trackingSkipURLs", "*.reddit.com, *.twitter.com, *.twimg.com, *.tiktok.com");
-user_pref("urlclassifier.features.socialtracking.skipURLs", "*.instagram.com, *.twitter.com, *.twimg.com");
+user_pref("browser.contentblocking.category", "strict");
 user_pref("network.cookie.sameSite.noneRequiresSecure", true);
 user_pref("browser.download.start_downloads_in_tmp_dir", true);
 user_pref("browser.helperApps.deleteTempFileOnExit", true);
@@ -189,7 +164,7 @@ user_pref("browser.privatebrowsing.vpnpromourl", "");
 user_pref("extensions.getAddons.showPane", false);
 user_pref("extensions.htmlaboutaddons.recommendations.enabled", false);
 user_pref("browser.discovery.enabled", false);
-user_pref("browser.shell.checkDefaultBrowser", false);
+user_pref("browser.shell.checkDefaultBrowser", true);
 user_pref("browser.newtabpage.activity-stream.asrouter.userprefs.cfr.addons", false);
 user_pref("browser.newtabpage.activity-stream.asrouter.userprefs.cfr.features", false);
 user_pref("browser.preferences.moreFromMozilla", false);
@@ -247,6 +222,104 @@ user_pref("layout.word_select.eat_space_to_next_word", false);
 // visit https://github.com/yokoffing/Betterfox/wiki/Common-Overrides
 // visit https://github.com/yokoffing/Betterfox/wiki/Optional-Hardening
 // Enter your personal overrides below this line:
+
+/** UI **/
+user_pref("browser.urlbar.suggest.recentsearches", false);
+user_pref("browser.warnOnQuitShortcut", false);
+
+/** PRIVACY **/
+user_pref("dom.private-attribution.submission.enabled", false);
+user_pref("extensions.formautofill.addresses.enabled", false);
+user_pref("extensions.formautofill.creditCards.enabled", false);
+user_pref("places.history.enabled", false);
+user_pref("privacy.donottrackheader.enabled", true);
+user_pref("signon.rememberSignons", false);
+
+/** SECURITY **/
+user_pref("dom.security.https_only_mode", true);
+user_pref("permissions.default.camera", 2);
+user_pref("permissions.default.microphone", 2);
+user_pref("permissions.default.xr", 2);
+
+/** DNS OVER HTTPS **/
+user_pref("network.trr.mode", 3);
+user_pref("network.trr.uri", "https://freedns.controld.com/p3");
+user_pref("network.trr.excluded-domains", "techn.is,go");
+
+/** CUSTOM DOMAINS **/
+user_pref("browser.fixup.domainwhitelist.go", true);
+
+/** ENHANCED PRIVACY **/
+// Fingerprinting protection
+user_pref("privacy.resistFingerprinting", true);
+user_pref("privacy.resistFingerprinting.block_mozAddonManager", true);
+user_pref("privacy.fingerprintingProtection", true);
+user_pref("privacy.fingerprintingProtection.overrides", "+AllTargets,-CSSPrefersColorScheme");
+
+// Query parameter stripping
+user_pref("privacy.query_stripping.enabled", true);
+user_pref("privacy.query_stripping.enabled.pbmode", true);
+user_pref("privacy.query_stripping.strip_list", "__hsfp __hssc __hstc __s _hsenc _openstat dclid fbclid gbraid gclid hsCtaTracking igshid mc_eid ml_subscriber ml_subscriber_hash msclkid oft_c oft_ck oft_d oft_id oft_ids oft_k oft_lk oft_sk oly_anon_id oly_enc_id rb_clickid s_cid twclid vero_conv vero_id wbraid wickedid yclid");
+
+// Cookie & Tracking protection
+user_pref("privacy.partition.serviceWorkers", true);
+user_pref("privacy.partition.always_partition_third_party_non_cookie_storage", true);
+user_pref("privacy.partition.always_partition_third_party_non_cookie_storage.exempt_sessionstorage", false);
+
+// Referer privacy
+user_pref("network.http.referer.XOriginPolicy", 2);
+user_pref("network.http.referer.defaultPolicy.trackers", 1);
+user_pref("network.http.referer.defaultPolicy.trackers.pbmode", 1);
+
+/** ENHANCED PERFORMANCE **/
+// HTTP/2 & HTTP/3 optimizations
+user_pref("network.http.http3.enable", true);
+user_pref("network.http.http3.enable_0rtt", true);
+
+// Memory & cache optimizations
+user_pref("browser.cache.memory.enable", true);
+user_pref("browser.cache.memory.capacity", -1); // Auto-determine
+user_pref("browser.sessionhistory.max_total_viewers", 4);
+
+// GPU acceleration
+user_pref("gfx.webrender.all", true);
+user_pref("gfx.webrender.enabled", true);
+user_pref("layers.acceleration.force-enabled", true);
+
+// Reduce disk I/O
+user_pref("browser.sessionstore.interval", 120000);
+user_pref("browser.cache.disk.enable", true);
+user_pref("browser.cache.disk.capacity", 1048576);
+
+/** SECURITY HARDENING **/
+// Safe browsing settings (block_dangerous disabled per user preference)
+user_pref("browser.safebrowsing.downloads.remote.block_dangerous", true);
+user_pref("browser.safebrowsing.downloads.remote.block_dangerous_host", true);
+user_pref("browser.safebrowsing.downloads.remote.block_potentially_unwanted", true);
+user_pref("browser.safebrowsing.downloads.remote.block_uncommon", true);
+
+// WebGL privacy (disable if sites break)
+user_pref("webgl.disabled", true);
+user_pref("webgl.enable-debug-renderer-info", false);
+
+// Canvas fingerprinting protection
+user_pref("privacy.resistFingerprinting.randomDataOnCanvasExtract", true);
+
+// Disable WebRTC IP leak (may break video calls)
+user_pref("media.peerconnection.enabled", false);
+
+// Disable clipboard events (reduces tracking)
+user_pref("dom.event.clipboardevents.enabled", false);
+
+/** QUALITY OF LIFE **/
+// Smooth scrolling improvements
+user_pref("general.smoothScroll", true);
+user_pref("general.smoothScroll.msdPhysics.enabled", true);
+user_pref("mousewheel.default.delta_multiplier_y", 275);
+
+// Faster tab warming
+user_pref("browser.sessionstore.restore_on_demand", false);
+user_pref("browser.sessionstore.restore_tabs_lazily", false);
 
 /****************************************************************************
  * SECTION: SMOOTHFOX                                                       *

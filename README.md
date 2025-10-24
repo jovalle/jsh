@@ -37,13 +37,13 @@ Scripts at `./bin/` are imported into `PATH`:
 
 ### 📝 Configurations
 
-Project includes custom configs for `iTerm2` and `vscode`.
+Project includes custom configs for:
+
+- iTerm2
+- Firefox
+- Visual Studio Code
 
 ### 🖍️ Customization
-
-#### 🎨 Theme
-
-[Night Owl](https://marketplace.visualstudio.com/items?itemName=sdras.night-owl) is the default theme. If only it was as widely supported as [Dracula](https://draculatheme.com/)... 🤷🏽‍♂️
 
 ## 🐣 Prerequisites
 
@@ -54,6 +54,16 @@ Taskfile is a needed! Install via `./setup.sh`.
 Using [JetBrainsMono](https://www.jetbrains.com/lp/mono/) with [FiraCode](https://github.com/tonsky/FiraCode) and [Meslo](https://github.com/andreberg/Meslo-Font) as backups.
 
 Installation should procure the fonts automatically but you may need to restart your app(s).
+
+## ⚠️ Important Note
+
+This repository may contain hardcoded references to my username (`jay`) and system paths in various configuration files. If you're forking or using this repository, you may need to:
+
+- Update usernames in `.taskfiles/` (especially the WindowW taskfile)
+- Adjust paths in configuration files (Firefox, VS Code, etc.)
+- Review and modify any platform-specific settings
+
+Please search for `jay` and `/home/jay/` or `C:\Users\jay\` and update accordingly for your environment.
 
 ## 📲 Install
 
