@@ -29,7 +29,7 @@ tasks:
       - test -x "{{.ROOT_DIR}}/.fzf/install"
 
   git:
-    cmd: git submodule update --init
+    cmd: git submodule update --init --remote
 
   install:
     aliases:

@@ -1,4 +1,6 @@
+.config/syncthing
 .fzf/bin/*
+.fzf/**/*.sync-conflict-*
 .git/objects/pack/*
 .kube/cache
 .venv

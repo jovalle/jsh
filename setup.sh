@@ -4,6 +4,7 @@ set -e
 
 REQUIRED_CMDS=(
   curl
+  neovim
   stow
   wget
   zsh

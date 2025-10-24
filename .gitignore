@@ -8,6 +8,7 @@
 *.stTheme.cache
 *.sublime-project
 *.sublime-workspace
+*.sync-conflict-*
 *.tmPreferences.cache
 *.tmlanguage.cache
 *.tmp
@@ -39,8 +40,8 @@
 .config/karabiner
 .config/qBittorrent
 .config/raycast
-.config/systemd
 .config/syncthing
+.config/systemd
 .config/thefuck
 .config/wireshark
 .config/xnviewmp

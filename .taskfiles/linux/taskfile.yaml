@@ -68,7 +68,6 @@ vars:
     - ripgrep
     - rsync
     - s-tui
-    - software-properties-common
     - stow
     - wget
     - zlib1g-dev
