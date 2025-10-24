@@ -90,6 +90,9 @@ setopt NOBGNICE
 # Restart running processes on exit
 setopt HUP
 
+# Respect comments
+setopt INTERACTIVE_COMMENTS
+
 # For sharing history between zsh processes
 setopt APPEND_HISTORY
 setopt INC_APPEND_HISTORY
