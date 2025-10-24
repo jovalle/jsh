@@ -64,9 +64,6 @@ zinit snippet OMZP::kubectl
 zinit snippet OMZP::kubectx
 zinit snippet OMZP::command-not-found
 
-# Load completions
-source <(kubectl completion zsh)
-
 # Replay cached completions
 zinit cdreplay -q
 
@@ -191,6 +188,9 @@ command -v mise &>/dev/null && eval "$(mise activate zsh)" &>/dev/null
 
 # Deduplicate PATH
 export PATH=$(echo "$PATH" | tr ':' '\n' | awk '!seen[$0]++' | tr '\n' ':' | sed 's/:$//')
+
+# Load completions
+source <(kubectl completion zsh)
 
 # Import aliases
 [ -f ${JSH}/.aliases.zsh ] && source $JSH/.aliases.zsh
