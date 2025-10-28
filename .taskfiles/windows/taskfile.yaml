@@ -98,6 +98,6 @@ vars:
   fonts:
     - FiraCode
     - JetBrainsMono
-    - MesloLGS
+    - Meslo
 
 version: 3

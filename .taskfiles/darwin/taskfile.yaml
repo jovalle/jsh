@@ -54,6 +54,8 @@ vars:
     - discord
     - drawio
     - firefox
+    - font-fira-code-nerd-font
+    - font-jetbrains-mono-nerd-font
     - font-meslo-lg-nerd-font
     - foobar2000
     - iterm2
