@@ -5,12 +5,16 @@ tasks:
 
   configure:
     cmds:
+      - task: configure-sudoers
       - task: enable-services
       - cmd: |
           if grep -qi microsoft /proc/version; then
             task wsl:configure
           fi
     desc: Configure Linux and WSL-specific settings
+
+  configure-sudoers:
+    cmd: "{{.ROOT_DIR}}/scripts/linux/configure-sudoers.sh"
 
   default:
     cmds:

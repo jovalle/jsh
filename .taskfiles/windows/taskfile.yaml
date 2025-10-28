@@ -3,34 +3,22 @@
 tasks:
   configure:
     cmds:
-      - task: configure-sudoers
+      - task: configure-ssh
       - task: configure-terminal
+      - task: configure-vscode
       - task: configure-firefox
 
   configure-firefox:
     cmd: "{{.ROOT_DIR}}/scripts/windows/configure-firefox.sh"
 
-  configure-sudoers:
-    cmd: |
-      USERNAME=$(whoami)
-      if [ "$USERNAME" = "root" ]; then
-        echo "Error: Running as root is not supported/applicable."
-        exit 1
-      fi
-      SUDOERS_LINE="$USERNAME ALL=(ALL) NOPASSWD:ALL"
-      SUDOERS_FILE="/etc/sudoers.d/$USERNAME"
-      if ! sudo grep -Fxq "$SUDOERS_LINE" "$SUDOERS_FILE"; then
-        echo "$SUDOERS_LINE" | sudo tee "$SUDOERS_FILE"
-        sudo chmod 0440 "$SUDOERS_FILE"
-        echo "Sudoers configured for $USERNAME with no password prompt."
-      else
-        echo "Sudoers already configured for $USERNAME."
-      fi
+  configure-ssh:
+    cmd: "{{.ROOT_DIR}}/scripts/windows/configure-ssh.sh"
 
   configure-terminal:
-    cmd: |
-      WSLPATH=$(wslpath -w ~/.config/windows-terminal/settings.json)
-      powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Copy-Item -Path '$WSLPATH' -Destination \"\$([Environment]::GetEnvironmentVariable('LOCALAPPDATA'))\\Packages\\Microsoft.WindowsTerminal_8wekyb3d8bbwe\\LocalState\\settings.json\" -Force"
+    cmd: "{{.ROOT_DIR}}/scripts/windows/configure-terminal.sh"
+
+  configure-vscode:
+    cmd: "{{.ROOT_DIR}}/scripts/windows/configure-vscode.sh"
 
   default:
     cmds:
@@ -57,6 +45,7 @@ vars:
   apps:
     - Chocolatey.Chocolatey
     - Doist.Todoist
+    - DuckDuckGo.DesktopBrowser
     - Git.Git
     - Microsoft.PowerToys
     - Microsoft.VisualStudioCode

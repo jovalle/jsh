@@ -27,24 +27,17 @@ tasks:
     dir: "{{.ROOT_DIR}}"
     interactive: true
     preconditions:
-      - sh: command -v cz
-        msg: "commitizen not found. Install with: pip install commitizen"
+      - msg: "commitizen not found. Install with: pip install commitizen"
+        sh: command -v cz
 
   configure:
     cmds:
       - task: stow
       - task: chsh
       - task: git
-      - task: git-hooks
-      - task: configure-mounts
+      - task: mount
       - task: os:configure
     desc: Configure OS-specific settings and applications
-
-  configure-mounts:
-    cmd: "{{.ROOT_DIR}}/scripts/configure-mounts.sh"
-    desc: Configure and mount SMB shares (works on both macOS and Linux)
-    dir: "{{.ROOT_DIR}}"
-    interactive: true
 
   default:
     cmd: task -l
@@ -56,15 +49,19 @@ tasks:
       - test -x "{{.ROOT_DIR}}/.fzf/install"
 
   git:
-    cmd: git submodule update --init --remote
+    cmds:
+      - task: git-submodules
+      - task: git-hooks
 
   git-hooks:
     cmd: pre-commit install --hook-type commit-msg
-    desc: Install pre-commit hooks for conventional commits
     dir: "{{.ROOT_DIR}}"
     preconditions:
-      - sh: command -v pre-commit
-        msg: "pre-commit not found. Install with: task install"
+      - msg: "pre-commit not found. Install with: task install"
+        sh: command -v pre-commit
+
+  git-submodules:
+    cmd: git submodule update --init --remote
 
   install:
     aliases:
@@ -103,6 +100,11 @@ tasks:
     cmd: brew install {{range .links}}{{.}} {{end}}
     status:
       - test -z "{{.links}}"
+
+  mount:
+    cmd: "{{.ROOT_DIR}}/scripts/unix/configure-mounts.sh"
+    dir: "{{.ROOT_DIR}}"
+    interactive: true
 
   setup:
     cmds:
