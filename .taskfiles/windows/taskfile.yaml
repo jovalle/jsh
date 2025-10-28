@@ -1,6 +1,12 @@
 # yaml-language-server: $schema=https://taskfile.dev/schema.json
 
 tasks:
+  configure:
+    cmds:
+      - task: configure-sudoers
+      - task: configure-terminal
+      - task: configure-firefox
+
   configure-firefox:
     cmd: |
       WSLPATH=$(wslpath -w ~/.jsh/configs/user.js)
@@ -57,11 +63,13 @@ tasks:
 
   default:
     cmds:
-      - task: configure-sudoers
-      - task: install-nerd-fonts
+      - task: configure
+      - task: install
+
+  install:
+    cmds:
       - task: install-apps
-      - task: configure-terminal
-      - task: configure-firefox
+      - task: install-nerd-fonts
 
   install-apps:
     cmd: powershell.exe -NoProfile -ExecutionPolicy Bypass -Command 'Start-Process -FilePath "winget" -ArgumentList "install {{range .apps}}{{.}} {{end}}" -Verb RunAs -Wait'

@@ -2,22 +2,37 @@
 # yaml-language-server: $schema=https://taskfile.dev/schema.json
 
 tasks:
+
+  configure:
+    cmds:
+      - task: enable-services
+      - cmd: |
+          if grep -qi microsoft /proc/version; then
+            task wsl:configure
+          fi
+
   default:
     cmds:
-      - if grep -qi microsoft /proc/version; then task wsl; fi
-      - task: install-packages
-      - task: enable-service
+      - task: configure
+      - task: install
 
-  enable-service:
+  enable-services:
     cmd: brew services start {{range .services}}{{.}} {{end}}
-    desc: Start services
     status:
       - test -z "{{.services}}"
+
+  install:
+    cmds:
+      - task: install-packages
+      - cmd: |
+          if grep -qi microsoft /proc/version; then
+            task wsl:install
+          fi
 
   install-packages:
     cmds:
       - task: update
-      - sudo apt install -y {{range .packages}}{{.}} {{end}}
+      - cmd: sudo apt install -y {{range .packages}}{{.}} {{end}}
     requires:
       vars:
         - packages
@@ -28,8 +43,7 @@ tasks:
   upgrade:
     cmds:
       - task: update
-      - sudo apt upgrade -y
-    desc: Upgrade OS packages
+      - cmd: sudo apt upgrade -y
 
 vars:
   formulae:

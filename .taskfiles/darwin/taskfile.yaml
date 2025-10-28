@@ -2,9 +2,16 @@
 # yaml-language-server: $schema=https://taskfile.dev/schema.json
 
 tasks:
+  configure:
+    cmds:
+      - task: configure-firefox
+      - task: configure-iterm2
+      - task: configure-vscode
+      - task: set-symlinks
+
   configure-firefox:
     cmds:
-      - ln -sf $HOME/.jsh/configs/user.js "{{ .FF_DIR }}/user.js"
+      - ln -sf $HOME/.jsh/configs/firefox/user.js "{{ .FF_DIR }}/user.js"
     desc: Tweak Firefox using Betterfox + own enhancements
     preconditions:
       - test -d /Applications/Firefox.app
@@ -21,17 +28,14 @@ tasks:
 
   configure-vscode:
     cmds:
-      - ln -sf $HOME/.jsh/configs/vscode.settings.json "$HOME/Library/Application Support/Code/User/settings.json"
+      - ln -sf $HOME/.jsh/configs/vscode/settings.json "$HOME/Library/Application Support/Code/User/settings.json"
     desc: Override VSCode settings with local copy using symlink
     generates:
       - "$HOME/Library/Application Support/Code/User/settings.json"
 
   default:
     cmds:
-      - task: configure-firefox
-      - task: configure-iterm2
-      - task: configure-vscode
-      - task: set-symlinks
+      - task: configure
 
   set-symlinks:
     cmds:

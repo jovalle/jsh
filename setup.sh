@@ -4,8 +4,8 @@ set -e
 
 REQUIRED_CMDS=(
   curl
-  neovim
   stow
+  vim
   wget
   zsh
 )

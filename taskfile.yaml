@@ -19,6 +19,14 @@ tasks:
     status:
       - test "$(basename -- "$SHELL")" == "zsh"
 
+  configure:
+    cmds:
+      - task: stow
+      - task: chsh
+      - task: git
+      - task: os:configure
+    desc: Configure OS-specific settings and applications
+
   default:
     cmd: task -l
     silent: true
@@ -37,11 +45,8 @@ tasks:
       - provision
       - setup
     cmds:
-      - task: stow
-      - task: chsh
-      - task: git
       - task: install-deps
-      - task: os
+      - task: os:install
     desc: Provision installations and configurations
 
   install-casks:
@@ -56,7 +61,6 @@ tasks:
       - task: install-casks
       - task: install-formulae
       - task: install-links
-    desc: Install dependencies
 
   install-formulae:
     cmd: brew install {{range .formulae}}{{.}} {{end}}
@@ -73,6 +77,12 @@ tasks:
     status:
       - test -z "{{.links}}"
 
+  setup:
+    cmds:
+      - task: configure
+      - task: install
+    desc: Configure and install jsh
+
   stow:
     cmd: stow . --adopt
     dir: "{{.ROOT_DIR}}"
@@ -83,7 +93,9 @@ tasks:
     dir: "{{.ROOT_DIR}}"
 
   upgrade:
-    cmd: brew upgrade
+    cmds:
+      - cmd: brew upgrade
+      - task: os:upgrade
     desc: Upgrade brew packages
 
 version: 3
