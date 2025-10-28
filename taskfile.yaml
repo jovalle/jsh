@@ -19,6 +19,30 @@ tasks:
     status:
       - test "$(basename -- "$SHELL")" == "zsh"
 
+  cleanup:
+    cmds:
+      - cmd: task cleanup-sync-conflicts
+        ignore_error: true
+      - cmd: task cleanup-kube-cache
+        ignore_error: true
+      - cmd: task cleanup-git
+        ignore_error: true
+    desc: Clean up local paths known for excessive files
+
+  cleanup-git:
+    cmd: git gc --aggressive --prune=now
+    dir: "{{.ROOT_DIR}}"
+    prompt: Delete git objects and untracked files?
+
+  cleanup-kube-cache:
+    cmd: rm -rf {{.ROOT_DIR}}/.kube/cache
+    dir: "{{.ROOT_DIR}}"
+    prompt: Delete kubectl cache files?
+
+  cleanup-sync-conflicts:
+    cmd: find {{.ROOT_DIR}} -name "*.sync-conflict*" -delete
+    prompt: Delete sync conflict files?
+
   commit:
     aliases:
       - cz
