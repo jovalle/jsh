@@ -10,6 +10,7 @@ tasks:
           if grep -qi microsoft /proc/version; then
             task wsl:configure
           fi
+    desc: Configure Linux and WSL-specific settings
 
   default:
     cmds:
@@ -65,6 +66,7 @@ vars:
     - ansible
     - btop
     - build-essential
+    - cifs-utils
     - dkms
     - fzf
     - git

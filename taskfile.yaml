@@ -36,8 +36,15 @@ tasks:
       - task: chsh
       - task: git
       - task: git-hooks
+      - task: configure-mounts
       - task: os:configure
     desc: Configure OS-specific settings and applications
+
+  configure-mounts:
+    cmd: "{{.ROOT_DIR}}/scripts/configure-mounts.sh"
+    desc: Configure and mount SMB shares (works on both macOS and Linux)
+    dir: "{{.ROOT_DIR}}"
+    interactive: true
 
   default:
     cmd: task -l
