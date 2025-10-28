@@ -8,36 +8,7 @@ tasks:
       - task: configure-firefox
 
   configure-firefox:
-    cmd: |
-      WSLPATH=$(wslpath -w ~/.jsh/configs/user.js)
-      PROFILE_DIR=$(ls -d /mnt/c/Users/jay/AppData/Roaming/Mozilla/Firefox/Profiles/*default-release 2>/dev/null | head -1)
-      if [ -z "$PROFILE_DIR" ]; then
-        echo "Error: Could not find Firefox default-release profile"
-        exit 1
-      fi
-      PROFILE_NAME=$(basename "$PROFILE_DIR")
-      PROFILE_DIR_WIN=$(wslpath -w "$PROFILE_DIR")
-      WINPATH="$PROFILE_DIR_WIN\\user.js"
-      echo "Found Firefox profile: $PROFILE_NAME"
-      echo "Creating symlink: $WINPATH -> $WSLPATH"
-      powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Start-Process powershell -ArgumentList '-NoProfile -ExecutionPolicy Bypass -Command \"New-Item -ItemType SymbolicLink -Path ''$WINPATH'' -Target ''$WSLPATH'' -Force\"' -Verb RunAs -Wait"
-      echo ""
-      echo "Validating symlink..."
-      LINK_INFO=$(powershell.exe -NoProfile -Command "Get-Item '$WINPATH' | Select-Object LinkType, Target | Format-List" 2>&1)
-      if echo "$LINK_INFO" | grep -q "SymbolicLink"; then
-        echo "✓ Symlink created successfully"
-        echo "$LINK_INFO"
-        # Test if file is readable
-        if powershell.exe -NoProfile -Command "Test-Path '$WINPATH'" | grep -q "True"; then
-          echo "✓ Symlink is readable by Windows applications"
-        else
-          echo "✗ Warning: Symlink exists but may not be readable"
-        fi
-      else
-        echo "✗ Error: Symlink validation failed"
-        exit 1
-      fi
-    desc: Create symlink for Firefox user.js (requires elevation)
+    cmd: "{{.ROOT_DIR}}/scripts/windows/configure-firefox.sh"
 
   configure-sudoers:
     cmd: |
