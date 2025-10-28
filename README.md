@@ -65,10 +65,10 @@ This repository may contain hardcoded references to my username (`jay`) and syst
 
 Please search for `jay` and `/home/jay/` or `C:\Users\jay\` and update accordingly for your environment.
 
-## 📲 Install
+## 📲 Setup
 
 ```sh
-task install
+task setup
 ```
 
 ### 🗑️ Uninstall
@@ -76,3 +76,7 @@ task install
 ```sh
 task uninstall
 ```
+
+> **⚠️ Warning:** The `uninstall` task only removes symlinks created by `stow`. It does **not** uninstall packages or applications installed during setup
+>
+> Removing symlinks will revert configuration changes to applications like Firefox and VS Code, as they will no longer point to the custom config files in this repository. Your original configuration files (if any existed) will need to be manually restored.

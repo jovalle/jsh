@@ -19,11 +19,23 @@ tasks:
     status:
       - test "$(basename -- "$SHELL")" == "zsh"
 
+  commit:
+    aliases:
+      - cz
+    cmd: cz commit
+    desc: Interactive conventional commit using commitizen
+    dir: "{{.ROOT_DIR}}"
+    interactive: true
+    preconditions:
+      - sh: command -v cz
+        msg: "commitizen not found. Install with: pip install commitizen"
+
   configure:
     cmds:
       - task: stow
       - task: chsh
       - task: git
+      - task: git-hooks
       - task: os:configure
     desc: Configure OS-specific settings and applications
 
@@ -38,6 +50,14 @@ tasks:
 
   git:
     cmd: git submodule update --init --remote
+
+  git-hooks:
+    cmd: pre-commit install --hook-type commit-msg
+    desc: Install pre-commit hooks for conventional commits
+    dir: "{{.ROOT_DIR}}"
+    preconditions:
+      - sh: command -v pre-commit
+        msg: "pre-commit not found. Install with: task install"
 
   install:
     aliases:
@@ -79,8 +99,8 @@ tasks:
 
   setup:
     cmds:
-      - task: configure
       - task: install
+      - task: configure
     desc: Configure and install jsh
 
   stow:

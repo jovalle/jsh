@@ -24,10 +24,16 @@ tasks:
   install:
     cmds:
       - task: install-packages
+      - task: install-pip-packages
       - cmd: |
           if grep -qi microsoft /proc/version; then
             task wsl:install
           fi
+
+  install-pip-packages:
+    cmd: pipx install {{range .pip_packages}}{{.}} {{end}}
+    status:
+      - test -z "{{.pip_packages}}"
 
   install-packages:
     cmds:
@@ -78,7 +84,9 @@ vars:
     - net-tools
     - npm
     - nvme-cli
+    - pipx
     - python3
+    - python3-pip
     - ripgrep
     - rsync
     - s-tui
@@ -86,6 +94,9 @@ vars:
     - wget
     - zlib1g-dev
     - zsh
+  pip_packages:
+    - commitizen
+    - pre-commit
   services:
     - syncthing
 

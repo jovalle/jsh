@@ -83,7 +83,9 @@ vars:
     - claude-code
     - cloudflared
     - codex
+    - commitizen
     - direnv
+    - pre-commit
     - docker
     - exiftool
     - ffmpeg
