@@ -98,7 +98,7 @@ tasks:
     desc: Provision installations and configurations
 
   install-casks:
-    cmd: brew install --cask {{range .casks}}{{.}} {{end}}
+    cmd: brew install --force --cask {{range .casks}}{{.}} {{end}}
     status:
       - test -z "{{.casks}}"
 
@@ -111,7 +111,7 @@ tasks:
       - task: install-links
 
   install-formulae:
-    cmd: brew install {{range .formulae}}{{.}} {{end}}
+    cmd: brew install --force {{range .formulae}}{{.}} {{end}}
     status:
       - test -z "{{.formulae}}"
 
@@ -121,12 +121,13 @@ tasks:
       - command -v brew
 
   install-links:
-    cmd: brew install {{range .links}}{{.}} {{end}}
+    cmd: brew install --force {{range .links}}{{.}} {{end}}
     status:
       - test -z "{{.links}}"
 
   mount:
-    cmd: "{{.ROOT_DIR}}/scripts/unix/configure-mounts.sh"
+    cmd: "{{.ROOT_DIR}}/scripts/unix/configure-mounts.sh {{.CLI_ARGS}}"
+    desc: "Configure and mount SMB shares. Usage: task mount [mount_name]"
     dir: "{{.ROOT_DIR}}"
     interactive: true
 

@@ -97,6 +97,7 @@ vars:
     - rsync
     - s-tui
     - stow
+    - tmux
     - wget
     - zlib1g-dev
     - zsh

@@ -37,6 +37,11 @@ tasks:
     cmds:
       - task: configure
 
+  install:
+    cmds:
+      - echo "No further steps required for macOS"
+    desc: No-op install task
+
   set-symlinks:
     cmds:
       - |
@@ -87,7 +92,6 @@ vars:
     - codex
     - commitizen
     - direnv
-    - pre-commit
     - docker
     - exiftool
     - ffmpeg
@@ -127,6 +131,7 @@ vars:
     - nvim
     - podman
     - poetry
+    - pre-commit
     - python3
     - qemu
     - readline
