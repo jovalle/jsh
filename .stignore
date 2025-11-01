@@ -1,3 +1,4 @@
+.cache
 .config/syncthing
 .fzf/bin/*
 .fzf/**/*.sync-conflict-*

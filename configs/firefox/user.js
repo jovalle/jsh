@@ -70,7 +70,6 @@ user_pref("security.tls.enable_0rtt_data", false);
 
 /** DISK AVOIDANCE ***/
 user_pref("browser.privatebrowsing.forceMediaMemoryCache", true);
-user_pref("browser.sessionstore.interval", 60000);
 
 /** SHUTDOWN & SANITIZING ***/
 user_pref("privacy.history.custom", true);
@@ -178,8 +177,14 @@ user_pref("browser.compactmode.show", true);
 user_pref("browser.display.focus_ring_on_anything", true);
 user_pref("browser.display.focus_ring_style", 0);
 user_pref("browser.display.focus_ring_width", 0);
+
+/** DARK MODE SETTINGS ***/
+// Force dark mode for web content (2=force dark, 1=force light, 0=no override)
 user_pref("layout.css.prefers-color-scheme.content-override", 2);
-user_pref("browser.privateWindowSeparation.enabled", false); // WINDOWS
+// Enable dark mode theme for UI
+user_pref("ui.systemUsesDarkTheme", 1);
+// Enable dark mode for private windows
+user_pref("browser.theme.dark-private-windows", true);
 
 /** COOKIE BANNER HANDLING ***/
 user_pref("cookiebanners.service.mode", 1);
@@ -236,10 +241,13 @@ user_pref("privacy.donottrackheader.enabled", true);
 user_pref("signon.rememberSignons", false);
 
 /** SECURITY **/
-user_pref("dom.security.https_only_mode", true);
+user_pref("dom.security.https_only_mode", false);
 user_pref("permissions.default.camera", 2);
 user_pref("permissions.default.microphone", 2);
 user_pref("permissions.default.xr", 2);
+
+/** PRIVATE WINDOW ISOLATION **/
+user_pref("browser.privateWindowSeparation.enabled", true);
 
 /** DNS OVER HTTPS **/
 user_pref("network.trr.mode", 3);
@@ -287,9 +295,31 @@ user_pref("gfx.webrender.enabled", true);
 user_pref("layers.acceleration.force-enabled", true);
 
 // Reduce disk I/O
-user_pref("browser.sessionstore.interval", 120000);
 user_pref("browser.cache.disk.enable", true);
 user_pref("browser.cache.disk.capacity", 1048576);
+
+/** ADDITIONAL PRIVACY HARDENING **/
+// JavaScript in PDFs (blocks malicious PDF scripts)
+user_pref("pdfjs.scripting.enabled", false);
+
+// IndexedDB in private windows only
+user_pref("dom.indexedDB.privateBrowsing.enabled", false);
+
+// Disable telemetry related to user activity
+user_pref("browser.newtabpage.activity-stream.feeds.recommendationmetadata", false);
+
+// Stronger state separation
+user_pref("dom.storage.client_validation.enabled", true);
+user_pref("dom.storage.next_gen", true);
+
+// Disable preconnect (information leak)
+user_pref("network.http.keep-alive.timeout", 300);
+
+// Prevent site data leaks between contexts
+user_pref("browser.cache.isolation_on_shutdown", true);
+
+// Restrict plugin access
+user_pref("plugins.flashPlayer.Enable", false);
 
 /** SECURITY HARDENING **/
 // Safe browsing settings (block_dangerous disabled per user preference)
@@ -312,6 +342,11 @@ user_pref("media.peerconnection.enabled", false);
 user_pref("dom.event.clipboardevents.enabled", false);
 
 /** QUALITY OF LIFE **/
+// Popup window sizing (allow extensions like Bitwarden to size windows correctly)
+user_pref("dom.disable_window_open_feature.width", false);
+user_pref("dom.disable_window_open_feature.height", false);
+user_pref("dom.disable_window_open_feature.status", false);
+
 // Smooth scrolling improvements
 user_pref("general.smoothScroll", true);
 user_pref("general.smoothScroll.msdPhysics.enabled", true);

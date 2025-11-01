@@ -146,10 +146,20 @@ tasks:
     desc: Retract dotfiles from home directory
     dir: "{{.ROOT_DIR}}"
 
+  update:
+    cmds:
+      - cmd: zsh -ic "zinit self-update"
+        ignore_error: true
+      - cmd: zsh -ic "zinit update --all"
+        ignore_error: true
+      - cmd: brew update
+    desc: Update brew and system package lists
+
   upgrade:
     cmds:
       - cmd: brew upgrade
+        ignore_error: true
       - task: os:upgrade
-    desc: Upgrade brew packages
+    desc: Upgrade brew packages, system packages, and zsh plugins (zinit/p10k)
 
 version: 3
