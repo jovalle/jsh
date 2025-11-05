@@ -176,6 +176,40 @@ delete_contexts() {
   done
 }
 
+choose_contexts_to_delete_interactive() {
+  local choices
+  choices="$(_KUBECTX_FORCE_COLOR=1 \
+    FZF_DEFAULT_COMMAND="${SELF_CMD}" \
+    fzf --ansi --no-preview --multi --prompt="Select contexts (⇧Tab=multi) to delete: " || true)"
+  if [[ -z "${choices}" ]]; then
+    echo 2>&1 "error: you did not choose any contexts to delete"
+    exit 1
+  else
+    # Convert newline-separated choices to array
+    local contexts_to_delete=()
+    while IFS= read -r context; do
+      contexts_to_delete+=("$context")
+    done <<< "$choices"
+
+    # Confirm deletion
+    echo "You selected the following contexts for deletion:"
+    for ctx in "${contexts_to_delete[@]}"; do
+      echo "  - $ctx"
+    done
+    echo -n "Are you sure you want to delete these contexts? [y/N]: "
+    read -r confirmation
+    case $confirmation in
+      [Yy]|[Yy][Ee][Ss])
+        delete_contexts "${contexts_to_delete[@]}"
+        ;;
+      *)
+        echo "Deletion cancelled."
+        exit 0
+        ;;
+    esac
+  fi
+}
+
 delete_context() {
   local ctx
   ctx="${1}"
@@ -211,11 +245,17 @@ main() {
     fi
   elif [[ "${1}" == "-d" ]]; then
     if [[ "$#" -lt 2 ]]; then
-      echo "error: missing context NAME" >&2
-      usage
-      exit 1
+      # No specific contexts provided, use interactive selection
+      if [[ -t 1 && -z "${KUBECTX_IGNORE_FZF:-}" && "$(type fzf &>/dev/null; echo $?)" -eq 0 ]]; then
+        choose_contexts_to_delete_interactive
+      else
+        echo "error: missing context NAME(s) and fzf is not available for interactive selection" >&2
+        usage
+        exit 1
+      fi
+    else
+      delete_contexts "${@:2}"
     fi
-    delete_contexts "${@:2}"
   elif [[ "$#" -gt 1 ]]; then
     echo "error: too many arguments" >&2
     usage
