@@ -1,33 +1,14 @@
-# macOS/system files
-.DS_Store
-.stfolder
+# Ignore all non-dotfiles (files/dirs not starting with .)
+^[^.].*
 
-# Git files
-.git
-.gitignore
-.gitmodules
+# Ignore markdown files (including dotfiles with .md anywhere)
+\.md$
 
-# Documentation and metadata
-LICENSE
-VERSION
-README.md
-CONTRIBUTING.md
-*.README.md
-jsh.jpeg
-
-# Scripts and configuration that should stay in .jsh
-setup.sh
-taskfile.yaml
-.taskfiles
-.stignore
-.jsh_local
-scripts
-
-# Application-specific files that shouldn't be in homedir root
-signal-desktop-keyring.gpg
-
-# oh-my-zsh subdirectories (managed separately)
-configs
-custom
-plugins
-themes
+# Ignore specific dotfiles that should stay in .jsh
+^\.git
+^\.gitmodules
+^\.stow-local-ignore
+^\.stignore
+^\.stfolder
+^\.DS_Store
+^\.taskfiles

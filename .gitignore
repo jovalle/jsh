@@ -1,8 +1,15 @@
+# Git & Prettier Ignore File
+# This file is used by both Git (.gitignore) and Prettier (.prettierignore symlink)
+# https://git-scm.com/docs/gitignore
+# https://prettier.io/docs/en/ignore.html
+
 *.cache*
 *.db
 *.gpg
 *.last-run
 *.log
+*.min.js
+*.mk
 *.netrwhist
 *.pem
 *.stTheme.cache
@@ -37,10 +44,13 @@
 .apdisk
 .com.apple.timemachine.donotpresent
 .config/argocd
+.config/atuin
+.config/configstore
 .config/containers
 .config/flipperdevices.com
 .config/fontforge
 .config/karabiner
+.config/nvim
 .config/qBittorrent
 .config/raycast
 .config/syncthing
@@ -55,12 +65,13 @@
 .idea
 .jsh_local
 .kube
-.mounts
+.mounts.json
 .oh-my-zsh
 .sops
 .ssh
 .stfolder
 .talos
+.task/
 .vault
 .vim/bundle/*
 .vim/plugged/*
@@ -73,6 +84,7 @@ Temporary\ Items
 __pycache__
 bh_unicode_properties.cache
 node_modules
+node_modules/
 oscrypto-ca-bundle.crt
 package-lock.json
 package.json

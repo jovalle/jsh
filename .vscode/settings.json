@@ -1,5 +1,10 @@
 {
+  "editorconfig.enable": true,
+  "eslint.options": {
+    "configFile": ".eslintrc.json"
+  },
   "files.associations": {
     "config": "shellscript"
-  }
+  },
+  "pylint.args": ["--rcfile=.pylintrc"]
 }
