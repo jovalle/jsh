@@ -182,6 +182,9 @@ _lazy_load_completion "helm" "completion zsh"
 # Node Version Manager - nvm
 _lazy_load_function "nvm" "command nvm"
 
+# Task runner - task
+_lazy_load_eval "task" "task --completion zsh"
+
 # Cleanup helper functions
 unfunction _lazy_load_eval _lazy_load_completion _lazy_load_function 2>/dev/null
 
