@@ -1,8 +1,8 @@
 #!/bin/bash
 # Configure and mount SMB shares
 
-# Generic config file (stowed from .jsh/.mounts to ~/.mounts, synced via Syncthing)
-CONFIG_FILE="$HOME/.mounts"
+# Generic config file (stowed from .jsh/.mounts.json to ~/.mounts.json, synced via Syncthing)
+CONFIG_FILE="$HOME/.mounts.json"
 
 # Detect OS
 if [[ "$OSTYPE" == "darwin"* ]]; then
@@ -36,8 +36,10 @@ read_config() {
     fi
 
     # Try OS-specific path first
-    local mount_section=$(grep -A 20 "\"$mount_name\":" "$CONFIG_FILE")
-    local os_mount=$(echo "$mount_section" | grep -A 5 '"mount_point":' | grep "\"$os_type\":" | cut -d'"' -f4)
+    local mount_section
+    mount_section=$(grep -A 20 "\"$mount_name\":" "$CONFIG_FILE")
+    local os_mount
+    os_mount=$(echo "$mount_section" | grep -A 5 '"mount_point":' | grep "\"$os_type\":" | cut -d'"' -f4)
 
     if [[ -n "$os_mount" ]]; then
       echo "$os_mount"
@@ -57,14 +59,111 @@ read_config() {
 # Helper function to initialize config file if it doesn't exist
 init_config() {
   if [[ ! -f "$CONFIG_FILE" ]]; then
-    cat > "$CONFIG_FILE" <<'EOF'
+    echo "Config file not found: $CONFIG_FILE"
+    echo ""
+    echo -n "Create sample configuration with documentation? [Y/n]: "
+    read CREATE_SAMPLE
+
+    if [[ "$CREATE_SAMPLE" =~ ^[Nn]$ ]]; then
+      # Create minimal config
+      cat > "$CONFIG_FILE" <<'EOF'
 {
   "credentials": {},
   "mounts": {}
 }
 EOF
-    chmod 600 "$CONFIG_FILE"
-    echo "✓ Created config file: $CONFIG_FILE"
+      chmod 600 "$CONFIG_FILE"
+      echo "✓ Created minimal config file: $CONFIG_FILE"
+    else
+      # Create sample config with documentation
+      cat > "$CONFIG_FILE" <<'EOF'
+{
+  "_comment": "SMB/CIFS Mounts Configuration",
+  "_documentation": {
+    "description": "Configuration file for managing SMB/CIFS mounts across Linux and macOS",
+    "usage": {
+      "configure_mount": "task mount [mount_name]  # Configure and mount a share",
+      "default_mount": "task mount                 # Uses 'media' as default",
+      "new_mount": "task mount newshare            # Interactive setup for new mount"
+    },
+    "schema": {
+      "credentials": "Named credential sets that can be reused across multiple mounts",
+      "mounts": "Mount configurations with share paths and mount points"
+    },
+    "mount_point_options": {
+      "os_specific": {
+        "description": "Different paths for different operating systems (recommended)",
+        "example": {
+          "darwin": "/Volumes/media",
+          "linux": "/mnt/media"
+        }
+      },
+      "universal": {
+        "description": "Same path on all operating systems",
+        "example": "/shared/media"
+      }
+    },
+    "shared_credentials": {
+      "description": "Multiple mounts can reference the same credential set",
+      "example": "Both 'media' and 'data' mounts can use 'home' credentials"
+    },
+    "auto_mount_macos": {
+      "description": "LaunchAgents created per-mount for automatic mounting",
+      "features": [
+        "Mounts at login",
+        "Re-mounts every 5 minutes if disconnected",
+        "Logs at ~/Library/Logs/com.user.smbmount.<mount_name>.{out,err}"
+      ]
+    },
+    "scripts": {
+      "configure": "~/.jsh/scripts/unix/configure-mounts.sh",
+      "auto_mount": "~/.jsh/scripts/unix/mount-smb.sh"
+    }
+  },
+  "credentials": {
+    "home": {
+      "username": "your_username",
+      "password": "your_password"
+    }
+  },
+  "mounts": {
+    "media": {
+      "share": "//nas.local/media",
+      "mount_point": {
+        "darwin": "/Volumes/media",
+        "linux": "/mnt/media"
+      },
+      "credential": "home"
+    },
+    "data": {
+      "share": "//nas.local/data",
+      "mount_point": {
+        "darwin": "/Volumes/data",
+        "linux": "/mnt/data"
+      },
+      "credential": "home"
+    },
+    "public": {
+      "share": "//server.local/public",
+      "mount_point": "/mnt/public",
+      "credential": ""
+    }
+  }
+}
+EOF
+      chmod 600 "$CONFIG_FILE"
+      echo "✓ Created sample config file: $CONFIG_FILE"
+      echo ""
+      echo "📝 Sample configuration created with example mounts."
+      echo "   Edit $CONFIG_FILE to add your actual shares and credentials."
+      echo ""
+      echo "   The file includes comprehensive documentation about:"
+      echo "   - Configuration schema and options"
+      echo "   - Mount point configurations (OS-specific vs universal)"
+      echo "   - Shared credentials across mounts"
+      echo "   - Auto-mount features (macOS)"
+      echo ""
+    fi
   fi
 }
 

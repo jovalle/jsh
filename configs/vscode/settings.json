@@ -1,4 +1,9 @@
 {
+  "[css]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true,
+    "editor.tabSize": 2
+  },
   "[dockercompose]": {
     "editor.autoIndent": "advanced",
     "editor.defaultFormatter": "redhat.vscode-yaml",
@@ -13,17 +18,104 @@
   "[github-actions-workflow]": {
     "editor.defaultFormatter": "redhat.vscode-yaml"
   },
+  "[graphql]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true,
+    "editor.tabSize": 2
+  },
+  "[html]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true,
+    "editor.tabSize": 2
+  },
+  "[javascript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true,
+    "editor.tabSize": 2
+  },
+  "[json]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.tabSize": 2
+  },
   "[jsonc]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
     "editor.quickSuggestions": {
       "strings": true
     },
     "editor.suggest.insertMode": "replace",
-    "gitlens.codeLens.scopes": [
-      "document"
-    ]
+    "editor.tabSize": 2,
+    "gitlens.codeLens.scopes": ["document"]
+  },
+  "[less]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true,
+    "editor.tabSize": 2
+  },
+  "[markdown]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.quickSuggestions": {
+      "comments": "off",
+      "other": "off",
+      "strings": "off"
+    },
+    "editor.wordWrap": "on"
   },
   "[python]": {
-    "editor.formatOnType": true
+    "editor.defaultFormatter": "ms-python.black-formatter",
+    "editor.formatOnSave": true,
+    "editor.formatOnType": true,
+    "editor.tabSize": 4
+  },
+  "[scss]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true,
+    "editor.tabSize": 2
+  },
+  "[shellscript]": {
+    "editor.defaultFormatter": "foxundermoon.shell-format",
+    "editor.tabSize": 2
+  },
+  "[toml]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true,
+    "editor.tabSize": 2
+  },
+  "[typescript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true,
+    "editor.tabSize": 2
+  },
+  "[typescriptreact]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.formatOnSave": true,
+    "editor.tabSize": 2
+  },
+  "[yaml]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode",
+    "editor.tabSize": 2
+  },
+  "black-formatter.args": ["--line-length", "100"],
+  "chat.tools.terminal.autoApprove": {
+    "'EOF'": true,
+    ".common.services}}": true,
+    ".services}}\"": true,
+    "autoload": true,
+    "brew": true,
+    "compinit": true,
+    "exec zsh": {
+      "approve": true,
+      "matchCommandLine": true
+    },
+    "git config": true,
+    "i:3d}:": true,
+    "line}',": true,
+    "make": true,
+    "mv": true,
+    "od": true,
+    "sed": true,
+    "task": true,
+    "uname": true,
+    "yaml.safe_load(open('taskfile.yaml'))\"": true
   },
   "codeium.enableConfig": {
     "*": true,
@@ -35,21 +127,24 @@
   "diffEditor.wordWrap": "on",
   "editor.acceptSuggestionOnEnter": "off",
   "editor.bracketPairColorization.enabled": true,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
   "editor.fontFamily": "JetBrainsMono NF, FiraCode Nerd Font, FiraCode NF, MesloLGS Nerd Font Mono, MesloLGS Nerd Font, MesloLGS NF, Meslo, Menlo, monospace",
   "editor.fontLigatures": true,
   "editor.fontSize": 12,
+  "editor.formatOnSave": true,
   "editor.guides.bracketPairs": true,
   "editor.guides.bracketPairsHorizontal": true,
   "editor.guides.highlightActiveBracketPair": true,
   "editor.hover.delay": 1000,
+  "editor.insertSpaces": true,
   "editor.minimap.enabled": false,
   "editor.multiCursorModifier": "ctrlCmd",
-  "editor.rulers": [
-    160
-  ],
+  "editor.rulers": [100],
   "editor.stickyScroll.enabled": true,
   "editor.tabSize": 2,
   "editor.wordWrap": "on",
+  "eslint.enable": true,
+  "eslint.validate": ["javascript", "typescript"],
   "explorer.autoReveal": false,
   "explorer.confirmDelete": false,
   "explorer.confirmDragAndDrop": false,
@@ -58,12 +153,16 @@
   "files.associations": {
     "*.list": "dotenv"
   },
+  "files.eol": "\n",
+  "files.insertFinalNewline": true,
   "files.trimTrailingWhitespace": true,
   "git.allowForcePush": true,
   "git.autofetch": true,
   "git.confirmForcePush": false,
   "git.confirmSync": false,
   "git.enableSmartCommit": true,
+  "git.inputValidationLength": 72,
+  "git.inputValidationSubjectLength": 50,
   "git.openRepositoryInParentFolders": "always",
   "git.replaceTagsWhenPull": true,
   "git.terminalAuthentication": false,
@@ -76,6 +175,7 @@
   "go.useLanguageServer": true,
   "makefile.configureOnOpen": true,
   "material-icon-theme.folders.theme": "specific",
+  "prettier.requireConfig": true,
   "python.defaultInterpreterPath": "/usr/local/bin/python",
   "redhat.telemetry.enabled": false,
   "remote.SSH.configFile": "~/.ssh/config",
@@ -95,19 +195,19 @@
   "remote.SSH.useExecServer": true,
   "remote.SSH.useLocalServer": false,
   "scm.showOutgoingChanges": "never",
-  "security.allowedUNCHosts": [
-    "192.168.0.3",
-    "wsl.localhost"
-  ],
+  "security.allowedUNCHosts": ["192.168.0.3", "wsl.localhost"],
   "security.workspace.trust.enabled": false,
   "security.workspace.trust.untrustedFiles": "open",
   "settingsSync.ignoredExtensions": [],
   "settingsSync.ignoredSettings": [],
+  "shellcheck.enable": true,
+  "shellcheck.run": "onSave",
+  "shellformat.flag": "-i 2 -ci -sr",
   "sync.autoDownload": true,
   "sync.autoUpload": true,
   "sync.quietSync": true,
   "telemetry.telemetryLevel": "off",
-  "terminal.external.osxExec": "iTerm.app",
+  "terminal.external.osxExec": "Terminal.app",
   "terminal.external.windowsExec": "C:\\WINDOWS\\System32\\wsl.exe",
   "terminal.integrated.copyOnSelection": true,
   "terminal.integrated.defaultProfile.linux": "zsh",
@@ -140,10 +240,7 @@
     "Command Prompt": {
       "args": [],
       "icon": "terminal-cmd",
-      "path": [
-        "${env:windir}\\Sysnative\\cmd.exe",
-        "${env:windir}\\System32\\cmd.exe"
-      ]
+      "path": ["${env:windir}\\Sysnative\\cmd.exe", "${env:windir}\\System32\\cmd.exe"]
     },
     "Git Bash": {
       "source": "Git Bash"
@@ -178,5 +275,10 @@
   "workbench.preferredHighContrastColorTheme": "Default Dark+",
   "workbench.sideBar.location": "right",
   "workbench.startupEditor": "none",
-  "workbench.tree.enableStickyScroll": true
+  "workbench.tree.enableStickyScroll": true,
+  "yaml.customTags": ["!ENV scalar", "!ENV sequence", "!reference sequence"],
+  "yaml.format.bracketSpacing": true,
+  "yaml.format.enable": true,
+  "yaml.format.singleQuote": false,
+  "yaml.validate": true
 }

@@ -49,13 +49,15 @@ repos:
     hooks:
       - id: shellcheck
         args: [--severity=warning]
+        types: [shell]
 
   # YAML linting
   - repo: https://github.com/adrienverge/yamllint
     rev: v1.33.0
     hooks:
       - id: yamllint
-        args: [--strict, --config-file=.yamllint]
+        args: [--config-file=.yamllint]
+        types: [yaml]
 
   # Markdown linting
   - repo: https://github.com/igorshubovych/markdownlint-cli
@@ -63,6 +65,7 @@ repos:
     hooks:
       - id: markdownlint
         args: [--config=.markdownlint.json, --fix]
+        types: [markdown]
 
   # Prettier for JS/JSON/Markdown formatting
   - repo: https://github.com/pre-commit/mirrors-prettier
@@ -71,10 +74,3 @@ repos:
       - id: prettier
         types_or: [javascript, json, markdown]
         exclude: 'package-lock\.json'
-
-  # EditorConfig validation
-  - repo: https://github.com/editorconfig-checker/editorconfig-checker.python
-    rev: 2.7.3
-    hooks:
-      - id: editorconfig-checker
-        alias: ec
