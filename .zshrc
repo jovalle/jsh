@@ -26,10 +26,10 @@ export TERM=xterm-256color                       # Terminal type for 256 colors
 export SH=${SHELL##*/}                           # Shell type reference
 
 # Project/work directories
-export GIT_BASE=$HOME/projects                   # Git projects base
-export WORK_DIR=$GIT_BASE                        # Default work directory
-export JSH=${JSH_ROOT:-$HOME}/.jsh               # Ideal JSH location
-export JSH_CUSTOM=$JSH/.jsh_local                # Local overrides (optional)
+export GIT_BASE=${HOME}/projects                 # Git projects base
+export WORK_DIR=${GIT_BASE}                      # Default work directory
+export JSH=${JSH_ROOT:-${HOME}}/.jsh             # Ideal JSH location
+export JSH_CUSTOM=${HOME}/.jsh_local             # Local overrides (optional)
 
 # Silence/optimize specific tools
 export DIRENV_LOG_FORMAT=                        # Silence direnv for p10k
@@ -50,17 +50,20 @@ setopt NO_PROMPT_CR                         # Don't add CR before prompt
 # ============================================================================
 
 # Download Zinit if missing
-if [[ ! -d "$ZINIT_HOME" ]]; then
-  mkdir -p "$(dirname "$ZINIT_HOME")"
-  git clone https://github.com/zdharma-continuum/zinit.git "$ZINIT_HOME"
+if [[ ! -d "${ZINIT_HOME}" ]]; then
+  mkdir -p "$(dirname "${ZINIT_HOME}")"
+  git clone https://github.com/zdharma-continuum/zinit.git "${ZINIT_HOME}"
 fi
 
 # Initialize Zinit
-source "$ZINIT_HOME/zinit.zsh"
+# shellcheck disable=SC1091  # Dynamic source, path verified above
+source "${ZINIT_HOME}/zinit.zsh"
 
 # Load theme (Powerlevel10k - instant prompt must be here)
-if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
-  source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
+# shellcheck disable=SC2296  # Zsh-specific parameter expansion syntax
+if [[ -r "${XDG_CACHE_HOME:-${HOME}/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
+  # shellcheck disable=SC1090  # Dynamic source, path depends on runtime vars
+  source "${XDG_CACHE_HOME:-${HOME}/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
 fi
 
 zinit ice depth=1
@@ -95,14 +98,15 @@ setopt COMPLETE_IN_WORD extended_history hist_find_no_dups hist_ignore_all_dups 
         NO_BEEP NOBGNICE HUP INC_APPEND_HISTORY SHARE_HISTORY
 
 # History configuration
-export HISTDUP=erase                # Erase duplicates
-export HISTFILE="$JSH/.zsh_history" # Store in syncthing-synced directory
-export HISTSIZE=50000               # Number of commands to keep in memory
-export HIST_STAMPS=iso              # Timestamp format
-export SAVEHIST=50000               # Number of commands to save to file
+export HISTDUP=erase                  # Erase duplicates
+export HISTFILE="${JSH}/.zsh_history" # Store in syncthing-synced directory
+export HISTSIZE=50000                 # Number of commands to keep in memory
+export HIST_STAMPS=iso                # Timestamp format
+export SAVEHIST=50000                 # Number of commands to save to file
 
 # Completion options
 LISTMAX=0                           # Automatically paginate completions
+export LISTMAX                      # Used by zsh completion system
 MAILCHECK=0                         # Disable mail checking
 
 # ============================================================================
@@ -114,79 +118,32 @@ autoload -Uz compinit && compinit
 
 # Completion styling
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'  # Case insensitive
+# shellcheck disable=SC2296  # Zsh-specific parameter expansion syntax
 zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}" # Use LS_COLORS
 zstyle ':completion:*' menu no                          # Don't show menu by default
 
 # Fzf-tab preview settings
-zstyle ':fzf-tab:complete:cd:*' fzf-preview 'ls --color $realpath'
-zstyle ':fzf-tab:complete:__zoxide_z:*' fzf-preview 'ls --color $realpath'
+zstyle ':fzf-tab:complete:cd:*' fzf-preview "ls --color \$realpath"
 
 # Replay cached completions from plugins
 zinit cdreplay -q
 
+# ---- Tool Completions ----
+
+command -v brew &>/dev/null && eval "$(brew shellenv)"
+command -v direnv &>/dev/null && eval "$(direnv hook zsh)"
+command -v docker &>/dev/null && eval "$(docker completion zsh)"
+# shellcheck disable=SC1090  # Dynamic source from fzf
+command -v fzf &>/dev/null && source <(command fzf --zsh)
+# shellcheck disable=SC1090  # Dynamic source from kubectl
+command -v kubectl &>/dev/null && source <(kubectl completion zsh)
+# shellcheck disable=SC1090  # Dynamic source from task
+command -v task &>/dev/null && source <(task --completion zsh)
+command -v zoxide &>/dev/null && eval "$(zoxide init zsh)"
+
 # ============================================================================
 # 5. HELPER FUNCTIONS
 # ============================================================================
-
-# Helper: Lazy-load eval-based initializers (zoxide, direnv, etc.)
-_lazy_load_eval() {
-  local cmd="$1" init="$2"
-  command -v "$cmd" &>/dev/null && eval "$(eval "$init")" 2>/dev/null
-}
-
-# Helper: Lazy-load completion-based tools (kubectl, helm, etc.)
-_lazy_load_completion() {
-  local cmd="$1" completion_args="$2"
-  command -v "$cmd" &>/dev/null && eval "
-    $cmd() {
-      unfunction $cmd
-      source <(command $cmd $completion_args)
-      $cmd \"\$@\"
-    }
-  "
-}
-
-# Helper: Lazy-load activation-based tools (mise, nvm, etc.)
-_lazy_load_function() {
-  local cmd="$1" activate="$2"
-  command -v "$cmd" &>/dev/null && eval "
-    $cmd() {
-      unfunction $cmd
-      eval \"\$($activate)\"
-      $cmd \"\$@\"
-    }
-  "
-}
-
-# Directory jumping - Zoxide
-_lazy_load_eval "zoxide" "zoxide init zsh"
-
-# Fuzzy search - Fzf
-_lazy_load_completion "fzf" "--zsh"
-
-# Runtime version manager - Mise
-_lazy_load_function "mise" "command mise activate zsh"
-
-# Kubernetes CLI - kubectl
-_lazy_load_completion "kubectl" "completion zsh"
-
-# Directory environment manager - direnv
-_lazy_load_eval "direnv" "direnv hook zsh"
-
-# Package manager - Homebrew
-_lazy_load_eval "brew" "brew shellenv"
-
-# Helm chart manager - helm
-_lazy_load_completion "helm" "completion zsh"
-
-# Node Version Manager - nvm
-_lazy_load_function "nvm" "command nvm"
-
-# Task runner - task
-_lazy_load_eval "task" "task --completion zsh"
-
-# Cleanup helper functions
-unfunction _lazy_load_eval _lazy_load_completion _lazy_load_function 2>/dev/null
 
 # Color palette for output formatting
 if command -v tput &>/dev/null; then
@@ -209,7 +166,13 @@ fi
 
 caffeinate() { gnome-session-inhibit --inhibit idle:sleep sleep infinity; }
 ffpid() { lsof -t -c "$@"; }
-quiet() { [[ $# == 0 ]] && &> /dev/null || "$*" &> /dev/null; }
+quiet() {
+  if [[ $# -eq 0 ]]; then
+    return
+  else
+    "$@" &> /dev/null
+  fi
+}
 
 # ---- Directory & File Operations ----
 
@@ -243,25 +206,30 @@ extract() {
 }
 
 ff() { /usr/bin/find . -name "$@"; }
-ffs() { /usr/bin/find . -name "$@"'*'; }
-ffe() { /usr/bin/find . -name '*'"$@"; }
+ffs() { /usr/bin/find . -name "$*"'*'; }
+ffe() { /usr/bin/find . -name '*'"$*"; }
 
 # ---- Git Utilities ----
 
 http2ssh() {
   REPO_URL=$(git remote -v | grep -m1 '^origin' | sed -Ene's#.*(https://[^[:space:]]*).*#\1#p')
-  [[ -z "$REPO_URL" ]] && { error "Could not identify repo URL"; return 1; }
+  [[ -z "${REPO_URL}" ]] && { error "Could not identify repo URL"; return 1; }
 
-  USER=$(echo "$REPO_URL" | sed -Ene's#https://github.com/([^/]*)/(.*)#\1#p')
-  [[ -z "$USER" ]] && { error "Could not identify user"; return 2; }
+  USER=$(echo "${REPO_URL}" | sed -Ene's#https://github.com/([^/]*)/(.*)#\1#p')
+  [[ -z "${USER}" ]] && { error "Could not identify user"; return 2; }
 
-  REPO=$(echo "$REPO_URL" | sed -Ene's#https://github.com/([^/]*)/(.*)#\2#p')
-  [[ -z "$REPO" ]] && { error "Could not identify repo"; return 3; }
+  REPO=$(echo "${REPO_URL}" | sed -Ene's#https://github.com/([^/]*)/(.*)#\2#p')
+  [[ -z "${REPO}" ]] && { error "Could not identify repo"; return 3; }
 
-  NEW_URL="git@github.com:$USER/$REPO"
-  warn "Changing repo URL from: '$REPO_URL' to: '$NEW_URL'"
+  NEW_URL="git@github.com:${USER}/${REPO}"
+  warn "Changing repo URL from: '${REPO_URL}' to: '${NEW_URL}'"
 
-  git remote set-url origin "$NEW_URL" && success "New URL set" || error "Failed to set URL"
+  if git remote set-url origin "${NEW_URL}"; then
+    success "New URL set"
+  else
+    error "Failed to set URL"
+    return 4
+  fi
 }
 
 # ---- Kubernetes Utilities ----
@@ -269,10 +237,14 @@ http2ssh() {
 nukem() {
   [[ -z "$1" ]] && { echo "Usage: $0 <namespace>"; return 1; }
   warn "Removing finalizers from namespace: $1"
-  kubectl get namespace "$1" -o json | tr -d "\n" | \
+  if kubectl get namespace "$1" -o json | tr -d "\n" | \
     sed "s/\"finalizers\": \[[^]]\+\]/\"finalizers\": []/" | \
-    kubectl replace --raw "/api/v1/namespaces/$1/finalize" -f - && \
-    success "Finalizers removed" || error "Failed"
+    kubectl replace --raw "/api/v1/namespaces/$1/finalize" -f -; then
+    success "Finalizers removed"
+  else
+    error "Failed"
+    return 2
+  fi
 }
 
 # ---- IPMI & Hardware Management ----
@@ -282,16 +254,22 @@ ipmi() {
     { error "IPMI env vars not set"; return 1; }
   [[ $1 == "fan" ]] || { ipmitool -I lanplus -H "${IPMI_HOST}" -U "${IPMI_USER}" -f "${IPMI_CRED_FILE}" "$@"; return; }
   ipmitool -I lanplus -H "${IPMI_HOST}" -U "${IPMI_USER}" -f "${IPMI_CRED_FILE}" raw 0x30 0x30 0x01 0x00
-  [[ $# -eq 2 ]] && ipmitool -I lanplus -H "${IPMI_HOST}" -U "${IPMI_USER}" -f "${IPMI_CRED_FILE}" raw 0x30 0x30 0x02 0xff 0x$(printf '%x\n' "$2") || \
-    { error "Usage: ipmi fan <speed_0-255>"; return 1; }
+  if [[ $# -eq 2 ]]; then
+    local hex_speed
+    hex_speed=$(printf '%x\n' "$2")
+    ipmitool -I lanplus -H "${IPMI_HOST}" -U "${IPMI_USER}" -f "${IPMI_CRED_FILE}" raw 0x30 0x30 0x02 0xff "0x${hex_speed}"
+  else
+    error "Usage: ipmi fan <speed_0-255>"
+    return 1
+  fi
 }
 
 # ---- Networking & Proxy ----
 
 proxy() {
   local PROXY="${PROXY_ENDPOINT:-go,localhost}"
-  env http_proxy="$PROXY" https_proxy="$PROXY" HTTP_PROXY="$PROXY" HTTPS_PROXY="$PROXY" \
-      NO_PROXY="$PROXY" no_proxy="$PROXY" "$@"
+  env http_proxy="${PROXY}" https_proxy="${PROXY}" HTTP_PROXY="${PROXY}" HTTPS_PROXY="${PROXY}" \
+      NO_PROXY="${PROXY}" no_proxy="${PROXY}" "$@"
 }
 
 # ---- Remote Development ----
@@ -309,11 +287,13 @@ rcode() {
 
 command -v bat &>/dev/null && alias cat='bat'
 command -v eza &>/dev/null && alias ls='eza --git --color=always --icons=always'
+command -v gawk &>/dev/null && alias awk='gawk'
 command -v ggrep &>/dev/null && alias grep='ggrep --color=auto -i'
 command -v gsed &>/dev/null && alias sed='gsed'
 command -v hx &>/dev/null && alias vim='hx'
 command -v nvim &>/dev/null && alias vim='nvim'
 command -v vim &>/dev/null && alias vi='vim'
+command -v zoxide &>/dev/null && alias cd='z'
 
 # ---- Directory Navigation ----
 
@@ -359,8 +339,8 @@ alias gvimdiff='git difftool --tool=vimdiff --no-prompt'
 # ---- Kubernetes ----
 
 alias k='kubectl' kav='kubectl api-versions' kci='kubectl cluster-info' kctx='kubectx' kns='kubens'
+alias kctx+='kubectx --add' kctx-='kubectx --delete'
 alias kdf='kubectl delete -f' kexec='kubectl exec -it' netshoot='kubectl run tmp-shell --rm -i --tty --image nicolaka/netshoot'
-alias kenc="sops --age $(cat ${SOPS_AGE_KEY_FILE} | grep -oP 'public key: \K(.*)') --encrypt --encrypted-regex '^(data|stringData)$' --in-place"
 
 # ---- Infrastructure & Tools ----
 
@@ -368,19 +348,23 @@ alias a='ansible' ap='ansible-playbook' av='ansible-vault' tf='terraform' pn='pn
 
 # ---- SSH & Remote ----
 
-alias sshx='eval $(ssh-agent) && ssh-add 2>/dev/null' stowrm='find $HOME -maxdepth 1 -type l | xargs -I {} unlink {}'
+alias sshx='eval $(ssh-agent) && ssh-add 2>/dev/null'
 alias proxy+='export {{http,https}_proxy,{HTTP,HTTPS}_PROXY}=${PROXY_ENDPOINT}; export {NO_PROXY,no_proxy}=${PROXY_ENDPOINT:-go,localhost}'
 alias proxy-='unset {http,https}_proxy {HTTP,HTTPS}_PROXY {NO_PROXY,no_proxy}' vscode='open -a "Visual Studio Code"'
 
 # ---- Colorized Output ----
 
-alias ls='ls --color=always'
 if command -v grc &>/dev/null; then
   alias colorize='grc -es --colour=auto'
   alias as='colorize as' configure='colorize ./configure' df='colorize df' diff='colorize diff'
   alias dig='colorize dig' g++='colorize g++' gas='colorize gas' gcc='colorize gcc' head='colorize head'
-  alias ld='colorize ld' make='colorize make' mount='colorize mount' mtr='colorize mtr' netstat='colorize netstat'
+  alias ld='colorize ld' mount='colorize mount' mtr='colorize mtr' netstat='colorize netstat'
   alias ping='colorize ping' ps='colorize ps' tail='colorize tail' traceroute='colorize /usr/sbin/traceroute'
+
+  # Use function wrapper for make to preserve completion
+  make() {
+    command grc -es --colour=auto make "$@"
+  }
 fi
 
 # ---- Development & Tmux ----
@@ -391,6 +375,8 @@ alias vz='vim ~/.zshrc' show_options='shopt' tmux='tmux -2'
 # 8. THEME CUSTOMIZATION
 # ============================================================================
 
+# To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
+# shellcheck disable=SC1090  # Dynamic source, standard p10k config
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
 
 # ============================================================================
@@ -398,26 +384,27 @@ alias vz='vim ~/.zshrc' show_options='shopt' tmux='tmux -2'
 # ============================================================================
 
 # Paths - ORDER MATTERS (priority: local > jsh > system)
-export PATH=$HOME/.local/bin:$JSH/.bin:$JSH/.fzf/bin:$HOME/go/bin:$PATH
+export PATH=${HOME}/.local/bin:${JSH}/.bin:${JSH}/.fzf/bin:${HOME}/go/bin:${PATH}
 
 # Function to remove duplicate PATH entries while preserving order
 dedup_path() {
+  # shellcheck disable=SC2296  # Zsh-specific parameter expansion syntax
   local path_array=("${(s/:/)PATH}")
   local seen=()
   local clean_path=""
 
   for dir in "${path_array[@]}"; do
-    if [[ -n "$dir" ]] && [[ ! " ${seen[*]} " =~ " $dir " ]]; then
-      seen+=("$dir")
-      if [[ -z "$clean_path" ]]; then
-        clean_path="$dir"
+    if [[ -n "${dir}" ]] && [[ ! " ${seen[*]} " =~ ${dir} ]]; then
+      seen+=("${dir}")
+      if [[ -z "${clean_path}" ]]; then
+        clean_path="${dir}"
       else
-        clean_path="${clean_path}:$dir"
+        clean_path="${clean_path}:${dir}"
       fi
     fi
   done
 
-  export PATH="$clean_path"
+  export PATH="${clean_path}"
 }
 
 # Deduplicate PATH entries
@@ -427,4 +414,5 @@ dedup_path
 # 10. LOCAL CUSTOMIZATIONS
 # ============================================================================
 
+# shellcheck disable=SC1090  # Dynamic source for local customizations
 [[ -f "${JSH_CUSTOM}" ]] && source "${JSH_CUSTOM}"
