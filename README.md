@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="jsh.jpeg" width="200px" height="200px" />
+  <img src=".github/assets/jsh.jpeg" width="200px" height="200px" />
 
   # jsh
 
