@@ -113,6 +113,9 @@ MAILCHECK=0                         # Disable mail checking
 # 4. COMPLETION SYSTEM
 # ============================================================================
 
+# Add custom completions directory to fpath
+fpath=(~/.zsh/completions "${fpath[@]}")
+
 # Initialize completion system
 autoload -Uz compinit && compinit
 

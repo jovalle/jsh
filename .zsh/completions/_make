@@ -1,0 +1,60 @@
+#compdef make gmake
+
+# Custom completion for make with enhanced Makefile target completion
+# Supports both standard make targets and task- prefixed targets
+
+_make() {
+  local -a targets
+  local makefile
+
+  # Find the Makefile
+  if [[ -f Makefile ]]; then
+    makefile="Makefile"
+  elif [[ -f makefile ]]; then
+    makefile="makefile"
+  elif [[ -f GNUmakefile ]]; then
+    makefile="GNUmakefile"
+  else
+    return 1
+  fi
+
+  # Extract targets from Makefile
+  # This captures both .PHONY targets and regular targets with ## comments
+  targets=(
+    ${(f)"$(
+      awk -F':' '
+        /^[a-zA-Z0-9_-]+:.*##/ {
+          # Extract targets with descriptions
+          if (match($0, /^([a-zA-Z0-9_-]+):.*##(.*)/)) {
+            target = $1;
+            # Skip pattern rules
+            if (target ~ /%/) next;
+            desc = $0;
+            sub(/^[^:]+:[^#]*##[[:space:]]*/, "", desc);
+            gsub(/[[:space:]]+$/, "", desc);
+            print target ":" desc
+          }
+          next
+        }
+        /^[a-zA-Z0-9_-]+:/ && !/^(\.|#)/ {
+          # Targets without descriptions
+          target = $1;
+          gsub(/[[:space:]]+.*$/, "", target);
+          # Skip pattern rules (containing %)
+          if (target !~ /%/) print target
+        }
+      ' "$makefile" | sort -u
+    )"}
+  )
+
+  # Add task- completion if taskfile exists
+  if [[ -f taskfile.yaml ]] || [[ -f Taskfile.yaml ]]; then
+    local -a tasks
+    tasks=(${(f)"$(task --list-all 2>/dev/null | awk 'NR>1 {print "task-"$1}')"})
+    targets+=($tasks)
+  fi
+
+  _describe 'make target' targets
+}
+
+_make "$@"
