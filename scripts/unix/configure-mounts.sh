@@ -2,10 +2,10 @@
 # Configure and mount SMB shares
 
 # Generic config file (stowed from .jsh/.mounts.json to ~/.mounts.json, synced via Syncthing)
-CONFIG_FILE="$HOME/.mounts.json"
+CONFIG_FILE="${HOME}/.mounts.json"
 
 # Detect OS
-if [[ "$OSTYPE" == "darwin"* ]]; then
+if [[ "${OSTYPE}" == "darwin"* ]]; then
   IS_MACOS=true
 else
   IS_MACOS=false
@@ -19,17 +19,17 @@ read_config() {
   local key="$1"
   local mount_name="$2"
 
-  if [[ ! -f "$CONFIG_FILE" ]]; then
+  if [[ ! -f "${CONFIG_FILE}" ]]; then
     return 1
   fi
 
   # Simple JSON parsing for our schema
-  if [[ "$key" == "share" ]]; then
-    grep -A 20 "\"$mount_name\":" "$CONFIG_FILE" | grep '"share":' | cut -d'"' -f4
-  elif [[ "$key" == "mount_point" ]]; then
+  if [[ "${key}" == "share" ]]; then
+    grep -A 20 "\"${mount_name}\":" "${CONFIG_FILE}" | grep '"share":' | cut -d'"' -f4
+  elif [[ "${key}" == "mount_point" ]]; then
     # Check for OS-specific mount point first
     local os_type
-    if [[ "$IS_MACOS" == true ]]; then
+    if [[ "${IS_MACOS}" == true ]]; then
       os_type="darwin"
     else
       os_type="linux"
@@ -37,46 +37,46 @@ read_config() {
 
     # Try OS-specific path first
     local mount_section
-    mount_section=$(grep -A 20 "\"$mount_name\":" "$CONFIG_FILE")
+    mount_section=$(grep -A 20 "\"${mount_name}\":" "${CONFIG_FILE}")
     local os_mount
-    os_mount=$(echo "$mount_section" | grep -A 5 '"mount_point":' | grep "\"$os_type\":" | cut -d'"' -f4)
+    os_mount=$(echo "${mount_section}" | grep -A 5 '"mount_point":' | grep "\"${os_type}\":" | cut -d'"' -f4)
 
-    if [[ -n "$os_mount" ]]; then
-      echo "$os_mount"
+    if [[ -n "${os_mount}" ]]; then
+      echo "${os_mount}"
     else
       # Fall back to universal mount_point (string value)
-      echo "$mount_section" | grep '"mount_point":' | grep -v '{' | cut -d'"' -f4
+      echo "${mount_section}" | grep '"mount_point":' | grep -v '{' | cut -d'"' -f4
     fi
-  elif [[ "$key" == "credential" ]]; then
-    grep -A 20 "\"$mount_name\":" "$CONFIG_FILE" | grep '"credential":' | cut -d'"' -f4
-  elif [[ "$key" == "username" ]]; then
-    grep -A 5 "\"$mount_name\":" "$CONFIG_FILE" | grep '"username":' | cut -d'"' -f4
-  elif [[ "$key" == "password" ]]; then
-    grep -A 5 "\"$mount_name\":" "$CONFIG_FILE" | grep '"password":' | cut -d'"' -f4
+  elif [[ "${key}" == "credential" ]]; then
+    grep -A 20 "\"${mount_name}\":" "${CONFIG_FILE}" | grep '"credential":' | cut -d'"' -f4
+  elif [[ "${key}" == "username" ]]; then
+    grep -A 5 "\"${mount_name}\":" "${CONFIG_FILE}" | grep '"username":' | cut -d'"' -f4
+  elif [[ "${key}" == "password" ]]; then
+    grep -A 5 "\"${mount_name}\":" "${CONFIG_FILE}" | grep '"password":' | cut -d'"' -f4
   fi
 }
 
 # Helper function to initialize config file if it doesn't exist
 init_config() {
-  if [[ ! -f "$CONFIG_FILE" ]]; then
-    echo "Config file not found: $CONFIG_FILE"
+  if [[ ! -f "${CONFIG_FILE}" ]]; then
+    echo "Config file not found: ${CONFIG_FILE}"
     echo ""
     echo -n "Create sample configuration with documentation? [Y/n]: "
-    read CREATE_SAMPLE
+    read -r CREATE_SAMPLE
 
-    if [[ "$CREATE_SAMPLE" =~ ^[Nn]$ ]]; then
+    if [[ "${CREATE_SAMPLE}" =~ ^[Nn]$ ]]; then
       # Create minimal config
-      cat > "$CONFIG_FILE" <<'EOF'
+      cat > "${CONFIG_FILE}" <<'EOF'
 {
   "credentials": {},
   "mounts": {}
 }
 EOF
-      chmod 600 "$CONFIG_FILE"
-      echo "✓ Created minimal config file: $CONFIG_FILE"
+      chmod 600 "${CONFIG_FILE}"
+      echo "✓ Created minimal config file: ${CONFIG_FILE}"
     else
       # Create sample config with documentation
-      cat > "$CONFIG_FILE" <<'EOF'
+      cat > "${CONFIG_FILE}" <<'EOF'
 {
   "_comment": "SMB/CIFS Mounts Configuration",
   "_documentation": {
@@ -151,11 +151,11 @@ EOF
   }
 }
 EOF
-      chmod 600 "$CONFIG_FILE"
-      echo "✓ Created sample config file: $CONFIG_FILE"
+      chmod 600 "${CONFIG_FILE}"
+      echo "✓ Created sample config file: ${CONFIG_FILE}"
       echo ""
       echo "📝 Sample configuration created with example mounts."
-      echo "   Edit $CONFIG_FILE to add your actual shares and credentials."
+      echo "   Edit ${CONFIG_FILE} to add your actual shares and credentials."
       echo ""
       echo "   The file includes comprehensive documentation about:"
       echo "   - Configuration schema and options"
@@ -180,8 +180,8 @@ save_config() {
 import json
 import sys
 
-config_file = "$CONFIG_FILE"
-is_macos = "$IS_MACOS" == "true"
+config_file = "${CONFIG_FILE}"
+is_macos = "${IS_MACOS}" == "true"
 
 try:
     with open(config_file, 'r') as f:
@@ -190,49 +190,49 @@ except:
     config = {"credentials": {}, "mounts": {}}
 
 # Save credentials if provided
-if "$cred_name" and "$username":
-    config["credentials"]["$cred_name"] = {
-        "username": "$username",
-        "password": "$password"
+if "${cred_name}" and "${username}":
+    config["credentials"]["${cred_name}"] = {
+        "username": "${username}",
+        "password": "${password}"
     }
 
 # Get existing mount config or create new
-if "$mount_name" not in config["mounts"]:
-    config["mounts"]["$mount_name"] = {}
+if "${mount_name}" not in config["mounts"]:
+    config["mounts"]["${mount_name}"] = {}
 
-mount_config = config["mounts"]["$mount_name"]
+mount_config = config["mounts"]["${mount_name}"]
 
 # Update share
-mount_config["share"] = "$share"
+mount_config["share"] = "${share}"
 
 # Handle mount_point - check if it's already an object (OS-specific)
 if isinstance(mount_config.get("mount_point"), dict):
     # Already OS-specific, update the appropriate key
     if is_macos:
-        mount_config["mount_point"]["darwin"] = "$mount_point"
+        mount_config["mount_point"]["darwin"] = "${mount_point}"
     else:
-        mount_config["mount_point"]["linux"] = "$mount_point"
+        mount_config["mount_point"]["linux"] = "${mount_point}"
 else:
     # Check if this is a default path pattern
-    if (is_macos and "$mount_point".startswith("/Volumes/")) or \
-       (not is_macos and "$mount_point".startswith("/mnt/")):
+    if (is_macos and "${mount_point}".startswith("/Volumes/")) or \
+       (not is_macos and "${mount_point}".startswith("/mnt/")):
         # Create OS-specific structure
         mount_config["mount_point"] = {
-            "darwin": "/Volumes/$mount_name" if is_macos else "/Volumes/$mount_name",
-            "linux": "/mnt/$mount_name" if not is_macos else "/mnt/$mount_name"
+            "darwin": "/Volumes/${mount_name}" if is_macos else "/Volumes/${mount_name}",
+            "linux": "/mnt/${mount_name}" if not is_macos else "/mnt/${mount_name}"
         }
         # Override with actual value for current OS
         if is_macos:
-            mount_config["mount_point"]["darwin"] = "$mount_point"
+            mount_config["mount_point"]["darwin"] = "${mount_point}"
         else:
-            mount_config["mount_point"]["linux"] = "$mount_point"
+            mount_config["mount_point"]["linux"] = "${mount_point}"
     else:
         # Universal mount point
-        mount_config["mount_point"] = "$mount_point"
+        mount_config["mount_point"] = "${mount_point}"
 
 # Update credential reference
-if "$cred_name":
-    mount_config["credential"] = "$cred_name"
+if "${cred_name}":
+    mount_config["credential"] = "${cred_name}"
 
 # Write back to file
 with open(config_file, 'w') as f:
@@ -241,44 +241,44 @@ with open(config_file, 'w') as f:
 print("✓ Configuration saved")
 PYTHON_EOF
 
-  chmod 600 "$CONFIG_FILE"
+  chmod 600 "${CONFIG_FILE}"
 }
 
 # Try to load configuration for this mount
-SMB_SHARE=$(read_config "share" "$MOUNT_NAME")
-MOUNT_POINT=$(read_config "mount_point" "$MOUNT_NAME")
-CREDENTIAL_NAME=$(read_config "credential" "$MOUNT_NAME")
+SMB_SHARE=$(read_config "share" "${MOUNT_NAME}")
+MOUNT_POINT=$(read_config "mount_point" "${MOUNT_NAME}")
+CREDENTIAL_NAME=$(read_config "credential" "${MOUNT_NAME}")
 
 # Set default mount point if not configured
-if [[ -z "$MOUNT_POINT" ]]; then
-  if [[ "$IS_MACOS" == true ]]; then
-    MOUNT_POINT="/Volumes/$MOUNT_NAME"
+if [[ -z "${MOUNT_POINT}" ]]; then
+  if [[ "${IS_MACOS}" == true ]]; then
+    MOUNT_POINT="/Volumes/${MOUNT_NAME}"
   else
-    MOUNT_POINT="/mnt/$MOUNT_NAME"
+    MOUNT_POINT="/mnt/${MOUNT_NAME}"
   fi
 fi
 
 # Check if already configured or mounted
 IS_CONFIGURED=false
-if [[ "$IS_MACOS" == false ]] && grep -q "$MOUNT_POINT" /etc/fstab 2>/dev/null; then
+if [[ "${IS_MACOS}" == false ]] && grep -q "${MOUNT_POINT}" /etc/fstab 2>/dev/null; then
   IS_CONFIGURED=true
-  echo "✓ Mount already configured in /etc/fstab for $MOUNT_POINT"
-elif mount | grep -q " on $MOUNT_POINT "; then
+  echo "✓ Mount already configured in /etc/fstab for ${MOUNT_POINT}"
+elif mount | grep -q " on ${MOUNT_POINT} "; then
   IS_CONFIGURED=true
-  echo "✓ Mount already active at $MOUNT_POINT"
+  echo "✓ Mount already active at ${MOUNT_POINT}"
 fi
 
-if [[ "$IS_CONFIGURED" == true ]]; then
+if [[ "${IS_CONFIGURED}" == true ]]; then
   # Check if already mounted
-  if mount | grep -q " on $MOUNT_POINT "; then
-    echo "✓ $MOUNT_POINT is currently mounted"
-    df -h "$MOUNT_POINT"
+  if mount | grep -q " on ${MOUNT_POINT} "; then
+    echo "✓ ${MOUNT_POINT} is currently mounted"
+    df -h "${MOUNT_POINT}"
   fi
 
   echo ""
   echo -n "Reconfigure? [y/N]: "
-  read RECONFIGURE
-  if [[ ! "$RECONFIGURE" =~ ^[Yy]$ ]]; then
+  read -r RECONFIGURE
+  if [[ ! "${RECONFIGURE}" =~ ^[Yy]$ ]]; then
     echo "Keeping existing configuration."
     exit 0
   fi
@@ -290,18 +290,18 @@ fi
 init_config
 
 # Prompt for SMB share if not configured
-if [ -z "$SMB_SHARE" ]; then
+if [[ -z "${SMB_SHARE}" ]]; then
   echo -n "Enter SMB share (e.g., //server/share): "
-  read SMB_SHARE
-  if [ -z "$SMB_SHARE" ]; then
+  read -r SMB_SHARE
+  if [[ -z "${SMB_SHARE}" ]]; then
     echo "ERROR: SMB share is required"
     exit 1
   fi
 fi
 
-echo "Mount Name: $MOUNT_NAME"
-echo "SMB Share: $SMB_SHARE"
-echo "Mount Point: $MOUNT_POINT"
+echo "Mount Name: ${MOUNT_NAME}"
+echo "SMB Share: ${SMB_SHARE}"
+echo "Mount Point: ${MOUNT_POINT}"
 echo ""
 
 # Handle credentials
@@ -309,72 +309,72 @@ SMB_USER=""
 SMB_PASS=""
 
 # Check if mount already has a credential reference
-if [[ -n "$CREDENTIAL_NAME" ]]; then
+if [[ -n "${CREDENTIAL_NAME}" ]]; then
   # Try to read credential from config
-  CRED_USER=$(grep -A 5 "\"credentials\":" "$CONFIG_FILE" | grep -A 3 "\"$CREDENTIAL_NAME\":" | grep '"username":' | cut -d'"' -f4)
-  CRED_PASS=$(grep -A 5 "\"credentials\":" "$CONFIG_FILE" | grep -A 3 "\"$CREDENTIAL_NAME\":" | grep '"password":' | cut -d'"' -f4)
+  CRED_USER=$(grep -A 5 "\"credentials\":" "${CONFIG_FILE}" | grep -A 3 "\"${CREDENTIAL_NAME}\":" | grep '"username":' | cut -d'"' -f4)
+  CRED_PASS=$(grep -A 5 "\"credentials\":" "${CONFIG_FILE}" | grep -A 3 "\"${CREDENTIAL_NAME}\":" | grep '"password":' | cut -d'"' -f4)
 
-  if [[ -n "$CRED_USER" ]]; then
-    echo "✓ Using existing credential set: $CREDENTIAL_NAME"
+  if [[ -n "${CRED_USER}" ]]; then
+    echo "✓ Using existing credential set: ${CREDENTIAL_NAME}"
     echo -n "Update credentials? [y/N]: "
-    read UPDATE_CREDS
+    read -r UPDATE_CREDS
 
-    if [[ "$UPDATE_CREDS" =~ ^[Yy]$ ]]; then
-      echo -n "Username [$CRED_USER]: "
-      read SMB_USER
-      SMB_USER="${SMB_USER:-$CRED_USER}"
+    if [[ "${UPDATE_CREDS}" =~ ^[Yy]$ ]]; then
+      echo -n "Username [${CRED_USER}]: "
+      read -r SMB_USER
+      SMB_USER="${SMB_USER:-${CRED_USER}}"
 
       echo -n "Password: "
       stty -echo
-      read SMB_PASS
+      read -r SMB_PASS
       stty echo
       echo ""
     else
-      SMB_USER="$CRED_USER"
-      SMB_PASS="$CRED_PASS"
+      SMB_USER="${CRED_USER}"
+      SMB_PASS="${CRED_PASS}"
     fi
   fi
 else
   # Ask if authentication is needed
   echo -n "Does this share require authentication? [Y/n]: "
-  read AUTH_REQUIRED
+  read -r AUTH_REQUIRED
 
-  if [[ ! "$AUTH_REQUIRED" =~ ^[Nn]$ ]]; then
+  if [[ ! "${AUTH_REQUIRED}" =~ ^[Nn]$ ]]; then
     # Check if there are existing credentials we can reuse
-    EXISTING_CREDS=$(grep -A 1000 '"credentials":' "$CONFIG_FILE" | grep -B 1 '"username":' | grep -v username | grep '"' | cut -d'"' -f2 | head -5)
+    EXISTING_CREDS=$(grep -A 1000 '"credentials":' "${CONFIG_FILE}" | grep -B 1 '"username":' | grep -v username | grep '"' | cut -d'"' -f2 | head -5)
 
-    if [[ -n "$EXISTING_CREDS" ]]; then
+    if [[ -n "${EXISTING_CREDS}" ]]; then
       echo ""
       echo "Existing credential sets:"
-      echo "$EXISTING_CREDS" | nl
+      echo "${EXISTING_CREDS}" | nl
       echo ""
       echo -n "Use existing credentials? Enter number or 'n' for new: "
-      read CRED_CHOICE
+      read -r CRED_CHOICE
 
-      if [[ "$CRED_CHOICE" =~ ^[0-9]+$ ]]; then
-        CREDENTIAL_NAME=$(echo "$EXISTING_CREDS" | sed -n "${CRED_CHOICE}p")
-        SMB_USER=$(grep -A 5 "\"credentials\":" "$CONFIG_FILE" | grep -A 3 "\"$CREDENTIAL_NAME\":" | grep '"username":' | cut -d'"' -f4)
-        SMB_PASS=$(grep -A 5 "\"credentials\":" "$CONFIG_FILE" | grep -A 3 "\"$CREDENTIAL_NAME\":" | grep '"password":' | cut -d'"' -f4)
-        echo "✓ Using credential set: $CREDENTIAL_NAME"
+      if [[ "${CRED_CHOICE}" =~ ^[0-9]+$ ]]; then
+        CREDENTIAL_NAME=$(echo "${EXISTING_CREDS}" | sed -n "${CRED_CHOICE}p")
+        SMB_USER=$(grep -A 5 "\"credentials\":" "${CONFIG_FILE}" | grep -A 3 "\"${CREDENTIAL_NAME}\":" | grep '"username":' | cut -d'"' -f4)
+        SMB_PASS=$(grep -A 5 "\"credentials\":" "${CONFIG_FILE}" | grep -A 3 "\"${CREDENTIAL_NAME}\":" | grep '"password":' | cut -d'"' -f4)
+        echo "✓ Using credential set: ${CREDENTIAL_NAME}"
       fi
     fi
 
     # If no existing creds selected, prompt for new
-    if [[ -z "$SMB_USER" ]]; then
+    if [[ -z "${SMB_USER}" ]]; then
       echo -n "Credential set name [default]: "
-      read CREDENTIAL_NAME
+      read -r CREDENTIAL_NAME
       CREDENTIAL_NAME="${CREDENTIAL_NAME:-default}"
 
       echo -n "Username: "
-      read SMB_USER
+      read -r SMB_USER
 
       echo -n "Password: "
       stty -echo
-      read SMB_PASS
+      read -r SMB_PASS
       stty echo
       echo ""
 
-      if [ -z "$SMB_USER" ] || [ -z "$SMB_PASS" ]; then
+      if [[ -z "${SMB_USER}" ]] || [[ -z "${SMB_PASS}" ]]; then
         echo "ERROR: Username and password are required for authenticated mounts"
         exit 1
       fi
@@ -383,9 +383,9 @@ else
 fi
 
   # Save configuration
-save_config "$MOUNT_NAME" "$SMB_SHARE" "$MOUNT_POINT" "$CREDENTIAL_NAME" "$SMB_USER" "$SMB_PASS"
+save_config "${MOUNT_NAME}" "${SMB_SHARE}" "${MOUNT_POINT}" "${CREDENTIAL_NAME}" "${SMB_USER}" "${SMB_PASS}"
 
-if [[ "$IS_MACOS" == false ]]; then
+if [[ "${IS_MACOS}" == false ]]; then
   # LINUX SETUP
   # Ensure cifs-utils is installed
   if ! command -v mount.cifs &> /dev/null; then
@@ -394,45 +394,45 @@ if [[ "$IS_MACOS" == false ]]; then
   fi
 
   # Create mount point if it doesn't exist
-  if [ ! -d "$MOUNT_POINT" ]; then
-    echo "Creating mount point: $MOUNT_POINT"
-    sudo mkdir -p "$MOUNT_POINT"
+  if [[ ! -d "${MOUNT_POINT}" ]]; then
+    echo "Creating mount point: ${MOUNT_POINT}"
+    sudo mkdir -p "${MOUNT_POINT}"
   fi
 
   # Build fstab entry
-  if [[ -n "$SMB_USER" ]]; then
+  if [[ -n "${SMB_USER}" ]]; then
     # Create a temporary credentials file for this mount (fstab requires a file)
-    TEMP_CREDS_FILE="$HOME/.smbcredentials_$MOUNT_NAME"
-    echo "username=$SMB_USER" > "$TEMP_CREDS_FILE"
-    echo "password=$SMB_PASS" >> "$TEMP_CREDS_FILE"
-    chmod 600 "$TEMP_CREDS_FILE"
-    FSTAB_ENTRY="$SMB_SHARE $MOUNT_POINT cifs credentials=$TEMP_CREDS_FILE,uid=$(id -u),gid=$(id -g),file_mode=0755,dir_mode=0755,nofail 0 0"
+    TEMP_CREDS_FILE="${HOME}/.smbcredentials_${MOUNT_NAME}"
+    echo "username=${SMB_USER}" > "${TEMP_CREDS_FILE}"
+    echo "password=${SMB_PASS}" >> "${TEMP_CREDS_FILE}"
+    chmod 600 "${TEMP_CREDS_FILE}"
+    FSTAB_ENTRY="${SMB_SHARE} ${MOUNT_POINT} cifs credentials=${TEMP_CREDS_FILE},uid=$(id -u),gid=$(id -g),file_mode=0755,dir_mode=0755,nofail 0 0"
   else
-    FSTAB_ENTRY="$SMB_SHARE $MOUNT_POINT cifs guest,uid=$(id -u),gid=$(id -g),file_mode=0755,dir_mode=0755,nofail 0 0"
+    FSTAB_ENTRY="${SMB_SHARE} ${MOUNT_POINT} cifs guest,uid=$(id -u),gid=$(id -g),file_mode=0755,dir_mode=0755,nofail 0 0"
   fi
 
   # Update fstab entry
-  if grep -q "$MOUNT_POINT" /etc/fstab 2>/dev/null; then
+  if grep -q "${MOUNT_POINT}" /etc/fstab 2>/dev/null; then
     echo "Updating /etc/fstab entry..."
     # Unmount if currently mounted
-    if mount | grep -q " on $MOUNT_POINT "; then
-      sudo umount "$MOUNT_POINT"
+    if mount | grep -q " on ${MOUNT_POINT} "; then
+      sudo umount "${MOUNT_POINT}"
     fi
     # Remove old entry and add new one
-    sudo sed -i "\|$MOUNT_POINT|d" /etc/fstab
-    echo "$FSTAB_ENTRY" | sudo tee -a /etc/fstab > /dev/null
+    sudo sed -i "\|${MOUNT_POINT}|d" /etc/fstab
+    echo "${FSTAB_ENTRY}" | sudo tee -a /etc/fstab > /dev/null
     echo "✓ Updated /etc/fstab"
   else
     echo "Adding entry to /etc/fstab..."
-    echo "$FSTAB_ENTRY" | sudo tee -a /etc/fstab > /dev/null
+    echo "${FSTAB_ENTRY}" | sudo tee -a /etc/fstab > /dev/null
     echo "✓ Added to /etc/fstab"
   fi
 
   # Mount the share
-  echo "Mounting $SMB_SHARE to $MOUNT_POINT..."
-  if sudo mount "$MOUNT_POINT" 2>/dev/null; then
+  echo "Mounting ${SMB_SHARE} to ${MOUNT_POINT}..."
+  if sudo mount "${MOUNT_POINT}" 2>/dev/null; then
     echo "✓ Successfully mounted"
-    df -h "$MOUNT_POINT"
+    df -h "${MOUNT_POINT}"
   else
     echo "✗ Failed to mount. Check your credentials and network connection."
     echo "Try: sudo mount -a"
@@ -441,59 +441,59 @@ if [[ "$IS_MACOS" == false ]]; then
 else
   # MACOS SETUP
   # Build mount command
-  if [[ -n "$SMB_USER" ]]; then
+  if [[ -n "${SMB_USER}" ]]; then
     MOUNT_URL="//${SMB_USER}:${SMB_PASS}@${SMB_SHARE#//}"
   else
     MOUNT_URL="${SMB_SHARE}"
   fi
 
   # Unmount if currently mounted
-  if mount | grep -q " on $MOUNT_POINT "; then
+  if mount | grep -q " on ${MOUNT_POINT} "; then
     echo "Unmounting existing mount..."
-    umount "$MOUNT_POINT" 2>/dev/null || sudo umount "$MOUNT_POINT"
+    umount "${MOUNT_POINT}" 2>/dev/null || sudo umount "${MOUNT_POINT}"
   fi
 
   # Create mount point if it doesn't exist (do this right before mounting)
   # On macOS, /Volumes mount points are auto-removed on unmount, so recreate as needed
-  if [ ! -d "$MOUNT_POINT" ]; then
-    echo "Creating mount point: $MOUNT_POINT"
-    sudo mkdir -p "$MOUNT_POINT"
+  if [[ ! -d "${MOUNT_POINT}" ]]; then
+    echo "Creating mount point: ${MOUNT_POINT}"
+    sudo mkdir -p "${MOUNT_POINT}"
     # Set ownership to current user to avoid permission issues
-    sudo chown "$USER" "$MOUNT_POINT"
+    sudo chown "${USER}" "${MOUNT_POINT}"
   fi
 
   # Mount the share using mount_smbfs
-  echo "Mounting $SMB_SHARE to $MOUNT_POINT..."
-  if mount_smbfs "$MOUNT_URL" "$MOUNT_POINT" 2>/dev/null; then
+  echo "Mounting ${SMB_SHARE} to ${MOUNT_POINT}..."
+  if mount_smbfs "${MOUNT_URL}" "${MOUNT_POINT}" 2>/dev/null; then
     echo "✓ Successfully mounted"
-    df -h "$MOUNT_POINT"
+    df -h "${MOUNT_POINT}"
   else
     echo "✗ Failed to mount. Check your credentials and network connection."
-    echo "Try manually: mount_smbfs $MOUNT_URL $MOUNT_POINT"
+    echo "Try manually: mount_smbfs ${MOUNT_URL} ${MOUNT_POINT}"
     exit 1
   fi
 
   # Create LaunchAgent for persistent mounting
   echo ""
   echo -n "Create LaunchAgent for automatic mounting at login? [Y/n]: "
-  read CREATE_AGENT
+  read -r CREATE_AGENT
 
-  if [[ ! "$CREATE_AGENT" =~ ^[Nn]$ ]]; then
-    AGENT_NAME="com.user.smbmount.$MOUNT_NAME"
-    AGENT_PLIST="$HOME/Library/LaunchAgents/$AGENT_NAME.plist"
-    MOUNT_SCRIPT="$HOME/.jsh/scripts/unix/mount-smb.sh"
+  if [[ ! "${CREATE_AGENT}" =~ ^[Nn]$ ]]; then
+    AGENT_NAME="com.user.smbmount.${MOUNT_NAME}"
+    AGENT_PLIST="${HOME}/Library/LaunchAgents/${AGENT_NAME}.plist"
+    MOUNT_SCRIPT="${HOME}/.jsh/scripts/unix/mount-smb.sh"
 
     # Create generic mount script if it doesn't exist
-    if [[ ! -f "$MOUNT_SCRIPT" ]]; then
-      echo "Creating mount script: $MOUNT_SCRIPT"
-      cat > "$MOUNT_SCRIPT" <<'SCRIPT_EOF'
+    if [[ ! -f "${MOUNT_SCRIPT}" ]]; then
+      echo "Creating mount script: ${MOUNT_SCRIPT}"
+      cat > "${MOUNT_SCRIPT}" <<'SCRIPT_EOF'
 #!/bin/bash
 # Generic auto-mount script for SMB shares
 
-CONFIG_FILE="$HOME/.mounts"
+CONFIG_FILE="${HOME}/.mounts"
 MOUNT_NAME="$1"
 
-if [[ -z "$MOUNT_NAME" ]]; then
+if [[ -z "${MOUNT_NAME}" ]]; then
   echo "ERROR: Mount name required"
   exit 1
 fi
@@ -503,86 +503,86 @@ read_config() {
   local key="$1"
   local mount_name="$2"
 
-  if [[ ! -f "$CONFIG_FILE" ]]; then
+  if [[ ! -f "${CONFIG_FILE}" ]]; then
     return 1
   fi
 
-  if [[ "$key" == "share" ]]; then
-    grep -A 10 "\"$mount_name\":" "$CONFIG_FILE" | grep '"share":' | cut -d'"' -f4
-  elif [[ "$key" == "mount_point" ]]; then
-    grep -A 10 "\"$mount_name\":" "$CONFIG_FILE" | grep '"mount_point":' | cut -d'"' -f4
-  elif [[ "$key" == "credential" ]]; then
-    grep -A 10 "\"$mount_name\":" "$CONFIG_FILE" | grep '"credential":' | cut -d'"' -f4
+  if [[ "${key}" == "share" ]]; then
+    grep -A 10 "\"${mount_name}\":" "${CONFIG_FILE}" | grep '"share":' | cut -d'"' -f4
+  elif [[ "${key}" == "mount_point" ]]; then
+    grep -A 10 "\"${mount_name}\":" "${CONFIG_FILE}" | grep '"mount_point":' | cut -d'"' -f4
+  elif [[ "${key}" == "credential" ]]; then
+    grep -A 10 "\"${mount_name}\":" "${CONFIG_FILE}" | grep '"credential":' | cut -d'"' -f4
   fi
 }
 
 # Load configuration
-SMB_SHARE=$(read_config "share" "$MOUNT_NAME")
-MOUNT_POINT=$(read_config "mount_point" "$MOUNT_NAME")
-CREDENTIAL_NAME=$(read_config "credential" "$MOUNT_NAME")
+SMB_SHARE=$(read_config "share" "${MOUNT_NAME}")
+MOUNT_POINT=$(read_config "mount_point" "${MOUNT_NAME}")
+CREDENTIAL_NAME=$(read_config "credential" "${MOUNT_NAME}")
 
-if [[ -z "$SMB_SHARE" ]] || [[ -z "$MOUNT_POINT" ]]; then
-  echo "ERROR: Mount configuration not found for: $MOUNT_NAME"
+if [[ -z "${SMB_SHARE}" ]] || [[ -z "${MOUNT_POINT}" ]]; then
+  echo "ERROR: Mount configuration not found for: ${MOUNT_NAME}"
   exit 1
 fi
 
 # Check if already mounted
-if mount | grep -q " on $MOUNT_POINT "; then
-  echo "Already mounted: $MOUNT_POINT"
+if mount | grep -q " on ${MOUNT_POINT} "; then
+  echo "Already mounted: ${MOUNT_POINT}"
   exit 0
 fi
 
 # Build mount URL with credentials
-if [[ -n "$CREDENTIAL_NAME" ]]; then
-  SMB_USER=$(grep -A 5 "\"credentials\":" "$CONFIG_FILE" | grep -A 3 "\"$CREDENTIAL_NAME\":" | grep '"username":' | cut -d'"' -f4)
-  SMB_PASS=$(grep -A 5 "\"credentials\":" "$CONFIG_FILE" | grep -A 3 "\"$CREDENTIAL_NAME\":" | grep '"password":' | cut -d'"' -f4)
+if [[ -n "${CREDENTIAL_NAME}" ]]; then
+  SMB_USER=$(grep -A 5 "\"credentials\":" "${CONFIG_FILE}" | grep -A 3 "\"${CREDENTIAL_NAME}\":" | grep '"username":' | cut -d'"' -f4)
+  SMB_PASS=$(grep -A 5 "\"credentials\":" "${CONFIG_FILE}" | grep -A 3 "\"${CREDENTIAL_NAME}\":" | grep '"password":' | cut -d'"' -f4)
   MOUNT_URL="//${SMB_USER}:${SMB_PASS}@${SMB_SHARE#//}"
 else
   MOUNT_URL="${SMB_SHARE}"
 fi
 
 # Create mount point if needed
-if [ ! -d "$MOUNT_POINT" ]; then
-  sudo mkdir -p "$MOUNT_POINT"
-  sudo chown "$USER" "$MOUNT_POINT"
+if [[ ! -d "${MOUNT_POINT}" ]]; then
+  sudo mkdir -p "${MOUNT_POINT}"
+  sudo chown "${USER}" "${MOUNT_POINT}"
 fi
 
 # Mount the share
-if mount_smbfs "$MOUNT_URL" "$MOUNT_POINT" 2>/dev/null; then
-  echo "Successfully mounted $SMB_SHARE to $MOUNT_POINT"
+if mount_smbfs "${MOUNT_URL}" "${MOUNT_POINT}" 2>/dev/null; then
+  echo "Successfully mounted ${SMB_SHARE} to ${MOUNT_POINT}"
   exit 0
 else
-  echo "Failed to mount $SMB_SHARE"
+  echo "Failed to mount ${SMB_SHARE}"
   exit 1
 fi
 SCRIPT_EOF
 
-      chmod +x "$MOUNT_SCRIPT"
+      chmod +x "${MOUNT_SCRIPT}"
       echo "✓ Created generic mount script"
     fi
 
     # Create LaunchAgent plist
-    echo "Creating LaunchAgent: $AGENT_PLIST"
-    cat > "$AGENT_PLIST" <<PLIST_EOF
+    echo "Creating LaunchAgent: ${AGENT_PLIST}"
+    cat > "${AGENT_PLIST}" <<PLIST_EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>$AGENT_NAME</string>
+    <string>${AGENT_NAME}</string>
     <key>ProgramArguments</key>
     <array>
-        <string>$MOUNT_SCRIPT</string>
-        <string>$MOUNT_NAME</string>
+        <string>${MOUNT_SCRIPT}</string>
+        <string>${MOUNT_NAME}</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
     <key>StartInterval</key>
     <integer>300</integer>
     <key>StandardErrorPath</key>
-    <string>$HOME/Library/Logs/$AGENT_NAME.err</string>
+    <string>${HOME}/Library/Logs/${AGENT_NAME}.err</string>
     <key>StandardOutPath</key>
-    <string>$HOME/Library/Logs/$AGENT_NAME.out</string>
+    <string>${HOME}/Library/Logs/${AGENT_NAME}.out</string>
 </dict>
 </plist>
 PLIST_EOF
@@ -590,19 +590,19 @@ PLIST_EOF
     echo "✓ Created LaunchAgent plist"
 
     # Load the LaunchAgent
-    launchctl unload "$AGENT_PLIST" 2>/dev/null
-    if launchctl load "$AGENT_PLIST" 2>/dev/null; then
+    launchctl unload "${AGENT_PLIST}" 2>/dev/null
+    if launchctl load "${AGENT_PLIST}" 2>/dev/null; then
       echo "✓ LaunchAgent loaded and will run at login"
       echo ""
       echo "The mount will automatically reconnect:"
       echo "  - At login"
       echo "  - Every 5 minutes if disconnected"
       echo ""
-      echo "To disable: launchctl unload $AGENT_PLIST"
-      echo "Logs: $HOME/Library/Logs/$AGENT_NAME.{out,err}"
+      echo "To disable: launchctl unload ${AGENT_PLIST}"
+      echo "Logs: ${HOME}/Library/Logs/${AGENT_NAME}.{out,err}"
     else
       echo "✗ Failed to load LaunchAgent"
-      echo "Try manually: launchctl load $AGENT_PLIST"
+      echo "Try manually: launchctl load ${AGENT_PLIST}"
     fi
   else
     echo "Skipping LaunchAgent creation."

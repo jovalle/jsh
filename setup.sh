@@ -7,14 +7,14 @@ if ! command -v brew &> /dev/null; then
   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
   # Add brew to PATH based on OS
-  if [[ "$OSTYPE" == "darwin"* ]]; then
+  if [[ "${OSTYPE}" == "darwin"* ]]; then
     # macOS - check both Apple Silicon and Intel paths
     if [[ -f "/opt/homebrew/bin/brew" ]]; then
       eval "$(/opt/homebrew/bin/brew shellenv)"
     elif [[ -f "/usr/local/bin/brew" ]]; then
       eval "$(/usr/local/bin/brew shellenv)"
     fi
-  elif [[ "$OSTYPE" == "linux"* ]]; then
+  elif [[ "${OSTYPE}" == "linux"* ]]; then
     # Linux
     if [[ -f "/home/linuxbrew/.linuxbrew/bin/brew" ]]; then
       eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
@@ -45,15 +45,15 @@ declare -A PKG_MAP=(
 )
 
 for cmd in "${REQUIRED_CMDS[@]}"; do
-  if ! command -v "$cmd" &> /dev/null; then
-    echo "Command '$cmd' is missing. Installing..."
+  if ! command -v "${cmd}" &> /dev/null; then
+    echo "Command '${cmd}' is missing. Installing..."
 
     # Use mapped package name if it exists, otherwise use command name
-    pkg="${PKG_MAP[$cmd]:-$cmd}"
+    pkg="${PKG_MAP[${cmd}]:-${cmd}}"
 
-    brew install "$pkg"
+    brew install "${pkg}"
   else
-    echo "Command '$cmd' is already installed."
+    echo "Command '${cmd}' is already installed."
   fi
 done
 

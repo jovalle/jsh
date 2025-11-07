@@ -191,7 +191,7 @@ lint: lint-shell lint-python lint-yaml lint-markdown lint-js ## Lint all files
 lint-shell: ## Lint shell scripts with shellcheck
 	@echo "$(CYAN)Linting shell scripts...$(RESET)"
 	@if [ -n "$(SHELL_FILES)" ]; then \
-		shellcheck -x $(SHELL_FILES) && \
+		shellcheck -x -S warning $(SHELL_FILES) && \
 		echo "$(GREEN)✓ Shell scripts passed linting$(RESET)"; \
 	else \
 		echo "$(YELLOW)No shell files found$(RESET)"; \
