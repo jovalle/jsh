@@ -3,16 +3,15 @@
 #
 # Load Order:
 #   1. Essential Exports
-#   2. Plugin System (Zinit + theme)
+#   2. Plugin System
 #   3. Shell Options & Keybindings
 #   4. Completion System
-#   5. Fast Integrations
-#   6. Lazy-Load Infrastructure
-#   7. Helper Functions
-#   8. Shell Functions
-#   9. Shell Aliases
-#  10. Theme Customization
-#  11. Local Customizations
+#   5. Helper Functions
+#   6. Shell Functions
+#   7. Shell Aliases
+#   8. Theme Customization
+#   9. Path Prioritization / Deduplication
+#   10. Local Customizations
 #
 
 # ============================================================================
@@ -20,32 +19,24 @@
 # ============================================================================
 
 # Core paths and editors
-export CLICOLORS=1                          # Colorize output
-export EDITOR=vim                           # Default CLI editor
-export VISUAL=vim                           # Default full-screen editor
-export TERM=xterm-256color                  # Terminal type for 256 colors
-export SH=${SHELL##*/}                      # Shell type reference
+export CLICOLORS=1                               # Colorize output
+export EDITOR=vim                                # Default CLI editor
+export VISUAL=vim                                # Default full-screen editor
+export TERM=xterm-256color                       # Terminal type for 256 colors
+export SH=${SHELL##*/}                           # Shell type reference
 
 # Project/work directories
-export GIT_BASE=$HOME/projects              # Git projects base
-export WORK_DIR=$HOME/projects              # Default work directory
-export JSH=${JSH_ROOT:-$HOME}/.jsh          # Ideal JSH location
-export JSH_CUSTOM=$JSH/.jsh_local           # Local overrides (optional)
-
-# Paths - ORDER MATTERS (priority: local > jsh > system)
-export PATH=$HOME/.local/bin:$JSH/.bin:$JSH/.fzf/bin:$HOME/go/bin:$PATH
-
-# Tool roots
-export FZF_ROOT=${FZF_ROOT:-$HOME/.fzf}
-export KREW_ROOT=${KREW_ROOT:-$HOME/.krew}
+export GIT_BASE=$HOME/projects                   # Git projects base
+export WORK_DIR=$GIT_BASE                        # Default work directory
+export JSH=${JSH_ROOT:-$HOME}/.jsh               # Ideal JSH location
+export JSH_CUSTOM=$JSH/.jsh_local                # Local overrides (optional)
 
 # Silence/optimize specific tools
-export DIRENV_LOG_FORMAT=                   # Silence direnv for p10k
-export GITSTATUS_RESPONSE_TIMEOUT=5         # Quick timeout for git status
-export DIRENV_WARN_TIMEOUT=30s              # Direnv timeout
-export PYTHONDONTWRITEBYTECODE=1            # No .pyc files on import
-export SOPS_AGE_KEY_FILE=$HOME/.sops/age.agekey
-export SSHRC_EXTRAS='.inputrc .tmux.conf .vimrc'
+export DIRENV_LOG_FORMAT=                        # Silence direnv for p10k
+export GITSTATUS_RESPONSE_TIMEOUT=5              # Quick timeout for git status
+export DIRENV_WARN_TIMEOUT=30s                   # Direnv timeout
+export PYTHONDONTWRITEBYTECODE=1                 # No .pyc files on import
+export SSHRC_EXTRAS='.inputrc .tmux.conf .vimrc' # Files to import on SSH
 
 # Zinit
 export ZINIT_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}/zinit/zinit.git"
@@ -55,7 +46,7 @@ export LESS="-RXE"                          # No wrapping, no clearing, exit on 
 setopt NO_PROMPT_CR                         # Don't add CR before prompt
 
 # ============================================================================
-# 2. PLUGIN SYSTEM - Zinit (must be early for theme)
+# 2. PLUGIN SYSTEM
 # ============================================================================
 
 # Download Zinit if missing
@@ -76,10 +67,10 @@ zinit ice depth=1
 zinit light romkatv/powerlevel10k
 
 # Load plugins
-zinit light Aloxaf/fzf-tab                  # Enhanced tab completion with fzf
-zinit light zsh-users/zsh-completions      # Additional completions
-zinit light zsh-users/zsh-autosuggestions  # Command suggestions from history
-zinit light zsh-users/zsh-syntax-highlighting  # Syntax highlighting
+zinit light Aloxaf/fzf-tab                    # Enhanced tab completion with fzf
+zinit light zsh-users/zsh-completions         # Additional completions
+zinit light zsh-users/zsh-autosuggestions     # Command suggestions from history
+zinit light zsh-users/zsh-syntax-highlighting # Syntax highlighting
 
 # ============================================================================
 # 3. SHELL OPTIONS & KEYBINDINGS
@@ -104,15 +95,15 @@ setopt COMPLETE_IN_WORD extended_history hist_find_no_dups hist_ignore_all_dups 
         NO_BEEP NOBGNICE HUP INC_APPEND_HISTORY SHARE_HISTORY
 
 # History configuration
-export HISTSIZE=50000                           # Number of commands to keep in memory
-export HISTFILE="$JSH/.zsh_history"             # Store in syncthing-synced directory
-export SAVEHIST=50000                           # Number of commands to save to file
-export HISTDUP=erase                            # Erase duplicates
-export HIST_STAMPS=iso                          # Timestamp format
+export HISTDUP=erase                # Erase duplicates
+export HISTFILE="$JSH/.zsh_history" # Store in syncthing-synced directory
+export HISTSIZE=50000               # Number of commands to keep in memory
+export HIST_STAMPS=iso              # Timestamp format
+export SAVEHIST=50000               # Number of commands to save to file
 
 # Completion options
-LISTMAX=0                                   # Automatically paginate completions
-MAILCHECK=0                                 # Disable mail checking
+LISTMAX=0                           # Automatically paginate completions
+MAILCHECK=0                         # Disable mail checking
 
 # ============================================================================
 # 4. COMPLETION SYSTEM
@@ -123,8 +114,8 @@ autoload -Uz compinit && compinit
 
 # Completion styling
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'  # Case insensitive
-zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}"  # Use LS_COLORS
-zstyle ':completion:*' menu no                           # Don't show menu by default
+zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}" # Use LS_COLORS
+zstyle ':completion:*' menu no                          # Don't show menu by default
 
 # Fzf-tab preview settings
 zstyle ':fzf-tab:complete:cd:*' fzf-preview 'ls --color $realpath'
@@ -134,29 +125,7 @@ zstyle ':fzf-tab:complete:__zoxide_z:*' fzf-preview 'ls --color $realpath'
 zinit cdreplay -q
 
 # ============================================================================
-# 5. FAST INTEGRATIONS
-# ============================================================================
-
-# FZF
-if [[ -x "$FZF_ROOT/bin/fzf" ]]; then
-  export PATH="$FZF_ROOT/bin:$PATH"
-  source <(fzf --zsh) 2>/dev/null
-fi
-
-# Homebrew
-if [[ -x /home/linuxbrew/.linuxbrew/bin/brew ]]; then
-  source <(/home/linuxbrew/.linuxbrew/bin/brew shellenv)
-elif [[ -x /opt/homebrew/bin/brew ]]; then
-  source <(/opt/homebrew/bin/brew shellenv)
-fi
-
-# Krew (Kubernetes plugin manager)
-if [[ -d "$KREW_ROOT" ]]; then
-  export PATH="${KREW_ROOT}/bin:$PATH"
-fi
-
-# ============================================================================
-# 6. LAZY-LOAD INFRASTRUCTURE
+# 5. HELPER FUNCTIONS
 # ============================================================================
 
 # Helper: Lazy-load eval-based initializers (zoxide, direnv, etc.)
@@ -189,23 +158,11 @@ _lazy_load_function() {
   "
 }
 
-# ============================================================================
-# 6a. LAZY-LOAD CONFIGURATION
-# ============================================================================
-# Add expensive operations here - they only initialize on first use
-#
-# For eval-based init (outputs shell commands):
-#   _lazy_load_eval "command" "command init zsh"
-#
-# For completion-based (generates completions):
-#   _lazy_load_completion "command" "completion zsh"
-#
-# For activation-based (runs activate script):
-#   _lazy_load_function "command" "command activate zsh"
-#
-
 # Directory jumping - Zoxide
 _lazy_load_eval "zoxide" "zoxide init zsh"
+
+# Fuzzy search - Fzf
+_lazy_load_completion "fzf" "--zsh"
 
 # Runtime version manager - Mise
 _lazy_load_function "mise" "command mise activate zsh"
@@ -216,6 +173,9 @@ _lazy_load_completion "kubectl" "completion zsh"
 # Directory environment manager - direnv
 _lazy_load_eval "direnv" "direnv hook zsh"
 
+# Package manager - Homebrew
+_lazy_load_eval "brew" "brew shellenv"
+
 # Helm chart manager - helm
 _lazy_load_completion "helm" "completion zsh"
 
@@ -224,10 +184,6 @@ _lazy_load_function "nvm" "command nvm"
 
 # Cleanup helper functions
 unfunction _lazy_load_eval _lazy_load_completion _lazy_load_function 2>/dev/null
-
-# ============================================================================
-# 7. HELPER FUNCTIONS - Color Output
-# ============================================================================
 
 # Color palette for output formatting
 if command -v tput &>/dev/null; then
@@ -243,7 +199,7 @@ else
 fi
 
 # ============================================================================
-# 8. SHELL FUNCTIONS - Core Utilities
+# 6. SHELL FUNCTIONS
 # ============================================================================
 
 # ---- System & Process Management ----
@@ -343,20 +299,18 @@ rcode() {
 }
 
 # ============================================================================
-# 9. SHELL ALIASES - Quick Commands
+# 7. SHELL ALIASES
 # ============================================================================
 
-# ---- Conditional Tool Replacements ----
+# ---- Tool Replacements ----
 
-if command -v eza &>/dev/null; then
-  alias ls='eza --git --color=always --icons=always'
-else
-  alias ls='ls --color=always'
-fi
-
-[[ -x /usr/bin/vim || -x /opt/homebrew/bin/vim ]] && alias vi='vim'
-command -v nvim &>/dev/null && alias vim='nvim'
+command -v bat &>/dev/null && alias cat='bat'
+command -v eza &>/dev/null && alias ls='eza --git --color=always --icons=always'
+command -v ggrep &>/dev/null && alias grep='ggrep --color=auto -i'
+command -v gsed &>/dev/null && alias sed='gsed'
 command -v hx &>/dev/null && alias vim='hx'
+command -v nvim &>/dev/null && alias vim='nvim'
+command -v vim &>/dev/null && alias vi='vim'
 
 # ---- Directory Navigation ----
 
@@ -415,8 +369,9 @@ alias sshx='eval $(ssh-agent) && ssh-add 2>/dev/null' stowrm='find $HOME -maxdep
 alias proxy+='export {{http,https}_proxy,{HTTP,HTTPS}_PROXY}=${PROXY_ENDPOINT}; export {NO_PROXY,no_proxy}=${PROXY_ENDPOINT:-go,localhost}'
 alias proxy-='unset {http,https}_proxy {HTTP,HTTPS}_PROXY {NO_PROXY,no_proxy}' vscode='open -a "Visual Studio Code"'
 
-# ---- Conditional Colorized Output (grc) ----
+# ---- Colorized Output ----
 
+alias ls='ls --color=always'
 if command -v grc &>/dev/null; then
   alias colorize='grc -es --colour=auto'
   alias as='colorize as' configure='colorize ./configure' df='colorize df' diff='colorize diff'
@@ -430,13 +385,43 @@ fi
 alias vz='vim ~/.zshrc' show_options='shopt' tmux='tmux -2'
 
 # ============================================================================
-# 10. THEME CUSTOMIZATION (after plugins loaded)
+# 8. THEME CUSTOMIZATION
 # ============================================================================
 
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
 
 # ============================================================================
-# 11. LOCAL CUSTOMIZATIONS (last - overrides everything)
+# 9. PATH PRIORITIZATION / DEDUPLICATION
+# ============================================================================
+
+# Paths - ORDER MATTERS (priority: local > jsh > system)
+export PATH=$HOME/.local/bin:$JSH/.bin:$JSH/.fzf/bin:$HOME/go/bin:$PATH
+
+# Function to remove duplicate PATH entries while preserving order
+dedup_path() {
+  local path_array=("${(s/:/)PATH}")
+  local seen=()
+  local clean_path=""
+
+  for dir in "${path_array[@]}"; do
+    if [[ -n "$dir" ]] && [[ ! " ${seen[*]} " =~ " $dir " ]]; then
+      seen+=("$dir")
+      if [[ -z "$clean_path" ]]; then
+        clean_path="$dir"
+      else
+        clean_path="${clean_path}:$dir"
+      fi
+    fi
+  done
+
+  export PATH="$clean_path"
+}
+
+# Deduplicate PATH entries
+dedup_path
+
+# ============================================================================
+# 10. LOCAL CUSTOMIZATIONS
 # ============================================================================
 
 [[ -f "${JSH_CUSTOM}" ]] && source "${JSH_CUSTOM}"
