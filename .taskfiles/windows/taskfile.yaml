@@ -1,3 +1,4 @@
+---
 # yaml-language-server: $schema=https://taskfile.dev/schema.json
 
 tasks:
@@ -7,31 +8,39 @@ tasks:
       - task: configure-terminal
       - task: configure-vscode
       - task: configure-firefox
+    desc: Configure Windows system settings and applications
 
   configure-firefox:
     cmd: "{{.ROOT_DIR}}/scripts/windows/configure-firefox.sh"
+    desc: Configure Firefox settings
 
   configure-ssh:
     cmd: "{{.ROOT_DIR}}/scripts/windows/configure-ssh.sh"
+    desc: Configure SSH settings
 
   configure-terminal:
     cmd: "{{.ROOT_DIR}}/scripts/windows/configure-terminal.sh"
+    desc: Configure Windows Terminal
 
   configure-vscode:
     cmd: "{{.ROOT_DIR}}/scripts/windows/configure-vscode.sh"
+    desc: Configure Visual Studio Code
 
   default:
     cmds:
       - task: configure
       - task: install
+    desc: Default task (configure then install)
 
   install:
     cmds:
       - task: install-apps
       - task: install-nerd-fonts
+    desc: Install applications and fonts
 
   install-apps:
     cmd: powershell.exe -NoProfile -ExecutionPolicy Bypass -Command 'Start-Process -FilePath "winget" -ArgumentList "install {{range .apps}}{{.}} {{end}}" -Verb RunAs -Wait'
+    desc: Install applications via winget
 
   install-nerd-fonts:
     cmd: powershell.exe -NoProfile -ExecutionPolicy Bypass -Command 'Start-Process powershell -ArgumentList "refreshenv; choco install {{range .fonts}}nerd-fonts-{{.}} {{end}} -y" -Verb RunAs -Wait'
@@ -40,6 +49,7 @@ tasks:
         {{range .fonts}}
         ls /mnt/c/Windows/Fonts | grep -qi "{{.}}"
         {{end}}
+    desc: Install Nerd fonts via Chocolatey
 
 vars:
   apps:
@@ -55,9 +65,8 @@ vars:
     - Syncthing.Syncthing
     - Zoom.Zoom
     - mpv.net
+
   fonts:
-    - FiraCode
     - JetBrainsMono
-    - Meslo
 
 version: 3

@@ -6,9 +6,6 @@ dotenv:
   - "{{.ENV}}/.env."
   - "{{.HOME}}/.env"
 
-env:
-  PATH: /home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:{{.PATH}}
-
 includes:
   os: ".taskfiles/{{OS}}/taskfile.yaml"
   wsl: ".taskfiles/windows/taskfile.yaml"
@@ -16,114 +13,37 @@ includes:
 tasks:
   chsh:
     cmd: chsh -s /bin/zsh
+    desc: Change shell to Zsh
     status:
       - test "$(basename -- "$SHELL")" == "zsh"
-
-  cleanup:
-    cmds:
-      - cmd: task cleanup-sync-conflicts
-        ignore_error: true
-      - cmd: task cleanup-kube-cache
-        ignore_error: true
-      - cmd: task cleanup-git
-        ignore_error: true
-    desc: Clean up local paths known for excessive files
-
-  cleanup-git:
-    cmd: git gc --aggressive --prune=now
-    dir: "{{.ROOT_DIR}}"
-    prompt: Delete git objects and untracked files?
-
-  cleanup-kube-cache:
-    cmd: rm -rf {{.ROOT_DIR}}/.kube/cache
-    dir: "{{.ROOT_DIR}}"
-    prompt: Delete kubectl cache files?
-
-  cleanup-sync-conflicts:
-    cmd: find {{.ROOT_DIR}} -name "*.sync-conflict*" -delete
-    prompt: Delete sync conflict files?
-
-  commit:
-    aliases:
-      - cz
-    cmd: cz commit
-    desc: Interactive conventional commit using commitizen
-    dir: "{{.ROOT_DIR}}"
-    interactive: true
-    preconditions:
-      - msg: "commitizen not found. Install with: pip install commitizen"
-        sh: command -v cz
 
   configure:
     cmds:
       - task: stow
       - task: chsh
-      - task: git
-      - task: mount
       - task: os:configure
     desc: Configure OS-specific settings and applications
 
   default:
     cmd: task -l
+    desc: List all available tasks
     silent: true
 
-  fzf:
-    cmd: "{{.ROOT_DIR}}/.fzf/install --bin --no-zsh"
-    preconditions:
-      - test -x "{{.ROOT_DIR}}/.fzf/install"
-
-  git:
-    cmds:
-      - task: git-submodules
-      - task: git-hooks
-
-  git-hooks:
-    cmd: pre-commit install --hook-type commit-msg
-    dir: "{{.ROOT_DIR}}"
-    preconditions:
-      - msg: "pre-commit not found. Install with: task install"
-        sh: command -v pre-commit
-
-  git-submodules:
-    cmd: git submodule update --init --remote
-
   install:
-    aliases:
-      - init
-      - provision
-      - setup
     cmds:
-      - task: install-deps
+      - task: install-casks
+      - task: install-formulae
       - task: os:install
-    desc: Provision installations and configurations
+      - task: start-services
+    desc: Install OS specific packages and Homebrew packages
 
   install-casks:
     cmd: brew install --force --cask {{range .casks}}{{.}} {{end}}
-    status:
-      - test -z "{{.casks}}"
-
-  install-deps:
-    cmds:
-      - task: fzf
-      - task: install-homebrew
-      - task: install-casks
-      - task: install-formulae
-      - task: install-links
+    desc: Install Homebrew casks
 
   install-formulae:
     cmd: brew install --force {{range .formulae}}{{.}} {{end}}
-    status:
-      - test -z "{{.formulae}}"
-
-  install-homebrew:
-    cmd: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-    status:
-      - command -v brew
-
-  install-links:
-    cmd: brew install --force {{range .links}}{{.}} {{end}}
-    status:
-      - test -z "{{.links}}"
+    desc: Install Homebrew formulae
 
   mount:
     cmd: "{{.ROOT_DIR}}/scripts/unix/configure-mounts.sh {{.CLI_ARGS}}"
@@ -135,10 +55,24 @@ tasks:
     cmds:
       - task: install
       - task: configure
-    desc: Configure and install jsh
+    desc: Install and configure jsh
+
+  start-services:
+    cmd: brew services start {{range .services}}{{.}} {{end}}
+    desc: Start brew services
 
   stow:
-    cmd: stow . --adopt
+    cmds:
+      - cmd: |
+          echo "Checking for broken symlinks in home directory..."
+          find ~ -maxdepth 1 -type l ! -exec test -e {} \; -print | while read -r link; do
+            echo "Removing broken symlink: $link"
+            rm "$link"
+          done
+        desc: Clean up broken symlinks
+      - cmd: stow -vvv . --adopt
+        desc: Deploy dotfiles using GNU stow
+    desc: Deploy dotfiles to home directory using GNU stow
     dir: "{{.ROOT_DIR}}"
 
   uninstall:
@@ -148,18 +82,11 @@ tasks:
 
   update:
     cmds:
-      - cmd: zsh -ic "zinit self-update"
-        ignore_error: true
-      - cmd: zsh -ic "zinit update --all"
-        ignore_error: true
+      - cmd: zinit self-update
+      - cmd: zinit update --all
       - cmd: brew update
-    desc: Update brew and system package lists
-
-  upgrade:
-    cmds:
       - cmd: brew upgrade
-        ignore_error: true
       - task: os:upgrade
-    desc: Upgrade brew packages, system packages, and zsh plugins (zinit/p10k)
+    desc: Upgrade brew packages and OS-specific packages
 
 version: 3

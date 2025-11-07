@@ -5,9 +5,8 @@ tasks:
   configure:
     cmds:
       - task: configure-firefox
-      - task: configure-iterm2
       - task: configure-vscode
-      - task: set-symlinks
+    desc: Configure all macOS applications and settings
 
   configure-firefox:
     cmds:
@@ -20,89 +19,48 @@ tasks:
       FF_DIR:
         sh: 'find $HOME/Library/Application\ Support/Firefox/Profiles -type d -name "*.default-release"'
 
-  configure-iterm2:
-    cmds:
-      - defaults write com.googlecode.iterm2.plist PrefsCustomFolder -string '{{.HOME}}/.config/iterm2'
-      - defaults write com.googlecode.iterm2.plist LoadPrefsFromCustomFolder -bool true
-    desc: Set iTerm2 to read config from local copy
-
   configure-vscode:
     cmds:
+      - ln -sf $HOME/.jsh/configs/vscode/keybindings.json "$HOME/Library/Application Support/Code/User/keybindings.json"
       - ln -sf $HOME/.jsh/configs/vscode/settings.json "$HOME/Library/Application Support/Code/User/settings.json"
     desc: Override VSCode settings with local copy using symlink
     generates:
+      - "$HOME/Library/Application Support/Code/User/keybindings.json"
       - "$HOME/Library/Application Support/Code/User/settings.json"
 
-  default:
-    cmds:
-      - task: configure
-
   install:
-    cmds:
-      - echo "No further steps required for macOS"
+    cmd: echo "No further steps required for macOS"
     desc: No-op install task
-
-  set-symlinks:
-    cmds:
-      - |
-          if [ -L /usr/local/bin/grep ]; then
-            echo "/usr/local/bin/grep symlink already exists, skipping."
-          else
-            sudo ln -sf $(brew --prefix)/bin/ggrep /usr/local/bin/grep
-            echo "Symlink created for grep."
-          fi
-    desc: Set up symlinks to dotfiles
 
 vars:
   casks:
     - caffeine
-    - discord
-    - drawio
     - firefox
-    - font-fira-code-nerd-font
     - font-jetbrains-mono-nerd-font
-    - font-meslo-lg-nerd-font
-    - foobar2000
-    - iterm2
+    - google-chrome
     - macfuse
     - mounty
-    - plex
-    - plexamp
-    - raspberry-pi-imager
-    - signal
-    - slack
-    - spotify
-    - stolendata-mpv # app, not just CLI like `mpv`
+    - stolendata-mpv # for app, not `mpv` CLI
     - sublime-text
-    - telegram
-    - tg-pro
+    - tailscale-app
+    - todoist-app
     - visual-studio-code
+    - wifiman
     - zoom
+
   formulae:
     - age
-    - ansible
-    - ansible-lint
-    - argocd
     - awscli
     - bat
     - btop
-    - cilium-cli
-    - claude-code
     - cloudflared
-    - codex
-    - commitizen
     - direnv
     - docker
     - exiftool
     - ffmpeg
-    - fluxcd/tap/flux
-    - fzf
-    - git-delta
-    - glances
+    - gawk # GNU awk
     - gnu-sed
     - go
-    - go-task
-    - govc
     - grc
     - grep
     - gromgit/fuse/ntfs-3g-mac
@@ -110,56 +68,34 @@ vars:
     - helmfile
     - hugo
     - ipmitool
-    - jq
-    - k3sup
     - k9s
     - kind
     - krew
     - kubecm
     - kubecolor
-    - kubectx
-    - kubent
     - kubernetes-cli
     - kubescape
-    - kubeshark
     - kubetail
-    - libvirt
     - neofetch
-    - neovim
     - netcat
     - nmap
-    - nvim
-    - podman
     - poetry
-    - pre-commit
-    - python3
-    - qemu
     - readline
     - ripgrep
     - rsync
     - sops
     - sshpass
-    - stow
     - syncthing
     - tailscale
     - talosctl
     - tldr
     - tmux
-    - todoist-app
-    - todoist-cli
-    - tree
-    - tree-sitter
-    - unbound
-    - virtualenv
     - watch
     - xz
     - zoxide
-    - zsh-completions
-  links:
-    - ansible
-    - docker
-    - python3
+
   services:
     - syncthing
+    - tailscale
 
 version: 3
