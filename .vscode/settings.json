@@ -3,5 +3,10 @@
   "eslint.options": {
     "configFile": ".eslintrc.json"
   },
-  "pylint.args": ["--rcfile=.pylintrc"]
+  "pylint.args": ["--rcfile=.pylintrc"],
+  "prettier.requireConfig": true,
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  }
 }

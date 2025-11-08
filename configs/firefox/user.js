@@ -120,7 +120,7 @@ user_pref('permissions.default.desktop-notification', 2);
 user_pref('permissions.default.geo', 2);
 user_pref(
   'geo.provider.network.url',
-  'https://location.services.mozilla.com/v1/geolocate?key=%MOZILLA_API_KEY%'
+  'https://location.services.mozilla.com/v1/geolocate?key=%MOZILLA_API_KEY%',
 );
 user_pref('permissions.manager.defaultsUrl', '');
 user_pref('webchannel.allowObject.urlWhitelist', '');
@@ -272,7 +272,7 @@ user_pref('privacy.query_stripping.enabled', true);
 user_pref('privacy.query_stripping.enabled.pbmode', true);
 user_pref(
   'privacy.query_stripping.strip_list',
-  '__hsfp __hssc __hstc __s _hsenc _openstat dclid fbclid gbraid gclid hsCtaTracking igshid mc_eid ml_subscriber ml_subscriber_hash msclkid oft_c oft_ck oft_d oft_id oft_ids oft_k oft_lk oft_sk oly_anon_id oly_enc_id rb_clickid s_cid twclid vero_conv vero_id wbraid wickedid yclid'
+  '__hsfp __hssc __hstc __s _hsenc _openstat dclid fbclid gbraid gclid hsCtaTracking igshid mc_eid ml_subscriber ml_subscriber_hash msclkid oft_c oft_ck oft_d oft_id oft_ids oft_k oft_lk oft_sk oly_anon_id oly_enc_id rb_clickid s_cid twclid vero_conv vero_id wbraid wickedid yclid',
 );
 
 // Cookie & Tracking protection
@@ -280,7 +280,7 @@ user_pref('privacy.partition.serviceWorkers', true);
 user_pref('privacy.partition.always_partition_third_party_non_cookie_storage', true);
 user_pref(
   'privacy.partition.always_partition_third_party_non_cookie_storage.exempt_sessionstorage',
-  false
+  false,
 );
 
 // Referer privacy
