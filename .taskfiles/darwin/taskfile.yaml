@@ -34,68 +34,68 @@ tasks:
 
 vars:
   casks:
-    - caffeine
-    - firefox
+    - caffeine # Utility that prevents the system from going to sleep
+    - firefox # Web browser
     - font-jetbrains-mono-nerd-font
-    - google-chrome
-    - macfuse
-    - mounty
-    - stolendata-mpv # for app, not `mpv` CLI
-    - sublime-text
-    - tailscale-app
-    - todoist-app
-    - visual-studio-code
-    - wifiman
-    - zoom
+    - google-chrome # Web browser
+    - macfuse # File system integration
+    - mounty # Re-mounts write-protected NTFS volumes
+    - stolendata-mpv # Media player based on MPlayer and mplayer2
+    - sublime-text # Text editor for code, markup and prose
+    - tailscale-app # Mesh VPN based on WireGuard
+    - todoist-app # To-do list
+    - visual-studio-code # Open-source code editor
+    - wifiman # Network monitoring and troubleshooting tool
+    - zoom # Video communication and virtual meeting platform
 
   formulae:
-    - age
-    - awscli
-    - bat
-    - btop
-    - cloudflared
-    - direnv
-    - docker
-    - exiftool
-    - ffmpeg
-    - gawk # GNU awk
-    - gnu-sed
-    - go
-    - grc
-    - grep
-    - gromgit/fuse/ntfs-3g-mac
-    - helm
-    - helmfile
-    - hugo
-    - ipmitool
-    - k9s
-    - kind
-    - krew
-    - kubecm
-    - kubecolor
-    - kubernetes-cli
-    - kubescape
-    - kubetail
-    - neofetch
-    - netcat
-    - nmap
-    - poetry
-    - readline
-    - ripgrep
-    - rsync
-    - sops
-    - sshpass
-    - syncthing
-    - tailscale
-    - talosctl
-    - tldr
-    - tmux
-    - watch
-    - xz
-    - zoxide
+    - age # Simple, modern, secure file encryption
+    - awscli # Official Amazon AWS command-line interface
+    - bat # Clone of cat(1) with syntax highlighting and Git integration
+    - btop # Resource monitor. C++ version and continuation of bashtop and bpytop
+    - cloudflared # Cloudflare Tunnel client (formerly Argo Tunnel)
+    - direnv # Load/unload environment variables based on $PWD
+    - docker # Pack, ship and run any application as a lightweight container
+    - exiftool # Perl lib for reading and writing EXIF metadata
+    - ffmpeg # Play, record, convert, and stream audio and video
+    - gawk # GNU awk utility
+    - gnu-sed # GNU implementation of the famous stream editor
+    - go # Open source programming language to build simple/reliable/efficient software
+    - grc # Colorize logfiles and command output
+    - grep # GNU grep, egrep and fgrep
+    - gromgit/fuse/ntfs-3g-mac # Read-write NTFS driver for FUSE
+    - helm # Kubernetes package manager
+    - helmfile # Deploy Kubernetes Helm Charts
+    - hugo # Configurable static site generator
+    - ipmitool # Utility for IPMI control with kernel driver or LAN interface
+    - k9s # Kubernetes CLI To Manage Your Clusters In Style!
+    - kind # Run local Kubernetes cluster in Docker
+    - krew # Package manager for kubectl plugins
+    - kubecm # KubeConfig Manager
+    - kubecolor # Colorize your kubectl output
+    - kubernetes-cli # Kubernetes command-line interface
+    - kubescape # Kubernetes testing according to Hardening Guidance by NSA and CISA
+    - kubetail # Logging tool for Kubernetes with a real-time web dashboard
+    - neofetch # Fast, highly customisable system info script
+    - netcat # Utility for managing network connections
+    - nmap # Port scanning utility for large networks
+    - poetry # Python package management tool
+    - readline # Library for command-line editing
+    - ripgrep # Search tool like grep and The Silver Searcher
+    - rsync # Utility that provides fast incremental file transfer
+    - sops # Editor of encrypted files
+    - sshpass # Non-interactive SSH password auth
+    - syncthing # Open source continuous file synchronization application
+    - talosctl # CLI for out-of-band management of Kubernetes nodes created by Talos
+    - terraform # Tool to build, change, and version infrastructure
+    - tldr # Simplified and community-driven man pages
+    - tmux # Terminal multiplexer
+    - watch # Executes a program periodically, showing output fullscreen
+    - xh # Friendly and fast tool for sending HTTP requests
+    - xz # General-purpose data compression with high compression ratio
+    - zoxide # Shell extension to navigate your filesystem faster
 
   services:
     - syncthing
-    - tailscale
 
 version: 3

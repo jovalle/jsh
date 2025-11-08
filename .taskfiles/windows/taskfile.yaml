@@ -53,18 +53,18 @@ tasks:
 
 vars:
   apps:
-    - Chocolatey.Chocolatey
-    - Doist.Todoist
-    - DuckDuckGo.DesktopBrowser
-    - Git.Git
-    - Microsoft.PowerToys
-    - Microsoft.VisualStudioCode
-    - Microsoft.WindowsTerminal
-    - Mozilla.Firefox
-    - Rufus.Rufus
-    - Syncthing.Syncthing
-    - Zoom.Zoom
-    - mpv.net
+    - Chocolatey.Chocolatey # Software management automation for Windows
+    - Doist.Todoist # To-do list and task manager
+    - DuckDuckGo.DesktopBrowser # Privacy-focused web browser
+    - Git.Git # Distributed version control system
+    - Microsoft.PowerToys # Set of utilities for power users
+    - Microsoft.VisualStudioCode # Code editor redefined and optimized for building and debugging
+    - Microsoft.WindowsTerminal # Modern terminal application for command-line tools
+    - Mozilla.Firefox # Fast, Private & Safe Web Browser
+    - Rufus.Rufus # Create bootable USB drives the easy way
+    - Syncthing.Syncthing # Open source continuous file synchronization
+    - Zoom.Zoom # Video conferencing and web conferencing service
+    - mpv.net # Modern media player for Windows
 
   fonts:
     - JetBrainsMono

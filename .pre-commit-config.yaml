@@ -34,6 +34,7 @@ repos:
       - id: check-yaml
         args: [--allow-multiple-documents]
       - id: check-json
+        exclude: '^\.vscode/extensions\.json$'
       - id: check-added-large-files
         args: [--maxkb=1000]
       - id: check-case-conflict
@@ -75,3 +76,4 @@ repos:
       - id: prettier
         types_or: [javascript, json, markdown]
         exclude: 'package-lock\.json'
+        # Prettier handles JSONC (JSON with Comments) in .vscode files

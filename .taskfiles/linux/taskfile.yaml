@@ -42,33 +42,33 @@ tasks:
 
 vars:
   formulae:
-    - helm
-    - k9s
-    - kind
-    - kubectl
-    - neofetch
-    - syncthing
-    - terraform
+    - helm # Kubernetes package manager
+    - k9s # Kubernetes CLI To Manage Your Clusters In Style!
+    - kind # Run local Kubernetes cluster in Docker
+    - kubectl # Kubernetes command-line interface
+    - neofetch # Fast, highly customisable system info script
+    - syncthing # Open source continuous file synchronization application
+    - terraform # Tool to build, change, and version infrastructure
   packages:
-    - btop
-    - build-essential
-    - cifs-utils
-    - dkms
-    - git
-    - grc
-    - make
-    - neovim
-    - net-tools
-    - npm
-    - nvme-cli
-    - pipx
-    - python
-    - ripgrep
-    - rsync
-    - s-tui
-    - tmux
-    - wget
-    - zsh
+    - btop # Modern and colorful command line resource monitor
+    - build-essential # Informational list of build-essential packages
+    - cifs-utils # Common Internet File System utilities
+    - dkms # Dynamic Kernel Module Support Framework
+    - git # Fast, scalable, distributed revision control system
+    - grc # Generic colouriser for everything
+    - make # Utility for directing compilation
+    - neovim # Heavily refactored vim fork
+    - net-tools # NET-3 networking toolkit
+    - npm # Package manager for Node.js
+    - nvme-cli # NVMe management command line interface
+    - pipx # Execute binaries from Python packages in isolated environments
+    - python3 # Interactive high-level object-oriented language (default python3 version)
+    - ripgrep # Recursively searches directories for a regex pattern
+    - rsync # Fast, versatile, remote (and local) file-copying tool
+    - s-tui # Terminal UI for monitoring your computer
+    - tmux # Terminal multiplexer
+    - wget # Retrieves files from the web
+    - zsh # Shell with lots of features
 
   services:
     - syncthing
