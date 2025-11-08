@@ -50,6 +50,7 @@ repos:
       - id: shellcheck
         args: [--severity=warning]
         types: [shell]
+        exclude: '^(\.p10k\.zsh)$'
 
   # YAML linting
   - repo: https://github.com/adrienverge/yamllint

@@ -359,14 +359,40 @@ alias proxy-='unset {http,https}_proxy {HTTP,HTTPS}_PROXY {NO_PROXY,no_proxy}' v
 
 if command -v grc &>/dev/null; then
   alias colorize='grc -es --colour=auto'
-  alias as='colorize as' configure='colorize ./configure' df='colorize df' diff='colorize diff'
-  alias dig='colorize dig' g++='colorize g++' gas='colorize gas' gcc='colorize gcc' head='colorize head'
-  alias ld='colorize ld' mount='colorize mount' mtr='colorize mtr' netstat='colorize netstat'
-  alias ping='colorize ping' ps='colorize ps' tail='colorize tail' traceroute='colorize /usr/sbin/traceroute'
 
-  # Use function wrapper for make to preserve completion
-  make() {
-    command grc -es --colour=auto make "$@"
+  # Find grc config directory (cross-platform)
+  # shellcheck disable=SC1073,SC1072  # Anonymous function syntax is zsh-specific
+  () {
+    local grc_conf_dir=""
+    for dir in /opt/homebrew/share/grc /usr/share/grc /usr/local/share/grc; do
+      [[ -d "$dir" ]] && { grc_conf_dir="$dir"; break; }
+    done
+
+    if [[ -n "$grc_conf_dir" ]]; then
+      # Auto-discover all available grc configurations and create aliases for them
+      # shellcheck disable=SC2206  # Zsh globbing with qualifiers
+      local -a available_configs=($grc_conf_dir/conf.*(N:t:s/conf.//))
+
+      for cmd in "${available_configs[@]}"; do
+        case "$cmd" in
+          # Skip configs that aren't actual commands
+          common|dummy|esperanto|log|lolcat) continue ;;
+          # Special cases that need custom handling
+          configure)
+            configure() { command grc -es --colour=auto ./configure "$@"; }
+            ;;
+          make)
+            # Function wrapper to preserve completion
+            make() { command grc -es --colour=auto make "$@"; }
+            ;;
+          *)
+            # Standard alias for all other commands
+            # shellcheck disable=SC2139  # Intentional expansion at definition time
+            alias "$cmd"="colorize $cmd"
+            ;;
+        esac
+      done
+    fi
   }
 fi
 
