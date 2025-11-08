@@ -40,7 +40,6 @@ vars:
     - google-chrome # Web browser
     - macfuse # File system integration
     - mounty # Re-mounts write-protected NTFS volumes
-    - stolendata-mpv # Media player based on MPlayer and mplayer2
     - sublime-text # Text editor for code, markup and prose
     - tailscale-app # Mesh VPN based on WireGuard
     - todoist-app # To-do list
@@ -77,6 +76,7 @@ vars:
     - kubescape # Kubernetes testing according to Hardening Guidance by NSA and CISA
     - kubetail # Logging tool for Kubernetes with a real-time web dashboard
     - neofetch # Fast, highly customisable system info script
+    - mpv # Media player based on MPlayer and mplayer2
     - netcat # Utility for managing network connections
     - nmap # Port scanning utility for large networks
     - poetry # Python package management tool
@@ -94,6 +94,9 @@ vars:
     - xh # Friendly and fast tool for sending HTTP requests
     - xz # General-purpose data compression with high compression ratio
     - zoxide # Shell extension to navigate your filesystem faster
+
+  links:
+    - mpv
 
   services:
     - syncthing

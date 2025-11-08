@@ -21,6 +21,7 @@ tasks:
     cmds:
       - task: stow
       - task: chsh
+      - task: configure-links
       - task: os:configure
     desc: Configure OS-specific settings and applications
 
@@ -45,6 +46,10 @@ tasks:
     cmd: brew install --force {{range .formulae}}{{.}} {{end}}
     desc: Install Homebrew formulae
 
+  configure-links:
+    cmd: brew link --overwrite --force {{range .links}}{{.}} {{end}}
+    desc: Override brew links for formulae
+
   mount:
     cmd: "{{.ROOT_DIR}}/scripts/unix/configure-mounts.sh {{.CLI_ARGS}}"
     desc: "Configure and mount SMB shares. Usage: task mount [mount_name]"
@@ -63,15 +68,13 @@ tasks:
 
   stow:
     cmds:
-      - cmd: |
-          echo "Checking for broken symlinks in home directory..."
-          find ~ -maxdepth 1 -type l ! -exec test -e {} \; -print | while read -r link; do
-            echo "Removing broken symlink: $link"
-            rm "$link"
-          done
-        desc: Clean up broken symlinks
-      - cmd: stow -vvv . --adopt
-        desc: Deploy dotfiles using GNU stow
+      - |
+        echo "Checking for broken symlinks in home directory..."
+        find ~ -maxdepth 1 -type l ! -exec test -e {} \; -print | while read -r link; do
+          echo "Removing broken symlink: $link"
+          rm "$link"
+        done
+      - stow -vvv . --adopt
     desc: Deploy dotfiles to home directory using GNU stow
     dir: "{{.ROOT_DIR}}"
 
