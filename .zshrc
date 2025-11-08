@@ -393,12 +393,12 @@ export PATH=${HOME}/.local/bin:${JSH}/.bin:${JSH}/.fzf/bin:${HOME}/go/bin:${PATH
 dedup_path() {
   # shellcheck disable=SC2296  # Zsh-specific parameter expansion syntax
   local path_array=("${(s/:/)PATH}")
-  local seen=()
+  local -A seen
   local clean_path=""
 
   for dir in "${path_array[@]}"; do
-    if [[ -n "${dir}" ]] && [[ ! " ${seen[*]} " =~ ${dir} ]]; then
-      seen+=("${dir}")
+    if [[ -n "${dir}" ]] && [[ -z "${seen[${dir}]}" ]]; then
+      seen[${dir}]=1
       if [[ -z "${clean_path}" ]]; then
         clean_path="${dir}"
       else
