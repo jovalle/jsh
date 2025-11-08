@@ -102,6 +102,7 @@
   },
   "black-formatter.args": ["--line-length", "100"],
   "chat.tools.terminal.autoApprove": {
+    "alias": true,
     "autoload": true,
     "awk": true,
     "brew": true,
@@ -119,6 +120,7 @@
     },
     "file": true,
     "find": true,
+    "gh": true,
     "git branch": true,
     "git config": true,
     "git diff": true,
@@ -137,6 +139,7 @@
     "mkdir": true,
     "mv": true,
     "npm": true,
+    "npx": true,
     "od": true,
     "pip": true,
     "pwd": true,
@@ -192,9 +195,9 @@
   "files.eol": "\n",
   "files.exclude": {
     "**/.git": true,
-    "**/node_modules": true,
+    "**/.pytest_cache": true,
     "**/__pycache__": true,
-    "**/.pytest_cache": true
+    "**/node_modules": true
   },
   "files.insertFinalNewline": true,
   "files.trimTrailingWhitespace": true,
@@ -235,6 +238,7 @@
   "remote.SSH.suppressWindowsSshWarning": true,
   "remote.SSH.useExecServer": true,
   "remote.SSH.useLocalServer": false,
+  "scm.defaultViewMode": "tree",
   "security.allowedUNCHosts": ["192.168.0.3", "wsl.localhost"],
   "security.workspace.trust.enabled": false,
   "security.workspace.trust.untrustedFiles": "open",

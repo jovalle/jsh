@@ -58,6 +58,7 @@ vars:
     - exiftool # Perl lib for reading and writing EXIF metadata
     - ffmpeg # Play, record, convert, and stream audio and video
     - gawk # GNU awk utility
+    - gh # GitHub command-line tool
     - gnu-sed # GNU implementation of the famous stream editor
     - go # Open source programming language to build simple/reliable/efficient software
     - grc # Colorize logfiles and command output
