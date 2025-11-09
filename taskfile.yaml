@@ -69,14 +69,16 @@ tasks:
   stow:
     cmds:
       - |
-        echo "Checking for broken symlinks in home directory..."
+        echo "🔍 Checking for broken symlinks in home directory..."
         find ~ -maxdepth 1 -type l ! -exec test -e {} \; -print | while read -r link; do
-          echo "Removing broken symlink: $link"
+          echo "🗑️  Removing broken symlink: $link"
           rm "$link"
         done
       - stow -vvv . --adopt
+      - echo "✅ Dotfiles deployed successfully"
     desc: Deploy dotfiles to home directory using GNU stow
     dir: "{{.ROOT_DIR}}"
+    silent: true
 
   uninstall:
     cmd: stow -D .

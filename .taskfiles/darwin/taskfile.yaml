@@ -4,13 +4,18 @@
 tasks:
   configure:
     cmds:
-      - task: configure-firefox
-      - task: configure-vscode
+      - echo "⚠️  The following apps need to be launched first before they can be configured:"
+      - echo ""
+      - echo "🦊 Firefox - Open the app, then run:"
+      - echo "   task os:configure-firefox"
+      - echo ""
+      - echo "📦 VSCode - Open the app, then run:"
+      - echo "   task os:configure-vscode"
     desc: Configure all macOS applications and settings
+    silent: true
 
   configure-firefox:
-    cmds:
-      - ln -sf $HOME/.jsh/configs/firefox/user.js "{{ .FF_DIR }}/user.js"
+    cmd: ln -sf $HOME/.jsh/configs/firefox/user.js "{{ .FF_DIR }}/user.js"
     desc: Tweak Firefox using Betterfox + own enhancements
     preconditions:
       - test -d /Applications/Firefox.app
@@ -27,6 +32,9 @@ tasks:
     generates:
       - "$HOME/Library/Application Support/Code/User/keybindings.json"
       - "$HOME/Library/Application Support/Code/User/settings.json"
+    preconditions:
+      - test -d /Applications/Visual\ Studio\ Code.app
+      - test -d $HOME/Library/Application\ Support/Code/User/
 
   install:
     cmd: echo "No further steps required for macOS"

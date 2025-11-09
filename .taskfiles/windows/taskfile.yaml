@@ -4,15 +4,16 @@
 tasks:
   configure:
     cmds:
+      - echo "⚠️  The following apps need to be launched first before they can be configured:"
+      - echo ""
+      - echo "📦 VSCode - Open the app, then run:"
+      - echo "   task os:configure-vscode"
+      - echo ""
+      - echo "📝 Configuring SSH and Terminal..."
       - task: configure-ssh
       - task: configure-terminal
-      - task: configure-vscode
-      - task: configure-firefox
     desc: Configure Windows system settings and applications
-
-  configure-firefox:
-    cmd: "{{.ROOT_DIR}}/scripts/windows/configure-firefox.sh"
-    desc: Configure Firefox settings
+    silent: true
 
   configure-ssh:
     cmd: "{{.ROOT_DIR}}/scripts/windows/configure-ssh.sh"
