@@ -105,6 +105,10 @@
     "alias": true,
     "autoload": true,
     "awk": true,
+    "bash --version": {
+      "approve": true,
+      "matchCommandLine": true
+    },
     "brew": true,
     "cat": true,
     "chmod": true,
@@ -128,6 +132,7 @@
     "git remote": true,
     "git show": true,
     "git status": true,
+    "gitx": true,
     "go": true,
     "grep": true,
     "head": true,
@@ -149,12 +154,18 @@
     "tail": true,
     "task": true,
     "touch": true,
+    "type": true,
     "uname": true,
     "wc": true,
     "wget": true,
     "which": true,
     "whoami": true,
-    "yarn": true
+    "xattr": true,
+    "yarn": true,
+    "zsh --version": {
+      "approve": true,
+      "matchCommandLine": true
+    }
   },
   "dev.containers.executeInWSL": true,
   "diffEditor.experimental.showMoves": true,

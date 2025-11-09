@@ -56,6 +56,7 @@ vars:
     - direnv # Load/unload environment variables based on $PWD
     - docker # Pack, ship and run any application as a lightweight container
     - exiftool # Perl lib for reading and writing EXIF metadata
+    - eza # Modern, maintained replacement for ls
     - ffmpeg # Play, record, convert, and stream audio and video
     - gawk # GNU awk utility
     - gh # GitHub command-line tool
