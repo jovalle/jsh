@@ -41,6 +41,9 @@ export SSHRC_EXTRAS='.inputrc .tmux.conf .vimrc' # Files to import on SSH
 # Zinit
 export ZINIT_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}/zinit/zinit.git"
 
+# fzf
+export FZF_BASE="${JSH}/.fzf"
+
 # Terminal optimizations
 export LESS="-RXE"                          # No wrapping, no clearing, exit on EOF
 setopt NO_PROMPT_CR                         # Don't add CR before prompt
@@ -48,6 +51,11 @@ setopt NO_PROMPT_CR                         # Don't add CR before prompt
 # ============================================================================
 # 2. PLUGIN SYSTEM
 # ============================================================================
+
+# Verify fzf is available (should be initialized as submodule via setup.sh)
+if [[ ! -d "${FZF_BASE}" ]]; then
+  warn "fzf submodule not found. Run: git submodule update --init"
+fi
 
 # Download Zinit if missing
 if [[ ! -d "${ZINIT_HOME}" ]]; then

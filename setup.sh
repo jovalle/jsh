@@ -1,6 +1,12 @@
-#!/usr/bin/env bash
+#!/usr/bin/env zsh
 
 set -e
+
+# Initialize git submodules (e.g., fzf)
+if [[ -f .gitmodules ]]; then
+  echo "Initializing git submodules..."
+  git submodule update --init --recursive
+fi
 
 # Install brew if not present
 if ! command -v brew &> /dev/null; then
@@ -24,6 +30,7 @@ fi
 
 REQUIRED_CMDS=(
   curl
+  fzf
   git
   jq
   make
@@ -57,4 +64,8 @@ for cmd in "${REQUIRED_CMDS[@]}"; do
   fi
 done
 
-echo "Ready to run tasks!"
+if command -v task; then
+  task setup
+else
+  echo "Reload your terminal and run \`task setup\`"
+fi
