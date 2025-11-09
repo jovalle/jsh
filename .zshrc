@@ -7,8 +7,8 @@
 #   3. Shell Options & Keybindings
 #   4. Completion System
 #   5. Helper Functions
-#   6. Shell Functions
-#   7. Shell Aliases
+#   6. Shell Aliases
+#   7. Shell Functions
 #   8. Theme Customization
 #   9. Path Prioritization / Deduplication
 #   10. Local Customizations
@@ -175,7 +175,125 @@ else
 fi
 
 # ============================================================================
-# 6. SHELL FUNCTIONS
+# 6. SHELL ALIASES
+# ============================================================================
+
+# ---- Directory Navigation ----
+
+alias ..='cd ../' .2='cd ../../' .3='cd ../../../' .4='cd ../../../../' .5='cd ../../../../../' .6='cd ../../../../../../'
+
+# ---- File Operations ----
+
+alias cp='cp -iv' mv='mv -iv' rm='rm -i' mkdir='mkdir -pv' t='touch' dud='du -d 1 -h' duf='du -sh *'
+alias ls='ls -a' l='ls -l' ll='ls -la' lll='ls -laFh'
+alias psg='ps aux | grep -i' psl='ps aux | less'
+
+# ---- Permissions ----
+
+alias 000='chmod 000' 640='chmod 640' 644='chmod 644' 755='chmod 755' 775='chmod 775' mx='chmod a+x'
+
+# ---- Terminal & System ----
+
+alias c='clear' ccd='clear && cd' e='exit' fix_stty='stty sane' epochtime='date +%s'
+alias ts='date +%F-%H%M' timestamp='date "+%Y%m%dT%H%M%S"'
+
+# ---- System Information ----
+
+alias path='echo -e ${PATH//:/\\n}' perm='stat --printf "%a %n \n "' whatis='declare -f' which='type -a'
+alias h='history' w='watch -n1 -d -t ' glances='glances -1 -t 0.5'
+
+# ---- Superuser ----
+
+alias _='sudo' please='sudo'
+
+# ---- System Commands ----
+
+alias g='grep -i' edit='vim' v='vim'
+
+# ---- Git ----
+
+alias g_='git commit -m' git+='git push --set-upstream origin $(git rev-parse --abbrev-ref HEAD)'
+alias git-='git reset HEAD~1' gl='git log --graph --oneline' gdiff='git diff --name-only master'
+alias gvimdiff='git difftool --tool=vimdiff --no-prompt'
+
+# ---- Kubernetes ----
+
+alias k='kubectl' kav='kubectl api-versions' kci='kubectl cluster-info' kctx='kubectx' kns='kubens'
+alias kctx+='kubectx --add' kctx-='kubectx --delete'
+alias kdf='kubectl delete -f' kexec='kubectl exec -it' netshoot='kubectl run tmp-shell --rm -i --tty --image nicolaka/netshoot'
+
+# ---- Infrastructure & Tools ----
+
+alias a='ansible' ap='ansible-playbook' av='ansible-vault' tf='terraform' pn='pnpm'
+
+# ---- SSH & Remote ----
+
+alias sshx='eval $(ssh-agent) && ssh-add 2>/dev/null'
+alias proxy+='export {{http,https}_proxy,{HTTP,HTTPS}_PROXY}=${PROXY_ENDPOINT}; export {NO_PROXY,no_proxy}=${PROXY_ENDPOINT:-go,localhost}'
+alias proxy-='unset {http,https}_proxy {HTTP,HTTPS}_PROXY {NO_PROXY,no_proxy}'
+
+# ---- Colorized Output ----
+
+if command -v grc &>/dev/null; then
+  alias colorize='grc -es --colour=auto'
+
+  # Find grc config directory (cross-platform)
+  # shellcheck disable=SC1073,SC1072  # Anonymous function syntax is zsh-specific
+  () {
+    local grc_conf_dir=""
+    for dir in /opt/homebrew/share/grc /usr/share/grc /usr/local/share/grc; do
+      [[ -d "$dir" ]] && { grc_conf_dir="$dir"; break; }
+    done
+
+    if [[ -n "$grc_conf_dir" ]]; then
+      # Auto-discover all available grc configurations and create aliases for them
+      # shellcheck disable=SC2206  # Zsh globbing with qualifiers
+      local -a available_configs=($grc_conf_dir/conf.*(N:t:s/conf.//))
+
+      for cmd in "${available_configs[@]}"; do
+        case "$cmd" in
+          # Skip configs that aren't actual commands
+          common|dummy|esperanto|log|lolcat) continue ;;
+          # Special cases that need custom handling
+          configure)
+            configure() { command grc -es --colour=auto ./configure "$@"; }
+            ;;
+          make)
+            # Function wrapper to preserve completion
+            make() { command grc -es --colour=auto make "$@"; }
+            ;;
+          *)
+            # Skip if command already has an alias (e.g., ls=eza)
+            if ! alias "$cmd" &>/dev/null; then
+              # Standard alias for all other commands
+              # shellcheck disable=SC2139  # Intentional expansion at definition time
+              alias "$cmd"="colorize $cmd"
+            fi
+            ;;
+        esac
+      done
+    fi
+  }
+fi
+
+# ---- Development & Tmux ----
+
+alias vz='vim ~/.zshrc' show_options='shopt' tmux='tmux -2'
+
+# ---- Tool Replacements ----
+
+command -v bat &>/dev/null && alias cat='bat'
+command -v eza &>/dev/null && alias ls='eza -a -l --git --icons' l='ls' ll='eza --git --icons --level=2 --long --tree --long' lll='eza --git --icons --long --tree'
+command -v gawk &>/dev/null && alias awk='gawk'
+command -v ggrep &>/dev/null && alias grep='ggrep --color=auto -i'
+command -v gsed &>/dev/null && alias sed='gsed'
+command -v hx &>/dev/null && alias vim='hx'
+command -v nvim &>/dev/null && alias vim='nvim'
+command -v vim &>/dev/null && alias vi='vim'
+command -v zoxide &>/dev/null && alias cd='z'
+
+# ============================================================================
+# 7. SHELL FUNCTIONS
 # ============================================================================
 
 # ---- System & Process Management ----
@@ -294,124 +412,6 @@ rcode() {
   [[ $# -ne 2 ]] && { echo "Usage: rcode <ssh_host> <remote_path>"; return 1; }
   code --remote "ssh-remote+${1}" "${2}"
 }
-
-# ============================================================================
-# 7. SHELL ALIASES
-# ============================================================================
-
-# ---- Directory Navigation ----
-
-alias ..='cd ../' .2='cd ../../' .3='cd ../../../' .4='cd ../../../../' .5='cd ../../../../../' .6='cd ../../../../../../'
-
-# ---- File Operations ----
-
-alias cp='cp -iv' mv='mv -iv' rm='rm -i' mkdir='mkdir -pv' t='touch' dud='du -d 1 -h' duf='du -sh *'
-alias ls='ls -a' l='ls -l' ll='ls -la' lll='ls -laFh'
-alias psg='ps aux | grep -i' psl='ps aux | less'
-
-# ---- Permissions ----
-
-alias 000='chmod 000' 640='chmod 640' 644='chmod 644' 755='chmod 755' 775='chmod 775' mx='chmod a+x'
-
-# ---- Terminal & System ----
-
-alias c='clear' ccd='clear && cd' e='exit' fix_stty='stty sane' epochtime='date +%s'
-alias ts='date +%F-%H%M' timestamp='date "+%Y%m%dT%H%M%S"'
-
-# ---- System Information ----
-
-alias path='echo -e ${PATH//:/\\n}' perm='stat --printf "%a %n \n "' whatis='declare -f' which='type -a'
-alias h='history' w='watch -n1 -d -t ' glances='glances -1 -t 0.5'
-
-# ---- Superuser ----
-
-alias _='sudo' please='sudo'
-
-# ---- System Commands ----
-
-alias g='grep -i' edit='vim' v='vim'
-
-# ---- Git ----
-
-alias g_='git commit -m' git+='git push --set-upstream origin $(git rev-parse --abbrev-ref HEAD)'
-alias git-='git reset HEAD~1' gl='git log --graph --oneline' gdiff='git diff --name-only master'
-alias gvimdiff='git difftool --tool=vimdiff --no-prompt'
-
-# ---- Kubernetes ----
-
-alias k='kubectl' kav='kubectl api-versions' kci='kubectl cluster-info' kctx='kubectx' kns='kubens'
-alias kctx+='kubectx --add' kctx-='kubectx --delete'
-alias kdf='kubectl delete -f' kexec='kubectl exec -it' netshoot='kubectl run tmp-shell --rm -i --tty --image nicolaka/netshoot'
-
-# ---- Infrastructure & Tools ----
-
-alias a='ansible' ap='ansible-playbook' av='ansible-vault' tf='terraform' pn='pnpm'
-
-# ---- SSH & Remote ----
-
-alias sshx='eval $(ssh-agent) && ssh-add 2>/dev/null'
-alias proxy+='export {{http,https}_proxy,{HTTP,HTTPS}_PROXY}=${PROXY_ENDPOINT}; export {NO_PROXY,no_proxy}=${PROXY_ENDPOINT:-go,localhost}'
-alias proxy-='unset {http,https}_proxy {HTTP,HTTPS}_PROXY {NO_PROXY,no_proxy}'
-
-# ---- Colorized Output ----
-
-if command -v grc &>/dev/null; then
-  alias colorize='grc -es --colour=auto'
-
-  # Find grc config directory (cross-platform)
-  # shellcheck disable=SC1073,SC1072  # Anonymous function syntax is zsh-specific
-  () {
-    local grc_conf_dir=""
-    for dir in /opt/homebrew/share/grc /usr/share/grc /usr/local/share/grc; do
-      [[ -d "$dir" ]] && { grc_conf_dir="$dir"; break; }
-    done
-
-    if [[ -n "$grc_conf_dir" ]]; then
-      # Auto-discover all available grc configurations and create aliases for them
-      # shellcheck disable=SC2206  # Zsh globbing with qualifiers
-      local -a available_configs=($grc_conf_dir/conf.*(N:t:s/conf.//))
-
-      for cmd in "${available_configs[@]}"; do
-        case "$cmd" in
-          # Skip configs that aren't actual commands
-          common|dummy|esperanto|log|lolcat) continue ;;
-          # Special cases that need custom handling
-          configure)
-            configure() { command grc -es --colour=auto ./configure "$@"; }
-            ;;
-          make)
-            # Function wrapper to preserve completion
-            make() { command grc -es --colour=auto make "$@"; }
-            ;;
-          *)
-            # Skip if command already has an alias (e.g., ls=eza)
-            if ! alias "$cmd" &>/dev/null; then
-              # Standard alias for all other commands
-              # shellcheck disable=SC2139  # Intentional expansion at definition time
-              alias "$cmd"="colorize $cmd"
-            fi
-            ;;
-        esac
-      done
-    fi
-  }
-fi
-
-# ---- Development & Tmux ----
-
-alias vz='vim ~/.zshrc' show_options='shopt' tmux='tmux -2'
-
-# ---- Tool Replacements ----
-
-command -v bat &>/dev/null && alias cat='bat'
-command -v eza &>/dev/null && alias ls='eza -a -l --git --icons' l='ls' ll='eza --git --icons --level=2 --long --tree --long' lll='eza --git --icons --long --tree'
-command -v gawk &>/dev/null && alias awk='gawk'
-command -v ggrep &>/dev/null && alias grep='ggrep --color=auto -i'
-command -v gsed &>/dev/null && alias sed='gsed'
-command -v hx &>/dev/null && alias vim='hx'
-command -v nvim &>/dev/null && alias vim='nvim'
-command -v vim &>/dev/null && alias vi='vim'
-command -v zoxide &>/dev/null && alias cd='z'
 
 # ============================================================================
 # 8. THEME CUSTOMIZATION
