@@ -75,6 +75,9 @@
 .vault
 .vim/bundle/*
 .vim/plugged/*
+.vscode/argv.json
+.vscode/cli/
+.vscode/extensions/
 .zsh_history
 .zsh_history.*
 AppSupport
