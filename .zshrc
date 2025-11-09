@@ -38,6 +38,11 @@ export DIRENV_WARN_TIMEOUT=30s                   # Direnv timeout
 export PYTHONDONTWRITEBYTECODE=1                 # No .pyc files on import
 export SSHRC_EXTRAS='.inputrc .tmux.conf .vimrc' # Files to import on SSH
 
+# Shell environment
+export LANG=en_US.UTF-8                          # Default locale
+export LC_ALL=en_US.UTF-8                        # Override all locales
+export XDG_CONFIG_HOME="${HOME}/.config"         # Wwhere apps should store config files, cache files, and data files
+
 # Zinit
 export ZINIT_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}/zinit/zinit.git"
 
@@ -294,26 +299,15 @@ rcode() {
 # 7. SHELL ALIASES
 # ============================================================================
 
-# ---- Tool Replacements ----
-
-command -v bat &>/dev/null && alias cat='bat'
-command -v eza &>/dev/null && alias ls='eza --git --color=always --icons=always'
-command -v gawk &>/dev/null && alias awk='gawk'
-command -v ggrep &>/dev/null && alias grep='ggrep --color=auto -i'
-command -v gsed &>/dev/null && alias sed='gsed'
-command -v hx &>/dev/null && alias vim='hx'
-command -v nvim &>/dev/null && alias vim='nvim'
-command -v vim &>/dev/null && alias vi='vim'
-command -v zoxide &>/dev/null && alias cd='z'
-
 # ---- Directory Navigation ----
 
 alias ..='cd ../' .2='cd ../../' .3='cd ../../../' .4='cd ../../../../' .5='cd ../../../../../' .6='cd ../../../../../../'
-alias cd..='cd ./' l='ls -la' d='dirs -v | head -10' work='cd ${WORK_DIR:-${HOME}}'
 
 # ---- File Operations ----
 
 alias cp='cp -iv' mv='mv -iv' rm='rm -i' mkdir='mkdir -pv' t='touch' dud='du -d 1 -h' duf='du -sh *'
+alias ls='ls -a' l='ls -l' ll='ls -la' lll='ls -laFh'
+alias psg='ps aux | grep -i' psl='ps aux | less'
 
 # ---- Permissions ----
 
@@ -329,17 +323,13 @@ alias ts='date +%F-%H%M' timestamp='date "+%Y%m%dT%H%M%S"'
 alias path='echo -e ${PATH//:/\\n}' perm='stat --printf "%a %n \n "' whatis='declare -f' which='type -a'
 alias h='history' w='watch -n1 -d -t ' glances='glances -1 -t 0.5'
 
-# ---- Networking & Utilities ----
-
-alias curl='curl -w "\n"' wget='wget -c' less='less -FSRXc'
-
 # ---- Superuser ----
 
-alias _='sudo' sudo='sudo ' please='sudo '
+alias _='sudo' please='sudo'
 
 # ---- System Commands ----
 
-alias nano='nano -W' grep='grep --color=auto -i' g='grep --color=auto -i' edit='vim'
+alias g='grep -i' edit='vim' v='vim'
 
 # ---- Git ----
 
@@ -361,7 +351,7 @@ alias a='ansible' ap='ansible-playbook' av='ansible-vault' tf='terraform' pn='pn
 
 alias sshx='eval $(ssh-agent) && ssh-add 2>/dev/null'
 alias proxy+='export {{http,https}_proxy,{HTTP,HTTPS}_PROXY}=${PROXY_ENDPOINT}; export {NO_PROXY,no_proxy}=${PROXY_ENDPOINT:-go,localhost}'
-alias proxy-='unset {http,https}_proxy {HTTP,HTTPS}_PROXY {NO_PROXY,no_proxy}' vscode='open -a "Visual Studio Code"'
+alias proxy-='unset {http,https}_proxy {HTTP,HTTPS}_PROXY {NO_PROXY,no_proxy}'
 
 # ---- Colorized Output ----
 
@@ -394,9 +384,12 @@ if command -v grc &>/dev/null; then
             make() { command grc -es --colour=auto make "$@"; }
             ;;
           *)
-            # Standard alias for all other commands
-            # shellcheck disable=SC2139  # Intentional expansion at definition time
-            alias "$cmd"="colorize $cmd"
+            # Skip if command already has an alias (e.g., ls=eza)
+            if ! alias "$cmd" &>/dev/null; then
+              # Standard alias for all other commands
+              # shellcheck disable=SC2139  # Intentional expansion at definition time
+              alias "$cmd"="colorize $cmd"
+            fi
             ;;
         esac
       done
@@ -407,6 +400,18 @@ fi
 # ---- Development & Tmux ----
 
 alias vz='vim ~/.zshrc' show_options='shopt' tmux='tmux -2'
+
+# ---- Tool Replacements ----
+
+command -v bat &>/dev/null && alias cat='bat'
+command -v eza &>/dev/null && alias ls='eza -a -l --git --icons' l='ls' ll='eza --git --icons --level=2 --long --tree --long' lll='eza --git --icons --long --tree'
+command -v gawk &>/dev/null && alias awk='gawk'
+command -v ggrep &>/dev/null && alias grep='ggrep --color=auto -i'
+command -v gsed &>/dev/null && alias sed='gsed'
+command -v hx &>/dev/null && alias vim='hx'
+command -v nvim &>/dev/null && alias vim='nvim'
+command -v vim &>/dev/null && alias vi='vim'
+command -v zoxide &>/dev/null && alias cd='z'
 
 # ============================================================================
 # 8. THEME CUSTOMIZATION
