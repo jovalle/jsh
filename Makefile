@@ -28,7 +28,7 @@ help: ## Show this help message
 
 ##@ Setup
 
-install-tools: ## Install required development tools (Google Style Guides)
+install-tools: ## Install required development tools
 	@echo "$(CYAN)Installing development tools...$(RESET)"
 	@command -v brew >/dev/null 2>&1 || { echo "$(RED)Homebrew not found. Please install it first.$(RESET)"; exit 1; }
 	@echo "$(CYAN)Installing Homebrew packages...$(RESET)"
@@ -235,7 +235,7 @@ lint-markdown: ## Lint Markdown files with markdownlint
 		echo "$(YELLOW)No Markdown files found$(RESET)"; \
 	fi
 
-lint-js: ## Lint JavaScript files with ESLint (Google style)
+lint-js: ## Lint JavaScript files with ESLint
 	@echo "$(CYAN)Linting JavaScript files...$(RESET)"
 	@JS_FILES=$$(find . -type f -name "*.js" ! -path "*/\.*" ! -path "*/node_modules/*"); \
 	if [ -n "$$JS_FILES" ]; then \
@@ -304,6 +304,19 @@ clean: ## Remove temporary files and caches
 	@find . -type d -name "__pycache__" -delete
 	@find . -type d -name ".pytest_cache" -delete
 	@find . -type d -name ".mypy_cache" -delete
+	@SYNC_FILES=$$(find . -type f -name "*.sync-conflict-*" 2>/dev/null | wc -l | tr -d ' '); \
+	if [ $$SYNC_FILES -gt 0 ]; then \
+		echo "$(YELLOW)Found $$SYNC_FILES sync-conflict file(s)$(RESET)"; \
+		find . -type f -name "*.sync-conflict-*" 2>/dev/null; \
+		read -p "Delete sync-conflict files? [y/N] " -n 1 -r; \
+		echo; \
+		if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
+			find . -type f -name "*.sync-conflict-*" -delete; \
+			echo "$(GREEN)✓ Sync-conflict files deleted$(RESET)"; \
+		else \
+			echo "$(YELLOW)Sync-conflict files kept$(RESET)"; \
+		fi; \
+	fi
 	@echo "$(GREEN)✓ Cleanup complete$(RESET)"
 
 ##@ Task Integration
