@@ -5,13 +5,14 @@
 #   1. Essential Exports
 #   2. Plugin System
 #   3. Shell Options & Keybindings
-#   4. Completion System
-#   5. Helper Functions
-#   6. Shell Aliases
-#   7. Shell Functions
-#   8. Theme Customization
-#   9. Path Prioritization / Deduplication
-#   10. Local Customizations
+#   4. Path Setup
+#   5. Completion System
+#   6. Helper Functions
+#   7. Shell Aliases
+#   8. Shell Functions
+#   9. Theme Customization
+#   10. Path Deduplication
+#   11. Local Customizations
 #
 
 # ============================================================================
@@ -123,7 +124,15 @@ export LISTMAX                      # Used by zsh completion system
 MAILCHECK=0                         # Disable mail checking
 
 # ============================================================================
-# 4. COMPLETION SYSTEM
+# 4. PATH SETUP
+# ============================================================================
+
+# Paths - ORDER MATTERS (priority: local > jsh > system)
+# Must be set before tool completions to ensure binaries are found
+export PATH=${HOME}/.local/bin:${JSH}/.bin:${JSH}/.fzf/bin:${HOME}/go/bin:${PATH}
+
+# ============================================================================
+# 5. COMPLETION SYSTEM
 # ============================================================================
 
 # Add custom completions directory to fpath
@@ -158,7 +167,7 @@ command -v task &>/dev/null && source <(task --completion zsh)
 command -v zoxide &>/dev/null && eval "$(zoxide init zsh)"
 
 # ============================================================================
-# 5. HELPER FUNCTIONS
+# 6. HELPER FUNCTIONS
 # ============================================================================
 
 # Color palette for output formatting
@@ -175,7 +184,7 @@ else
 fi
 
 # ============================================================================
-# 6. SHELL ALIASES
+# 7. SHELL ALIASES
 # ============================================================================
 
 # ---- Directory Navigation ----
@@ -293,7 +302,7 @@ command -v vim &>/dev/null && alias vi='vim'
 command -v zoxide &>/dev/null && alias cd='z'
 
 # ============================================================================
-# 7. SHELL FUNCTIONS
+# 8. SHELL FUNCTIONS
 # ============================================================================
 
 # ---- System & Process Management ----
@@ -414,7 +423,7 @@ rcode() {
 }
 
 # ============================================================================
-# 8. THEME CUSTOMIZATION
+# 9. THEME CUSTOMIZATION
 # ============================================================================
 
 # To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
@@ -422,11 +431,8 @@ rcode() {
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
 
 # ============================================================================
-# 9. PATH PRIORITIZATION / DEDUPLICATION
+# 10. PATH DEDUPLICATION
 # ============================================================================
-
-# Paths - ORDER MATTERS (priority: local > jsh > system)
-export PATH=${HOME}/.local/bin:${JSH}/.bin:${JSH}/.fzf/bin:${HOME}/go/bin:${PATH}
 
 # Function to remove duplicate PATH entries while preserving order
 dedup_path() {
@@ -453,7 +459,7 @@ dedup_path() {
 dedup_path
 
 # ============================================================================
-# 10. LOCAL CUSTOMIZATIONS
+# 11. LOCAL CUSTOMIZATIONS
 # ============================================================================
 
 # shellcheck disable=SC1090  # Dynamic source for local customizations
