@@ -106,8 +106,13 @@ bindkey -M viins '^S' history-incremental-search-forward
 bindkey -M vicmd '^[[3~' delete-char
 bindkey -M viins '^[[3~' delete-char
 
+# Word deletion with Ctrl+Backspace and Ctrl+W
+bindkey -M viins '^H' backward-kill-word        # Ctrl+Backspace
+bindkey -M viins '^W' backward-kill-word        # Ctrl+W (standard)
+bindkey -M viins '^[^?' backward-kill-word      # Alt+Backspace
+
 # Shell options (all at once)
-setopt COMPLETE_IN_WORD extended_history hist_find_no_dups hist_ignore_all_dups \
+setopt AUTO_CD COMPLETE_IN_WORD extended_history hist_find_no_dups hist_ignore_all_dups \
         hist_ignore_dups hist_ignore_space hist_save_no_dups INTERACTIVE_COMMENTS \
         NO_BEEP NOBGNICE HUP INC_APPEND_HISTORY SHARE_HISTORY
 
@@ -299,7 +304,6 @@ command -v gsed &>/dev/null && alias sed='gsed'
 command -v hx &>/dev/null && alias vim='hx'
 command -v nvim &>/dev/null && alias vim='nvim'
 command -v vim &>/dev/null && alias vi='vim'
-command -v zoxide &>/dev/null && alias cd='z'
 
 # ============================================================================
 # 8. SHELL FUNCTIONS
