@@ -81,9 +81,12 @@ tasks:
     silent: true
 
   uninstall:
-    cmd: stow -D .
-    desc: Retract dotfiles from home directory
+    cmds:
+      - stow -D .
+      - "{{.ROOT_DIR}}/scripts/unix/uninstall-homebrew.sh"
+    desc: Retract dotfiles and completely uninstall Homebrew
     dir: "{{.ROOT_DIR}}"
+    interactive: true
 
   update:
     cmds:
