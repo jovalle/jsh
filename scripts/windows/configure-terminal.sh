@@ -2,10 +2,13 @@
 # Create symlink for Windows Terminal settings (requires elevation)
 
 SETTINGS_SRC="${HOME}/.config/windows-terminal/settings.json"
-TERMINAL_SETTINGS_DIR="\$([Environment]::GetEnvironmentVariable('LOCALAPPDATA'))\\Packages\\Microsoft.WindowsTerminal_8wekyb3d8bbwe\\LocalState"
+
+# Get Windows LOCALAPPDATA path dynamically
+LOCALAPPDATA_WIN=$(powershell.exe -NoProfile -Command '[Environment]::GetEnvironmentVariable("LOCALAPPDATA")' | tr -d '\r')
+TERMINAL_SETTINGS_DIR="${LOCALAPPDATA_WIN}\\Packages\\Microsoft.WindowsTerminal_8wekyb3d8bbwe\\LocalState"
 
 # Check if Windows Terminal is installed
-TERMINAL_DIR_WSL=$(echo "${TERMINAL_SETTINGS_DIR}" | sed 's|\\|/|g' | sed 's|$([Environment]::GetEnvironmentVariable('\''LOCALAPPDATA'\''))|/mnt/c/Users/jay/AppData/Local|')
+TERMINAL_DIR_WSL=$(wslpath "${LOCALAPPDATA_WIN}")/Packages/Microsoft.WindowsTerminal_8wekyb3d8bbwe/LocalState
 if [[ ! -d "${TERMINAL_DIR_WSL}" ]]; then
   echo "Error: Windows Terminal not found (check if installed)"
   exit 1
