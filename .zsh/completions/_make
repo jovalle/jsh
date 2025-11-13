@@ -1,60 +1,33 @@
 #compdef make gmake
 
-# Custom completion for make with enhanced Makefile target completion
-# Supports both standard make targets and task- prefixed targets
+# Completion function for make - show only Makefile targets
+# This replaces the default make completion to show only actual targets,
+# not files or variables
 
 _make() {
   local -a targets
-  local makefile
+  local expl
 
-  # Find the Makefile
-  if [[ -f Makefile ]]; then
-    makefile="Makefile"
-  elif [[ -f makefile ]]; then
-    makefile="makefile"
-  elif [[ -f GNUmakefile ]]; then
-    makefile="GNUmakefile"
-  else
-    return 1
+  # Check if a Makefile exists in current directory
+  if [[ -f Makefile ]] || [[ -f makefile ]] || [[ -f GNUmakefile ]]; then
+    # Extract targets from Makefile using make's -qp flag
+    # Filter to only show actual targets (not special targets, files, or variables)
+    targets=($(make -qp 2>/dev/null | \
+               grep -E '^[a-zA-Z0-9_-]+:' | \
+               cut -d: -f1 | \
+               grep -vE '^\.|^Makefile$|^makefile$|^GNUmakefile$' | \
+               sort -u))
+
+    if (( ${#targets[@]} > 0 )); then
+      # Use _wanted to properly tag completions and prevent fallback to files
+      _wanted targets expl 'make target' compadd -a targets
+      return 0
+    fi
   fi
 
-  # Extract targets from Makefile
-  # This captures both .PHONY targets and regular targets with ## comments
-  targets=(
-    ${(f)"$(
-      awk -F':' '
-        /^[a-zA-Z0-9_-]+:.*##/ {
-          # Extract targets with descriptions
-          if (match($0, /^([a-zA-Z0-9_-]+):.*##(.*)/)) {
-            target = $1;
-            # Skip pattern rules
-            if (target ~ /%/) next;
-            desc = $0;
-            sub(/^[^:]+:[^#]*##[[:space:]]*/, "", desc);
-            gsub(/[[:space:]]+$/, "", desc);
-            print target ":" desc
-          }
-          next
-        }
-        /^[a-zA-Z0-9_-]+:/ && !/^(\.|#)/ {
-          # Targets without descriptions
-          target = $1;
-          gsub(/[[:space:]]+.*$/, "", target);
-          # Skip pattern rules (containing %)
-          if (target !~ /%/) print target
-        }
-      ' "$makefile" | sort -u
-    )"}
-  )
-
-  # Add task- completion if taskfile exists
-  if [[ -f taskfile.yaml ]] || [[ -f Taskfile.yaml ]]; then
-    local -a tasks
-    tasks=(${(f)"$(task --list-all 2>/dev/null | awk 'NR>1 {print "task-"$1}')"})
-    targets+=($tasks)
-  fi
-
-  _describe 'make target' targets
+  # No Makefile found
+  _message 'no Makefile found'
+  return 1
 }
 
 _make "$@"
