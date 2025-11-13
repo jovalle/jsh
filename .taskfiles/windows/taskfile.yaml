@@ -10,9 +10,15 @@ tasks:
       - echo "   task os:configure-vscode"
       - echo ""
       - echo "📝 Configuring SSH and Terminal..."
+      - task: configure-hostname
       - task: configure-ssh
       - task: configure-terminal
     desc: Configure Windows system settings and applications
+    silent: true
+
+  configure-hostname:
+    cmd: powershell.exe -NoProfile -ExecutionPolicy Bypass -Command 'Start-Process powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -Command `"$$current = [System.Net.Dns]::GetHostName(); if ($$current -ne ''{{.HOSTNAME}}'') { Write-Host ''🖥️  Setting hostname to {{.HOSTNAME}}...''; Rename-Computer -NewName ''{{.HOSTNAME}}'' -Force; Write-Host ''⚠️  Restart required for hostname change to take effect'' } else { Write-Host ''✅ Hostname already set to {{.HOSTNAME}}'' }`"" -Verb RunAs -Wait'
+    desc: Configure Windows hostname
     silent: true
 
   configure-ssh:
@@ -45,15 +51,17 @@ tasks:
 
   install-nerd-fonts:
     cmd: powershell.exe -NoProfile -ExecutionPolicy Bypass -Command 'Start-Process powershell -ArgumentList "refreshenv; choco install {{range .fonts}}nerd-fonts-{{.}} {{end}} -y" -Verb RunAs -Wait'
+    desc: Install Nerd fonts via Chocolatey
     status:
       - |
         {{range .fonts}}
         ls /mnt/c/Windows/Fonts | grep -qi "{{.}}"
         {{end}}
-    desc: Install Nerd fonts via Chocolatey
 
 vars:
+  HOSTNAME: COLOSSUS
   apps:
+    - Brave.Brave # Secure, fast & private web browser with ad blocker
     - Chocolatey.Chocolatey # Software management automation for Windows
     - Doist.Todoist # To-do list and task manager
     - DuckDuckGo.DesktopBrowser # Privacy-focused web browser
@@ -61,7 +69,6 @@ vars:
     - Microsoft.PowerToys # Set of utilities for power users
     - Microsoft.VisualStudioCode # Code editor redefined and optimized for building and debugging
     - Microsoft.WindowsTerminal # Modern terminal application for command-line tools
-    - Mozilla.Firefox # Fast, Private & Safe Web Browser
     - Rufus.Rufus # Create bootable USB drives the easy way
     - Syncthing.Syncthing # Open source continuous file synchronization
     - Zoom.Zoom # Video conferencing and web conferencing service
