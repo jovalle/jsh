@@ -462,6 +462,12 @@ dedup_path() {
 # Deduplicate PATH entries
 dedup_path
 
+# ---- Brew Update Checker ----
+
+# Load brew update checker script
+# shellcheck disable=SC1090  # Dynamic source
+[[ -f "${JSH}/scripts/unix/brew-update-checker.sh" ]] && source "${JSH}/scripts/unix/brew-update-checker.sh"
+
 # ============================================================================
 # 11. LOCAL CUSTOMIZATIONS
 # ============================================================================

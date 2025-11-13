@@ -32,23 +32,37 @@ tasks:
 
   install:
     cmds:
+      - task: brew-align
       - task: install-casks
       - task: install-formulae
       - task: os:install
       - task: start-services
     desc: Install OS specific packages and Homebrew packages
 
+  brew-align:
+    cmd: "{{.ROOT_DIR}}/scripts/unix/brew-align.sh --interactive"
+    desc: Manage Homebrew packages to align with desired state
+    platforms:
+      - darwin
+      - linux
+
   install-casks:
     cmd: brew install --force --cask {{range .casks}}{{.}} {{end}}
     desc: Install Homebrew casks
+    status:
+      - test -z "{{.casks}}"
 
   install-formulae:
     cmd: brew install --force {{range .formulae}}{{.}} {{end}}
     desc: Install Homebrew formulae
+    status:
+      - test -z "{{.formulae}}"
 
   configure-links:
     cmd: brew link --overwrite --force {{range .links}}{{.}} {{end}}
     desc: Override brew links for formulae
+    status:
+      - test -z "{{.links}}"
 
   mount:
     cmd: "{{.ROOT_DIR}}/scripts/unix/configure-mounts.sh {{.CLI_ARGS}}"
@@ -65,6 +79,8 @@ tasks:
   start-services:
     cmd: brew services start {{range .services}}{{.}} {{end}}
     desc: Start brew services
+    status:
+      - test -z "{{.services}}"
 
   stow:
     cmds:
@@ -90,11 +106,18 @@ tasks:
 
   update:
     cmds:
-      - cmd: zinit self-update
-      - cmd: zinit update --all
+      - cmd: zsh -ic 'zinit self-update'
+        ignore_error: true
+      - cmd: zsh -ic 'zinit update --all'
+        ignore_error: true
       - cmd: brew update
       - cmd: brew upgrade
       - task: os:upgrade
+      - cmd: |
+          mkdir -p ~/.cache/brew
+          brew outdated --quiet 2>/dev/null | wc -l | tr -d ' ' > ~/.cache/brew/outdated_count
+          date +%s > ~/.cache/brew/last_update_check
+        ignore_error: true
     desc: Upgrade brew packages and OS-specific packages
 
 version: 3
