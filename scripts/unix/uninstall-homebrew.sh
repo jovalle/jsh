@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck shell=bash
 # Completely uninstall Homebrew and all packages
 # This script provides multiple confirmation prompts before destructive actions
 # Works on both macOS and Linux

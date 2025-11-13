@@ -4,6 +4,7 @@
 # https://prettier.io/docs/en/ignore.html
 
 *.cache*
+*.chatmode.md
 *.db
 *.gpg
 *.last-run
@@ -50,7 +51,6 @@
 .config/flipperdevices.com
 .config/fontforge
 .config/karabiner
-.config/nvim
 .config/qBittorrent
 .config/raycast
 .config/syncthing

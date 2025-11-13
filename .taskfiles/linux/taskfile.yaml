@@ -5,30 +5,42 @@ tasks:
   configure:
     cmds:
       - task: configure-sudoers
-      - task: detect-wsl || task wsl:configure
+      - task: configure-wsl
     desc: Configure Linux system settings
 
   configure-sudoers:
     cmd: "{{.ROOT_DIR}}/scripts/linux/configure-sudoers.sh"
     desc: Configure sudoers file for passwordless sudo
 
-  detect-wsl:
-    internal: true
-    cmd: grep -qi microsoft /proc/version
-    silent: true
-    desc: Check if running on WSL
+  configure-wsl:
+    cmds:
+      - task: :wsl:configure
+    desc: Configure WSL if detected
+    status:
+      - "! grep -qi microsoft /proc/version"
 
   install:
     cmds:
       - task: install-packages
-      - task: detect-wsl || task wsl:install
+      - task: install-wsl
     desc: Install packages and services
 
   install-packages:
     cmds:
       - task: update
-      - cmd: sudo apt install -y {{range .packages.packages}}{{.}} {{end}}
-    desc: Update package cache and install packages
+      - cmd: sudo apt install -y {{range .packages}}{{.}} {{end}}
+    requires:
+      vars:
+        - packages
+    status:
+      - test -z "{{.packages}}"
+
+  install-wsl:
+    cmds:
+      - task: :wsl:install
+    desc: Install WSL-specific packages if detected
+    status:
+      - "! grep -qi microsoft /proc/version"
 
   update:
     cmd: sudo apt update

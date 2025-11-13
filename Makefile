@@ -16,7 +16,7 @@ YAMLLINT_CONFIG := .yamllint
 
 # Find files by type
 # Shell files: Find by .sh extension OR by shebang in .bin/ directory
-SHELL_FILES := $(shell find . -type f -name "*.sh" ! -path "*/node_modules/*" ! -path "*/.git/*" ! -path "*/.fzf/*" ! -path "*/.config/nvim/*" ! -path "*/.config/*"; \
+SHELL_FILES := $(shell find . -type f -name "*.sh" ! -path "*/node_modules/*" ! -path "*/.git/*" ! -path "*/.fzf/*" ! -path "*/.vscode/*" ! -path "*/.config/nvim/*" ! -path "*/.config/*"; \
 	find .bin -type f 2>/dev/null | while read -r f; do head -n1 "$$f" 2>/dev/null | grep -qE '^\#!/bin/(ba)?sh' && echo "$$f"; done)
 PYTHON_FILES := $(shell find . -type f -name "*.py" ! -path "*/\.*" ! -path "*/node_modules/*" ! -path "*/.venv/*")
 YAML_FILES := $(shell find . -type f \( -name "*.yaml" -o -name "*.yml" \) ! -path "*/\.*" ! -path "*/node_modules/*")
