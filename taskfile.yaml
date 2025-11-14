@@ -37,11 +37,20 @@ tasks:
       - task: install-formulae
       - task: os:install
       - task: start-services
+      - cmd: "{{.ROOT_DIR}}/scripts/unix/brew.sh check --force"
+        ignore_error: true
     desc: Install OS specific packages and Homebrew packages
 
   brew-align:
-    cmd: "{{.ROOT_DIR}}/scripts/unix/brew-align.sh --interactive"
+    cmd: "{{.ROOT_DIR}}/scripts/unix/brew.sh align --interactive"
     desc: Manage Homebrew packages to align with desired state
+    platforms:
+      - darwin
+      - linux
+
+  brew-sync:
+    cmd: "{{.ROOT_DIR}}/scripts/unix/brew.sh sync"
+    desc: Synchronize formulae between Darwin and Linux taskfiles
     platforms:
       - darwin
       - linux
@@ -99,7 +108,7 @@ tasks:
   uninstall:
     cmds:
       - stow -D .
-      - "{{.ROOT_DIR}}/scripts/unix/uninstall-homebrew.sh"
+      - "{{.ROOT_DIR}}/scripts/unix/brew.sh uninstall"
     desc: Retract dotfiles and completely uninstall Homebrew
     dir: "{{.ROOT_DIR}}"
     interactive: true
@@ -113,10 +122,7 @@ tasks:
       - cmd: brew update
       - cmd: brew upgrade
       - task: os:upgrade
-      - cmd: |
-          mkdir -p ~/.cache/brew
-          brew outdated --quiet 2>/dev/null | wc -l | tr -d ' ' > ~/.cache/brew/outdated_count
-          date +%s > ~/.cache/brew/last_update_check
+      - cmd: "{{.ROOT_DIR}}/scripts/unix/brew.sh check --force"
         ignore_error: true
     desc: Upgrade brew packages and OS-specific packages
 
