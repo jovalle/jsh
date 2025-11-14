@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Create symlinks for SSH config and key from WSL to Windows (requires elevation)
 
 KEY_SOURCE=$(wslpath -w ~/.jsh/.ssh/id_rsa)

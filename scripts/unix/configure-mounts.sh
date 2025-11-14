@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Configure and mount SMB shares
 
 # Generic config file (stowed from .jsh/.mounts.json to ~/.mounts.json, synced via Syncthing)
@@ -487,7 +487,7 @@ else
     if [[ ! -f "${MOUNT_SCRIPT}" ]]; then
       echo "Creating mount script: ${MOUNT_SCRIPT}"
       cat > "${MOUNT_SCRIPT}" <<'SCRIPT_EOF'
-#!/bin/bash
+#!/usr/bin/env bash
 # Generic auto-mount script for SMB shares
 
 CONFIG_FILE="${HOME}/.mounts"

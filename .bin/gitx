@@ -1,15 +1,15 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 [[ -n $DEBUG ]] && set -x
 
 set -eou pipefail
 IFS=$'\n\t'
 
-abort() { echo; echo "\033[31m$@\033[0m" 1>&2; exit 1 ; }
-error() { echo -e "\033[31m$@\033[0m" ; }
-warn() { echo -e "\033[33m$@\033[0m" ; }
-success() { echo -e "\033[32m$@\033[0m" ; }
-info() { echo -e "\033[34m$@\033[0m" ; }
+abort() { echo; echo "\033[31m$*\033[0m" 1>&2; exit 1 ; }
+error() { echo -e "\033[31m$*\033[0m" ; }
+warn() { echo -e "\033[33m$*\033[0m" ; }
+success() { echo -e "\033[32m$*\033[0m" ; }
+info() { echo -e "\033[34m$*\033[0m" ; }
 usage() {
   error "Usage: git update|<git_command>"
   exit 1
@@ -28,21 +28,21 @@ get_repos() {
       git_repos+=("$repo_name")
     done
   else
-    git_repos=( $(find . -maxdepth 2 -type d -name .git -prune -print | xargs -n1 dirname | grep -vE '^\.?$') )
+    mapfile -t git_repos < <(find . -maxdepth 2 -type d -name .git -prune -print0 | xargs -0 -n1 dirname | grep -vE '^\.?$')
     # Always include current directory if it is a git repo
     if [ -d .git ]; then
       git_repos=("$(pwd)" "${git_repos[@]}")
     fi
   fi
-  for git_repo in ${git_repos[@]}; do
+  for git_repo in "${git_repos[@]}"; do
     echo "$git_repo"
   done
 }
 
 case "$1" in
   update)
-    repos=($(get_repos))
-    for repo in ${repos[@]}; do
+    mapfile -t repos < <(get_repos)
+    for repo in "${repos[@]}"; do
       if [ -z "$repo" ]; then
         repo="$(pwd)"
         info "No repository path provided, using current directory: $repo"
@@ -100,14 +100,14 @@ case "$1" in
     done
     ;;
   *)
-    repos=($(get_repos))
-    for repo in ${repos[@]}; do
+    mapfile -t repos < <(get_repos)
+    for repo in "${repos[@]}"; do
       info "Processing repository: $repo"
       if [ ! -d "$repo/.git" ]; then
         warn "$repo is not a git repository, skipping."
         continue
       fi
-      warn "git $@"
+      warn "git $*"
       pushd "$repo" >/dev/null || exit 1
       git "$@"
       popd >/dev/null || exit 1

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Generic auto-mount script for SMB shares
 
 CONFIG_FILE="${HOME}/.mounts.json"

@@ -243,20 +243,22 @@ add_context() {
   [[ ! -f "$KUBECONFIG_DST" ]] && touch "$KUBECONFIG_DST"
 
   # Get details from source
-  local context_name=$(KUBECONFIG="$KUBECONFIG_SRC" $KUBECTL config view --minify -o jsonpath='{.contexts[0].name}')
-  local cluster_name=$(KUBECONFIG="$KUBECONFIG_SRC" $KUBECTL config view --minify -o jsonpath='{.contexts[0].context.cluster}')
-  local user_name=$(KUBECONFIG="$KUBECONFIG_SRC" $KUBECTL config view --minify -o jsonpath='{.contexts[0].context.user}')
+  local context_name
+  context_name=$(KUBECONFIG="$KUBECONFIG_SRC" $KUBECTL config view --minify -o jsonpath='{.contexts[0].name}')
+  local cluster_name
+  cluster_name=$(KUBECONFIG="$KUBECONFIG_SRC" $KUBECTL config view --minify -o jsonpath='{.contexts[0].context.cluster}')
+  local user_name
+  user_name=$(KUBECONFIG="$KUBECONFIG_SRC" $KUBECTL config view --minify -o jsonpath='{.contexts[0].context.user}')
 
   [[ -z "$context_name" ]] && { error "No context found in source kubeconfig"; return 1; }
 
   info "Merging context: $context_name"
 
   # Extract details from source
-  local server=$(KUBECONFIG="$KUBECONFIG_SRC" $KUBECTL config view --minify -o jsonpath='{.clusters[0].cluster.server}')
-  local server_host=$(echo "$server" | sed -E 's|https?://([^:/]+).*|\1|')
-
-  # Extract authinfo name from context (should be server/user format)
-  local authinfo=$(KUBECONFIG="$KUBECONFIG_SRC" $KUBECTL config view --minify -o jsonpath='{.contexts[0].context.user}')
+  local server
+  server=$(KUBECONFIG="$KUBECONFIG_SRC" $KUBECTL config view --minify -o jsonpath='{.clusters[0].cluster.server}')
+  local server_host
+  server_host=$(echo "$server" | sed -E 's|https?://([^:/]+).*|\1|')
 
   # Use server/user as the unique authinfo identifier
   local unique_authinfo="${server_host}/${user_name}"
@@ -269,9 +271,12 @@ add_context() {
   $KUBECTL config delete-user "$unique_authinfo" &>/dev/null || true
 
   # Create temp files for certificate data
-  local ca_tmp=$(mktemp)
-  local cert_tmp=$(mktemp)
-  local key_tmp=$(mktemp)
+  local ca_tmp
+  ca_tmp=$(mktemp)
+  local cert_tmp
+  cert_tmp=$(mktemp)
+  local key_tmp
+  key_tmp=$(mktemp)
 
   # Extract and write CA certificate
   KUBECONFIG="$KUBECONFIG_SRC" $KUBECTL config view --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' | base64 -d > "$ca_tmp"
@@ -280,8 +285,10 @@ add_context() {
   $KUBECTL config set-cluster "$cluster_name" --server="$server" --certificate-authority="$ca_tmp" --embed-certs=true
 
   # Extract and write user credentials
-  local user_cert=$(KUBECONFIG="$KUBECONFIG_SRC" $KUBECTL config view --raw -o jsonpath='{.users[0].user.client-certificate-data}')
-  local user_key=$(KUBECONFIG="$KUBECONFIG_SRC" $KUBECTL config view --raw -o jsonpath='{.users[0].user.client-key-data}')
+  local user_cert
+  user_cert=$(KUBECONFIG="$KUBECONFIG_SRC" $KUBECTL config view --raw -o jsonpath='{.users[0].user.client-certificate-data}')
+  local user_key
+  user_key=$(KUBECONFIG="$KUBECONFIG_SRC" $KUBECTL config view --raw -o jsonpath='{.users[0].user.client-key-data}')
 
   if [[ -n "$user_cert" && -n "$user_key" ]]; then
     echo "$user_cert" | base64 -d > "$cert_tmp"
@@ -289,7 +296,8 @@ add_context() {
     $KUBECTL config set-credentials "$unique_authinfo" --client-certificate="$cert_tmp" --client-key="$key_tmp" --embed-certs=true
   else
     # Try token-based auth
-    local token=$(KUBECONFIG="$KUBECONFIG_SRC" $KUBECTL config view --raw -o jsonpath='{.users[0].user.token}')
+    local token
+    token=$(KUBECONFIG="$KUBECONFIG_SRC" $KUBECTL config view --raw -o jsonpath='{.users[0].user.token}')
     if [[ -n "$token" ]]; then
       $KUBECTL config set-credentials "$unique_authinfo" --token="$token"
     else
@@ -316,16 +324,20 @@ delete_context_with_cleanup() {
   local KUBECONFIG_DST="$HOME/.kube/config"
 
   # Get cluster and user associated with this context
-  local cluster=$($KUBECTL config view -o jsonpath="{.contexts[?(@.name==\"$context\")].context.cluster}")
-  local user=$($KUBECTL config view -o jsonpath="{.contexts[?(@.name==\"$context\")].context.user}")
+  local cluster
+  cluster=$($KUBECTL config view -o jsonpath="{.contexts[?(@.name==\"$context\")].context.cluster}")
+  local user
+  user=$($KUBECTL config view -o jsonpath="{.contexts[?(@.name==\"$context\")].context.user}")
 
   # Delete the context
   $KUBECTL config delete-context "$context" &>/dev/null && \
     info "Context '$context' removed"
 
   # Check if cluster/user are still referenced by other contexts
-  local cluster_refs=$($KUBECTL config view -o jsonpath="{.contexts[*].context.cluster}" | grep -c "$cluster" || true)
-  local user_refs=$($KUBECTL config view -o jsonpath="{.contexts[*].context.user}" | grep -c "$user" || true)
+  local cluster_refs
+  cluster_refs=$($KUBECTL config view -o jsonpath="{.contexts[*].context.cluster}" | grep -c "$cluster" || true)
+  local user_refs
+  user_refs=$($KUBECTL config view -o jsonpath="{.contexts[*].context.user}" | grep -c "$user" || true)
 
   # Clean up orphaned clusters and users
   [[ $cluster_refs -eq 0 && -n "$cluster" ]] && \
