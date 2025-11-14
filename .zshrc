@@ -7,12 +7,10 @@
 #   3. Shell Options & Keybindings
 #   4. Path Setup
 #   5. Completion System
-#   6. Helper Functions
-#   7. Shell Aliases
-#   8. Shell Functions
-#   9. Theme Customization
-#   10. Path Deduplication
-#   11. Local Customizations
+#   6. Shell Aliases
+#   7. Shell Functions
+#   8. Automations
+#   9. Local Customizations
 #
 
 # ============================================================================
@@ -172,24 +170,7 @@ command -v task &>/dev/null && source <(task --completion zsh)
 command -v zoxide &>/dev/null && eval "$(zoxide init zsh)"
 
 # ============================================================================
-# 6. HELPER FUNCTIONS
-# ============================================================================
-
-# Color palette for output formatting
-if command -v tput &>/dev/null; then
-  error() { echo -e "$(tput setaf 1)$*$(tput sgr0)"; }      # Red
-  warn() { echo -e "$(tput setaf 3)$*$(tput sgr0)"; }       # Yellow/Orange
-  success() { echo -e "$(tput setaf 2)$*$(tput sgr0)"; }    # Green
-  info() { echo -e "$(tput setaf 4)$*$(tput sgr0)"; }       # Blue
-else
-  error() { echo -e "\033[31m$*\033[0m"; }                  # Red
-  warn() { echo -e "\033[33m$*\033[0m"; }                   # Yellow
-  success() { echo -e "\033[32m$*\033[0m"; }                # Green
-  info() { echo -e "\033[34m$*\033[0m"; }                   # Blue
-fi
-
-# ============================================================================
-# 7. SHELL ALIASES
+# 6. SHELL ALIASES
 # ============================================================================
 
 # ---- Directory Navigation ----
@@ -199,8 +180,8 @@ alias ..='cd ../' .2='cd ../../' .3='cd ../../../' .4='cd ../../../../' .5='cd .
 # ---- File Operations ----
 
 alias cp='cp -iv' mv='mv -iv' rm='rm -i' mkdir='mkdir -pv' t='touch' dud='du -d 1 -h' duf='du -sh *'
-alias ls='ls -a' l='ls -l' ll='ls -la' lll='ls -laFh'
-alias psg='ps aux | grep -i' psl='ps aux | less'
+alias ls='ls -a --color=auto' l='ls -l' ll='ls -la' lll='ls -laFh'
+alias psg='ps aux | grep -i --color=auto' psl='ps aux | less'
 
 # ---- Permissions ----
 
@@ -210,9 +191,6 @@ alias 000='chmod 000' 640='chmod 640' 644='chmod 644' 755='chmod 755' 775='chmod
 
 alias c='clear' ccd='clear && cd' e='exit' fix_stty='stty sane' epochtime='date +%s'
 alias ts='date +%F-%H%M' timestamp='date "+%Y%m%dT%H%M%S"'
-
-# ---- System Information ----
-
 alias path='echo -e ${PATH//:/\\n}' perm='stat --printf "%a %n \n "' whatis='declare -f' which='type -a'
 alias h='history' w='watch -n1 -d -t ' glances='glances -1 -t 0.5'
 
@@ -222,12 +200,12 @@ alias _='sudo' please='sudo'
 
 # ---- System Commands ----
 
-alias g='grep -i' edit='vim' v='vim'
+alias g='grep -i --color=auto' edit='vim' v='vim'
 
 # ---- Git ----
 
 alias g_='git commit -m' git+='git push --set-upstream origin $(git rev-parse --abbrev-ref HEAD)'
-alias git-='git reset HEAD~1' gl='git log --graph --oneline' gdiff='git diff --name-only master'
+alias git-='git reset HEAD~1' gl='git log --graph --oneline --color=always' gdiff='git diff --name-only master --color=auto'
 alias gvimdiff='git difftool --tool=vimdiff --no-prompt'
 
 # ---- Kubernetes ----
@@ -294,20 +272,66 @@ fi
 
 alias vz='vim ~/.zshrc' show_options='shopt' tmux='tmux -2'
 
+# ---- GNU Tool Replacements ----
+
+# Use GNU variants for better feature set and Linux compatibility
+command -v gawk &>/dev/null && alias awk='gawk'
+command -v gbase64 &>/dev/null && alias base64='gbase64'
+command -v gbasename &>/dev/null && alias basename='gbasename'
+command -v gcat &>/dev/null && alias cat='gcat'
+command -v gchmod &>/dev/null && alias chmod='gchmod'
+command -v gchown &>/dev/null && alias chown='gchown'
+command -v gcp &>/dev/null && alias cp='gcp -iv'
+command -v gcut &>/dev/null && alias cut='gcut'
+command -v gdate &>/dev/null && alias date='gdate'
+command -v gdd &>/dev/null && alias dd='gdd'
+command -v gdf &>/dev/null && alias df='gdf'
+command -v gdirname &>/dev/null && alias dirname='gdirname'
+command -v gdu &>/dev/null && alias du='gdu'
+command -v gecho &>/dev/null && alias echo='gecho'
+command -v genv &>/dev/null && alias env='genv'
+command -v gfind &>/dev/null && alias find='gfind'
+command -v ggrep &>/dev/null && alias grep='ggrep --color=auto -i'
+command -v ghead &>/dev/null && alias head='ghead'
+command -v gln &>/dev/null && alias ln='gln'
+command -v gls &>/dev/null && alias gls='gls --color=auto' ls='gls --color=auto -a' l='gls --color=auto -l' ll='gls --color=auto -la' lll='gls --color=auto -laFh'
+command -v gmkdir &>/dev/null && alias mkdir='gmkdir -pv'
+command -v gmv &>/dev/null && alias mv='gmv -iv'
+command -v grm &>/dev/null && alias rm='grm -i'
+command -v gsed &>/dev/null && alias sed='gsed'
+command -v gsort &>/dev/null && alias sort='gsort'
+command -v gtail &>/dev/null && alias tail='gtail'
+command -v gtar &>/dev/null && alias tar='gtar'
+command -v gtouch &>/dev/null && alias touch='gtouch'
+command -v gtr &>/dev/null && alias tr='gtr'
+command -v guniq &>/dev/null && alias uniq='guniq'
+command -v gwc &>/dev/null && alias wc='gwc'
+command -v gwhich &>/dev/null && alias which='gwhich'
+command -v gxargs &>/dev/null && alias xargs='gxargs'
+
 # ---- Tool Replacements ----
 
-command -v bat &>/dev/null && alias cat='bat'
-command -v eza &>/dev/null && alias ls='eza -a -l --git --icons' l='ls' ll='eza --git --icons --level=2 --long --tree --long' lll='eza --git --icons --long --tree'
-command -v gawk &>/dev/null && alias awk='gawk'
-command -v ggrep &>/dev/null && alias grep='ggrep --color=auto -i'
-command -v gsed &>/dev/null && alias sed='gsed'
+command -v eza &>/dev/null && alias l='eza -a -l --git --icons --color=always' ll='eza --git --icons --level=2 --long --tree --long --color=always' lll='eza --git --icons --long --tree --color=always'
 command -v hx &>/dev/null && alias vim='hx'
 command -v nvim &>/dev/null && alias vim='nvim'
 command -v vim &>/dev/null && alias vi='vim'
 
 # ============================================================================
-# 8. SHELL FUNCTIONS
+# 7. SHELL FUNCTIONS
 # ============================================================================
+
+# ---- Color helper functions ---
+if command -v tput &>/dev/null; then
+  error() { echo -e "$(tput setaf 1)$*$(tput sgr0)"; }      # Red
+  warn() { echo -e "$(tput setaf 3)$*$(tput sgr0)"; }       # Yellow/Orange
+  success() { echo -e "$(tput setaf 2)$*$(tput sgr0)"; }    # Green
+  info() { echo -e "$(tput setaf 4)$*$(tput sgr0)"; }       # Blue
+else
+  error() { echo -e "\033[31m$*\033[0m"; }                  # Red
+  warn() { echo -e "\033[33m$*\033[0m"; }                   # Yellow
+  success() { echo -e "\033[32m$*\033[0m"; }                # Green
+  info() { echo -e "\033[34m$*\033[0m"; }                   # Blue
+fi
 
 # ---- System & Process Management ----
 
@@ -427,16 +451,10 @@ rcode() {
 }
 
 # ============================================================================
-# 9. THEME CUSTOMIZATION
+# 8. AUTOMATIONS
 # ============================================================================
 
-# To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
-# shellcheck disable=SC1090  # Dynamic source, standard p10k config
-[[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
-
-# ============================================================================
-# 10. PATH DEDUPLICATION
-# ============================================================================
+# ---- Path Deduplication ----
 
 # Function to remove duplicate PATH entries while preserving order
 dedup_path() {
@@ -464,13 +482,16 @@ dedup_path
 
 # ---- Brew Update Checker ----
 
-# Load brew update checker script
-# shellcheck disable=SC1090  # Dynamic source
-[[ -f "${JSH}/scripts/unix/brew-update-checker.sh" ]] && source "${JSH}/scripts/unix/brew-update-checker.sh"
+# Check for outdated Homebrew packages
+command -v brew &>/dev/null && "${JSH}/scripts/unix/brew.sh" check
 
 # ============================================================================
-# 11. LOCAL CUSTOMIZATIONS
+# 9. LOCAL CUSTOMIZATIONS
 # ============================================================================
+
+# To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
+# shellcheck disable=SC1090  # Dynamic source, standard p10k config
+[[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
 
 # shellcheck disable=SC1090  # Dynamic source for local customizations
 [[ -f "${JSH_CUSTOM}" ]] && source "${JSH_CUSTOM}"
