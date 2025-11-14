@@ -260,8 +260,15 @@ add_context() {
   local server_host
   server_host=$(echo "$server" | sed -E 's|https?://([^:/]+).*|\1|')
 
-  # Use server/user as the unique authinfo identifier
-  local unique_authinfo="${server_host}/${user_name}"
+  # Use the authinfo as-is if it already contains server/user format, otherwise create it
+  local unique_authinfo
+  if [[ "$authinfo" == *"/"* ]]; then
+    # Already in server/user format, use as-is
+    unique_authinfo="$authinfo"
+  else
+    # Create server/user format
+    unique_authinfo="${server_host}/${user_name}"
+  fi
 
   info "Using authinfo: $unique_authinfo"
 
