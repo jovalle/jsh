@@ -59,6 +59,7 @@ vars:
     - kind # Run local Kubernetes cluster in Docker
     - kubectl # Kubernetes command-line interface
     - neofetch # Fast, highly customisable system info script
+    - neovim # Hyperextensible Vim-based text editor
     - syncthing # Open source continuous file synchronization application
     - terraform # Tool to build, change, and version infrastructure
   packages:

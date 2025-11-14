@@ -91,7 +91,7 @@ vars:
     - kubescape # Kubernetes testing according to Hardening Guidance by NSA and CISA
     - kubetail # Logging tool for Kubernetes with a real-time web dashboard
     - neofetch # Fast, highly customisable system info script
-    - mpv # Media player based on MPlayer and mplayer2
+    - neovim # Hyperextensible Vim-based text editor
     - netcat # Utility for managing network connections
     - nmap # Port scanning utility for large networks
     - poetry # Python package management tool
