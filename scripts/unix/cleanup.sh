@@ -17,7 +17,7 @@ echo "1️⃣  Checking for sync-conflict files in .jsh directory..."
 PATTERNS=("*.sync-conflict-*" "*conflicted copy*" "*.conflict" "*-conflict-*")
 CONFLICT_FILES=""
 for pattern in "${PATTERNS[@]}"; do
-  FOUND=$(find "$ROOT_DIR" -type f -iname "$pattern" 2>/dev/null || true)
+  FOUND=$(find "$ROOT_DIR" -type f -iname "$pattern" 2> /dev/null || true)
   if [ -n "$FOUND" ]; then
     CONFLICT_FILES="${CONFLICT_FILES}${FOUND}"$'\n'
   fi
@@ -31,7 +31,7 @@ else
   COUNT=$(echo "$CONFLICT_FILES" | wc -l | tr -d ' ')
   echo "🔗 Found $COUNT sync-conflict file(s):"
   echo "$CONFLICT_FILES" | while IFS= read -r file; do
-    SIZE=$(du -h "$file" 2>/dev/null | cut -f1 || echo "?")
+    SIZE=$(du -h "$file" 2> /dev/null | cut -f1 || echo "?")
     echo "  📄 $file ($SIZE)"
   done
   echo ""
@@ -52,7 +52,7 @@ fi
 
 # 2. Broken symlinks in home directory
 echo "2️⃣  Checking for broken symlinks in home directory..."
-BROKEN_LINKS=$(find ~ -maxdepth 1 -type l ! -exec test -e {} \; -print 2>/dev/null || true)
+BROKEN_LINKS=$(find ~ -maxdepth 1 -type l ! -exec test -e {} \; -print 2> /dev/null || true)
 if [ -z "$BROKEN_LINKS" ]; then
   echo "✅ No broken symlinks found"
   echo ""
@@ -101,9 +101,9 @@ CACHE_DIRS=(
 TOTAL_SIZE=0
 for cache_dir in "${CACHE_DIRS[@]}"; do
   if [ -d "$cache_dir" ]; then
-    SIZE=$(du -sh "$cache_dir" 2>/dev/null | cut -f1 || echo "0")
+    SIZE=$(du -sh "$cache_dir" 2> /dev/null | cut -f1 || echo "0")
     echo "  📦 $cache_dir ($SIZE)"
-    CACHE_SIZE=$(du -sk "$cache_dir" 2>/dev/null | cut -f1 || echo "0")
+    CACHE_SIZE=$(du -sk "$cache_dir" 2> /dev/null | cut -f1 || echo "0")
     TOTAL_SIZE=$((TOTAL_SIZE + CACHE_SIZE))
   fi
 done
@@ -119,7 +119,7 @@ if [ $TOTAL_SIZE -gt 0 ]; then
     for cache_dir in "${CACHE_DIRS[@]}"; do
       if [ -d "$cache_dir" ] && [ -n "$cache_dir" ]; then
         echo "  🗑️  Clearing $cache_dir..."
-        rm -rf "${cache_dir:?}"/* 2>/dev/null || true
+        rm -rf "${cache_dir:?}"/* 2> /dev/null || true
       fi
     done
     echo "✅ System caches cleared"

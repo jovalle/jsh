@@ -59,7 +59,7 @@ if [[ ! -d "${MOUNT_POINT}" ]]; then
 fi
 
 # Mount the share
-if mount_smbfs "${MOUNT_URL}" "${MOUNT_POINT}" 2>/dev/null; then
+if mount_smbfs "${MOUNT_URL}" "${MOUNT_POINT}" 2> /dev/null; then
   echo "Successfully mounted ${SMB_SHARE} to ${MOUNT_POINT}"
   exit 0
 else
