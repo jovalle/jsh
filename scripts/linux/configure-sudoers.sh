@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Configure sudoers to allow passwordless sudo
 
 USERNAME=$(whoami)

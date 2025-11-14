@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Create symlink for Windows Terminal settings (requires elevation)
 
 SETTINGS_SRC="${HOME}/.config/windows-terminal/settings.json"

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # Create symlink for VSCode settings.json (requires elevation)
 
 SETTINGS_SRC="${HOME}/.jsh/configs/vscode/settings.json"

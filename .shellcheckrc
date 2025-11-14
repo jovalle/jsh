@@ -7,4 +7,4 @@ enable=all
 # source-path=SCRIPTDIR
 
 # Shell dialect
-shell=zsh
+shell=bash
