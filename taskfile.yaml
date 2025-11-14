@@ -17,6 +17,11 @@ tasks:
     status:
       - test "$(basename -- "$SHELL")" == "zsh"
 
+  clean:
+    cmd: bash {{.ROOT_DIR}}/scripts/unix/cleanup.sh {{.ROOT_DIR}}
+    desc: Clean up system (sync-conflicts, broken symlinks, brew cache, system cache)
+    interactive: true
+
   configure:
     cmds:
       - task: stow
@@ -32,7 +37,6 @@ tasks:
 
   install:
     cmds:
-      - task: brew-align
       - task: install-casks
       - task: install-formulae
       - task: os:install
@@ -40,20 +44,6 @@ tasks:
       - cmd: "{{.ROOT_DIR}}/scripts/unix/brew.sh check --force"
         ignore_error: true
     desc: Install OS specific packages and Homebrew packages
-
-  brew-align:
-    cmd: "{{.ROOT_DIR}}/scripts/unix/brew.sh align --interactive"
-    desc: Manage Homebrew packages to align with desired state
-    platforms:
-      - darwin
-      - linux
-
-  brew-sync:
-    cmd: "{{.ROOT_DIR}}/scripts/unix/brew.sh sync"
-    desc: Synchronize formulae between Darwin and Linux taskfiles
-    platforms:
-      - darwin
-      - linux
 
   install-casks:
     cmd: brew install --force --cask {{range .casks}}{{.}} {{end}}
@@ -99,7 +89,7 @@ tasks:
           echo "🗑️  Removing broken symlink: $link"
           rm "$link"
         done
-      - stow -vvv . --adopt
+      - stow -v . --adopt
       - echo "✅ Dotfiles deployed successfully"
     desc: Deploy dotfiles to home directory using GNU stow
     dir: "{{.ROOT_DIR}}"

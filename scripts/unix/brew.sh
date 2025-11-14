@@ -2,22 +2,23 @@
 # shellcheck disable=SC2207
 # SC2207: Prefer mapfile or read -a to split command output (we use portable syntax)
 
-set -e
 set -u
 set -o pipefail
 
 # ============================================================================
-# brew.sh
+# brew.sh - Homebrew/Linuxbrew Management Tool
 # ============================================================================
-# Comprehensive Homebrew management tool with multiple subcommands:
+# Comprehensive package management tool with declarative configuration.
 #
 # Commands:
-#   align       - Compare installed packages against taskfile declarations
-#   sync        - Synchronize formulae between Darwin and Linux taskfiles
-#   check       - Check for outdated packages (used by shell integration)
-#   uninstall   - Completely uninstall Homebrew and all packages
+#   sync               - Synchronize formulae between Darwin and Linux taskfiles
+#   add                - Add cask/formula/service/link to configuration
+#   remove             - Remove cask/formula/service/link from configuration
+#   install            - Install Homebrew/Linuxbrew
+#   uninstall          - Uninstall Homebrew/Linuxbrew (--force-wipe for complete removal)
+#   check              - Check for outdated packages
 #
-# Only checks explicitly requested packages (dependencies are ignored).
+# Configuration is stored in .taskfiles/{darwin,linux}/taskfile.yaml
 # ============================================================================
 
 # Colors for output
@@ -110,36 +111,58 @@ detect_brew_path() {
 }
 
 # Parse args
-INTERACTIVE=0
 DRY_RUN=0
+FORCE_UPDATE=0
+FORCE_WIPE=0
+SKIP_CONFIRM=0
+IS_CASK=0
+IS_SERVICE=0
+AS_LINK=0
+FORCE_REINSTALL=0
 COMMAND=""
 
 # Show usage
 show_usage() {
     cat <<EOF
-Usage: $0 <command> [options]
+Usage: $0 <command> [options] [args]
 
 Commands:
-  align       Compare installed packages against taskfile declarations
-  sync        Synchronize formulae between Darwin and Linux taskfiles
-  check       Check for outdated packages (background-friendly)
-  uninstall   Completely uninstall Homebrew and all packages
-
-Align Options:
-  -i, --interactive   Prompt for each extra package to keep/declare/remove
+  sync               Synchronize formulae between Darwin and Linux taskfiles
+  add <name>         Add package to configuration
+  remove <name>      Remove package from configuration
+  install            Install Homebrew/Linuxbrew
+  uninstall          Uninstall Homebrew/Linuxbrew
+  check              Check for outdated packages
 
 Sync Options:
-  -d, --dry-run       Show what would be changed without modifying files
+  -d, --dry-run      Show what would be changed without modifying files
+  -f, --force        Force update all package descriptions
+
+Add/Remove Options:
+  -y, --yes          Skip confirmation prompts
+  -f, --force        Force reinstall, re-add to lists, and update description
+  --cask             Treat package as a cask (GUI application)
+  --service          Install as a service (auto-start)
+  --link             Create link for formula
+
+Uninstall Options:
+  --force-wipe       Remove all packages, services, and links before uninstalling
 
 Check Options:
-  --force             Force immediate cache update (skip 24-hour interval)
+  --force            Run comprehensive interactive check (validate packages, descriptions, and prompt for undeclared packages)
 
 Examples:
-  $0 align --interactive
-  $0 sync --dry-run
-  $0 check
-  $0 check --force
-  $0 uninstall
+  $0 sync
+  $0 sync --force
+  $0 add jq
+  $0 add firefox --cask
+  $0 add syncthing --service
+  $0 add jq --force              # Reinstall and update description
+  $0 remove tldr -y
+  $0 remove firefox --cask
+  $0 uninstall --force-wipe
+  $0 check                       # Quick check for outdated packages
+  $0 check --force               # Comprehensive check with interactive prompts
 EOF
     exit 0
 }
@@ -157,30 +180,55 @@ REMAINING_ARGS=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -i|--interactive)
-      INTERACTIVE=1
+    -y|--yes)
+      SKIP_CONFIRM=1
       shift
       ;;
     -d|--dry-run)
       DRY_RUN=1
       shift
       ;;
+    -f|--force)
+      # Check if this is for the 'add' command
+      if [[ "$COMMAND" == "add" ]]; then
+        FORCE_REINSTALL=1
+      else
+        FORCE_UPDATE=1
+        REMAINING_ARGS+=("$1")
+      fi
+      shift
+      ;;
+    --force-wipe)
+      FORCE_WIPE=1
+      shift
+      ;;
+    --cask)
+      IS_CASK=1
+      shift
+      ;;
+    --service)
+      IS_SERVICE=1
+      shift
+      ;;
+    --link)
+      AS_LINK=1
+      shift
+      ;;
     -h|--help)
       show_usage
       ;;
-    --force)
-      # Preserve --force flag for check command
-      REMAINING_ARGS+=("$1")
-      shift
-      ;;
     *)
+      REMAINING_ARGS+=("$1")
       shift
       ;;
   esac
 done
 
+# ============================================================================
+# Package Extraction Functions
+# ============================================================================
 
-# Extract package names from taskfile YAML (handles both single-line and multi-line format)
+# Extract package names from taskfile YAML
 extract_packages() {
   local file="$1"
   local key="$2"
@@ -190,30 +238,22 @@ extract_packages() {
     return
   fi
 
-  # Use awk to extract packages from vars section
-  # Looking for pattern: vars: -> casks/formulae: -> list items
-  # Deduplicate results with sort -u
   awk -v key="$key" '
     /^vars:/ {
       in_vars = 1
       next
     }
-    # Exit vars section when we hit another top-level key
     in_vars && /^[a-zA-Z_-]+:/ && !/^  / {
       in_vars = 0
     }
-    # Found our key within vars section
     in_vars && $0 ~ "^  " key ":" {
       in_section = 1
       next
     }
-    # Exit section when we hit another vars subsection or end of vars
     in_section && /^  [a-zA-Z_-]+:/ {
       in_section = 0
     }
-    # Extract package names (with 4-space indentation under vars subsections)
     in_section && /^    - / {
-      # Extract package name (strip "- " prefix and everything after "#")
       sub(/^    - /, "")
       sub(/ #.*$/, "")
       gsub(/ /, "")
@@ -222,70 +262,253 @@ extract_packages() {
   ' "$file" | sort -u
 }
 
+# Extract packages with their descriptions
+extract_packages_with_descriptions() {
+  local file="$1"
+  local key="$2"
+
+  if [[ ! -f "$file" ]]; then
+    return
+  fi
+
+  awk -v key="$key" '
+    /^vars:/ {
+      in_vars = 1
+      next
+    }
+    in_vars && /^[a-zA-Z_-]+:/ && !/^  / {
+      in_vars = 0
+    }
+    in_vars && $0 ~ "^  " key ":" {
+      in_section = 1
+      next
+    }
+    in_section && /^  [a-zA-Z_-]+:/ {
+      in_section = 0
+    }
+    in_section && /^    - / {
+      line = $0
+      sub(/^    - /, "", line)
+
+      if (match(line, / # /)) {
+        pkg = substr(line, 1, RSTART - 1)
+        desc = substr(line, RSTART + 3)
+        gsub(/ /, "", pkg)
+        print pkg "|||" desc
+      } else {
+        gsub(/ /, "", line)
+        print line "|||"
+      }
+    }
+  ' "$file"
+}
+
+# Check if a package is available in Homebrew repos
+check_package_availability() {
+  local pkg="$1"
+  local pkg_type="$2"  # "formula" or "cask"
+
+  if [[ "$pkg_type" == "cask" ]]; then
+    brew info --cask "$pkg" &>/dev/null
+    return $?
+  else
+    brew info --formula "$pkg" &>/dev/null
+    return $?
+  fi
+}
+
+# Check if a package exists in Homebrew API (works for both Darwin and Linux repos)
+check_package_in_api() {
+  local pkg="$1"
+  local pkg_type="$2"  # "formula" or "cask"
+
+  local api_url=""
+  if [[ "$pkg_type" == "cask" ]]; then
+    api_url="https://formulae.brew.sh/api/cask/${pkg}.json"
+  else
+    api_url="https://formulae.brew.sh/api/formula/${pkg}.json"
+  fi
+
+  # Use curl to check if the package exists in the API
+  if curl -sf "$api_url" &>/dev/null; then
+    return 0
+  else
+    return 1
+  fi
+}
+
 # Get brew description for a package
 get_brew_description() {
   local pkg="$1"
   local pkg_type="$2"  # "formula" or "cask"
 
   local desc=""
+
+  # Try API first (works cross-platform), fall back to local brew info
+  local api_url=""
   if [[ "$pkg_type" == "cask" ]]; then
-    # For casks, try to get the name/description from the first line after the version
-    # Format: ==> name: version
-    # Second line is usually the URL, not helpful
-    # Try to extract from JSON output instead
-    desc=$(brew info --cask --json=v2 "$pkg" 2>/dev/null | jq -r '.casks[0].desc // empty' 2>/dev/null || echo "")
-    if [[ -z "$desc" ]]; then
-      # Fallback to name if no description
-      desc=$(brew info --cask --json=v2 "$pkg" 2>/dev/null | jq -r '.casks[0].name[0] // empty' 2>/dev/null || echo "")
-    fi
+    api_url="https://formulae.brew.sh/api/cask/${pkg}.json"
   else
-    # For formulae, the description is on the second line
-    desc=$(brew info "$pkg" 2>/dev/null | sed -n '2p' || echo "")
+    api_url="https://formulae.brew.sh/api/formula/${pkg}.json"
   fi
 
-  # Clean up description - remove trailing newlines and extra spaces
+  # Fetch from API
+  local api_response
+  api_response=$(curl -sf "$api_url" 2>/dev/null || echo "")
+
+  if [[ -n "$api_response" ]]; then
+    if [[ "$pkg_type" == "cask" ]]; then
+      desc=$(echo "$api_response" | jq -r '.desc // empty' 2>/dev/null || echo "")
+      if [[ -z "$desc" ]]; then
+        desc=$(echo "$api_response" | jq -r '.name[0] // empty' 2>/dev/null || echo "")
+      fi
+    else
+      desc=$(echo "$api_response" | jq -r '.desc // empty' 2>/dev/null || echo "")
+    fi
+  fi
+
+  # Fall back to local brew info if API didn't work
+  if [[ -z "$desc" ]]; then
+    if [[ "$pkg_type" == "cask" ]]; then
+      desc=$(brew info --cask --json=v2 "$pkg" 2>/dev/null | jq -r '.casks[0].desc // empty' 2>/dev/null || echo "")
+      if [[ -z "$desc" ]]; then
+        desc=$(brew info --cask --json=v2 "$pkg" 2>/dev/null | jq -r '.casks[0].name[0] // empty' 2>/dev/null || echo "")
+      fi
+    else
+      desc=$(brew info --json=v2 "$pkg" 2>/dev/null | jq -r '.formulae[0].desc // empty' 2>/dev/null || echo "")
+
+      if [[ -z "$desc" ]]; then
+        desc=$(brew info "$pkg" 2>/dev/null | sed -n '2p' || echo "")
+      fi
+    fi
+  fi
+
+  # Clean up description
   desc=$(echo "$desc" | tr '\n' ' ' | sed 's/  */ /g' | sed 's/^ *//;s/ *$//')
+  desc=$(echo "$desc" | sed 's/^stable [0-9][^ ]* (bottled).*$//' | sed 's/^stable [0-9][^ ]*.*HEAD$//')
+  desc=$(echo "$desc" | sed 's/^ *//;s/ *$//')
 
   echo "$desc"
 }
 
-# Add a package to the OS taskfile under the given key (formulae or casks)
-add_package_to_taskfile() {
-  local file="$1"
-  local key="$2"
-  local pkg="$3"
+# ============================================================================
+# Add/Remove Package Functions
+# ============================================================================
 
-  # If file doesn't exist, bail
-  if [[ ! -f "$file" ]]; then
-    echo -e "${YELLOW}Warning: taskfile $file not found; cannot declare $pkg${RESET}"
-    return 1
+# Add a package to a specific taskfile
+add_package_to_file() {
+  local pkg_name="$1"
+  local taskfile="$2"
+  local pkg_type="$3"
+  local key="$4"
+  local install="${5:-1}"  # Whether to install (default: yes)
+  local force="${6:-0}"    # Force reinstall (default: no)
+
+  local already_exists=0
+  if extract_packages "$taskfile" "$key" | grep -qx "$pkg_name"; then
+    already_exists=1
   fi
 
-  # Check if already declared
-  if grep -qE "^[[:space:]]*- ${pkg}([[:space:]]|$)" "$file"; then
-    echo -e "${CYAN}$pkg already declared in $file${RESET}"
-    return 0
+  # Handle force flag
+  if [[ $force -eq 1 ]]; then
+    info "Force mode: Reinstalling $pkg_type: $pkg_name"
+
+    # Only install if on current OS and install flag is set
+    if [[ $install -eq 1 ]]; then
+      case "$pkg_type" in
+        cask)
+          brew reinstall --cask "$pkg_name" 2>/dev/null || true
+          ;;
+        formula)
+          brew reinstall "$pkg_name" 2>/dev/null || true
+          ;;
+        service)
+          brew reinstall "$pkg_name" 2>/dev/null || true
+          brew services restart "$pkg_name" 2>/dev/null || true
+          ;;
+        link)
+          brew reinstall "$pkg_name" 2>/dev/null || true
+          brew unlink "$pkg_name" 2>/dev/null || true
+          brew link "$pkg_name" 2>/dev/null || true
+          ;;
+      esac
+    fi
+
+    # Remove existing entry to ensure fresh addition
+    if [[ $already_exists -eq 1 ]]; then
+      local tmp
+      tmp=$(mktemp)
+
+      awk -v key="$key" -v pkg="$pkg_name" '
+        BEGIN {
+          in_section = 0
+        }
+        /^vars:/ {
+          in_vars = 1
+        }
+        in_vars && $0 ~ "^  " key ":" {
+          in_section = 1
+          print
+          next
+        }
+        in_section && /^  [a-zA-Z_-]+:/ {
+          in_section = 0
+        }
+        in_section && /^    - / {
+          line = $0
+          sub(/^    - /, "", line)
+          sub(/ #.*$/, "", line)
+          gsub(/ /, "", line)
+          if (line != pkg) {
+            print $0
+          }
+          next
+        }
+        { print }
+      ' "$taskfile" > "$tmp" && mv "$tmp" "$taskfile"
+    fi
+  else
+    # Check if already exists
+    if [[ $already_exists -eq 1 ]]; then
+      return 0  # Already exists, skip
+    fi
+
+    # Install the package only if on current OS and install flag is set
+    if [[ $install -eq 1 ]]; then
+      case "$pkg_type" in
+        cask)
+          brew install --cask "$pkg_name" 2>/dev/null || return 1
+          ;;
+        formula)
+          brew install "$pkg_name" 2>/dev/null || return 1
+          ;;
+        service)
+          brew install "$pkg_name" 2>/dev/null || return 1
+          brew services start "$pkg_name" 2>/dev/null || true
+          ;;
+        link)
+          brew install "$pkg_name" 2>/dev/null || return 1
+          brew link "$pkg_name" 2>/dev/null || true
+          ;;
+      esac
+    fi
   fi
 
-  # Get package description
-  local pkg_type="formula"
-  if [[ "$key" == "casks" ]]; then
-    pkg_type="cask"
+  # Get description for casks and formulae
+  local desc=""
+  if [[ "$pkg_type" == "cask" || "$pkg_type" == "formula" ]]; then
+    desc=$(get_brew_description "$pkg_name" "$pkg_type")
   fi
 
-  echo -e "${CYAN}Fetching description for $pkg...${RESET}"
-  local description
-  description=$(get_brew_description "$pkg" "$pkg_type")
-
-  # Simple approach: read file into array, extract packages, add new one, sort, rebuild
+  # Add to taskfile
   local tmp
   tmp=$(mktemp)
 
-  awk -v key="$key" -v pkg="$pkg" -v desc="$description" '
+  awk -v key="$key" -v pkg="$pkg_name" -v desc="$desc" '
     BEGIN {
       in_vars = 0
       found_key = 0
-      pkg_count = 0
+      added = 0
     }
     {
       lines[NR] = $0
@@ -298,15 +521,9 @@ add_package_to_taskfile() {
       found_key = 1
       key_line = NR
     }
-    # Collect existing packages
-    found_key && /^    - / {
-      pkg_count++
-      packages[pkg_count] = $0
-    }
     END {
       if (found_key) {
-        # Find the section boundaries
-        section_start = key_line
+        # Find section end
         section_end = key_line
         for (i = key_line + 1; i <= NR; i++) {
           if (lines[i] ~ /^    - /) {
@@ -316,7 +533,16 @@ add_package_to_taskfile() {
           }
         }
 
-        # Add new package to array
+        # Collect existing packages
+        pkg_count = 0
+        for (i = key_line + 1; i <= section_end; i++) {
+          if (lines[i] ~ /^    - /) {
+            pkg_count++
+            packages[pkg_count] = lines[i]
+          }
+        }
+
+        # Add new package
         if (desc != "") {
           packages[pkg_count + 1] = "    - " pkg " # " desc
         } else {
@@ -324,10 +550,9 @@ add_package_to_taskfile() {
         }
         pkg_count++
 
-        # Sort packages (simple bubble sort in awk)
+        # Sort packages
         for (i = 1; i <= pkg_count; i++) {
           for (j = i + 1; j <= pkg_count; j++) {
-            # Extract package name for comparison (without comment)
             pkg_i = packages[i]
             pkg_j = packages[j]
             sub(/^[[:space:]]*- /, "", pkg_i)
@@ -343,8 +568,8 @@ add_package_to_taskfile() {
           }
         }
 
-        # Print everything up to the key line
-        for (i = 1; i <= section_start; i++) {
+        # Print everything up to key line
+        for (i = 1; i <= key_line; i++) {
           print lines[i]
         }
 
@@ -353,16 +578,16 @@ add_package_to_taskfile() {
           print packages[i]
         }
 
-        # Print remaining lines after the section
+        # Print remaining lines
         for (i = section_end + 1; i <= NR; i++) {
           print lines[i]
         }
       } else {
-        # Key not found, just print original file
+        # Key not found, print original and append
         for (i = 1; i <= NR; i++) {
           print lines[i]
         }
-        # Append new section if vars exists
+
         if (desc != "") {
           pkg_line = "    - " pkg " # " desc
         } else {
@@ -376,817 +601,612 @@ add_package_to_taskfile() {
         }
       }
     }
-  ' "$file" > "$tmp" && mv "$tmp" "$file"
+  ' "$taskfile" > "$tmp" && mv "$tmp" "$taskfile"
 
-  echo -e "${GREEN}✓ Declared $pkg in $file under $key${RESET}"
   return 0
 }
 
-# Interactive TUI for package management with arrow key navigation
-interactive_tui() {
-  local formulae_var=$1
-  local casks_var=$2
+# Add a package to the taskfile(s)
+add_package() {
+  local pkg_name="$1"
 
-  # Combine packages with their types
-  local -a all_packages=()
-  declare -A pkg_types=()
-  declare -A pkg_actions=()
-
-  # Use nameref to access arrays by variable name
-  local -n formulae_ref="$formulae_var"
-  local -n casks_ref="$casks_var"
-
-  for pkg in "${formulae_ref[@]}"; do
-    all_packages+=("$pkg")
-    pkg_types[$pkg]="formula"
-    pkg_actions[$pkg]="skip"
-  done
-
-  for pkg in "${casks_ref[@]}"; do
-    all_packages+=("$pkg")
-    pkg_types[$pkg]="cask"
-    pkg_actions[$pkg]="skip"
-  done
-
-  # Sort packages alphabetically (case-insensitive)
-  IFS=$'\n' all_packages=($(sort -f <<<"${all_packages[*]}"))
-  unset IFS
-
-  if [[ ${#all_packages[@]} -eq 0 ]]; then
-    return 0
+  if [[ -z "$pkg_name" ]]; then
+    error "Package name is required"
+    info "Usage: $0 add <name> [--cask|--service|--link] [--force]"
+    exit 1
   fi
 
-  # Filter state for fuzzy search
-  local search_filter=""
-  local -a filtered_packages=("${all_packages[@]}")
-  local current_index=0
-  local scroll_offset=0
+  # Determine package type from flags
+  local pkg_type="formula"
+  local key="formulae"
 
-  # Action cycle: skip -> declare -> decom
-  local -a action_cycle=("skip" "declare" "decom")
-
-  # Track cancellation
-  local cancelled=0
-
-  # Function to cleanup terminal state
-  cleanup_terminal() {
-    tput rmcup 2>/dev/null || true  # Restore screen
-    stty echo 2>/dev/null || true   # Show input
-    tput cnorm 2>/dev/null || true  # Show cursor
-    tput sgr0 2>/dev/null || true   # Reset colors
-    printf '\e[r' 2>/dev/null || true  # Reset scrolling region
-    printf '\e[?1049l' 2>/dev/null || true  # Exit alternate screen buffer (backup method)
-  }
-
-  # Function to handle interrupt (CTRL-C)
-  handle_interrupt() {
-    running=0
-    trap - EXIT INT TERM  # Remove trap to prevent double cleanup
-    cleanup_terminal
-    echo -e "${YELLOW}Interrupted. No changes made.${RESET}"
-    exit 130  # Standard exit code for SIGINT
-  }
-
-  # Set up traps to ensure cleanup on exit
-  trap cleanup_terminal EXIT TERM
-  trap handle_interrupt INT
-
-  # Save terminal state
-  tput smcup  # Save screen
-  stty -echo  # Hide input
-  tput civis  # Hide cursor
-
-  local running=1
-
-  # Function to filter packages based on search
-  filter_packages() {
-    filtered_packages=()
-    if [[ -z "$search_filter" ]]; then
-      if [[ ${#all_packages[@]} -gt 0 ]]; then
-        filtered_packages=("${all_packages[@]}")
-      fi
-    else
-      if [[ ${#all_packages[@]} -gt 0 ]]; then
-        for pkg in "${all_packages[@]}"; do
-          if [[ "$pkg" == *"$search_filter"* ]]; then
-            filtered_packages+=("$pkg")
-          fi
-        done
-      fi
-    fi
-    # Reset index if out of bounds
-    if [[ $current_index -ge ${#filtered_packages[@]} ]]; then
-      current_index=$((${#filtered_packages[@]} - 1))
-    fi
-    if [[ $current_index -lt 0 ]]; then
-      current_index=0
-    fi
-  }
-
-  # Function to cycle action for current package
-  cycle_action() {
-    local direction=$1  # 1 for forward, -1 for backward
-    if [[ ${#filtered_packages[@]} -eq 0 ]]; then return; fi
-
-    local pkg="${filtered_packages[$current_index]}"
-    local current_action="${pkg_actions[$pkg]}"
-    local current_idx=0
-
-    # Find current action index
-    for i in {0..2}; do
-      if [[ "${action_cycle[$i]}" == "$current_action" ]]; then
-        current_idx=$i
-        break
-      fi
-    done
-
-    # Cycle to next/prev action
-    local new_idx=$(( (current_idx + direction + 3) % 3 ))
-    pkg_actions[$pkg]="${action_cycle[$new_idx]}"
-  }
-
-  # Function to render the UI
-  render_ui() {
-    tput clear
-    tput cup 0 0
-
-    # Header (each line must be exactly 72 chars between the ║ characters)
-    echo -e "${CYAN}╔════════════════════════════════════════════════════════════════════════╗${RESET}"
-    printf "${CYAN}║${RESET}%-72s${CYAN}║${RESET}\n" "  Interactive Package Manager"
-    echo -e "${CYAN}╠════════════════════════════════════════════════════════════════════════╣${RESET}"
-    printf "${CYAN}║${RESET}%-74s${CYAN}║${RESET}\n" "  Navigation: ↑/↓ | Toggle: ←/→/SPACE | Submit: ENTER | Cancel: ESC"
-    # Legend line with color markers
-    printf "${CYAN}║${RESET}  Legend: ${CYAN}●${RESET} formula  ${YELLOW}■${RESET} cask%*s${CYAN}║${RESET}\n" 45 ""
-    if [[ -n "$search_filter" ]]; then
-      local search_line="  Search: ${search_filter}"
-      local search_pad=$((72 - ${#search_line}))
-      printf "${CYAN}║${RESET}  Search: ${GREEN}%s${RESET}%*s${CYAN}║${RESET}\n" "$search_filter" "$search_pad" ""
-    else
-      printf "${CYAN}║${RESET}%-72s${CYAN}║${RESET}\n" "  Search: (type to filter)"
-    fi
-    echo -e "${CYAN}╠════════════════════════════════════════════════════════════════════════╣${RESET}"
-    printf "${CYAN}║${RESET} %-50s %-20s${CYAN}║${RESET}\n" "PACKAGE" "ACTION"
-    echo -e "${CYAN}╠════════════════════════════════════════════════════════════════════════╣${RESET}"
-
-    # Calculate visible window (header is now 13 lines instead of 12)
-    local term_height=$(($(tput lines) - 13))
-    local visible_count=$term_height
-
-    # Adjust scroll offset
-    if [[ $current_index -lt $scroll_offset ]]; then
-      scroll_offset=$current_index
-    elif [[ $current_index -ge $((scroll_offset + visible_count)) ]]; then
-      scroll_offset=$((current_index - visible_count + 1))
-    fi
-
-    # Display packages
-    local display_count=0
-    local i=$scroll_offset
-    if [[ ${#filtered_packages[@]} -gt 0 ]]; then
-      while [[ $i -lt ${#filtered_packages[@]} && $display_count -lt $visible_count ]]; do
-        local pkg="${filtered_packages[$i]}"
-        local action="${pkg_actions[$pkg]}"
-        local pkg_type="${pkg_types[$pkg]}"
-
-        # Color code actions
-        local action_display=""
-        case "$action" in
-          skip) action_display="${CYAN}skip${RESET}" ;;
-          declare) action_display="${GREEN}declare${RESET}" ;;
-          decom) action_display="${RED}decom${RESET}" ;;
-        esac
-
-        # Color marker for type (blue circle for formula, magenta square for cask)
-        local type_marker=""
-        if [[ "$pkg_type" == "formula" ]]; then
-          type_marker="${CYAN}●${RESET}"  # Blue circle for formulae
-        else
-          type_marker="${YELLOW}■${RESET}"  # Yellow square for casks
-        fi
-
-        # Format package name (trimmed to fit with marker)
-        local pkg_display="${pkg:0:47}"
-
-        # Highlight current line
-        if [[ $i -eq $current_index ]]; then
-          printf "${CYAN}║${RESET}${YELLOW}▶${RESET} ${type_marker} %-47s ${action_display}%*s${CYAN}║${RESET}\n" "$pkg_display" $((20 - ${#action})) ""
-        else
-          printf "${CYAN}║${RESET}  ${type_marker} %-47s ${action_display}%*s${CYAN}║${RESET}\n" "$pkg_display" $((20 - ${#action})) ""
-        fi
-        display_count=$((display_count + 1))
-        i=$((i + 1))
-      done
-    fi
-
-    # Fill remaining space
-    for ((i=display_count; i<visible_count; i++)); do
-      echo -e "${CYAN}║${RESET}$(printf '%-72s' '')${CYAN}║${RESET}"
-    done
-
-    echo -e "${CYAN}╚════════════════════════════════════════════════════════════════════════╝${RESET}"
-    echo -e "Showing ${#filtered_packages[@]} of ${#all_packages[@]} packages"
-  }
-
-  # Main event loop
-  while [[ $running -eq 1 ]]; do
-    render_ui
-
-    # Read single character (bash-compatible)
-    IFS= read -rsn1 key
-
-    # Handle escape sequences (arrow keys)
-    if [[ "$key" == $'\x1b' ]]; then
-      read -rsn2 -t 0.1 key2 2>/dev/null || true
-      case "$key2" in
-        '[A') # Up arrow
-          if [[ $current_index -gt 0 ]]; then
-            current_index=$((current_index - 1))
-          fi
-          ;;
-        '[B') # Down arrow
-          if [[ $current_index -lt $((${#filtered_packages[@]} - 1)) ]]; then
-            current_index=$((current_index + 1))
-          fi
-          ;;
-        '[C') # Right arrow
-          cycle_action 1
-          ;;
-        '[D') # Left arrow
-          cycle_action -1
-          ;;
-        *)
-          # ESC key (cancel)
-          cancelled=1
-          running=0
-          ;;
-      esac
-    else
-      case "$key" in
-        ' ') # Space
-          cycle_action 1
-          ;;
-        $'\n'|$'\r'|'') # Enter - Submit (newline, carriage return, or empty)
-          running=0
-          ;;
-        x|X) # Also allow x for submit (legacy)
-          running=0
-          ;;
-        $'\x7f'|$'\x08') # Backspace
-          if [[ -n "$search_filter" ]]; then
-            search_filter="${search_filter%?}"
-            filter_packages
-          fi
-          ;;
-        [a-zA-Z0-9\-_\.]) # Alphanumeric for search
-          search_filter="${search_filter}${key}"
-          filter_packages
-          ;;
-      esac
-    fi
-  done
-
-  # Restore terminal - remove trap first, then cleanup
-  trap - EXIT INT TERM
-  cleanup_terminal
-
-  # Check if user cancelled
-  if [[ $cancelled -eq 1 ]]; then
-    echo -e "${YELLOW}Cancelled. No changes made.${RESET}"
-    return 1
+  if [[ $IS_CASK -eq 1 ]]; then
+    pkg_type="cask"
+    key="casks"
+  elif [[ $IS_SERVICE -eq 1 ]]; then
+    pkg_type="service"
+    key="services"
+  elif [[ $AS_LINK -eq 1 ]]; then
+    pkg_type="link"
+    key="links"
   fi
 
-  # Process actions
-  local -a to_declare_formulae=()
-  local -a to_declare_casks=()
-  local -a to_decom_formulae=()
-  local -a to_decom_casks=()
+  # Casks are Darwin-only by nature
+  local is_darwin_only=0
+  local is_linux_only=0
 
-  for pkg in "${all_packages[@]}"; do
-    local action="${pkg_actions[$pkg]}"
-    local type="${pkg_types[$pkg]}"
+  if [[ $IS_CASK -eq 1 ]]; then
+    is_darwin_only=1
+  fi
 
-    if [[ "$action" == "declare" ]]; then
-      if [[ "$type" == "formula" ]]; then
-        to_declare_formulae+=("$pkg")
+  # Confirm installation
+  if [[ $SKIP_CONFIRM -eq 0 && $FORCE_REINSTALL -eq 0 ]]; then
+    if ! confirm "Install $pkg_name?"; then
+      warning "Installation cancelled"
+      exit 1
+    fi
+  fi
+
+  # Determine which platforms to add to
+  local add_to_darwin=0
+  local add_to_linux=0
+  local current_os=""
+
+  if [[ "${OSTYPE}" == "darwin"* ]]; then
+    current_os="darwin"
+  else
+    current_os="linux"
+  fi
+
+  # Check package availability and determine target platforms
+  if [[ $is_darwin_only -eq 1 ]]; then
+    add_to_darwin=1
+    info "Package is Darwin-specific"
+  elif [[ $is_linux_only -eq 1 ]]; then
+    add_to_linux=1
+    info "Package is Linux-specific"
+  else
+    # Check availability in Homebrew API
+    info "Checking package availability across platforms..."
+
+    if check_package_in_api "$pkg_name" "$pkg_type"; then
+      success "Package found in Homebrew repository"
+
+      # Verify locally on current platform
+      if check_package_availability "$pkg_name" "$pkg_type"; then
+        if [[ "$current_os" == "darwin" ]]; then
+          add_to_darwin=1
+          success "Verified in local Homebrew (Darwin)"
+        else
+          add_to_linux=1
+          success "Verified in local Linuxbrew"
+        fi
       else
-        to_declare_casks+=("$pkg")
-      fi
-    elif [[ "$action" == "decom" ]]; then
-      if [[ "$type" == "formula" ]]; then
-        to_decom_formulae+=("$pkg")
-      else
-        to_decom_casks+=("$pkg")
-      fi
-    fi
-  done
-
-  # Show summary
-  local total_changes=$((${#to_declare_formulae[@]} + ${#to_declare_casks[@]} + ${#to_decom_formulae[@]} + ${#to_decom_casks[@]}))
-
-  if [[ $total_changes -eq 0 ]]; then
-    echo -e "${CYAN}No changes selected.${RESET}"
-    return 0
-  fi
-
-  echo ""
-  echo -e "${CYAN}═══════════════════════════════════════${RESET}"
-  echo -e "${YELLOW}Proposed Changes Summary:${RESET}"
-  echo -e "${CYAN}═══════════════════════════════════════${RESET}"
-
-  if [[ ${#to_declare_formulae[@]} -gt 0 ]]; then
-    echo -e "\n${GREEN}Declare Formulae (${#to_declare_formulae[@]}):${RESET}"
-    for pkg in "${to_declare_formulae[@]}"; do
-      echo "  + $pkg"
-    done
-  fi
-
-  if [[ ${#to_declare_casks[@]} -gt 0 ]]; then
-    echo -e "\n${GREEN}Declare Casks (${#to_declare_casks[@]}):${RESET}"
-    for pkg in "${to_declare_casks[@]}"; do
-      echo "  + $pkg"
-    done
-  fi
-
-  if [[ ${#to_decom_formulae[@]} -gt 0 ]]; then
-    echo -e "\n${RED}Decommission Formulae (${#to_decom_formulae[@]}):${RESET}"
-    for pkg in "${to_decom_formulae[@]}"; do
-      echo "  - $pkg"
-    done
-  fi
-
-  if [[ ${#to_decom_casks[@]} -gt 0 ]]; then
-    echo -e "\n${RED}Decommission Casks (${#to_decom_casks[@]}):${RESET}"
-    for pkg in "${to_decom_casks[@]}"; do
-      echo "  - $pkg"
-    done
-  fi
-
-  echo ""
-  echo -ne "${CYAN}Apply these changes? [y/N] ${RESET}"
-  read -rsn1 CONFIRM
-  echo  # Newline after response
-
-  if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
-    echo -e "${YELLOW}Changes cancelled.${RESET}"
-    return 1
-  fi
-
-  # Apply declarations
-  for pkg in "${to_declare_formulae[@]}"; do
-    add_package_to_taskfile "$OS_TASKFILE" "formulae" "$pkg"
-  done
-
-  for pkg in "${to_declare_casks[@]}"; do
-    add_package_to_taskfile "$OS_TASKFILE" "casks" "$pkg"
-  done
-
-  # Apply decommissions
-  for pkg in "${to_decom_formulae[@]}"; do
-    echo -e "${RED}Uninstalling formula: $pkg${RESET}"
-    brew uninstall --ignore-dependencies "$pkg" 2>&1 | sed 's/^/  /'
-  done
-
-  for pkg in "${to_decom_casks[@]}"; do
-    echo -e "${RED}Uninstalling cask: $pkg${RESET}"
-    brew uninstall --cask "$pkg" 2>&1 | sed 's/^/  /'
-  done
-
-  # Update cache after package changes
-  update_brew_cache
-
-  echo ""
-  echo -e "${GREEN}✓ Changes applied successfully${RESET}"
-}
-
-# ============================================================================
-# Helper Functions for Cache Management
-# ============================================================================
-
-# Update the outdated package count cache
-update_brew_cache() {
-    local BREW_CACHE_DIR="${HOME}/.cache/brew"
-    local BREW_OUTDATED_COUNT="${BREW_CACHE_DIR}/outdated_count"
-
-    # Ensure cache directory exists
-    [[ -d "${BREW_CACHE_DIR}" ]] || mkdir -p "${BREW_CACHE_DIR}" 2>/dev/null
-
-    # Update the outdated count
-    brew outdated --quiet 2>/dev/null | wc -l | tr -d ' ' > "${BREW_OUTDATED_COUNT}"
-}
-
-# ============================================================================
-# Check Command - Background update checker with smart caching
-# ============================================================================
-
-brew_check() {
-    # Only run if brew is available
-    if ! command -v brew &>/dev/null; then
-        return 0
-    fi
-
-    # Check for --force flag
-    local force_update=0
-    if [[ "${1:-}" == "--force" ]]; then
-        force_update=1
-    fi
-
-    # Configuration
-    local BREW_CACHE_DIR="${HOME}/.cache/brew"
-    local BREW_UPDATE_STAMP="${BREW_CACHE_DIR}/last_update_check"
-    local BREW_OUTDATED_COUNT="${BREW_CACHE_DIR}/outdated_count"
-    local UPDATE_INTERVAL=86400  # 24 hours in seconds
-
-    # Ensure cache directory exists
-    [[ -d "${BREW_CACHE_DIR}" ]] || mkdir -p "${BREW_CACHE_DIR}" 2>/dev/null
-
-    # Check if we should update (>24 hours since last check or forced)
-    local should_update=0
-    if [[ ${force_update} -eq 1 ]]; then
-        should_update=1
-    elif [[ ! -f "${BREW_UPDATE_STAMP}" ]]; then
-        should_update=1
-    else
-        local last_update
-        last_update=$(cat "${BREW_UPDATE_STAMP}" 2>/dev/null || echo 0)
-        local now
-        now=$(date +%s)
-        local time_diff=$((now - last_update))
-
-        if [[ ${time_diff} -ge ${UPDATE_INTERVAL} ]]; then
-            should_update=1
-        fi
-    fi
-
-    # Run background update if needed (or force immediate update if --force flag)
-    if [[ ${should_update} -eq 1 ]]; then
-        if [[ ${force_update} -eq 1 ]]; then
-            # Force immediate update (synchronous)
-            brew update &>/dev/null
-            date +%s > "${BREW_UPDATE_STAMP}"
-            brew outdated --quiet 2>/dev/null | wc -l | tr -d ' ' > "${BREW_OUTDATED_COUNT}"
+        warning "Package exists in API but not available locally - this might be platform-specific"
+        if [[ "$current_os" == "darwin" ]]; then
+          add_to_darwin=1
         else
-            # Background update (asynchronous)
-            {
-                brew update &>/dev/null
-                date +%s > "${BREW_UPDATE_STAMP}"
-                brew outdated --quiet 2>/dev/null | wc -l | tr -d ' ' > "${BREW_OUTDATED_COUNT}"
-            } &
+          add_to_linux=1
         fi
-    fi
+      fi
 
-    # Display outdated package count if available (instant)
-    if [[ -f "${BREW_OUTDATED_COUNT}" ]]; then
-        local count
-        count=$(cat "${BREW_OUTDATED_COUNT}" 2>/dev/null || echo 0)
-        if [[ ${count} -gt 0 ]]; then
-            # Use warn function if available, otherwise use fallback
-            if command -v warn &>/dev/null; then
-                warn "📦 ${count} Homebrew package(s) can be upgraded (run 'brew upgrade' or 'task update')"
-            else
-                echo -e "${YELLOW}📦 ${count} Homebrew package(s) can be upgraded (run 'brew upgrade' or 'task update')${RESET}"
-            fi
-        fi
+      # For formulae (not casks), add to both platforms since API confirms availability
+      # Casks are Darwin-only by design
+      if [[ $IS_CASK -eq 0 ]]; then
+        add_to_darwin=1
+        add_to_linux=1
+        info "Will add to both platforms (cross-platform formula)"
+      fi
+    else
+      error "Package '$pkg_name' not found in Homebrew repository"
+      exit 1
     fi
+  fi
+
+  # Track success/failure for each platform
+  local darwin_success=0
+  local linux_success=0
+
+  # Add to Darwin taskfile
+  if [[ $add_to_darwin -eq 1 ]]; then
+    if [[ ! -f "$DARWIN_TASKFILE" ]]; then
+      warning "Darwin taskfile not found: $DARWIN_TASKFILE"
+    else
+      local should_install=0
+      [[ "$current_os" == "darwin" ]] && should_install=1
+
+      if [[ $should_install -eq 1 ]]; then
+        info "Adding to Darwin and installing..."
+      else
+        info "Adding to Darwin taskfile (no install)..."
+      fi
+
+      if add_package_to_file "$pkg_name" "$DARWIN_TASKFILE" "$pkg_type" "$key" "$should_install" "$FORCE_REINSTALL"; then
+        success "Added to Darwin taskfile"
+        darwin_success=1
+      else
+        warning "Failed to add to Darwin taskfile"
+      fi
+    fi
+  fi
+
+  # Add to Linux taskfile (formulae only, no casks)
+  if [[ $add_to_linux -eq 1 && $IS_CASK -eq 0 ]]; then
+    if [[ ! -f "$LINUX_TASKFILE" ]]; then
+      warning "Linux taskfile not found: $LINUX_TASKFILE"
+    else
+      local should_install=0
+      [[ "$current_os" == "linux" ]] && should_install=1
+
+      if [[ $should_install -eq 1 ]]; then
+        info "Adding to Linux and installing..."
+      else
+        info "Adding to Linux taskfile (no install)..."
+      fi
+
+      if add_package_to_file "$pkg_name" "$LINUX_TASKFILE" "$pkg_type" "$key" "$should_install" "$FORCE_REINSTALL"; then
+        success "Added to Linux taskfile"
+        linux_success=1
+      else
+        warning "Failed to add to Linux taskfile"
+      fi
+    fi
+  fi
+
+  # Final status
+  echo ""
+  if [[ $darwin_success -eq 1 || $linux_success -eq 1 ]]; then
+    if [[ $darwin_success -eq 1 && $linux_success -eq 1 ]]; then
+      success "$pkg_name added to both Darwin and Linux"
+    elif [[ $darwin_success -eq 1 ]]; then
+      success "$pkg_name added to Darwin"
+    else
+      success "$pkg_name added to Linux"
+    fi
+  else
+    error "Failed to add $pkg_name to any platform"
+    exit 1
+  fi
+}
+
+# Remove a package from the taskfile
+remove_package() {
+  local pkg_name="$1"
+
+  if [[ -z "$pkg_name" ]]; then
+    error "Package name is required"
+    info "Usage: $0 remove <name> [--cask|--service|--link]"
+    exit 1
+  fi
+
+  # Determine package type from flags
+  local pkg_type="formula"
+  local key="formulae"
+
+  if [[ $IS_CASK -eq 1 ]]; then
+    pkg_type="cask"
+    key="casks"
+  elif [[ $IS_SERVICE -eq 1 ]]; then
+    pkg_type="service"
+    key="services"
+  elif [[ $AS_LINK -eq 1 ]]; then
+    pkg_type="link"
+    key="links"
+  fi
+
+  info "Removing $pkg_type: $pkg_name from $OS_TASKFILE"
+
+  # Check if exists
+  if ! extract_packages "$OS_TASKFILE" "$key" | grep -qx "$pkg_name"; then
+    warning "$pkg_name not found in $key section"
+    exit 1
+  fi
+
+  # Confirm removal
+  if [[ $SKIP_CONFIRM -eq 0 ]]; then
+    if ! confirm "Remove $pkg_name from system and configuration?"; then
+      warning "Removal cancelled"
+      exit 1
+    fi
+  fi
+
+  # Stop service if applicable
+  if [[ "$pkg_type" == "service" ]]; then
+    info "Stopping service: $pkg_name"
+    brew services stop "$pkg_name" 2>/dev/null || true
+  fi
+
+  # Uninstall the package
+  case "$pkg_type" in
+    cask)
+      info "Uninstalling cask: $pkg_name"
+      brew uninstall --cask "$pkg_name"
+      ;;
+    formula|service|link)
+      info "Uninstalling formula: $pkg_name"
+      brew uninstall --ignore-dependencies "$pkg_name"
+      ;;
+  esac
+
+  # Remove from taskfile
+  local tmp
+  tmp=$(mktemp)
+
+  awk -v key="$key" -v pkg="$pkg_name" '
+    BEGIN {
+      in_section = 0
+    }
+    /^vars:/ {
+      in_vars = 1
+    }
+    in_vars && $0 ~ "^  " key ":" {
+      in_section = 1
+      print
+      next
+    }
+    in_section && /^  [a-zA-Z_-]+:/ {
+      in_section = 0
+    }
+    in_section && /^    - / {
+      line = $0
+      sub(/^    - /, "", line)
+      sub(/ #.*$/, "", line)
+      gsub(/ /, "", line)
+      if (line != pkg) {
+        print $0
+      }
+      next
+    }
+    { print }
+  ' "$OS_TASKFILE" > "$tmp" && mv "$tmp" "$OS_TASKFILE"
+
+  success "$pkg_name removed from $key section"
 }
 
 # ============================================================================
-# Uninstall Command - Complete Homebrew removal
+# Sync Functions
 # ============================================================================
 
-brew_uninstall() {
-    local BREW_PREFIX
-    BREW_PREFIX=$(detect_brew_path)
-
-    # Check if Homebrew is installed
-    if [[ -z "$BREW_PREFIX" ]]; then
-        error "Homebrew installation not found."
-        exit 1
-    fi
-
-    info "Found Homebrew at: $BREW_PREFIX"
-    echo ""
-
-    warning "WARNING: This will completely uninstall Homebrew and all packages!"
-    echo ""
-    info "This process will:"
-    info "  1. Stop all Homebrew services"
-    info "  2. Uninstall all casks and formulae"
-    info "  3. Run the official Homebrew uninstall script"
-    info "  4. Remove all Homebrew directories from $BREW_PREFIX"
-    echo ""
-
-    if ! confirm "Are you ABSOLUTELY sure you want to continue?"; then
-        error "Uninstall cancelled."
-        exit 1
-    fi
-
-    # Step 1: Stop services
-    echo ""
-    info "Step 1/4: Stopping all Homebrew services..."
-    if ! confirm "Continue with stopping services?"; then
-        error "Uninstall cancelled."
-        exit 1
-    fi
-
-    if brew services stop --all 2>/dev/null; then
-        success "Services stopped"
-    else
-        warning "No services running or failed to stop services"
-    fi
-
-    # Step 2: Unlink formulae
-    echo ""
-    info "Step 2/4: Unlinking all Homebrew formulae..."
-    if brew list --formula 2>/dev/null | xargs -n1 brew unlink 2>/dev/null; then
-        success "Formulae unlinked"
-    else
-        warning "No formulae to unlink or unlinking failed"
-    fi
-
-    # Step 3: Uninstall packages
-    echo ""
-    info "Step 3/4: Uninstalling all casks and formulae..."
-    if ! confirm "Continue with uninstalling all packages?"; then
-        error "Uninstall cancelled."
-        exit 1
-    fi
-
-    info "Uninstalling casks..."
-    if brew list --cask 2>/dev/null | xargs -n1 brew uninstall --cask --force 2>/dev/null; then
-        success "Casks uninstalled"
-    else
-        warning "No casks installed or uninstall failed"
-    fi
-
-    info "Uninstalling formulae..."
-    if brew list --formula 2>/dev/null | xargs -n1 brew uninstall --force --ignore-dependencies 2>/dev/null; then
-        success "Formulae uninstalled"
-    else
-        warning "No formulae installed or uninstall failed"
-    fi
-
-    # Step 4: Run official uninstall script
-    echo ""
-    info "Step 4/4: Running official Homebrew uninstall script..."
-    if ! confirm "Continue with running Homebrew uninstall script?"; then
-        error "Uninstall cancelled."
-        exit 1
-    fi
-
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)"
-
-    # Step 5: Clean up remaining directories
-    echo ""
-    info "Step 5/5: Removing remaining Homebrew directories..."
-    info "The following directories will be deleted from $BREW_PREFIX:"
-
-    # Common directories across macOS and Linux
-    local dirs_to_remove=(
-        "bin"
-        "etc"
-        "include"
-        "lib"
-        "opt"
-        "sbin"
-        "share"
-        "var"
-    )
-
-    # macOS-specific directories
-    if [[ "${OSTYPE}" == "darwin"* ]]; then
-        dirs_to_remove+=(
-            ".DS_Store"
-            "AGENTS.md"
-            "CHANGES.rst"
-            "Frameworks"
-            "README.rst"
-        )
-    fi
-
-    # List directories to be removed
-    for item in "${dirs_to_remove[@]}"; do
-        info "  - $BREW_PREFIX/$item"
-    done
-    echo ""
-
-    if ! confirm "Continue with removing directories?"; then
-        warning "Uninstall cancelled at final step. Homebrew may be partially uninstalled."
-        exit 1
-    fi
-
-    # Remove directories and files
-    for item in "${dirs_to_remove[@]}"; do
-        local path="$BREW_PREFIX/$item"
-        if [[ -d "$path" ]]; then
-            sudo rm -rf "$path" 2>/dev/null || true
-        elif [[ -f "$path" ]]; then
-            sudo rm -f "$path" 2>/dev/null || true
-        fi
-    done
-
-    echo ""
-    success "Homebrew uninstallation complete!"
-}
-
-# ============================================================================
-# Synchronization Functions
-# ============================================================================
-
-# Get unique formulae from a taskfile (package name only, no comments)
+# Get unique formulae from a taskfile
 get_unique_formulae() {
   local file="$1"
   extract_packages "$file" "formulae" | sort -u
 }
 
-# Synchronize, sort, and comment formulae between darwin and linux
+# Check if a package is a cask
+is_cask() {
+  local pkg="$1"
+  brew info --cask "$pkg" &>/dev/null
+  return $?
+}
+
+# Synchronize formulae between darwin and linux
 sync_formulae() {
   echo -e "${CYAN}🔄 Synchronizing formulae between Darwin and Linux...${RESET}\n"
 
   # Check if taskfiles exist
   if [[ ! -f "$DARWIN_TASKFILE" ]]; then
-    echo -e "${RED}Error: Darwin taskfile not found: $DARWIN_TASKFILE${RESET}" >&2
-    return 1
+    error "Darwin taskfile not found: $DARWIN_TASKFILE"
+    exit 1
   fi
 
   if [[ ! -f "$LINUX_TASKFILE" ]]; then
-    echo -e "${RED}Error: Linux taskfile not found: $LINUX_TASKFILE${RESET}" >&2
-    return 1
+    error "Linux taskfile not found: $LINUX_TASKFILE"
+    exit 1
   fi
 
-  # Extract formulae from both taskfiles
-  local darwin_formulae
-  darwin_formulae=$(get_unique_formulae "$DARWIN_TASKFILE")
-  local linux_formulae
-  linux_formulae=$(get_unique_formulae "$LINUX_TASKFILE")
+  # Extract packages with descriptions from both taskfiles
+  declare -A darwin_formulae_desc=()
+  declare -A darwin_casks_desc=()
+  declare -A linux_formulae_desc=()
 
-  # Combine and get unique list
+  while IFS='|||' read -r pkg desc; do
+    if [[ -n "$pkg" ]]; then
+      darwin_formulae_desc[$pkg]="$desc"
+    fi
+  done < <(extract_packages_with_descriptions "$DARWIN_TASKFILE" "formulae")
+
+  while IFS='|||' read -r pkg desc; do
+    if [[ -n "$pkg" ]]; then
+      darwin_casks_desc[$pkg]="$desc"
+    fi
+  done < <(extract_packages_with_descriptions "$DARWIN_TASKFILE" "casks")
+
+  while IFS='|||' read -r pkg desc; do
+    if [[ -n "$pkg" ]]; then
+      linux_formulae_desc[$pkg]="$desc"
+    fi
+  done < <(extract_packages_with_descriptions "$LINUX_TASKFILE" "formulae")
+
+  # Get unique package names
+  local -a darwin_formulae=()
+  local -a linux_formulae=()
+
+  for pkg in "${!darwin_formulae_desc[@]}"; do
+    darwin_formulae+=("$pkg")
+  done
+  for pkg in "${!linux_formulae_desc[@]}"; do
+    linux_formulae+=("$pkg")
+  done
+
+  # Build lists of packages to process
   local -a all_formulae=()
-  if [[ -n "$darwin_formulae" ]]; then
-    while IFS= read -r line; do
-      [[ -n "$line" ]] && all_formulae+=("$line")
-    done <<< "$darwin_formulae"
-  fi
-  if [[ -n "$linux_formulae" ]]; then
-    while IFS= read -r line; do
-      [[ -n "$line" ]] && all_formulae+=("$line")
-    done <<< "$linux_formulae"
-  fi
+  local -a packages_to_add_darwin=()
+  local -a packages_to_add_linux=()
+  local -a packages_to_update=()
 
-  # Sort and deduplicate
+  # Combine all formula packages
+  for pkg in "${darwin_formulae[@]}"; do
+    local pkg_exists=0
+    for existing in "${all_formulae[@]}"; do
+      if [[ "$existing" == "$pkg" ]]; then
+        pkg_exists=1
+        break
+      fi
+    done
+    if [[ $pkg_exists -eq 0 ]]; then
+      all_formulae+=("$pkg")
+    fi
+  done
+  for pkg in "${linux_formulae[@]}"; do
+    local pkg_exists=0
+    for existing in "${all_formulae[@]}"; do
+      if [[ "$existing" == "$pkg" ]]; then
+        pkg_exists=1
+        break
+      fi
+    done
+    if [[ $pkg_exists -eq 0 ]]; then
+      all_formulae+=("$pkg")
+    fi
+  done
+
+  # Sort all formulae
   if [[ ${#all_formulae[@]} -gt 0 ]]; then
     IFS=$'\n' all_formulae=($(printf '%s\n' "${all_formulae[@]}" | sort -u))
     unset IFS
   fi
 
-  # Platform-specific packages (known to be OS-specific)
-  local -a darwin_only=(
-    "ntfs-3g-mac"
-    "gromgit/fuse/ntfs-3g-mac"
-    "speedtest-cli"
-    "timeout"
-  )
+  info "📦 Analyzing packages..."
+  echo ""
 
-  local -a linux_only=(
-    # Add any Linux-only packages here if needed
-    # These would be packages that don't exist or don't make sense on macOS
-  )
-
-  # Build synchronized lists
-  local -a darwin_sync=()
-  local -a linux_sync=()
-  local -a common_formulae=()
-  local -a darwin_specific=()
-  local -a linux_specific=()
-
-  echo -e "${CYAN}📦 Analyzing packages...${RESET}"
-
+  # Analyze each package
   for pkg in "${all_formulae[@]}"; do
-    local is_darwin_only=0
-    local is_linux_only=0
+    local in_darwin=0
+    local in_linux=0
 
-    # Check if package is platform-specific
-    for darwin_pkg in "${darwin_only[@]}"; do
-      if [[ "$pkg" == "$darwin_pkg" ]]; then
-        is_darwin_only=1
-        break
+    [[ -n "${darwin_formulae_desc[$pkg]:-}" ]] && in_darwin=1
+    [[ -n "${linux_formulae_desc[$pkg]:-}" ]] && in_linux=1
+
+    # Package exists in both - check for description mismatch
+    if [[ $in_darwin -eq 1 && $in_linux -eq 1 ]]; then
+      local darwin_desc="${darwin_formulae_desc[$pkg]}"
+      local linux_desc="${linux_formulae_desc[$pkg]}"
+
+      if [[ "$darwin_desc" != "$linux_desc" ]]; then
+        packages_to_update+=("$pkg")
       fi
-    done
-
-    if [[ $is_darwin_only -eq 0 ]]; then
-      for linux_pkg in "${linux_only[@]}"; do
-        if [[ "$pkg" == "$linux_pkg" ]]; then
-          is_linux_only=1
-          break
-        fi
-      done
-    fi
-
-    # Add to appropriate lists
-    if [[ $is_darwin_only -eq 1 ]]; then
-      darwin_sync+=("$pkg")
-      darwin_specific+=("$pkg")
-    elif [[ $is_linux_only -eq 1 ]]; then
-      linux_sync+=("$pkg")
-      linux_specific+=("$pkg")
-    else
-      # Common package - add to both
-      darwin_sync+=("$pkg")
-      linux_sync+=("$pkg")
-      common_formulae+=("$pkg")
+    # Package only in darwin - candidate for linux
+    elif [[ $in_darwin -eq 1 && $in_linux -eq 0 ]]; then
+      packages_to_add_linux+=("$pkg")
+    # Package only in linux - candidate for darwin
+    elif [[ $in_darwin -eq 0 && $in_linux -eq 1 ]]; then
+      packages_to_add_darwin+=("$pkg")
     fi
   done
 
-  echo -e "${CYAN}ℹ  Common formulae: ${#common_formulae[@]}${RESET}"
-  echo -e "${CYAN}ℹ  Darwin-only formulae: ${#darwin_specific[@]}${RESET}"
-  echo -e "${CYAN}ℹ  Linux-only formulae: ${#linux_specific[@]}${RESET}"
+  # Report findings
+  if [[ ${#packages_to_update[@]} -gt 0 ]]; then
+    warning "Found ${#packages_to_update[@]} package(s) with mismatched descriptions:"
+    for pkg in "${packages_to_update[@]}"; do
+      echo "  - $pkg"
+      echo "    Darwin: ${darwin_formulae_desc[$pkg]}"
+      echo "    Linux:  ${linux_formulae_desc[$pkg]}"
+    done
+    echo ""
+  fi
+
+  if [[ ${#packages_to_add_darwin[@]} -gt 0 ]]; then
+    info "Found ${#packages_to_add_darwin[@]} package(s) only in Linux"
+  fi
+
+  if [[ ${#packages_to_add_linux[@]} -gt 0 ]]; then
+    info "Found ${#packages_to_add_linux[@]} package(s) only in Darwin"
+  fi
+
   echo ""
 
-  # Show what will be synchronized
-  if [[ ${#darwin_specific[@]} -gt 0 ]]; then
-    echo -e "${YELLOW}Darwin-only packages (will not be added to Linux):${RESET}"
-    for pkg in "${darwin_specific[@]}"; do
-      echo "  - $pkg"
-    done
-    echo ""
-  fi
-
-  if [[ ${#linux_specific[@]} -gt 0 ]]; then
-    echo -e "${YELLOW}Linux-only packages (will not be added to Darwin):${RESET}"
-    for pkg in "${linux_specific[@]}"; do
-      echo "  - $pkg"
-    done
-    echo ""
-  fi
-
-  # Prompt for confirmation
-  echo -ne "${YELLOW}Synchronize and update both taskfiles? [y/N] ${RESET}"
-  read -rsn1 REPLY
-  echo  # Newline
-
-  if [[ "$REPLY" != "y" && "$REPLY" != "Y" ]]; then
-    echo -e "${YELLOW}Synchronization cancelled.${RESET}"
-    return 0
-  fi
-
-  # Check for dry-run mode
   if [[ $DRY_RUN -eq 1 ]]; then
-    echo -e "${YELLOW}🔍 DRY RUN MODE - No files will be modified${RESET}"
+    warning "🔍 DRY RUN MODE - No files will be modified"
     echo ""
-    echo -e "${CYAN}Would update Darwin taskfile with ${#darwin_sync[@]} formulae${RESET}"
-    echo -e "${CYAN}Would update Linux taskfile with ${#linux_sync[@]} formulae${RESET}"
-    echo ""
-    echo -e "${GREEN}✅ Dry run complete. Use without --dry-run to apply changes.${RESET}"
-    return 0
+    success "Dry run complete. Use without --dry-run to apply changes."
+    exit 0
   fi
 
-  # Update Darwin taskfile
-  echo -e "${CYAN}📝 Updating Darwin taskfile...${RESET}"
-  update_formulae_section "$DARWIN_TASKFILE" darwin_sync
+  # Process packages to add to darwin (check API availability)
+  local -a confirmed_darwin_formulae=()
+  local -a confirmed_darwin_casks=()
 
-  # Update Linux taskfile
-  echo -e "${CYAN}📝 Updating Linux taskfile...${RESET}"
-  update_formulae_section "$LINUX_TASKFILE" linux_sync
+  if [[ ${#packages_to_add_darwin[@]} -gt 0 ]]; then
+    info "Checking availability for packages to add to Darwin..."
+    for pkg in "${packages_to_add_darwin[@]}"; do
+      # Check if it's a cask
+      if is_cask "$pkg"; then
+        if check_package_in_api "$pkg" "cask"; then
+          confirmed_darwin_casks+=("$pkg")
+          success "  ✓ Will add $pkg as cask to Darwin (API confirmed)"
+        else
+          warning "  ✗ Skipping $pkg - not available as cask"
+        fi
+      else
+        # Check if available as formula
+        if check_package_in_api "$pkg" "formula"; then
+          confirmed_darwin_formulae+=("$pkg")
+          success "  ✓ Will add $pkg as formula to Darwin (API confirmed)"
+        else
+          warning "  ✗ Skipping $pkg - not available on Darwin"
+        fi
+      fi
+    done
+    echo ""
+  fi
+
+  # Process packages to add to linux (check API availability)
+  local -a confirmed_linux_formulae=()
+
+  if [[ ${#packages_to_add_linux[@]} -gt 0 ]]; then
+    info "Checking availability for packages to add to Linux..."
+    for pkg in "${packages_to_add_linux[@]}"; do
+      # Casks are darwin-only, so only check as formula
+      if check_package_in_api "$pkg" "formula"; then
+        confirmed_linux_formulae+=("$pkg")
+        success "  ✓ Will add $pkg as formula to Linux (API confirmed)"
+      else
+        warning "  ✗ Skipping $pkg - not available on Linux"
+      fi
+    done
+    echo ""
+  fi
+
+  # Update descriptions for mismatched packages and build final lists
+  # shellcheck disable=SC2034
+  declare -A final_darwin_formulae_desc=()
+  # shellcheck disable=SC2034
+  declare -A final_darwin_casks_desc=()
+  # shellcheck disable=SC2034
+  declare -A final_linux_formulae_desc=()
+
+  # Copy existing descriptions
+  for pkg in "${!darwin_formulae_desc[@]}"; do
+    final_darwin_formulae_desc[$pkg]="${darwin_formulae_desc[$pkg]}"
+  done
+  for pkg in "${!darwin_casks_desc[@]}"; do
+    final_darwin_casks_desc[$pkg]="${darwin_casks_desc[$pkg]}"
+  done
+  for pkg in "${!linux_formulae_desc[@]}"; do
+    final_linux_formulae_desc[$pkg]="${linux_formulae_desc[$pkg]}"
+  done
+
+  # Update mismatched descriptions
+  if [[ ${#packages_to_update[@]} -gt 0 ]]; then
+    info "📝 Updating mismatched descriptions..."
+    for pkg in "${packages_to_update[@]}"; do
+      local new_desc
+      new_desc=$(get_brew_description "$pkg" "formula")
+      # shellcheck disable=SC2034
+      final_darwin_formulae_desc[$pkg]="$new_desc"
+      # shellcheck disable=SC2034
+      final_linux_formulae_desc[$pkg]="$new_desc"
+      echo "  ✓ Updated $pkg"
+    done
+    echo ""
+  fi
+
+  # Add new packages with descriptions
+  if [[ ${#confirmed_darwin_formulae[@]} -gt 0 || ${#confirmed_darwin_casks[@]} -gt 0 ]]; then
+    info "📝 Fetching descriptions for new Darwin packages..."
+    for pkg in "${confirmed_darwin_formulae[@]}"; do
+      local desc
+      desc=$(get_brew_description "$pkg" "formula")
+      # shellcheck disable=SC2034
+      final_darwin_formulae_desc[$pkg]="$desc"
+      echo "  ✓ $pkg"
+    done
+    for pkg in "${confirmed_darwin_casks[@]}"; do
+      local desc
+      desc=$(get_brew_description "$pkg" "cask")
+      # shellcheck disable=SC2034
+      final_darwin_casks_desc[$pkg]="$desc"
+      echo "  ✓ $pkg (cask)"
+    done
+    echo ""
+  fi
+
+  if [[ ${#confirmed_linux_formulae[@]} -gt 0 ]]; then
+    info "📝 Fetching descriptions for new Linux packages..."
+    for pkg in "${confirmed_linux_formulae[@]}"; do
+      local desc
+      desc=$(get_brew_description "$pkg" "formula")
+      # shellcheck disable=SC2034
+      final_linux_formulae_desc[$pkg]="$desc"
+      echo "  ✓ $pkg"
+    done
+    echo ""
+  fi
+
+  # Update taskfiles
+  info "📝 Updating Darwin taskfile..."
+  update_section_with_descriptions "$DARWIN_TASKFILE" "formulae" final_darwin_formulae_desc
+  update_section_with_descriptions "$DARWIN_TASKFILE" "casks" final_darwin_casks_desc
+
+  info "📝 Updating Linux taskfile..."
+  update_section_with_descriptions "$LINUX_TASKFILE" "formulae" final_linux_formulae_desc
 
   echo ""
-  echo -e "${GREEN}✅ Synchronization complete!${RESET}"
-  echo -e "${GREEN}   Both taskfiles have been updated, sorted, and commented.${RESET}"
+  success "Synchronization complete!"
+  info "Both taskfiles have been updated, sorted, and commented."
+  info "Review changes with: git diff"
 }
 
-# Update the formulae section in a taskfile with sorted and commented packages
+# Update the formulae section in a taskfile
 update_formulae_section() {
   local file="$1"
   local packages_var=$2
 
-  # Get the array via nameref
   local -n packages_ref="$packages_var"
 
   if [[ ! -f "$file" ]]; then
-    echo -e "${RED}Error: File not found: $file${RESET}" >&2
-    return 1
+    error "File not found: $file"
+    exit 1
+  fi
+
+  # Extract existing packages with descriptions
+  declare -A existing_descriptions=()
+  if [[ $FORCE_UPDATE -eq 0 ]]; then
+    while IFS='|||' read -r pkg desc; do
+      if [[ -n "$pkg" ]]; then
+        existing_descriptions[$pkg]="$desc"
+      fi
+    done < <(extract_packages_with_descriptions "$file" "formulae")
   fi
 
   # Build package list with descriptions
   declare -A pkg_descriptions=()
   local -a sorted_packages=()
+  local -a packages_to_fetch=()
 
-  echo -e "${CYAN}  Fetching descriptions for ${#packages_ref[@]} packages...${RESET}"
-
+  # Determine which packages need description fetching
   for pkg in "${packages_ref[@]}"; do
     sorted_packages+=("$pkg")
 
-    # Get description
-    local desc
-    desc=$(get_brew_description "$pkg" "formula")
-    pkg_descriptions[$pkg]="$desc"
-
-    # Show progress
-    echo -ne "  "
-    if [[ -n "$desc" ]]; then
-      echo -e "${GREEN}✓${RESET} $pkg"
+    if [[ $FORCE_UPDATE -eq 1 ]]; then
+      packages_to_fetch+=("$pkg")
+    elif [[ -z "${existing_descriptions[$pkg]:-}" ]]; then
+      packages_to_fetch+=("$pkg")
     else
-      echo -e "${YELLOW}○${RESET} $pkg (no description)"
+      pkg_descriptions[$pkg]="${existing_descriptions[$pkg]}"
     fi
   done
+
+  # Fetch descriptions only for packages that need them
+  if [[ ${#packages_to_fetch[@]} -gt 0 ]]; then
+    info "Fetching descriptions for ${#packages_to_fetch[@]} package(s)..."
+
+    for pkg in "${packages_to_fetch[@]}"; do
+      local desc
+      desc=$(get_brew_description "$pkg" "formula")
+      pkg_descriptions[$pkg]="$desc"
+
+      echo -ne "  "
+      if [[ -n "$desc" ]]; then
+        echo -e "${GREEN}✓${RESET} $pkg"
+      else
+        echo -e "${YELLOW}○${RESET} $pkg (no description)"
+      fi
+    done
+  else
+    info "All descriptions up to date (use --force to refresh)"
+  fi
 
   # Sort packages case-insensitively
   IFS=$'\n' sorted_packages=($(printf '%s\n' "${sorted_packages[@]}" | sort -f))
@@ -1208,36 +1228,27 @@ update_formulae_section() {
     }
     /^vars:/ {
       in_vars = 1
-      vars_line = NR
     }
     in_vars && /^  formulae:/ {
       found_formulae = 1
       formulae_start = NR
     }
-    # Track end of formulae section
     found_formulae && /^    - / {
       formulae_end = NR
     }
-    # Exit formulae section when we hit another vars key or end of vars
     found_formulae && /^  [a-zA-Z_-]+:/ && !/^  formulae:/ {
       found_formulae = 0
     }
     END {
       if (formulae_start > 0) {
-        # Print everything up to formulae section start
         for (i = 1; i <= formulae_start; i++) {
           print lines[i]
         }
-
-        # New packages will be inserted here via external script
         print "PACKAGES_PLACEHOLDER"
-
-        # Print everything after formulae section
         for (i = formulae_end + 1; i <= NR; i++) {
           print lines[i]
         }
       } else {
-        # No formulae section found, print original
         for (i = 1; i <= NR; i++) {
           print lines[i]
         }
@@ -1249,6 +1260,10 @@ update_formulae_section() {
   local package_lines=""
   for pkg in "${sorted_packages[@]}"; do
     local desc="${pkg_descriptions[$pkg]}"
+    # Strip delimiter artifacts
+    desc="${desc#|||}"
+    desc="${desc#||}"
+    desc="${desc#|}"
     if [[ -n "$desc" ]]; then
       package_lines+="    - ${pkg} # ${desc}\n"
     else
@@ -1256,12 +1271,10 @@ update_formulae_section() {
     fi
   done
 
-  # Replace placeholder with actual package lines
-  # Use a temporary file for the sed operation
+  # Replace placeholder
   local tmp2
   tmp2=$(mktemp)
 
-  # Replace PACKAGES_PLACEHOLDER with actual lines (no escaping needed with awk)
   awk -v pkg_lines="$package_lines" '
     /PACKAGES_PLACEHOLDER/ {
       printf "%s", pkg_lines
@@ -1272,178 +1285,741 @@ update_formulae_section() {
 
   rm -f "$tmp"
 
-  echo -e "${GREEN}  ✓ Updated $file${RESET}"
+  success "  Updated $file"
+}
+
+# Update a section with descriptions from an associative array
+update_section_with_descriptions() {
+  local file="$1"
+  local section="$2"
+  local descriptions_var=$3
+
+  local -n descriptions_ref="$descriptions_var"
+
+  if [[ ! -f "$file" ]]; then
+    error "File not found: $file"
+    exit 1
+  fi
+
+  # Get sorted package list
+  local -a sorted_packages=()
+  for pkg in "${!descriptions_ref[@]}"; do
+    sorted_packages+=("$pkg")
+  done
+
+  # Sort packages case-insensitively
+  if [[ ${#sorted_packages[@]} -gt 0 ]]; then
+    IFS=$'\n' sorted_packages=($(printf '%s\n' "${sorted_packages[@]}" | sort -f))
+    unset IFS
+  fi
+
+  # Create new section
+  local tmp
+  tmp=$(mktemp)
+
+  awk -v key="$section" '
+    BEGIN {
+      in_vars = 0
+      found_section = 0
+      section_start = 0
+      section_end = 0
+    }
+    {
+      lines[NR] = $0
+    }
+    /^vars:/ {
+      in_vars = 1
+    }
+    in_vars && $0 ~ "^  " key ":" {
+      found_section = 1
+      section_start = NR
+    }
+    found_section && /^    - / {
+      section_end = NR
+    }
+    found_section && /^  [a-zA-Z_-]+:/ && $0 !~ "^  " key ":" {
+      found_section = 0
+    }
+    END {
+      if (section_start > 0) {
+        for (i = 1; i <= section_start; i++) {
+          print lines[i]
+        }
+        print "PACKAGES_PLACEHOLDER"
+        for (i = section_end + 1; i <= NR; i++) {
+          print lines[i]
+        }
+      } else {
+        for (i = 1; i <= NR; i++) {
+          print lines[i]
+        }
+      }
+    }
+  ' "$file" > "$tmp"
+
+  # Build the package lines
+  local package_lines=""
+  for pkg in "${sorted_packages[@]}"; do
+    local desc="${descriptions_ref[$pkg]}"
+    # Strip delimiter artifacts
+    desc="${desc#|||}"
+    desc="${desc#||}"
+    desc="${desc#|}"
+    if [[ -n "$desc" ]]; then
+      package_lines+="    - ${pkg} # ${desc}\n"
+    else
+      package_lines+="    - ${pkg}\n"
+    fi
+  done
+
+  # Replace placeholder
+  local tmp2
+  tmp2=$(mktemp)
+
+  awk -v pkg_lines="$package_lines" '
+    /PACKAGES_PLACEHOLDER/ {
+      printf "%s", pkg_lines
+      next
+    }
+    { print }
+  ' "$tmp" > "$tmp2" && mv "$tmp2" "$file"
+
+  rm -f "$tmp"
+
+  success "  Updated $file - $section"
+}
+
+# ============================================================================
+# Install/Uninstall Homebrew
+# ============================================================================
+
+# Install Homebrew/Linuxbrew
+brew_install() {
+  local BREW_PREFIX
+  BREW_PREFIX=$(detect_brew_path)
+
+  if [[ -n "$BREW_PREFIX" ]]; then
+    warning "Homebrew is already installed at: $BREW_PREFIX"
+    exit 0
+  fi
+
+  info "Installing Homebrew/Linuxbrew..."
+  echo ""
+
+  # Run official install script
+  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+  success "Homebrew installation complete!"
+  info "Add Homebrew to your PATH by following the instructions above"
+}
+
+# Uninstall Homebrew/Linuxbrew
+brew_uninstall() {
+  local BREW_PREFIX
+  BREW_PREFIX=$(detect_brew_path)
+
+  if [[ -z "$BREW_PREFIX" ]]; then
+    error "Homebrew installation not found."
+    exit 1
+  fi
+
+  info "Found Homebrew at: $BREW_PREFIX"
+  echo ""
+
+  if [[ $FORCE_WIPE -eq 1 ]]; then
+    warning "WARNING: --force-wipe will remove ALL packages, services, and links!"
+    echo ""
+    info "This process will:"
+    info "  1. Stop all services"
+    info "  2. Uninstall all casks"
+    info "  3. Uninstall all formulae"
+    info "  4. Run Homebrew uninstall script"
+    info "  5. Remove all Homebrew directories"
+    echo ""
+
+    if ! confirm "Are you ABSOLUTELY sure you want to continue?"; then
+      error "Uninstall cancelled."
+      exit 1
+    fi
+
+    # Stop all services
+    info "Stopping all services..."
+    brew services stop --all 2>/dev/null || true
+
+    # Uninstall all casks
+    info "Uninstalling all casks..."
+    brew list --cask 2>/dev/null | xargs -n1 brew uninstall --cask --force 2>/dev/null || true
+
+    # Uninstall all formulae
+    info "Uninstalling all formulae..."
+    brew list --formula 2>/dev/null | xargs -n1 brew uninstall --force --ignore-dependencies 2>/dev/null || true
+  else
+    warning "WARNING: This will uninstall Homebrew (packages will be left installed)"
+    echo ""
+    info "Use --force-wipe to also remove all packages before uninstalling"
+    echo ""
+
+    if ! confirm "Continue with uninstalling Homebrew?"; then
+      error "Uninstall cancelled."
+      exit 1
+    fi
+  fi
+
+  # Run official uninstall script
+  info "Running Homebrew uninstall script..."
+  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/uninstall.sh)"
+
+  # Clean up remaining directories
+  info "Cleaning up remaining directories..."
+  local dirs_to_remove=("bin" "etc" "include" "lib" "opt" "sbin" "share" "var")
+
+  for item in "${dirs_to_remove[@]}"; do
+    local path="$BREW_PREFIX/$item"
+    if [[ -d "$path" ]] || [[ -f "$path" ]]; then
+      sudo rm -rf "$path" 2>/dev/null || true
+    fi
+  done
+
+  success "Homebrew uninstallation complete!"
+}
+
+# ============================================================================
+# Check Command
+# ============================================================================
+
+brew_check() {
+  if ! command -v brew &>/dev/null; then
+    return 0
+  fi
+
+  local force_update=0
+  if [[ "${1:-}" == "--force" ]]; then
+    force_update=1
+  fi
+
+  local BREW_CACHE_DIR="${HOME}/.cache/brew"
+  local BREW_UPDATE_STAMP="${BREW_CACHE_DIR}/last_update_check"
+  local BREW_OUTDATED_COUNT="${BREW_CACHE_DIR}/outdated_count"
+  local UPDATE_INTERVAL=86400  # 24 hours
+
+  [[ -d "${BREW_CACHE_DIR}" ]] || mkdir -p "${BREW_CACHE_DIR}" 2>/dev/null
+
+  local should_update=0
+  if [[ ${force_update} -eq 1 ]]; then
+    should_update=1
+  elif [[ ! -f "${BREW_UPDATE_STAMP}" ]]; then
+    should_update=1
+  else
+    local last_update
+    last_update=$(cat "${BREW_UPDATE_STAMP}" 2>/dev/null || echo 0)
+    local now
+    now=$(date +%s)
+    local time_diff=$((now - last_update))
+
+    if [[ ${time_diff} -ge ${UPDATE_INTERVAL} ]]; then
+      should_update=1
+    fi
+  fi
+
+  if [[ ${should_update} -eq 1 ]]; then
+    if [[ ${force_update} -eq 1 ]]; then
+      brew update &>/dev/null
+      date +%s > "${BREW_UPDATE_STAMP}"
+      brew outdated --quiet 2>/dev/null | wc -l | tr -d ' ' > "${BREW_OUTDATED_COUNT}"
+    else
+      {
+        brew update &>/dev/null
+        date +%s > "${BREW_UPDATE_STAMP}"
+        brew outdated --quiet 2>/dev/null | wc -l | tr -d ' ' > "${BREW_OUTDATED_COUNT}"
+      } &
+    fi
+  fi
+
+  # Only show outdated count if not running full interactive check
+  if [[ ${force_update} -eq 0 ]]; then
+    if [[ -f "${BREW_OUTDATED_COUNT}" ]]; then
+      local count
+      count=$(cat "${BREW_OUTDATED_COUNT}" 2>/dev/null || echo 0)
+      if [[ ${count} -gt 0 ]]; then
+        warning "📦 ${count} Homebrew package(s) can be upgraded (run 'brew upgrade')"
+      fi
+    fi
+    return 0
+  fi
+
+  # ===== Full Interactive Check (when --force is used) =====
+
+  info "🔍 Running comprehensive Homebrew check..."
+  echo ""
+
+  local issues_found=0
+
+  # 1. Check for outdated packages
+  info "📦 Checking for outdated packages..."
+  local outdated_formulae
+  local outdated_casks
+  outdated_formulae=$(brew outdated --formula --quiet 2>/dev/null || echo "")
+  if [[ -n "$outdated_formulae" ]]; then
+    warning "Found outdated formulae:"
+    echo "$outdated_formulae" | while IFS= read -r pkg; do
+      echo "  - $pkg"
+    done
+    ((issues_found++))
+  else
+    success "All formulae are up to date"
+  fi
+
+  if [[ "${OSTYPE}" == "darwin"* ]]; then
+    outdated_casks=$(brew outdated --cask --quiet 2>/dev/null || echo "")
+    if [[ -n "$outdated_casks" ]]; then
+      warning "Found outdated casks:"
+      echo "$outdated_casks" | while IFS= read -r pkg; do
+        echo "  - $pkg"
+      done
+      ((issues_found++))
+    else
+      success "All casks are up to date"
+    fi
+  fi
+  echo ""
+
+  # 2. Validate and update packages (casks and formulae)
+  info "🔄 Validating and updating package info..."
+  local darwin_taskfile="$HOME/.jsh/.taskfiles/darwin/taskfile.yaml"
+  local linux_taskfile="$HOME/.jsh/.taskfiles/linux/taskfile.yaml"
+
+  if [[ -f "$darwin_taskfile" ]] && [[ -f "$linux_taskfile" ]]; then
+    # Extract all packages from both taskfiles with descriptions
+    declare -A darwin_formulae_desc
+    declare -A darwin_casks_desc
+    declare -A linux_formulae_desc
+
+    while IFS='|||' read -r pkg desc; do
+      [[ -n "$pkg" ]] && darwin_formulae_desc["$pkg"]="$desc"
+    done < <(extract_packages_with_descriptions "$darwin_taskfile" "formulae")
+
+    while IFS='|||' read -r pkg desc; do
+      [[ -n "$pkg" ]] && darwin_casks_desc["$pkg"]="$desc"
+    done < <(extract_packages_with_descriptions "$darwin_taskfile" "casks")
+
+    while IFS='|||' read -r pkg desc; do
+      [[ -n "$pkg" ]] && linux_formulae_desc["$pkg"]="$desc"
+    done < <(extract_packages_with_descriptions "$linux_taskfile" "formulae")
+
+    local packages_updated=0
+    local packages_synced=0
+    local cask_issues=0
+    local formula_issues=0
+
+    # Validate and update Darwin casks
+    info "🍺 Validating Darwin casks..."
+    local darwin_cask_count=${#darwin_casks_desc[@]}
+    local darwin_cask_idx=0
+
+    for pkg in "${!darwin_casks_desc[@]}"; do
+      ((darwin_cask_idx++)) || true
+      echo -ne "[$darwin_cask_idx/$darwin_cask_count] Validating ${pkg}...\r"
+
+      # Check if it's actually a cask
+      if ! brew info --cask "$pkg" &>/dev/null; then
+        echo -ne "\033[2K"  # Clear line
+        warning "'$pkg' is not a valid cask"
+        ((cask_issues++))
+        ((issues_found++))
+        continue
+      fi
+
+      # Update description if different or if empty
+      local darwin_desc="${darwin_casks_desc[$pkg]}"
+      local current_desc
+      current_desc=$(get_brew_description "$pkg" "cask" 2>/dev/null || true)
+
+      if [[ -n "$current_desc" ]] && [[ "$darwin_desc" != "$current_desc" ]]; then
+        echo -ne "\033[2K"  # Clear line
+        info "  → Updating description: $pkg"
+        darwin_casks_desc["$pkg"]="$current_desc"
+        ((packages_updated++))
+      elif [[ -z "$darwin_desc" ]] && [[ -n "$current_desc" ]]; then
+        echo -ne "\033[2K"  # Clear line
+        info "  → Adding missing description: $pkg"
+        darwin_casks_desc["$pkg"]="$current_desc"
+        ((packages_updated++))
+      fi
+    done
+    echo -ne "\033[2K"  # Clear line
+
+    if [[ $cask_issues -eq 0 ]]; then
+      success "All $darwin_cask_count casks are valid"
+    else
+      warning "Found $cask_issues invalid cask(s)"
+    fi
+
+    # Validate and update Darwin formulae
+    info "⚗️  Validating Darwin formulae..."
+    local -a darwin_formula_pkgs=()
+    for pkg in "${!darwin_formulae_desc[@]}"; do
+      darwin_formula_pkgs+=("$pkg")
+    done
+    if [[ ${#darwin_formula_pkgs[@]} -gt 0 ]]; then
+      local sorted_pkgs
+      sorted_pkgs=($(printf '%s\n' "${darwin_formula_pkgs[@]}" | sort -f))
+      darwin_formula_pkgs=("${sorted_pkgs[@]}")
+    fi
+
+    local darwin_formula_count=${#darwin_formula_pkgs[@]}
+    local darwin_formula_idx=0
+
+    for pkg in "${darwin_formula_pkgs[@]}"; do
+      ((darwin_formula_idx++)) || true
+      echo -ne "[$darwin_formula_idx/$darwin_formula_count] Validating ${pkg}...\r"
+
+      # Check if it's actually a formula (not a cask)
+      if ! brew info --formula "$pkg" &>/dev/null; then
+        echo -ne "\033[2K"  # Clear line
+        if brew info --cask "$pkg" &>/dev/null; then
+          warning "'$pkg' is a cask, not a formula (should be in casks list)"
+        else
+          warning "'$pkg' is not a valid formula"
+        fi
+        ((formula_issues++))
+        ((issues_found++))
+        continue
+      fi
+
+      # Update description if different or if empty
+      local darwin_desc="${darwin_formulae_desc[$pkg]}"
+      local current_desc
+      current_desc=$(get_brew_description "$pkg" "formula" 2>/dev/null || true)
+
+      if [[ -n "$current_desc" ]] && [[ "$darwin_desc" != "$current_desc" ]]; then
+        echo -ne "\033[2K"  # Clear line
+        info "  → Updating description: $pkg"
+        darwin_formulae_desc["$pkg"]="$current_desc"
+        ((packages_updated++))
+      elif [[ -z "$darwin_desc" ]] && [[ -n "$current_desc" ]]; then
+        echo -ne "\033[2K"  # Clear line
+        info "  → Adding missing description: $pkg"
+        darwin_formulae_desc["$pkg"]="$current_desc"
+        ((packages_updated++))
+      fi
+
+      # Check if should be synced to Linux
+      if [[ ! -v "linux_formulae_desc[$pkg]" ]]; then
+        if check_package_in_api "$pkg" "formula"; then
+          echo -ne "\033[2K"  # Clear line
+          info "  → Adding to Linux (cross-platform formula): $pkg"
+          local sync_desc="$current_desc"
+          if [[ -z "$sync_desc" ]]; then
+            sync_desc=$(get_brew_description "$pkg" "formula")
+          fi
+          linux_formulae_desc["$pkg"]="$sync_desc"
+          ((packages_synced++))
+        fi
+      else
+        # Package exists on both platforms, ensure descriptions match
+        local linux_desc="${linux_formulae_desc[$pkg]}"
+        if [[ -n "$current_desc" ]] && [[ "$linux_desc" != "$current_desc" ]]; then
+          echo -ne "\033[2K"  # Clear line
+          info "  → Syncing description (Darwin -> Linux): $pkg"
+          linux_formulae_desc["$pkg"]="$current_desc"
+          ((packages_updated++))
+        fi
+      fi
+    done
+    echo -ne "\033[2K"  # Clear line
+
+    if [[ $formula_issues -eq 0 ]]; then
+      success "All $darwin_formula_count formulae are valid"
+    else
+      warning "Found $formula_issues invalid formula(e)"
+    fi
+
+    # Validate and update Linux formulae
+    info "  ⚗️  Validating Linux formulae..."
+    local -a linux_formula_pkgs=()
+    for pkg in "${!linux_formulae_desc[@]}"; do
+      linux_formula_pkgs+=("$pkg")
+    done
+    if [[ ${#linux_formula_pkgs[@]} -gt 0 ]]; then
+      local sorted_pkgs
+      sorted_pkgs=($(printf '%s\n' "${linux_formula_pkgs[@]}" | sort -f))
+      linux_formula_pkgs=("${sorted_pkgs[@]}")
+    fi
+
+    local linux_formula_count=${#linux_formula_pkgs[@]}
+    local linux_formula_idx=0
+    local linux_formula_issues=0
+
+    for pkg in "${linux_formula_pkgs[@]}"; do
+      ((linux_formula_idx++)) || true
+      echo -ne "    [$linux_formula_idx/$linux_formula_count] Validating ${pkg}...\r"
+
+      # Skip if already processed from Darwin side
+      if [[ -v "darwin_formulae_desc[$pkg]" ]]; then
+        continue
+      fi
+
+      # Check if it's actually a formula
+      if ! brew info --formula "$pkg" &>/dev/null; then
+        echo -ne "\033[2K"  # Clear line
+        if brew info --cask "$pkg" &>/dev/null; then
+          warning "'$pkg' is a cask, not a formula"
+        else
+          warning "'$pkg' is not a valid formula"
+        fi
+        ((linux_formula_issues++))
+        ((issues_found++))
+        continue
+      fi
+
+      # Update description if different or if empty
+      local linux_desc="${linux_formulae_desc[$pkg]}"
+      local current_desc
+      current_desc=$(get_brew_description "$pkg" "formula" 2>/dev/null || true)
+
+      if [[ -n "$current_desc" ]] && [[ "$linux_desc" != "$current_desc" ]]; then
+        echo -ne "\033[2K"  # Clear line
+        info "  → Updating description: $pkg"
+        linux_formulae_desc["$pkg"]="$current_desc"
+        ((packages_updated++))
+      elif [[ -z "$linux_desc" ]] && [[ -n "$current_desc" ]]; then
+        echo -ne "\033[2K"  # Clear line
+        info "  → Adding missing description: $pkg"
+        linux_formulae_desc["$pkg"]="$current_desc"
+        ((packages_updated++))
+      fi
+    done
+    echo -ne "\033[2K"  # Clear line
+
+    if [[ $linux_formula_issues -eq 0 ]]; then
+      success "All $linux_formula_count Linux formulae are valid"
+    else
+      warning "Found $linux_formula_issues invalid Linux formula(e)"
+    fi
+
+    # Update taskfiles if changes were made
+    if [[ $packages_updated -gt 0 || $packages_synced -gt 0 ]]; then
+      info "Writing updates to taskfiles..."
+      update_section_with_descriptions "$darwin_taskfile" "formulae" darwin_formulae_desc
+      update_section_with_descriptions "$darwin_taskfile" "casks" darwin_casks_desc
+      update_section_with_descriptions "$linux_taskfile" "formulae" linux_formulae_desc
+      success "Updated $packages_updated description(s) and synced $packages_synced package(s)"
+    else
+      success "All package info is up to date and packages are valid"
+    fi
+  fi
+  echo ""
+
+  # 3. Compare declared packages to locally installed
+  info "📋 Checking for uninstalled declared packages..."
+  local darwin_taskfile="${darwin_taskfile:-$HOME/.jsh/.taskfiles/darwin/taskfile.yaml}"
+  local linux_taskfile="${linux_taskfile:-$HOME/.jsh/.taskfiles/linux/taskfile.yaml}"
+
+  local current_os_taskfile
+  if [[ "${OSTYPE}" == "darwin"* ]]; then
+    current_os_taskfile="$darwin_taskfile"
+  else
+    current_os_taskfile="$linux_taskfile"
+  fi
+
+  # Find uninstalled packages (declared but not installed)
+  local uninstalled=()
+
+  # Get locally installed packages (explicitly installed only, not dependencies)
+  local installed_formulae
+  local installed_casks
+  installed_formulae=$(brew leaves 2>/dev/null || echo "")
+  if [[ "${OSTYPE}" == "darwin"* ]]; then
+    installed_casks=$(brew list --cask -1 2>/dev/null || echo "")
+  fi
+
+  # Get declared packages
+  local declared_casks
+  if [[ "${OSTYPE}" == "darwin"* ]]; then
+    declared_casks=$(extract_packages "$darwin_taskfile" "casks" | cut -d'|' -f1 | sed 's/^ *//;s/ *$//')
+  fi
+  local declared_formulae
+  local declared_services
+  local declared_links
+  declared_formulae=$(extract_packages "$current_os_taskfile" "formulae" | cut -d'|' -f1 | sed 's/^ *//;s/ *$//')
+  declared_services=$(extract_packages "$current_os_taskfile" "services" | cut -d'|' -f1 | sed 's/^ *//;s/ *$//')
+  declared_links=$(extract_packages "$current_os_taskfile" "links" | cut -d'|' -f1 | sed 's/^ *//;s/ *$//')
+
+  # Check declared formulae to see if they're installed
+  while IFS= read -r pkg; do
+    [[ -z "$pkg" ]] && continue
+
+    # Skip if in services or links (different categories)
+    if echo "$declared_services" | grep -qx "$pkg" || echo "$declared_links" | grep -qx "$pkg"; then
+      continue
+    fi
+
+    # Check if installed
+    if ! echo "$installed_formulae" | grep -qx "$pkg"; then
+      uninstalled+=("formula:$pkg")
+    fi
+  done <<< "$declared_formulae"
+
+  # Check declared casks (macOS only)
+  if [[ "${OSTYPE}" == "darwin"* ]]; then
+    while IFS= read -r pkg; do
+      [[ -z "$pkg" ]] && continue
+
+      # Check if installed
+      if ! echo "$installed_casks" | grep -qx "$pkg"; then
+        uninstalled+=("cask:$pkg")
+      fi
+    done <<< "$declared_casks"
+  fi
+
+  # Interactive prompts for uninstalled packages
+  if [[ ${#uninstalled[@]} -gt 0 ]]; then
+    warning "  Found ${#uninstalled[@]} uninstalled declared package(s):"
+    echo ""
+
+    # List all uninstalled packages first
+    for item in "${uninstalled[@]}"; do
+      local pkg_type="${item%%:*}"
+      local pkg_name="${item#*:}"
+      echo "    - $pkg_name ($pkg_type)"
+    done
+    echo ""
+
+    # Then prompt for each one
+    for item in "${uninstalled[@]}"; do
+      local pkg_type="${item%%:*}"
+      local pkg_name="${item#*:}"
+
+      echo -e "${CYAN}Package:${RESET} $pkg_name (${pkg_type})"
+
+      # Prompt for action
+      local action=""
+      while [[ -z "$action" ]]; do
+        read -r -n 1 -p "  Action? [i]nstall / [r]emove from config / [s]kip (default): " response
+        echo
+
+        case "$response" in
+          i|I)
+            action="install"
+            ;;
+          r|R)
+            action="remove"
+            ;;
+          s|S|"")
+            action="skip"
+            ;;
+          *)
+            warning "  Invalid choice. Please enter 'i', 'r', or 's'"
+            ;;
+        esac
+      done
+
+      case "$action" in
+        install)
+          info "  Installing '$pkg_name'..."
+
+          if [[ "$pkg_type" == "cask" ]]; then
+            brew install --cask "$pkg_name" 2>/dev/null && success "  Installed '$pkg_name'" || warning "  Failed to install '$pkg_name'"
+          else
+            brew install "$pkg_name" 2>/dev/null && success "  Installed '$pkg_name'" || warning "  Failed to install '$pkg_name'"
+          fi
+          ;;
+        remove)
+          info "  Removing '$pkg_name' from configuration..."
+
+          # Save current flag states
+          local saved_is_cask=$IS_CASK
+          local saved_is_service=$IS_SERVICE
+          local saved_as_link=$AS_LINK
+
+          # Set flags based on type
+          IS_CASK=0
+          IS_SERVICE=0
+          AS_LINK=0
+
+          if [[ "$pkg_type" == "cask" ]]; then
+            IS_CASK=1
+          fi
+
+          # Remove from config
+          remove_package "$pkg_name"
+
+          # Restore flag states
+          IS_CASK=$saved_is_cask
+          IS_SERVICE=$saved_is_service
+          AS_LINK=$saved_as_link
+
+          success "  Removed '$pkg_name' from configuration"
+          ;;
+        skip)
+          info "  Skipping '$pkg_name'"
+          ;;
+      esac
+      echo ""
+    done
+  else
+    success "  All declared packages are installed"
+  fi
+  echo ""
+
+  # Summary
+  if [[ $issues_found -eq 0 ]]; then
+    success "All checks passed! No issues found."
+  else
+    warning "Found $issues_found issue(s). Review the output above."
+  fi
 }
 
 # ============================================================================
 # Main Logic
 # ============================================================================
 
-# Route to appropriate command
 case "$COMMAND" in
-  check)
-    brew_check "${REMAINING_ARGS[@]}"
-    exit 0
-    ;;
-  uninstall)
-    brew_uninstall
-    exit 0
-    ;;
   sync)
-    # Check if brew is installed
     if ! command -v brew &>/dev/null; then
-      echo -e "${RED}Error: Homebrew is not installed${RESET}" >&2
-      echo -e "${YELLOW}Sync mode requires brew to fetch package descriptions${RESET}" >&2
+      error "Homebrew is not installed"
+      info "Run: $0 install"
       exit 1
     fi
     sync_formulae
-    exit 0
     ;;
-  align)
-    # Continue to alignment logic below
+  add)
+    if ! command -v brew &>/dev/null; then
+      error "Homebrew is not installed"
+      info "Run: $0 install"
+      exit 1
+    fi
+    if [[ ${#REMAINING_ARGS[@]} -lt 1 ]]; then
+      error "Missing package name"
+      info "Usage: $0 add <name> [--cask|--service|--link]"
+      exit 1
+    fi
+    add_package "${REMAINING_ARGS[0]}"
+    ;;
+  remove)
+    if ! command -v brew &>/dev/null; then
+      error "Homebrew is not installed"
+      exit 1
+    fi
+    if [[ ${#REMAINING_ARGS[@]} -lt 1 ]]; then
+      error "Missing package name"
+      info "Usage: $0 remove <name> [--cask|--service|--link]"
+      exit 1
+    fi
+    remove_package "${REMAINING_ARGS[0]}"
+    ;;
+  install)
+    brew_install
+    ;;
+  uninstall)
+    brew_uninstall
+    ;;
+  check)
+    brew_check "${REMAINING_ARGS[@]}"
     ;;
   *)
-    echo -e "${RED}Error: Unknown command '$COMMAND'${RESET}" >&2
+    error "Unknown command: $COMMAND"
     echo ""
     show_usage
     ;;
 esac
-
-# ============================================================================
-# Align Command - Package alignment logic
-# ============================================================================
-
-echo -e "${CYAN}🔍 Checking Homebrew package alignment...${RESET}\n"
-
-# Check if brew is installed
-if ! command -v brew &>/dev/null; then
-  echo -e "${RED}Error: Homebrew is not installed${RESET}" >&2
-  exit 1
-fi
-
-# Extract declared packages from taskfiles
-echo -e "${CYAN}📋 Reading declared packages from taskfiles...${RESET}"
-DECLARED_FORMULAE=$(extract_packages "$OS_TASKFILE" "formulae")
-DECLARED_CASKS=$(extract_packages "$OS_TASKFILE" "casks")
-
-# Get currently installed packages (only those explicitly requested, not dependencies)
-echo -e "${CYAN}📦 Reading installed packages from Homebrew...${RESET}"
-mapfile -t INSTALLED_FORMULAE_ARRAY < <(brew list --formula --installed-on-request -1 2>/dev/null || true)
-mapfile -t INSTALLED_CASKS_ARRAY < <(brew list --cask -1 2>/dev/null || true)
-
-# Find extra formulae (installed but not declared)
-# Since we're using --installed-on-request, dependencies are already excluded
-EXTRA_FORMULAE=()
-for installed in "${INSTALLED_FORMULAE_ARRAY[@]}"; do
-  if ! echo "$DECLARED_FORMULAE" | grep -qx "$installed"; then
-    EXTRA_FORMULAE+=("$installed")
-  fi
-done
-
-# Find extra casks (installed but not declared)
-EXTRA_CASKS=()
-for installed in "${INSTALLED_CASKS_ARRAY[@]}"; do
-  if ! echo "$DECLARED_CASKS" | grep -qx "$installed"; then
-    EXTRA_CASKS+=("$installed")
-  fi
-done
-
-# Count declared packages
-DECLARED_FORMULAE_COUNT=$(echo "$DECLARED_FORMULAE" | grep -c . || echo 0)
-DECLARED_CASKS_COUNT=$(echo "$DECLARED_CASKS" | grep -c . || echo 0)
-
-# Display results
-echo ""
-echo -e "${GREEN}✓ Declared formulae: ${DECLARED_FORMULAE_COUNT}${RESET}"
-echo -e "${GREEN}✓ Declared casks: ${DECLARED_CASKS_COUNT}${RESET}"
-echo -e "${CYAN}ℹ Installed formulae: ${#INSTALLED_FORMULAE_ARRAY[@]}${RESET}"
-echo -e "${CYAN}ℹ Installed casks: ${#INSTALLED_CASKS_ARRAY[@]}${RESET}"
-
-# Check if there are any extra packages
-TOTAL_EXTRA=$((${#EXTRA_FORMULAE[@]} + ${#EXTRA_CASKS[@]}))
-
-if [[ $TOTAL_EXTRA -eq 0 ]]; then
-  echo ""
-  echo -e "${GREEN}✅ All installed packages are declared in taskfiles!${RESET}"
-  echo -e "${GREEN}   Your system is aligned with IaC.${RESET}"
-  exit 0
-fi
-
-# Display extra packages
-echo ""
-echo -e "${YELLOW}⚠️  Found ${TOTAL_EXTRA} extra package(s) not declared in taskfiles:${RESET}"
-echo ""
-
-if [[ ${#EXTRA_FORMULAE[@]} -gt 0 ]]; then
-  echo -e "${YELLOW}Formulae (${#EXTRA_FORMULAE[@]}):${RESET}"
-  for pkg in "${EXTRA_FORMULAE[@]}"; do
-    echo "  - $pkg"
-  done
-  echo ""
-fi
-
-if [[ ${#EXTRA_CASKS[@]} -gt 0 ]]; then
-  echo -e "${YELLOW}Casks (${#EXTRA_CASKS[@]}):${RESET}"
-  for pkg in "${EXTRA_CASKS[@]}"; do
-    echo "  - $pkg"
-  done
-  echo ""
-fi
-
-if [[ $INTERACTIVE -eq 1 ]]; then
-  echo -e "${CYAN}🧭 Interactive mode: launching TUI...${RESET}"
-  echo ""
-  interactive_tui EXTRA_FORMULAE EXTRA_CASKS
-  echo ""
-  echo -e "${GREEN}Interactive session complete.${RESET}"
-else
-  # Prompt user for action (non-interactive batch mode)
-  echo -ne "${CYAN}Would you like to uninstall these packages to align with IaC declarations? [y/N] ${RESET}"
-  read -rsn1 REPLY
-  echo  # Newline after response
-
-  if [[ "$REPLY" != "y" && "$REPLY" != "Y" ]]; then
-    echo -e "${YELLOW}Skipping package removal.${RESET}"
-    exit 0
-  fi
-
-  # Uninstall extra packages
-  echo ""
-  echo -e "${CYAN}🗑️  Uninstalling extra packages...${RESET}\n"
-
-  if [[ ${#EXTRA_FORMULAE[@]} -gt 0 ]]; then
-    echo -e "${CYAN}Removing formulae...${RESET}"
-    for pkg in "${EXTRA_FORMULAE[@]}"; do
-      echo -e "  ${RED}✗${RESET} Uninstalling: $pkg"
-      brew uninstall --ignore-dependencies "$pkg" 2>&1 | sed 's/^/    /'
-    done
-    echo ""
-  fi
-
-  if [[ ${#EXTRA_CASKS[@]} -gt 0 ]]; then
-    echo -e "${CYAN}Removing casks...${RESET}"
-    for pkg in "${EXTRA_CASKS[@]}"; do
-      echo -e "  ${RED}✗${RESET} Uninstalling: $pkg"
-      brew uninstall --cask "$pkg" 2>&1 | sed 's/^/    /'
-    done
-    echo ""
-  fi
-
-  # Update cache after package changes
-  update_brew_cache
-fi
-
-echo -e "${GREEN}✅ Package cleanup complete!${RESET}"
-echo -e "${GREEN}   Your system is now aligned with IaC.${RESET}"
-
-# Optionally run brew cleanup to remove old versions
-echo ""
-echo -ne "${CYAN}Run 'brew cleanup' to remove old package versions? [y/N] ${RESET}"
-read -rsn1 CLEANUP
-echo  # Newline after response
-
-if [[ "$CLEANUP" == "y" || "$CLEANUP" == "Y" ]]; then
-  echo -e "${CYAN}🧹 Running brew cleanup...${RESET}"
-  brew cleanup
-  echo -e "${GREEN}✅ Cleanup complete!${RESET}"
-fi
