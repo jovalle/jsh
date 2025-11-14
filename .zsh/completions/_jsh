@@ -1,0 +1,268 @@
+#compdef jsh
+# shellcheck shell=bash
+# shellcheck disable=SC2207,SC2296,SC2034,SC2154,SC2206,SC2155,SC2128,SC1087
+# SC2207: zsh array syntax differs from bash
+# SC2296: zsh parameter expansion syntax
+# SC2034: variables used by zsh completion system
+# SC2154: variables provided by zsh completion system
+# SC2206: word splitting is intentional for zsh arrays
+# SC2155: declare and assign separately - acceptable in completions
+# SC2128: zsh array subscripting syntax differs from bash
+# SC1087: zsh uses $var[idx] not ${var[idx]}
+
+# ============================================================================
+# jsh - Zsh Completion
+# ============================================================================
+# Tab completion for the jsh CLI
+# Dynamically extracts commands from the jsh script to stay synchronized
+# ============================================================================
+
+_jsh() {
+    local curcontext="$curcontext" state line
+    typeset -A opt_args
+
+    # Dynamically extract commands from the jsh help output
+    local -a commands
+    local jsh_path
+
+    # Find jsh in PATH
+    jsh_path=$(command -v jsh 2>/dev/null)
+
+    if [[ -n "$jsh_path" ]]; then
+        # Extract commands from help output
+        # Strip ANSI codes and parse command:description pairs
+        commands=(${(f)"$(
+            "$jsh_path" help 2>/dev/null | \
+            perl -pe 's/\e\[[0-9;]*m//g' | \
+            awk '/^COMMANDS:/,/^EXAMPLES:/ {
+                if ($1 ~ /^[a-z]/) {
+                    desc = $0
+                    sub(/^[ \t]+/, "", desc)
+                    cmd = $1
+                    sub(/^[^ \t]+[ \t]+/, "", desc)
+                    print cmd ":" desc
+                }
+            }'
+        )"})
+    fi
+
+    # Fallback to basic commands if dynamic extraction fails
+    if [[ ${#commands[@]} -eq 0 ]]; then
+        commands=(
+            'init:Initialize jsh environment'
+            'update:Update all packages and plugins'
+            'uninstall:Remove jsh dotfiles'
+            'sync:Run brew align'
+            'status:Show system status'
+            'doctor:Run diagnostics'
+            'clean:Clean up caches'
+            'backup:Backup configuration'
+            'restore:Restore configuration'
+            'list:List packages'
+            'link:Deploy dotfiles'
+            'unlink:Remove symlinks'
+            'mount:Mount SMB shares'
+            'version:Show version'
+            'help:Show help'
+        )
+    fi
+
+    _arguments -C \
+        '1: :->command' \
+        '*::arg:->args'
+
+    case $state in
+        command)
+            _describe -t commands 'jsh commands' commands
+            ;;
+        args)
+            case $words[1] in
+                brew)
+                    _jsh_brew
+                    ;;
+                mount)
+                    _jsh_mount
+                    ;;
+                restore)
+                    _jsh_restore
+                    ;;
+                sync)
+                    _jsh_sync
+                    ;;
+                uninstall)
+                    _jsh_uninstall
+                    ;;
+                check|clean|cleanup)
+                    _arguments \
+                        '--force[Force immediate cache update]'
+                    ;;
+                help|version|-h|--help|-v|--version)
+                    # No additional completions needed
+                    ;;
+                *)
+                    # Generic file completion for other commands
+                    _files
+                    ;;
+            esac
+            ;;
+    esac
+}
+
+_jsh_mount() {
+    local -a mounts
+    local mounts_file="${HOME}/.jsh/.mounts.json"
+
+    # Dynamically extract mount names from .mounts.json if it exists
+    if [[ -f "$mounts_file" ]] && command -v jq &> /dev/null; then
+        # Get mount names and format with descriptions
+        local -a mount_names
+        mount_names=(${(f)"$(jq -r 'keys[]' "$mounts_file" 2>/dev/null)"})
+
+        # Format with descriptions
+        for mount in "${mount_names[@]}"; do
+            mounts+=("${mount}:Mount ${mount} share")
+        done
+    fi
+
+    # Fallback: if no mounts found, just allow any text
+    if [[ ${#mounts[@]} -eq 0 ]]; then
+        _message "mount name"
+        return
+    fi
+
+    _describe -t mounts 'available mounts' mounts
+}
+
+_jsh_restore() {
+    local backup_dir="${HOME}/.jsh-backups"
+    local -a backups
+
+    # Add 'latest' option
+    backups=('latest:Restore from the most recent backup')
+
+    # List available backups
+    if [[ -d "$backup_dir" ]]; then
+        local -a backup_dirs
+        backup_dirs=(${(f)"$(find "$backup_dir" -maxdepth 1 -type d -name 'jsh_*' 2>/dev/null | sort -r)"})
+
+        for backup in "${backup_dirs[@]}"; do
+            local backup_name=$(basename "$backup")
+            local backup_date=$(echo "$backup_name" | sed 's/jsh_//' | sed 's/_/ /' | sed 's/\([0-9]\{4\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)/\1-\2-\3/')
+            backups+=("${backup_name}:Backup from ${backup_date}")
+        done
+    fi
+
+    _describe -t backups 'available backups' backups
+}
+
+_jsh_brew() {
+    local -a brew_commands
+    local brew_script="${HOME}/.jsh/scripts/unix/brew.sh"
+
+    # Dynamically extract brew commands from the main case statement in brew.sh
+    if [[ -f "$brew_script" ]]; then
+        brew_commands=(${(f)"$(
+            awk '
+                /^case.*COMMAND.*in/ { in_case=1; next }
+                in_case && /^esac/ { exit }
+                in_case && /^  [a-z-]+\)/ {
+                    gsub(/^  /, "")
+                    gsub(/\).*$/, "")
+                    print $0 ":Homebrew " $0 " command"
+                }
+            ' "$brew_script"
+        )"})
+    fi
+
+    # Fallback to basic commands if dynamic extraction fails
+    if [[ ${#brew_commands[@]} -eq 0 ]]; then
+        brew_commands=(
+            'add:Add package to configuration'
+            'remove:Remove package from configuration'
+            'sync:Synchronize formulae between Darwin and Linux'
+            'check:Check for outdated packages'
+            'install:Install Homebrew/Linuxbrew'
+            'uninstall:Uninstall Homebrew/Linuxbrew'
+        )
+    fi
+
+    local curcontext="$curcontext" state line
+    typeset -A opt_args
+
+    _arguments -C \
+        '1: :->subcmd' \
+        '*:: :->args'
+
+    case $state in
+        subcmd)
+            _describe -t brew-commands 'brew subcommand' brew_commands
+            ;;
+        args)
+            case $line[1] in
+                add)
+                    _jsh_brew_add
+                    ;;
+                remove|rm)
+                    _jsh_brew_remove
+                    ;;
+                sync)
+                    _arguments \
+                        '(-d --dry-run)'{-d,--dry-run}'[Show what would be changed without modifying files]' \
+                        '(-f --force)'{-f,--force}'[Force update all package descriptions]'
+                    ;;
+                check)
+                    _arguments \
+                        '--force[Force immediate cache update]'
+                    ;;
+                uninstall)
+                    _arguments \
+                        '--force-wipe[Remove all packages, services, and links before uninstalling]'
+                    ;;
+                *)
+                    # No additional completions
+                    ;;
+            esac
+            ;;
+    esac
+}
+
+_jsh_brew_add() {
+    _arguments \
+        '(-y --yes)'{-y,--yes}'[Skip confirmation prompts]' \
+        '--cask[Treat package as a cask (GUI application)]' \
+        '--service[Install as a service (auto-start)]' \
+        '--link[Create link for formula]' \
+        '1:package name:'
+}
+
+_jsh_brew_remove() {
+    local -a packages
+
+    # Get installed formulae and casks
+    if command -v brew &>/dev/null; then
+        packages=(
+            ${(f)"$(brew list --formula 2>/dev/null)"}
+            ${(f)"$(brew list --cask 2>/dev/null)"}
+        )
+    fi
+
+    _arguments \
+        '(-y --yes)'{-y,--yes}'[Skip confirmation prompts]' \
+        '--cask[Treat package as a cask]' \
+        '--service[Stop and remove service]' \
+        '--link[Remove link for formula]' \
+        "1:package:($packages)"
+}
+
+_jsh_sync() {
+    _arguments \
+        '(-d --dry-run)'{-d,--dry-run}'[Show what would be changed without modifying files]' \
+        '(-f --force)'{-f,--force}'[Force update all package descriptions]'
+}
+
+_jsh_uninstall() {
+    _arguments \
+        '--keep-packages[Keep installed packages when uninstalling]'
+}
+
+_jsh "$@"
