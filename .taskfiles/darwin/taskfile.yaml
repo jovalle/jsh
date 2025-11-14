@@ -4,6 +4,7 @@
 tasks:
   configure:
     cmds:
+      - task: configure-ghostty
       - echo "⚠️  The following apps need to be launched first before they can be configured:"
       - echo ""
       - echo "🦊 Firefox - Open the app, then run:"
@@ -24,6 +25,12 @@ tasks:
       FF_DIR:
         sh: 'find $HOME/Library/Application\ Support/Firefox/Profiles -type d -name "*.default-release"'
 
+  configure-ghostty:
+    cmd: bash $HOME/.jsh/scripts/macos/configure-ghostty-aliases.sh
+    desc: Create launcher apps for Ghostty (Term.app and Terminal.app)
+    preconditions:
+      - test -d /Applications/Ghostty.app
+
   configure-vscode:
     cmds:
       - ln -sf $HOME/.jsh/configs/vscode/keybindings.json "$HOME/Library/Application Support/Code/User/keybindings.json"
@@ -43,9 +50,7 @@ tasks:
 vars:
   casks:
     - caffeine # Utility that prevents the system from going to sleep
-    - firefox # Web browser
-    - font-jetbrains-mono-nerd-font
-    - google-chrome # Web browser
+    - ghostty # Fast, feature-rich, and cross-platform terminal emulator
     - macfuse # File system integration
     - mounty # Re-mounts write-protected NTFS volumes
     - sublime-text # Text editor for code, markup and prose
