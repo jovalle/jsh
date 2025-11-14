@@ -64,11 +64,11 @@ vars:
     - Brave.Brave # Secure, fast & private web browser with ad blocker
     - Chocolatey.Chocolatey # Software management automation for Windows
     - Doist.Todoist # To-do list and task manager
-    - DuckDuckGo.DesktopBrowser # Privacy-focused web browser
     - Git.Git # Distributed version control system
     - Microsoft.PowerToys # Set of utilities for power users
     - Microsoft.VisualStudioCode # Code editor redefined and optimized for building and debugging
     - Microsoft.WindowsTerminal # Modern terminal application for command-line tools
+    - Mozilla.Firefox # Web browser
     - Rufus.Rufus # Create bootable USB drives the easy way
     - Syncthing.Syncthing # Open source continuous file synchronization
     - Zoom.Zoom # Video conferencing and web conferencing service
