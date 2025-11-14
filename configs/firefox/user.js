@@ -140,6 +140,7 @@ user_pref('toolkit.telemetry.firstShutdownPing.enabled', false);
 user_pref('toolkit.telemetry.coverage.opt-out', true);
 user_pref('toolkit.coverage.opt-out', true);
 user_pref('toolkit.coverage.endpoint.base', '');
+user_pref('toolkit.telemetry.dailyPing.enabled', false);
 user_pref('browser.newtabpage.activity-stream.feeds.telemetry', false);
 user_pref('browser.newtabpage.activity-stream.telemetry', false);
 
@@ -260,6 +261,21 @@ user_pref('network.trr.excluded-domains', 'techn.is,go');
 /** CUSTOM DOMAINS **/
 user_pref('browser.fixup.domainwhitelist.go', true);
 
+/** FIREFOX SYNC **/
+// Enable Firefox Sync (requires manual sign-in)
+user_pref('identity.fxaccounts.enabled', true);
+user_pref('services.sync.enabled', true);
+
+// Control what syncs
+user_pref('services.sync.engine.addons', true);
+user_pref('services.sync.engine.bookmarks', true);
+user_pref('services.sync.engine.history', false);
+user_pref('services.sync.engine.passwords', false);
+user_pref('services.sync.engine.prefs', false);
+user_pref('services.sync.engine.tabs', true);
+user_pref('services.sync.engine.creditcards', false);
+user_pref('services.sync.engine.addresses', false);
+
 /** ENHANCED PRIVACY **/
 // Fingerprinting protection
 user_pref('privacy.resistFingerprinting', true);
@@ -351,7 +367,8 @@ user_pref('media.peerconnection.enabled', false);
 user_pref('dom.event.clipboardevents.enabled', false);
 
 /** QUALITY OF LIFE **/
-// Popup window sizing (allow extensions like Bitwarden to size windows correctly)
+// Popup window sizing
+// (allow extensions like Bitwarden to size windows correctly)
 user_pref('dom.disable_window_open_feature.width', false);
 user_pref('dom.disable_window_open_feature.height', false);
 user_pref('dom.disable_window_open_feature.status', false);
@@ -375,7 +392,7 @@ user_pref('browser.newtabpage.activity-stream.showSearch', false);
 user_pref('browser.newtabpage.activity-stream.showSponsored', false);
 user_pref('browser.newtabpage.activity-stream.showSponsoredTopSites', false);
 user_pref('browser.newtabpage.activity-stream.showWeather', false);
-user_pref('browser.startup.homepage', 'about:blank', false);
+user_pref('browser.startup.homepage', 'about:blank', true);
 
 /****************************************************************************
  * SECTION: SMOOTHFOX                                                       *

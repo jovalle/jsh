@@ -66,7 +66,7 @@ init_config() {
 
     if [[ "${CREATE_SAMPLE}" =~ ^[Nn]$ ]]; then
       # Create minimal config
-      cat > "${CONFIG_FILE}" <<'EOF'
+      cat > "${CONFIG_FILE}" << 'EOF'
 {
   "credentials": {},
   "mounts": {}
@@ -76,7 +76,7 @@ EOF
       echo "✓ Created minimal config file: ${CONFIG_FILE}"
     else
       # Create sample config with documentation
-      cat > "${CONFIG_FILE}" <<'EOF'
+      cat > "${CONFIG_FILE}" << 'EOF'
 {
   "_comment": "SMB/CIFS Mounts Configuration",
   "_documentation": {
@@ -176,7 +176,7 @@ save_config() {
   local username="$5"
   local password="$6"
 
-  python3 <<PYTHON_EOF
+  python3 << PYTHON_EOF
 import json
 import sys
 
@@ -260,7 +260,7 @@ fi
 
 # Check if already configured or mounted
 IS_CONFIGURED=false
-if [[ "${IS_MACOS}" == false ]] && grep -q "${MOUNT_POINT}" /etc/fstab 2>/dev/null; then
+if [[ "${IS_MACOS}" == false ]] && grep -q "${MOUNT_POINT}" /etc/fstab 2> /dev/null; then
   IS_CONFIGURED=true
   echo "✓ Mount already configured in /etc/fstab for ${MOUNT_POINT}"
 elif mount | grep -q " on ${MOUNT_POINT} "; then
@@ -382,7 +382,7 @@ else
   fi
 fi
 
-  # Save configuration
+# Save configuration
 save_config "${MOUNT_NAME}" "${SMB_SHARE}" "${MOUNT_POINT}" "${CREDENTIAL_NAME}" "${SMB_USER}" "${SMB_PASS}"
 
 if [[ "${IS_MACOS}" == false ]]; then
@@ -412,7 +412,7 @@ if [[ "${IS_MACOS}" == false ]]; then
   fi
 
   # Update fstab entry
-  if grep -q "${MOUNT_POINT}" /etc/fstab 2>/dev/null; then
+  if grep -q "${MOUNT_POINT}" /etc/fstab 2> /dev/null; then
     echo "Updating /etc/fstab entry..."
     # Unmount if currently mounted
     if mount | grep -q " on ${MOUNT_POINT} "; then
@@ -430,7 +430,7 @@ if [[ "${IS_MACOS}" == false ]]; then
 
   # Mount the share
   echo "Mounting ${SMB_SHARE} to ${MOUNT_POINT}..."
-  if sudo mount "${MOUNT_POINT}" 2>/dev/null; then
+  if sudo mount "${MOUNT_POINT}" 2> /dev/null; then
     echo "✓ Successfully mounted"
     df -h "${MOUNT_POINT}"
   else
@@ -450,7 +450,7 @@ else
   # Unmount if currently mounted
   if mount | grep -q " on ${MOUNT_POINT} "; then
     echo "Unmounting existing mount..."
-    umount "${MOUNT_POINT}" 2>/dev/null || sudo umount "${MOUNT_POINT}"
+    umount "${MOUNT_POINT}" 2> /dev/null || sudo umount "${MOUNT_POINT}"
   fi
 
   # Create mount point if it doesn't exist (do this right before mounting)
@@ -464,7 +464,7 @@ else
 
   # Mount the share using mount_smbfs
   echo "Mounting ${SMB_SHARE} to ${MOUNT_POINT}..."
-  if mount_smbfs "${MOUNT_URL}" "${MOUNT_POINT}" 2>/dev/null; then
+  if mount_smbfs "${MOUNT_URL}" "${MOUNT_POINT}" 2> /dev/null; then
     echo "✓ Successfully mounted"
     df -h "${MOUNT_POINT}"
   else
@@ -486,7 +486,7 @@ else
     # Create generic mount script if it doesn't exist
     if [[ ! -f "${MOUNT_SCRIPT}" ]]; then
       echo "Creating mount script: ${MOUNT_SCRIPT}"
-      cat > "${MOUNT_SCRIPT}" <<'SCRIPT_EOF'
+      cat > "${MOUNT_SCRIPT}" << 'SCRIPT_EOF'
 #!/usr/bin/env bash
 # Generic auto-mount script for SMB shares
 
@@ -563,7 +563,7 @@ SCRIPT_EOF
 
     # Create LaunchAgent plist
     echo "Creating LaunchAgent: ${AGENT_PLIST}"
-    cat > "${AGENT_PLIST}" <<PLIST_EOF
+    cat > "${AGENT_PLIST}" << PLIST_EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -590,8 +590,8 @@ PLIST_EOF
     echo "✓ Created LaunchAgent plist"
 
     # Load the LaunchAgent
-    launchctl unload "${AGENT_PLIST}" 2>/dev/null
-    if launchctl load "${AGENT_PLIST}" 2>/dev/null; then
+    launchctl unload "${AGENT_PLIST}" 2> /dev/null
+    if launchctl load "${AGENT_PLIST}" 2> /dev/null; then
       echo "✓ LaunchAgent loaded and will run at login"
       echo ""
       echo "The mount will automatically reconnect:"

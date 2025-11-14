@@ -1,0 +1,94 @@
+{
+  "policies": {
+    "DisableDefaultBrowserAgent": true,
+    "DisableFeedbackCommands": true,
+    "DisableFirefoxStudies": true,
+    "DisableFormHistory": true,
+    "DisablePocket": true,
+    "DisableSystemAddonUpdate": true,
+    "DisableTelemetry": true,
+    "DisplayBookmarksToolbar": "never",
+    "DisplayMenuBar": "default-off",
+    "DontCheckDefaultBrowser": true,
+    "EnableTrackingProtection": {
+      "Value": true,
+      "Locked": false,
+      "Cryptomining": true,
+      "Fingerprinting": true,
+      "EmailTracking": true
+    },
+    "FirefoxHome": {
+      "Search": false,
+      "TopSites": false,
+      "SponsoredTopSites": false,
+      "Highlights": false,
+      "Pocket": false,
+      "SponsoredPocket": false,
+      "Snippets": false,
+      "Locked": false
+    },
+    "FirefoxSuggest": {
+      "WebSuggestions": false,
+      "SponsoredSuggestions": false,
+      "ImproveSuggest": false,
+      "Locked": false
+    },
+    "Homepage": {
+      "URL": "about:blank",
+      "Locked": false,
+      "StartPage": "none"
+    },
+    "NewTabPage": false,
+    "NoDefaultBookmarks": true,
+    "OfferToSaveLogins": false,
+    "OfferToSaveLoginsDefault": false,
+    "OverrideFirstRunPage": "",
+    "OverridePostUpdatePage": "",
+    "PasswordManagerEnabled": false,
+    "PDFjs": {
+      "Enabled": true,
+      "EnablePermissions": false
+    },
+    "Permissions": {
+      "Camera": {
+        "BlockNewRequests": true,
+        "Locked": false
+      },
+      "Microphone": {
+        "BlockNewRequests": true,
+        "Locked": false
+      },
+      "Location": {
+        "BlockNewRequests": true,
+        "Locked": false
+      },
+      "Notifications": {
+        "BlockNewRequests": true,
+        "Locked": false
+      },
+      "Autoplay": {
+        "Default": "block-audio-video",
+        "Locked": false
+      },
+      "VirtualReality": {
+        "BlockNewRequests": true,
+        "Locked": false
+      }
+    },
+    "PromptForDownloadLocation": true,
+    "SearchEngines": {
+      "Default": "DuckDuckGo"
+    },
+    "SearchSuggestEnabled": false,
+    "DisableFirefoxAccounts": false,
+    "UserMessaging": {
+      "WhatsNew": false,
+      "ExtensionRecommendations": false,
+      "FeatureRecommendations": false,
+      "UrlbarInterventions": false,
+      "SkipOnboarding": true,
+      "MoreFromMozilla": false,
+      "Locked": false
+    }
+  }
+}

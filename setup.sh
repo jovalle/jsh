@@ -46,8 +46,8 @@ REQUIRED_CMDS=(
 
 # Mapping of command names to package names (when they differ)
 declare -A PKG_MAP=(
-  ["node"]="nodejs"      # Node.js runtime (Linux)
-  ["task"]="go-task"     # Task runner
+  ["node"]="nodejs"       # Node.js runtime (Linux)
+  ["task"]="go-task"      # Task runner
   ["timeout"]="coreutils" # GNU coreutils
 )
 

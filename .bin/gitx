@@ -5,11 +5,15 @@
 set -eou pipefail
 IFS=$'\n\t'
 
-abort() { echo; echo "\033[31m$*\033[0m" 1>&2; exit 1 ; }
-error() { echo -e "\033[31m$*\033[0m" ; }
-warn() { echo -e "\033[33m$*\033[0m" ; }
-success() { echo -e "\033[32m$*\033[0m" ; }
-info() { echo -e "\033[34m$*\033[0m" ; }
+abort() {
+  echo
+  echo "\033[31m$*\033[0m" 1>&2
+  exit 1
+}
+error() { echo -e "\033[31m$*\033[0m"; }
+warn() { echo -e "\033[33m$*\033[0m"; }
+success() { echo -e "\033[32m$*\033[0m"; }
+info() { echo -e "\033[34m$*\033[0m"; }
 usage() {
   error "Usage: git update|<git_command>"
   exit 1
@@ -61,12 +65,15 @@ case "$1" in
         exit 1
       fi
 
-      pushd "$repo" >/dev/null || exit 1
+      pushd "$repo" > /dev/null || exit 1
 
       # Stash changes if any (including untracked)
       stash_applied=false
       if ! git diff --quiet || ! git diff --cached --quiet || [ -n "$(git ls-files --others --exclude-standard)" ]; then
-        git stash push -u -m "Auto-stash before update $(date +%Y-%m-%dT%H:%M:%S)" || { popd >/dev/null; exit 1; }
+        git stash push -u -m "Auto-stash before update $(date +%Y-%m-%dT%H:%M:%S)" || {
+          popd > /dev/null
+          exit 1
+        }
         stash_applied=true
       fi
 
@@ -80,23 +87,29 @@ case "$1" in
       done
       if [ -z "$branch" ]; then
         echo "No common upstream branch (master/main/develop) found."
-        popd >/dev/null
+        popd > /dev/null
         exit 1
       fi
-      git checkout "$branch" || { popd >/dev/null; exit 1; }
+      git checkout "$branch" || {
+        popd > /dev/null
+        exit 1
+      }
 
       # Pull latest
-      git pull || { popd >/dev/null; exit 1; }
+      git pull || {
+        popd > /dev/null
+        exit 1
+      }
 
       # Apply stash if it was created
       if [ "$stash_applied" = true ]; then
-        git stash list | grep 'Auto-stash before update' >/dev/null && git stash pop
+        git stash list | grep 'Auto-stash before update' > /dev/null && git stash pop
         if [ $? -ne 0 ]; then
           echo "Conflicts occurred when applying stash. Please resolve them manually."
         fi
       fi
 
-      popd >/dev/null
+      popd > /dev/null
     done
     ;;
   *)
@@ -108,9 +121,9 @@ case "$1" in
         continue
       fi
       warn "git $*"
-      pushd "$repo" >/dev/null || exit 1
+      pushd "$repo" > /dev/null || exit 1
       git "$@"
-      popd >/dev/null || exit 1
+      popd > /dev/null || exit 1
     done
     ;;
 esac

@@ -2,8 +2,12 @@
 export default [
   {
     files: ['**/*.js'],
+    ignores: ['node_modules/**', '.git/**', '.vscode/**', '.config/nvim/**'],
+  },
+  {
+    files: ['eslint.config.js', 'scripts/**/*.js', 'configs/**/*.js'],
     languageOptions: {
-      ecmaVersion: 2022,
+      ecmaVersion: 'latest',
       sourceType: 'module',
       globals: {
         // Browser globals
