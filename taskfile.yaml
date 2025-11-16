@@ -19,7 +19,7 @@ tasks:
 
   clean:
     cmd: bash {{.ROOT_DIR}}/scripts/unix/cleanup.sh {{.ROOT_DIR}}
-    desc: Clean up system (sync-conflicts, broken symlinks, brew cache, system cache)
+    desc: Clean up system (sync-conflicts, broken symlinks, caches, etc.)
     interactive: true
 
   configure:
@@ -85,10 +85,11 @@ tasks:
     cmds:
       - |
         echo "🔍 Checking for broken symlinks in home directory..."
-        find ~ -maxdepth 1 -type l ! -exec test -e {} \; -print | while read -r link; do
-          echo "🗑️  Removing broken symlink: $link"
-          rm "$link"
-        done
+        find ~ -maxdepth 1 -type l ! -exec test -e {} \; -print | \
+          while read -r link; do
+            echo "🗑️  Removing broken symlink: $link"
+            rm "$link"
+          done
       - stow -v . --adopt
       - echo "✅ Dotfiles deployed successfully"
     desc: Deploy dotfiles to home directory using GNU stow

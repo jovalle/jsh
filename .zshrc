@@ -483,7 +483,7 @@ dedup_path
 # ---- Brew Update Checker ----
 
 # Check for outdated Homebrew packages
-command -v brew &>/dev/null && "${JSH}/scripts/unix/brew.sh" check
+command -v brew &>/dev/null && jsh brew check --silent
 
 # ============================================================================
 # 9. LOCAL CUSTOMIZATIONS
