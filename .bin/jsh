@@ -22,9 +22,25 @@ readonly BOLD='\033[1m'
 readonly RESET='\033[0m'
 
 # Determine the root directory of the project
-# Assumes this script lives in .bin/ under the project root
-# shellcheck disable=SC2296
-SCRIPT_DIR="$(cd "$(dirname "${(%):-%x}")" && pwd)"
+# This script can be called from anywhere, so we need to find it dynamically
+# First, try to resolve the actual location of this script (following symlinks)
+# shellcheck disable=SC2296  # Zsh-specific parameter expansion
+if [[ -L "${(%):-%x}" ]]; then
+    # If it's a symlink, resolve it
+    # shellcheck disable=SC2296  # Zsh-specific parameter expansion
+    SCRIPT_PATH="$(readlink "${(%):-%x}")"
+    # If readlink returned a relative path, make it absolute
+    if [[ "$SCRIPT_PATH" != /* ]]; then
+        # shellcheck disable=SC2296  # Zsh-specific parameter expansion
+        SCRIPT_PATH="$(cd "$(dirname "${(%):-%x}")" && cd "$(dirname "$SCRIPT_PATH")" && pwd)/$(basename "$SCRIPT_PATH")"
+    fi
+else
+    # shellcheck disable=SC2296  # Zsh-specific parameter expansion
+    SCRIPT_PATH="${(%):-%x}"
+fi
+
+# Now get the directory containing the script
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # ============================================================================
@@ -147,7 +163,7 @@ cmd_version() {
 cmd_init() {
     header "Initializing jsh environment"
 
-    info "Step 1/5: Running setup script"
+    info "Step 1/4: Running setup script"
     if [[ -f "${ROOT_DIR}/setup.sh" ]]; then
         "${ROOT_DIR}/setup.sh"
     else
@@ -155,7 +171,7 @@ cmd_init() {
         return 1
     fi
 
-    info "Step 2/5: Running task setup"
+    info "Step 2/4: Running task setup"
     if ! cmd_exists task; then
         error "Task is not installed. Run setup.sh first."
         return 1
@@ -167,15 +183,13 @@ cmd_init() {
     }
     task --taskfile taskfile.yaml setup
 
-    info "Step 3/5: Validating symlinks"
+    info "Step 3/4: Validating symlinks"
     validate_symlinks
 
-    info "Step 4/5: Validating configurations"
+    info "Step 4/4: Validating configurations"
     validate_configs
 
-    info "Step 5/5: Reloading shell"
     success "jsh initialization complete!"
-    warning "Please reload your shell or run: exec zsh"
 }
 
 cmd_update() {

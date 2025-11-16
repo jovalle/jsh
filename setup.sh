@@ -30,13 +30,7 @@ fi
 
 REQUIRED_CMDS=(
   curl
-  direnv
-  fzf
-  git
-  jq
   make
-  node
-  pipx
   python
   stow
   task
@@ -47,7 +41,6 @@ REQUIRED_CMDS=(
 
 # Mapping of command names to package names (when they differ)
 declare -A PKG_MAP=(
-  ["node"]="nodejs"       # Node.js runtime (Linux)
   ["task"]="go-task"      # Task runner
   ["timeout"]="coreutils" # GNU coreutils
 )
@@ -64,3 +57,21 @@ for cmd in "${REQUIRED_CMDS[@]}"; do
     echo "Command '${cmd}' is already installed."
   fi
 done
+
+echo ""
+echo "📦 Deploying dotfiles with stow..."
+stow -v . --adopt || {
+  echo "⚠️  Warning: stow encountered issues. Some dotfiles may need manual review."
+}
+
+echo ""
+echo "✅ Setup complete!"
+echo ""
+echo "📋 Next steps:"
+echo "  1. Reload your shell to load the new configuration:"
+echo "       exec zsh"
+echo "  2. The 'jsh' command will now be available globally. Run:"
+echo "       jsh init"
+echo ""
+echo "💡 Note: 'jsh' works from any directory after the shell is reloaded."
+echo ""

@@ -61,8 +61,10 @@ vars:
     - cloudflared # Cloudflare Tunnel client (formerly Argo Tunnel)
     - coreutils # GNU File, Shell, and Text utilities
     - curl # Get a file from an HTTP, HTTPS or FTP server
+    - diffutils # GNU diff utilities
     - direnv # Load/unload environment variables based on $PWD
     - docker # Pack, ship and run any application as a lightweight container
+    - dos2unix # Convert text between DOS, UNIX, and Mac formats
     - exiftool # Perl lib for reading and writing EXIF metadata
     - eza # Modern, maintained replacement for ls
     - fastfetch # Like neofetch, but much faster because written mostly in C

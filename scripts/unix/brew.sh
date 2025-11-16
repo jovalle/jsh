@@ -1025,9 +1025,18 @@ sync_formulae() {
   if [[ ${#packages_to_update[@]} -gt 0 ]]; then
     warning "Found ${#packages_to_update[@]} package(s) with mismatched descriptions:"
     for pkg in "${packages_to_update[@]}"; do
+      local darwin_desc="${darwin_formulae_desc[$pkg]}"
+      local linux_desc="${linux_formulae_desc[$pkg]}"
+      # Strip delimiter artifacts for display
+      darwin_desc="${darwin_desc#|||}"
+      darwin_desc="${darwin_desc#||}"
+      darwin_desc="${darwin_desc#|}"
+      linux_desc="${linux_desc#|||}"
+      linux_desc="${linux_desc#||}"
+      linux_desc="${linux_desc#|}"
       echo "  - $pkg"
-      echo "    Darwin: ${darwin_formulae_desc[$pkg]}"
-      echo "    Linux:  ${linux_formulae_desc[$pkg]}"
+      echo "    Darwin: ${darwin_desc}"
+      echo "    Linux:  ${linux_desc}"
     done
     echo ""
   fi
@@ -1172,6 +1181,12 @@ sync_formulae() {
   success "Synchronization complete!"
   info "Both taskfiles have been updated, sorted, and commented."
   info "Review changes with: git diff"
+
+  # Run comprehensive check if --force flag was provided
+  if [[ $FORCE_UPDATE -eq 1 ]]; then
+    echo ""
+    brew_check --force
+  fi
 }
 
 # Update the formulae section in a taskfile
@@ -1326,7 +1341,7 @@ update_formulae_section() {
 
   rm -f "$tmp"
 
-  success "  Updated $file"
+  success "Updated $file"
 }
 
 # Update a section with descriptions from an associative array
@@ -1427,7 +1442,7 @@ update_section_with_descriptions() {
 
   rm -f "$tmp"
 
-  success "  Updated $file - $section"
+  success "Updated $file - $section"
 }
 
 # ============================================================================

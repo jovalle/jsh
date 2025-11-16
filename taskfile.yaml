@@ -41,8 +41,6 @@ tasks:
       - task: install-formulae
       - task: os:install
       - task: start-services
-      - cmd: "{{.ROOT_DIR}}/scripts/unix/brew.sh check --force"
-        ignore_error: true
     desc: Install OS specific packages and Homebrew packages
 
   install-casks:
