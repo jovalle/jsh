@@ -68,9 +68,9 @@ check-tools: ## Check if required tools are installed
 
 ##@ Formatting
 
-format: format-shell format-python format-yaml format-json format-markdown ## Format all files
+fmt: fmt-shell fmt-python fmt-yaml fmt-json fmt-markdown ## Format all files
 
-format-shell: ## Format shell scripts
+fmt-shell: ## Format shell scripts
 	@echo -e "$(CYAN)Formatting shell scripts...$(RESET)"
 	@if [ -n "$(SHELL_FILES)" ]; then \
 		shfmt -w -i 2 -ci -sr $(SHELL_FILES) && \
@@ -79,7 +79,7 @@ format-shell: ## Format shell scripts
 		echo -e "$(YELLOW)No shell files found$(RESET)"; \
 	fi
 
-format-python: ## Format Python files
+fmt-python: ## Format Python files
 	@echo -e "$(CYAN)Formatting Python files...$(RESET)"
 	@if [ -n "$(PYTHON_FILES)" ]; then \
 		black --line-length 100 $(PYTHON_FILES) && \
@@ -88,7 +88,7 @@ format-python: ## Format Python files
 		echo -e "$(YELLOW)No Python files found$(RESET)"; \
 	fi
 
-format-yaml: ## Format YAML files
+fmt-yaml: ## Format YAML files
 	@echo -e "$(CYAN)Formatting YAML files...$(RESET)"
 	@if [ -n "$(YAML_FILES)" ]; then \
 		prettier --write --print-width 100 $(YAML_FILES) && \
@@ -97,7 +97,7 @@ format-yaml: ## Format YAML files
 		echo -e "$(YELLOW)No YAML files found$(RESET)"; \
 	fi
 
-format-json: ## Format JSON files
+fmt-json: ## Format JSON files
 	@echo -e "$(CYAN)Formatting JSON files...$(RESET)"
 	@if [ -n "$(JSON_FILES)" ]; then \
 		prettier --write $(JSON_FILES) && \
@@ -106,7 +106,7 @@ format-json: ## Format JSON files
 		echo -e "$(YELLOW)No JSON files found$(RESET)"; \
 	fi
 
-format-markdown: ## Format Markdown files
+fmt-markdown: ## Format Markdown files
 	@echo -e "$(CYAN)Formatting Markdown files...$(RESET)"
 	@if [ -n "$(MD_FILES)" ]; then \
 		prettier --write --prose-wrap always $(MD_FILES) && \
@@ -158,7 +158,7 @@ check-yaml-syntax: ## Check YAML syntax
 	@if [ -n "$(YAML_FILES)" ]; then \
 		errors=0; \
 		for file in $(YAML_FILES); do \
-			$(PYTHON) -c "import yaml; yaml.safe_load(open('$$file'))" 2>&1 || errors=$$((errors + 1)); \
+			yamllint -d relaxed "$$file" 2>&1 || errors=$$((errors + 1)); \
 		done; \
 		if [ $$errors -eq 0 ]; then \
 			echo -e "$(GREEN)✓ All YAML files have valid syntax$(RESET)"; \

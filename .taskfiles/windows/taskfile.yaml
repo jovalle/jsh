@@ -4,6 +4,7 @@
 tasks:
   configure:
     cmds:
+      - echo ""
       - echo "⚠️  The following apps need to be launched first before they can be configured:"
       - echo ""
       - echo "📦 VSCode - Open the app, then run:"

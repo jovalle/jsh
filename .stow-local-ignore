@@ -1,10 +1,16 @@
 # Ignore all non-dotfiles (files/dirs not starting with .)
+
 ^[^.].*
 
 # Ignore markdown files (including dotfiles with .md anywhere)
+
 \.md$
 
 # Ignore specific dotfiles that should stay in .jsh
+
+^\.bin
+^\.envrc
+^\.fzf
 ^\.git
 ^\.gitmodules
 ^\.stow-local-ignore
@@ -12,3 +18,14 @@
 ^\.stfolder
 ^\.DS_Store
 ^\.taskfiles
+
+# Ignore sync conflict files
+
+\.sync-conflict-.*
+
+# Ignore temporary and backup files
+
+~$
+\.bak$
+\.swp$
+\.tmp$

@@ -54,6 +54,25 @@ LINUX_TASKFILE="${ROOT_DIR}/.taskfiles/linux/taskfile.yaml"
 # Helper Functions
 # ============================================================================
 
+# Function to handle CTRL+C gracefully
+SECTION_SKIP=0
+LAST_SIGINT_TIME=0
+trap_sigint() {
+  local current_time
+  current_time=$(date +%s)
+  local time_diff=$((current_time - LAST_SIGINT_TIME))
+
+  # If CTRL+C pressed twice within 2 seconds, exit
+  if [[ $time_diff -lt 2 && $LAST_SIGINT_TIME -ne 0 ]]; then
+    echo -e "\n${RED}❌ Interrupted by user${RESET}"
+    exit 130
+  fi
+
+  LAST_SIGINT_TIME=$current_time
+  SECTION_SKIP=1
+  echo -e "\n${YELLOW}⏭️ Skipping section... (Press CTRL+C again to exit)${RESET}"
+}
+
 # Function to print colored messages
 error() {
   echo -e "${RED}❌ $1${RESET}" >&2
@@ -64,7 +83,7 @@ success() {
 }
 
 warning() {
-  echo -e "${YELLOW}⚠️  $1${RESET}"
+  echo -e "${YELLOW}⚠️ $1${RESET}"
 }
 
 info() {
@@ -119,6 +138,7 @@ IS_CASK=0
 IS_SERVICE=0
 AS_LINK=0
 FORCE_REINSTALL=0
+SILENT_MODE=0
 COMMAND=""
 
 # Show usage
@@ -150,6 +170,7 @@ Uninstall Options:
 
 Check Options:
   --force            Run comprehensive interactive check (validate packages, descriptions, and prompt for undeclared packages)
+  --silent           Suppress all output unless issues are found (useful for shell integrations)
 
 Examples:
   $0 sync
@@ -163,6 +184,7 @@ Examples:
   $0 uninstall --force-wipe
   $0 check                       # Quick check for outdated packages
   $0 check --force               # Comprehensive check with interactive prompts
+  $0 check --silent              # Silent check for shell integrations
 EOF
   exit 0
 }
@@ -212,6 +234,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --link)
       AS_LINK=1
+      shift
+      ;;
+    --silent)
+      SILENT_MODE=1
       shift
       ;;
     -h | --help)
@@ -1190,9 +1216,21 @@ update_formulae_section() {
 
   # Fetch descriptions only for packages that need them
   if [[ ${#packages_to_fetch[@]} -gt 0 ]]; then
-    info "Fetching descriptions for ${#packages_to_fetch[@]} package(s)..."
+    info "Fetching descriptions for ${#packages_to_fetch[@]} package(s)... ${CYAN}(CTRL+C to skip, twice to exit)${RESET}"
+
+    # Enable CTRL+C trap
+    SECTION_SKIP=0
+    trap trap_sigint SIGINT
 
     for pkg in "${packages_to_fetch[@]}"; do
+      # Check if section was skipped
+      if [[ $SECTION_SKIP -eq 1 ]]; then
+        info "Skipped remaining description fetches"
+        trap - SIGINT
+        SECTION_SKIP=0 # Reset flag
+        break
+      fi
+
       local desc
       desc=$(get_brew_description "$pkg" "formula")
       pkg_descriptions[$pkg]="$desc"
@@ -1204,6 +1242,9 @@ update_formulae_section() {
         echo -e "${YELLOW}○${RESET} $pkg (no description)"
       fi
     done
+
+    # Remove trap
+    trap - SIGINT
   else
     info "All descriptions up to date (use --force to refresh)"
   fi
@@ -1497,52 +1538,21 @@ brew_check() {
     force_update=1
   fi
 
-  local BREW_CACHE_DIR="${HOME}/.cache/brew"
-  local BREW_UPDATE_STAMP="${BREW_CACHE_DIR}/last_update_check"
-  local BREW_OUTDATED_COUNT="${BREW_CACHE_DIR}/outdated_count"
-  local UPDATE_INTERVAL=86400 # 24 hours
-
-  [[ -d "${BREW_CACHE_DIR}" ]] || mkdir -p "${BREW_CACHE_DIR}" 2> /dev/null
-
-  local should_update=0
-  if [[ ${force_update} -eq 1 ]]; then
-    should_update=1
-  elif [[ ! -f "${BREW_UPDATE_STAMP}" ]]; then
-    should_update=1
-  else
-    local last_update
-    last_update=$(cat "${BREW_UPDATE_STAMP}" 2> /dev/null || echo 0)
-    local now
-    now=$(date +%s)
-    local time_diff=$((now - last_update))
-
-    if [[ ${time_diff} -ge ${UPDATE_INTERVAL} ]]; then
-      should_update=1
-    fi
-  fi
-
-  if [[ ${should_update} -eq 1 ]]; then
-    if [[ ${force_update} -eq 1 ]]; then
-      brew update &> /dev/null
-      date +%s > "${BREW_UPDATE_STAMP}"
-      brew outdated --quiet 2> /dev/null | wc -l | tr -d ' ' > "${BREW_OUTDATED_COUNT}"
-    else
-      {
-        brew update &> /dev/null
-        date +%s > "${BREW_UPDATE_STAMP}"
-        brew outdated --quiet 2> /dev/null | wc -l | tr -d ' ' > "${BREW_OUTDATED_COUNT}"
-      } &
-    fi
-  fi
-
-  # Only show outdated count if not running full interactive check
+  # Quick check mode (default when called from shell initialization)
   if [[ ${force_update} -eq 0 ]]; then
-    if [[ -f "${BREW_OUTDATED_COUNT}" ]]; then
-      local count
-      count=$(cat "${BREW_OUTDATED_COUNT}" 2> /dev/null || echo 0)
-      if [[ ${count} -gt 0 ]]; then
-        warning "📦 ${count} Homebrew package(s) can be upgraded (run 'brew upgrade')"
-      fi
+    # Show status message unless in silent mode
+    if [[ ${SILENT_MODE} -eq 0 ]]; then
+      info "🔄 Checking Homebrew packages..."
+    fi
+
+    # Check for outdated packages (quick, no update)
+    local count
+    count=$(brew outdated --quiet 2> /dev/null | wc -l | tr -d ' ')
+
+    if [[ ${count} -gt 0 ]]; then
+      warning "📦 ${count} Homebrew package(s) can be upgraded (run 'brew upgrade')"
+    elif [[ ${SILENT_MODE} -eq 0 ]]; then
+      success "All Homebrew packages are up to date"
     fi
     return 0
   fi
@@ -1608,203 +1618,183 @@ brew_check() {
 
     local packages_updated=0
     local packages_synced=0
-    local cask_issues=0
-    local formula_issues=0
+    local total_issues=0
 
-    # Validate and update Darwin casks
-    info "🍺 Validating Darwin casks..."
-    local darwin_cask_count=${#darwin_casks_desc[@]}
-    local darwin_cask_idx=0
+    # Generic validation function
+    validate_package_set() {
+      local -n pkg_desc_ref=$1
+      local pkg_type=$2            # "cask" or "formula"
+      local platform=$3            # "darwin" or "linux"
+      local icon=$4                # emoji for display
+      local sync_target_var=${5:-} # optional: target platform desc array name for cross-platform sync
+      local skip_if_in=${6:-}      # optional: skip packages already in this array
 
-    for pkg in "${!darwin_casks_desc[@]}"; do
-      ((darwin_cask_idx++)) || true
-      echo -ne "[$darwin_cask_idx/$darwin_cask_count] Validating ${pkg}...\r"
+      local -a pkg_list=()
+      for pkg in "${!pkg_desc_ref[@]}"; do
+        pkg_list+=("$pkg")
+      done
 
-      # Check if it's actually a cask
-      if ! brew info --cask "$pkg" &> /dev/null; then
-        echo -ne "\033[2K" # Clear line
-        warning "'$pkg' is not a valid cask"
-        ((cask_issues++))
-        ((issues_found++))
-        continue
+      # Sort packages
+      if [[ ${#pkg_list[@]} -gt 0 ]]; then
+        IFS=$'\n' pkg_list=($(printf '%s\n' "${pkg_list[@]}" | sort -f))
+        unset IFS
       fi
 
-      # Update description if different or if empty
-      local darwin_desc="${darwin_casks_desc[$pkg]}"
-      local current_desc
-      current_desc=$(get_brew_description "$pkg" "cask" 2> /dev/null || true)
+      local pkg_count=${#pkg_list[@]}
+      local pkg_idx=0
+      local pkg_issues=0
 
-      if [[ -n "$current_desc" ]] && [[ "$darwin_desc" != "$current_desc" ]]; then
-        echo -ne "\033[2K" # Clear line
-        info "  → Updating description: $pkg"
-        darwin_casks_desc["$pkg"]="$current_desc"
-        ((packages_updated++))
-      elif [[ -z "$darwin_desc" ]] && [[ -n "$current_desc" ]]; then
-        echo -ne "\033[2K" # Clear line
-        info "  → Adding missing description: $pkg"
-        darwin_casks_desc["$pkg"]="$current_desc"
-        ((packages_updated++))
-      fi
-    done
-    echo -ne "\033[2K" # Clear line
+      [[ $pkg_count -eq 0 ]] && return 0
 
-    if [[ $cask_issues -eq 0 ]]; then
-      success "All $darwin_cask_count casks are valid"
-    else
-      warning "Found $cask_issues invalid cask(s)"
-    fi
+      info "${icon} Validating ${platform} ${pkg_type}s... ${CYAN}(CTRL+C to skip, twice to exit)${RESET}"
 
-    # Validate and update Darwin formulae
-    info "⚗️  Validating Darwin formulae..."
-    local -a darwin_formula_pkgs=()
-    for pkg in "${!darwin_formulae_desc[@]}"; do
-      darwin_formula_pkgs+=("$pkg")
-    done
-    if [[ ${#darwin_formula_pkgs[@]} -gt 0 ]]; then
-      local sorted_pkgs
-      sorted_pkgs=($(printf '%s\n' "${darwin_formula_pkgs[@]}" | sort -f))
-      darwin_formula_pkgs=("${sorted_pkgs[@]}")
-    fi
+      # Enable CTRL+C trap for this section
+      SECTION_SKIP=0
+      trap trap_sigint SIGINT
 
-    local darwin_formula_count=${#darwin_formula_pkgs[@]}
-    local darwin_formula_idx=0
+      for pkg in "${pkg_list[@]}"; do
+        ((pkg_idx++)) || true
 
-    for pkg in "${darwin_formula_pkgs[@]}"; do
-      ((darwin_formula_idx++)) || true
-      echo -ne "[$darwin_formula_idx/$darwin_formula_count] Validating ${pkg}...\r"
-
-      # Check if it's actually a formula (not a cask)
-      if ! brew info --formula "$pkg" &> /dev/null; then
-        echo -ne "\033[2K" # Clear line
-        if brew info --cask "$pkg" &> /dev/null; then
-          warning "'$pkg' is a cask, not a formula (should be in casks list)"
-        else
-          warning "'$pkg' is not a valid formula"
-        fi
-        ((formula_issues++))
-        ((issues_found++))
-        continue
-      fi
-
-      # Update description if different or if empty
-      local darwin_desc="${darwin_formulae_desc[$pkg]}"
-      local current_desc
-      current_desc=$(get_brew_description "$pkg" "formula" 2> /dev/null || true)
-
-      if [[ -n "$current_desc" ]] && [[ "$darwin_desc" != "$current_desc" ]]; then
-        echo -ne "\033[2K" # Clear line
-        info "  → Updating description: $pkg"
-        darwin_formulae_desc["$pkg"]="$current_desc"
-        ((packages_updated++))
-      elif [[ -z "$darwin_desc" ]] && [[ -n "$current_desc" ]]; then
-        echo -ne "\033[2K" # Clear line
-        info "  → Adding missing description: $pkg"
-        darwin_formulae_desc["$pkg"]="$current_desc"
-        ((packages_updated++))
-      fi
-
-      # Check if should be synced to Linux
-      if [[ ! -v "linux_formulae_desc[$pkg]" ]]; then
-        if check_package_in_api "$pkg" "formula"; then
+        # Check if section was skipped
+        if [[ $SECTION_SKIP -eq 1 ]]; then
           echo -ne "\033[2K" # Clear line
-          info "  → Adding to Linux (cross-platform formula): $pkg"
-          local sync_desc="$current_desc"
-          if [[ -z "$sync_desc" ]]; then
-            sync_desc=$(get_brew_description "$pkg" "formula")
+          info "Skipped remaining ${pkg_type} validation"
+          trap - SIGINT  # Remove trap
+          SECTION_SKIP=0 # Reset flag
+          return 0
+        fi
+
+        echo -ne "[$pkg_idx/$pkg_count] Validating ${pkg}...\r"
+
+        # Skip if already processed
+        if [[ -n "$skip_if_in" ]]; then
+          local -n skip_ref=$skip_if_in
+          if [[ -v "skip_ref[$pkg]" ]]; then
+            continue
           fi
-          linux_formulae_desc["$pkg"]="$sync_desc"
-          ((packages_synced++))
         fi
-      else
-        # Package exists on both platforms, ensure descriptions match
-        local linux_desc="${linux_formulae_desc[$pkg]}"
-        if [[ -n "$current_desc" ]] && [[ "$linux_desc" != "$current_desc" ]]; then
+
+        # Check skip again before running brew commands (in case CTRL+C was pressed during echo)
+        if [[ $SECTION_SKIP -eq 1 ]]; then
           echo -ne "\033[2K" # Clear line
-          info "  → Syncing description (Darwin -> Linux): $pkg"
-          linux_formulae_desc["$pkg"]="$current_desc"
-          ((packages_updated++))
+          info "Skipped remaining ${pkg_type} validation"
+          trap - SIGINT  # Remove trap
+          SECTION_SKIP=0 # Reset flag
+          return 0
         fi
-      fi
-    done
-    echo -ne "\033[2K" # Clear line
 
-    if [[ $formula_issues -eq 0 ]]; then
-      success "All $darwin_formula_count formulae are valid"
-    else
-      warning "Found $formula_issues invalid formula(e)"
-    fi
+        # Validate package exists
+        brew info --${pkg_type} "$pkg" &> /dev/null
+        local brew_exit_code=$?
 
-    # Validate and update Linux formulae
-    info "  ⚗️  Validating Linux formulae..."
-    local -a linux_formula_pkgs=()
-    for pkg in "${!linux_formulae_desc[@]}"; do
-      linux_formula_pkgs+=("$pkg")
-    done
-    if [[ ${#linux_formula_pkgs[@]} -gt 0 ]]; then
-      local sorted_pkgs
-      sorted_pkgs=($(printf '%s\n' "${linux_formula_pkgs[@]}" | sort -f))
-      linux_formula_pkgs=("${sorted_pkgs[@]}")
-    fi
-
-    local linux_formula_count=${#linux_formula_pkgs[@]}
-    local linux_formula_idx=0
-    local linux_formula_issues=0
-
-    for pkg in "${linux_formula_pkgs[@]}"; do
-      ((linux_formula_idx++)) || true
-      echo -ne "    [$linux_formula_idx/$linux_formula_count] Validating ${pkg}...\r"
-
-      # Skip if already processed from Darwin side
-      if [[ -v "darwin_formulae_desc[$pkg]" ]]; then
-        continue
-      fi
-
-      # Check if it's actually a formula
-      if ! brew info --formula "$pkg" &> /dev/null; then
-        echo -ne "\033[2K" # Clear line
-        if brew info --cask "$pkg" &> /dev/null; then
-          warning "'$pkg' is a cask, not a formula"
-        else
-          warning "'$pkg' is not a valid formula"
+        # Check if interrupted by signal (exit code 130 is SIGINT)
+        if [[ $brew_exit_code -eq 130 ]] || [[ $SECTION_SKIP -eq 1 ]]; then
+          echo -ne "\033[2K" # Clear line
+          info "Skipped remaining ${pkg_type} validation"
+          trap - SIGINT  # Remove trap
+          SECTION_SKIP=0 # Reset flag
+          return 0
         fi
-        ((linux_formula_issues++))
-        ((issues_found++))
-        continue
+
+        if [[ $brew_exit_code -ne 0 ]]; then
+          echo -ne "\033[2K" # Clear line
+          # Only flag as cask if it's ONLY a cask and NOT also a formula
+          if [[ "$pkg_type" == "formula" ]] && ! brew info --formula "$pkg" &> /dev/null && brew info --cask "$pkg" &> /dev/null; then
+            echo -e "  ${YELLOW}!${RESET} '$pkg' is a cask, not a formula (should be in casks list)"
+          else
+            echo -e "  ${RED}✗${RESET} '$pkg' is not a valid $pkg_type"
+          fi
+          ((pkg_issues++))
+          ((issues_found++))
+          continue
+        fi
+
+        # Get current and stored descriptions
+        local stored_desc="${pkg_desc_ref[$pkg]}"
+        local action_taken=0
+
+        # Only fetch if description is missing
+        if [[ -z "$stored_desc" ]]; then
+          # Missing description - fetch it
+          local current_desc
+          current_desc=$(get_brew_description "$pkg" "$pkg_type" 2> /dev/null || true)
+          if [[ -n "$current_desc" ]]; then
+            echo -ne "\033[2K" # Clear line
+            echo -e "  ${CYAN}+${RESET} Adding missing description: $pkg"
+            pkg_desc_ref["$pkg"]="$current_desc"
+            ((packages_updated++))
+            action_taken=1
+          fi
+        fi
+        # If description exists, skip fetching (regardless of --force flag)
+
+        # Handle cross-platform sync for formulae
+        if [[ "$pkg_type" == "formula" && -n "$sync_target_var" ]]; then
+          local -n sync_target_ref=$sync_target_var
+          if [[ ! -v "sync_target_ref[$pkg]" ]]; then
+            # Package not in target platform - check if it should be added
+            if check_package_in_api "$pkg" "formula"; then
+              echo -ne "\033[2K" # Clear line
+              local target_platform="linux"
+              [[ "$platform" == "linux" ]] && target_platform="darwin"
+              echo -e "  ${CYAN}↔${RESET} Adding to ${target_platform} (cross-platform formula): $pkg"
+              # Get description if we have it, otherwise fetch it
+              local sync_desc="${stored_desc:-${current_desc:-$(get_brew_description "$pkg" "formula")}}"
+              sync_target_ref["$pkg"]="$sync_desc"
+              ((packages_synced++))
+              action_taken=1
+            fi
+          elif [[ -z "${sync_target_ref[$pkg]}" ]]; then
+            # Package exists on target platform but has no description - sync only if we have one
+            local our_desc="${stored_desc:-$current_desc}"
+            if [[ -n "$our_desc" ]]; then
+              echo -ne "\033[2K" # Clear line
+              local target_platform="linux"
+              [[ "$platform" == "linux" ]] && target_platform="darwin"
+              echo -e "  ${CYAN}→${RESET} Syncing description (${platform} -> ${target_platform}): $pkg"
+              sync_target_ref["$pkg"]="$our_desc"
+              ((packages_updated++))
+              action_taken=1
+            fi
+          fi
+        fi
+
+        # Show rapid validation message if no action was taken
+        if [[ $action_taken -eq 0 ]]; then
+          echo -ne "\033[2K" # Clear line
+          echo -e "  ✓ $pkg"
+        fi
+      done
+      echo -ne "\033[2K" # Clear line
+
+      # Remove trap
+      trap - SIGINT
+
+      if [[ $pkg_issues -eq 0 ]]; then
+        echo -e "  ${GREEN}✓${RESET} All $pkg_count ${pkg_type}s are valid"
+      else
+        echo -e "  ${YELLOW}!${RESET} Found $pkg_issues invalid ${pkg_type}(s)"
+        ((total_issues += pkg_issues))
       fi
 
-      # Update description if different or if empty
-      local linux_desc="${linux_formulae_desc[$pkg]}"
-      local current_desc
-      current_desc=$(get_brew_description "$pkg" "formula" 2> /dev/null || true)
+      return 0
+    }
 
-      if [[ -n "$current_desc" ]] && [[ "$linux_desc" != "$current_desc" ]]; then
-        echo -ne "\033[2K" # Clear line
-        info "  → Updating description: $pkg"
-        linux_formulae_desc["$pkg"]="$current_desc"
-        ((packages_updated++))
-      elif [[ -z "$linux_desc" ]] && [[ -n "$current_desc" ]]; then
-        echo -ne "\033[2K" # Clear line
-        info "  → Adding missing description: $pkg"
-        linux_formulae_desc["$pkg"]="$current_desc"
-        ((packages_updated++))
-      fi
-    done
-    echo -ne "\033[2K" # Clear line
-
-    if [[ $linux_formula_issues -eq 0 ]]; then
-      success "All $linux_formula_count Linux formulae are valid"
-    else
-      warning "Found $linux_formula_issues invalid Linux formula(e)"
-    fi
+    # Validate all package sets
+    validate_package_set darwin_casks_desc "cask" "darwin" "🍺"
+    validate_package_set darwin_formulae_desc "formula" "darwin" "⚗️" linux_formulae_desc
+    validate_package_set linux_formulae_desc "formula" "linux" "⚗️" darwin_formulae_desc darwin_formulae_desc
 
     # Update taskfiles if changes were made
     if [[ $packages_updated -gt 0 || $packages_synced -gt 0 ]]; then
-      info "Writing updates to taskfiles..."
+      echo ""
+      info "📝 Writing updates to taskfiles..."
       update_section_with_descriptions "$darwin_taskfile" "formulae" darwin_formulae_desc
       update_section_with_descriptions "$darwin_taskfile" "casks" darwin_casks_desc
       update_section_with_descriptions "$linux_taskfile" "formulae" linux_formulae_desc
       success "Updated $packages_updated description(s) and synced $packages_synced package(s)"
     else
+      echo ""
       success "All package info is up to date and packages are valid"
     fi
   fi
@@ -1825,10 +1815,42 @@ brew_check() {
   # Find uninstalled packages (declared but not installed)
   local uninstalled=()
 
-  # Get locally installed packages (explicitly installed only, not dependencies)
+  # Helper function to check if a formula is installed
+  # Handles: tap paths (gromgit/fuse/ntfs-3g-mac), version-specific packages (python@3.14),
+  # and package aliases (kubectl -> kubernetes-cli)
+  is_formula_installed() {
+    local declared_pkg="$1"
+    local installed_list="$2"
+
+    # Strip tap path if present (e.g., gromgit/fuse/ntfs-3g-mac -> ntfs-3g-mac)
+    local pkg_name="${declared_pkg##*/}"
+
+    # Check exact match first
+    if echo "$installed_list" | grep -qx "$pkg_name"; then
+      return 0
+    fi
+
+    # Check for versioned packages (e.g., python matches python@3.14)
+    if echo "$installed_list" | grep -qx "${pkg_name}@[0-9].*"; then
+      return 0
+    fi
+
+    # Check if it's an alias by querying brew info
+    local actual_name
+    actual_name=$(brew info "$pkg_name" 2>&1 | head -1 | awk -F: '{print $1}' | sed 's/^==> //')
+    if [[ -n "$actual_name" ]] && [[ "$actual_name" != "$pkg_name" ]]; then
+      if echo "$installed_list" | grep -qx "$actual_name"; then
+        return 0
+      fi
+    fi
+
+    return 1
+  }
+
+  # Get locally installed packages
   local installed_formulae
   local installed_casks
-  installed_formulae=$(brew leaves 2> /dev/null || echo "")
+  installed_formulae=$(brew list --formula -1 2> /dev/null || echo "")
   if [[ "${OSTYPE}" == "darwin"* ]]; then
     installed_casks=$(brew list --cask -1 2> /dev/null || echo "")
   fi
@@ -1854,8 +1876,8 @@ brew_check() {
       continue
     fi
 
-    # Check if installed
-    if ! echo "$installed_formulae" | grep -qx "$pkg"; then
+    # Check if installed (using helper function for edge cases)
+    if ! is_formula_installed "$pkg" "$installed_formulae"; then
       uninstalled+=("formula:$pkg")
     fi
   done <<< "$declared_formulae"
@@ -1874,58 +1896,104 @@ brew_check() {
 
   # Interactive prompts for uninstalled packages
   if [[ ${#uninstalled[@]} -gt 0 ]]; then
-    warning "  Found ${#uninstalled[@]} uninstalled declared package(s):"
-    echo ""
+    warning "Found ${#uninstalled[@]} uninstalled declared package(s):"
 
-    # List all uninstalled packages first
+    # List all uninstalled packages first with color coding
     for item in "${uninstalled[@]}"; do
       local pkg_type="${item%%:*}"
       local pkg_name="${item#*:}"
-      echo "    - $pkg_name ($pkg_type)"
+      if [[ "$pkg_type" == "cask" ]]; then
+        echo -e "  - ${CYAN}$pkg_name${RESET}"
+      else
+        echo -e "  - $pkg_name"
+      fi
     done
     echo ""
+    info "Legend: ${CYAN}casks${RESET}, formulae | ${YELLOW}CTRL+C to skip, twice to exit${RESET}"
+    echo ""
 
-    # Then prompt for each one
+    # Enable CTRL+C trap
+    SECTION_SKIP=0
+    trap trap_sigint SIGINT
+
+    # Ask for batch action first
+    local batch_action=""
+    # Temporarily disable trap during read to avoid skip messages after prompt
+    trap - SIGINT
+    read -r -n 1 -p "Action for all? [I]nstall all / [R]emove all / [S]kip all / [p]rompt each (default): " batch_response
+    echo ""
+    echo ""
+    # Re-enable trap for processing loop
+    trap trap_sigint SIGINT
+
+    case "$batch_response" in
+      I)
+        batch_action="install"
+        ;;
+      R)
+        batch_action="remove"
+        ;;
+      S)
+        batch_action="skip"
+        ;;
+    esac
+
+    # Process each package
     for item in "${uninstalled[@]}"; do
+      # Check if section was skipped
+      if [[ $SECTION_SKIP -eq 1 ]]; then
+        info "Skipped remaining package prompts"
+        trap - SIGINT
+        SECTION_SKIP=0 # Reset flag
+        break
+      fi
+
       local pkg_type="${item%%:*}"
       local pkg_name="${item#*:}"
+      local action="$batch_action"
 
-      echo -e "${CYAN}Package:${RESET} $pkg_name (${pkg_type})"
+      # If no batch action, prompt for individual action
+      if [[ -z "$action" ]]; then
+        if [[ "$pkg_type" == "cask" ]]; then
+          echo -e "${CYAN}$pkg_name${RESET}"
+        else
+          echo -e "$pkg_name"
+        fi
 
-      # Prompt for action
-      local action=""
-      while [[ -z "$action" ]]; do
-        read -r -n 1 -p "  Action? [i]nstall / [r]emove from config / [s]kip (default): " response
-        echo
+        # Prompt for action
+        while [[ -z "$action" ]]; do
+          read -r -n 1 -p "  Action? [i]nstall / [r]emove from config / [s]kip (default): " response
+          echo
 
-        case "$response" in
-          i | I)
-            action="install"
-            ;;
-          r | R)
-            action="remove"
-            ;;
-          s | S | "")
-            action="skip"
-            ;;
-          *)
-            warning "  Invalid choice. Please enter 'i', 'r', or 's'"
-            ;;
-        esac
-      done
+          case "$response" in
+            i | I)
+              action="install"
+              ;;
+            r | R)
+              action="remove"
+              ;;
+            s | S | "")
+              action="skip"
+              ;;
+            *)
+              warning "  Invalid choice. Please enter 'i', 'r', or 's'"
+              ;;
+          esac
+        done
+      fi
 
       case "$action" in
         install)
-          info "  Installing '$pkg_name'..."
+          echo "    Installing '$pkg_name'..."
 
           if [[ "$pkg_type" == "cask" ]]; then
-            brew install --cask "$pkg_name" 2> /dev/null && success "  Installed '$pkg_name'" || warning "  Failed to install '$pkg_name'"
+            brew install --cask "$pkg_name" 2> /dev/null && echo -e "    ${GREEN}✓${RESET} Installed '$pkg_name'" || echo -e "    ${YELLOW}!${RESET} Failed to install '$pkg_name'"
           else
-            brew install "$pkg_name" 2> /dev/null && success "  Installed '$pkg_name'" || warning "  Failed to install '$pkg_name'"
+            brew install "$pkg_name" 2> /dev/null && echo -e "    ${GREEN}✓${RESET} Installed '$pkg_name'" || echo -e "    ${YELLOW}!${RESET} Failed to install '$pkg_name'"
           fi
           ;;
         remove)
-          info "  Removing '$pkg_name' from configuration..."
+          echo "    Removing '$pkg_name' from configuration..."
 
           # Save current flag states
           local saved_is_cask=$IS_CASK
@@ -1949,16 +2017,19 @@ brew_check() {
           IS_SERVICE=$saved_is_service
           AS_LINK=$saved_as_link
 
-          success "  Removed '$pkg_name' from configuration"
+          echo -e "    ${GREEN}✓${RESET} Removed '$pkg_name' from configuration"
           ;;
         skip)
-          info "  Skipping '$pkg_name'"
+          echo "    Skipping '$pkg_name'"
           ;;
       esac
       echo ""
     done
+
+    # Remove trap
+    trap - SIGINT
   else
-    success "  All declared packages are installed"
+    success "All declared packages are installed"
   fi
   echo ""
 

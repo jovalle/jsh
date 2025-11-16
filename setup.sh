@@ -30,6 +30,7 @@ fi
 
 REQUIRED_CMDS=(
   curl
+  direnv
   fzf
   git
   jq
@@ -63,9 +64,3 @@ for cmd in "${REQUIRED_CMDS[@]}"; do
     echo "Command '${cmd}' is already installed."
   fi
 done
-
-if command -v task; then
-  task setup
-else
-  echo "Reload your terminal and run \`task setup\`"
-fi

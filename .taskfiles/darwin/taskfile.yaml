@@ -5,6 +5,7 @@ tasks:
   configure:
     cmds:
       - task: configure-ghostty
+      - echo ""
       - echo "⚠️  The following apps need to be launched first before they can be configured:"
       - echo ""
       - echo "🦊 Firefox - Open the app, then run:"
@@ -121,7 +122,6 @@ vars:
     - krew # Package manager for kubectl plugins
     - kubecm # KubeConfig Manager
     - kubecolor # Colorize your kubectl output
-    - kubectl # Kubernetes command-line interface
     - kubernetes-cli # Kubernetes command-line interface
     - kubescape # Kubernetes testing according to Hardening Guidance by NSA and CISA
     - kubetail # Logging tool for Kubernetes with a real-time web dashboard
