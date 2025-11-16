@@ -7,6 +7,7 @@ CYAN := \033[0;36m
 GREEN := \033[0;32m
 YELLOW := \033[0;33m
 RED := \033[0;31m
+GRAY := \033[0;90m
 RESET := \033[0m
 
 # Tool versions (can be overridden)
@@ -14,10 +15,72 @@ PYTHON := python3
 SHFMT_VERSION := latest
 YAMLLINT_CONFIG := .yamllint
 
+# Format function: formats files and prints per-file output with timing
+# Usage: $(call format_files,file_list,format_command,type_name)
+# Example: $(call format_files,$(SHELL_FILES),shfmt -w -i 2 -ci -sr,Shell scripts)
+define format_files
+	errors=0; \
+	for file in $(1); do \
+		tmp=$$(mktemp); \
+		cp "$${file}" "$$tmp"; \
+		start=$$($(PYTHON) -c 'import time; print(int(time.time() * 1000))'); \
+		if ! $(2) "$${file}"; then \
+			errors=$$((errors + 1)); \
+			rm -f "$$tmp"; \
+			continue; \
+		fi; \
+		end=$$($(PYTHON) -c 'import time; print(int(time.time() * 1000))'); \
+		duration=$$((end - start)); \
+		if cmp -s "$${file}" "$$tmp"; then \
+			status="(unchanged)"; \
+		else \
+			status="(formatted)"; \
+		fi; \
+		rm -f "$$tmp"; \
+		echo -e "$(GRAY)$${file}$(RESET) $${duration}ms $$status"; \
+		unset status; \
+	done; \
+	if [ $$errors -eq 0 ]; then \
+		echo -e "$(GREEN)✓ $(3) formatted$(RESET)"; \
+	else \
+		echo -e "$(RED)✗ $(3) formatting failed$(RESET)"; \
+		exit 1; \
+	fi
+endef
+
+# Format function for find-based iteration (YAML, JSON, Markdown)
+# Usage: $(call format_files_find,find_pattern,format_command,type_name)
+define format_files_find
+	$(1) -print0 | while IFS= read -r -d '' file; do \
+		tmp=$$(mktemp); \
+		cp "$${file}" "$$tmp"; \
+		start=$$($(PYTHON) -c 'import time; print(int(time.time() * 1000))'); \
+		if ! $(2) "$${file}" > /dev/null 2>&1; then \
+			rm -f "$$tmp"; \
+			continue; \
+		fi; \
+		end=$$($(PYTHON) -c 'import time; print(int(time.time() * 1000))'); \
+		duration=$$((end - start)); \
+		if cmp -s "$${file}" "$$tmp"; then \
+			status="(unchanged)"; \
+		else \
+			status="(formatted)"; \
+		fi; \
+		rm -f "$$tmp"; \
+		echo -e "$(GRAY)$${file}$(RESET) $${duration}ms $$status"; \
+		unset status; \
+	done && \
+	echo -e "$(GREEN)✓ $(3) formatted$(RESET)"
+endef
+
 # Find files by type
 # Shell files: Find by .sh extension OR by shebang in .bin/ directory
 SHELL_FILES := $(shell find . -type f -name "*.sh" ! -path "*/node_modules/*" ! -path "*/.git/*" ! -path "*/.fzf/*" ! -path "*/.vscode/*" ! -path "*/.config/nvim/*" ! -path "*/.config/*"; \
-	find .bin -type f 2>/dev/null | while read -r f; do head -n1 "$$f" 2>/dev/null | grep -qE '^\#!/.*(ba)?sh' && echo "$$f"; done)
+	find .bin -type f 2>/dev/null | while read -r f; do \
+		shebang=$$(head -n1 "$$f" 2>/dev/null); \
+		echo "$$shebang" | grep -qE '^\#!/.*zsh' && continue; \
+		echo "$$shebang" | grep -qE '^\#!/.*(ba)?sh' && echo "$$f"; \
+	done)
 PYTHON_FILES := $(shell find . -type f -name "*.py" ! -path "*/\.*" ! -path "*/node_modules/*" ! -path "*/.venv/*")
 YAML_FILES := $(shell find . -type f \( -name "*.yaml" -o -name "*.yml" \) ! -path "*/\.*" ! -path "*/node_modules/*")
 JSON_FILES := $(shell find . -type f -name "*.json" ! -path "*/\.*" ! -path "*/node_modules/*" ! -path "*/package*.json")
@@ -73,8 +136,7 @@ fmt: fmt-shell fmt-python fmt-yaml fmt-json fmt-markdown ## Format all files
 fmt-shell: ## Format shell scripts
 	@echo -e "$(CYAN)Formatting shell scripts...$(RESET)"
 	@if [ -n "$(SHELL_FILES)" ]; then \
-		shfmt -w -i 2 -ci -sr $(SHELL_FILES) && \
-		echo -e "$(GREEN)✓ Shell scripts formatted$(RESET)"; \
+		$(call format_files,$(SHELL_FILES),shfmt -w -i 2 -ci -sr,Shell scripts); \
 	else \
 		echo -e "$(YELLOW)No shell files found$(RESET)"; \
 	fi
@@ -82,8 +144,7 @@ fmt-shell: ## Format shell scripts
 fmt-python: ## Format Python files
 	@echo -e "$(CYAN)Formatting Python files...$(RESET)"
 	@if [ -n "$(PYTHON_FILES)" ]; then \
-		black --line-length 100 $(PYTHON_FILES) && \
-		echo -e "$(GREEN)✓ Python files formatted$(RESET)"; \
+		$(call format_files,$(PYTHON_FILES),black --line-length 100 --quiet,Python files); \
 	else \
 		echo -e "$(YELLOW)No Python files found$(RESET)"; \
 	fi
@@ -91,8 +152,7 @@ fmt-python: ## Format Python files
 fmt-yaml: ## Format YAML files
 	@echo -e "$(CYAN)Formatting YAML files...$(RESET)"
 	@if [ -n "$(YAML_FILES)" ]; then \
-		prettier --write --print-width 100 $(YAML_FILES) && \
-		echo -e "$(GREEN)✓ YAML files formatted$(RESET)"; \
+		$(call format_files_find,find . -type f \( -name "*.yaml" -o -name "*.yml" \) ! -path "*/\\.*" ! -path "*/node_modules/*",prettier --write --print-width 100,YAML files); \
 	else \
 		echo -e "$(YELLOW)No YAML files found$(RESET)"; \
 	fi
@@ -100,8 +160,7 @@ fmt-yaml: ## Format YAML files
 fmt-json: ## Format JSON files
 	@echo -e "$(CYAN)Formatting JSON files...$(RESET)"
 	@if [ -n "$(JSON_FILES)" ]; then \
-		prettier --write $(JSON_FILES) && \
-		echo -e "$(GREEN)✓ JSON files formatted$(RESET)"; \
+		$(call format_files_find,find . -type f -name "*.json" ! -path "*/\\.*" ! -path "*/node_modules/*" ! -path "*/package*.json",prettier --write,JSON files); \
 	else \
 		echo -e "$(YELLOW)No JSON files found$(RESET)"; \
 	fi
@@ -109,8 +168,7 @@ fmt-json: ## Format JSON files
 fmt-markdown: ## Format Markdown files
 	@echo -e "$(CYAN)Formatting Markdown files...$(RESET)"
 	@if [ -n "$(MD_FILES)" ]; then \
-		prettier --write --prose-wrap always $(MD_FILES) && \
-		echo -e "$(GREEN)✓ Markdown files formatted$(RESET)"; \
+		$(call format_files_find,find . -type f -name "*.md" ! -path "*/\\.*" ! -path "*/node_modules/*",prettier --write --prose-wrap always,Markdown files); \
 	else \
 		echo -e "$(YELLOW)No Markdown files found$(RESET)"; \
 	fi
