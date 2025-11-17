@@ -132,7 +132,34 @@ MAILCHECK=0                         # Disable mail checking
 
 # Paths - ORDER MATTERS (priority: local > jsh > system)
 # Must be set before tool completions to ensure binaries are found
-export PATH=${HOME}/.local/bin:${JSH}/.bin:${JSH}/.fzf/bin:${HOME}/go/bin:${PATH}
+local_paths=(
+  "${HOME}/.local/bin"                      # user local bin
+  "${JSH}/.bin"                             # jsh local bin
+  "${JSH}/.fzf/bin"                         # fzf bin
+  "${HOME}/go/bin"                          # go bin
+  "${HOME}/.linuxbrew/bin"                  # Linuxbrew user install
+  "${HOME}/linuxbrew/.linuxbrew/bin"        # Alternative user path
+  "/home/linuxbrew/.linuxbrew/bin"          # Linuxbrew default
+  "/opt/homebrew/bin"                       # macOS Apple Silicon
+)
+
+# Build a prefix of existing dirs (preserve order) and prepend once
+local_prefix=""
+for p in "${local_paths[@]}"; do
+  if [[ -d "${p}" ]]; then
+    if [[ -z "${local_prefix}" ]]; then
+      local_prefix="${p}"
+    else
+      local_prefix="${local_prefix}:${p}"
+    fi
+  fi
+done
+
+if [[ -n "${local_prefix}" ]]; then
+  export PATH="${local_prefix}:${PATH}"
+fi
+
+unset local_paths local_prefix
 
 # ============================================================================
 # 5. COMPLETION SYSTEM
@@ -483,7 +510,7 @@ dedup_path
 # ---- Brew Update Checker ----
 
 # Check for outdated Homebrew packages
-command -v brew &>/dev/null && jsh brew check --silent
+command -v brew &>/dev/null && jsh brew check
 
 # ============================================================================
 # 9. LOCAL CUSTOMIZATIONS

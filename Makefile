@@ -78,8 +78,8 @@ endef
 SHELL_FILES := $(shell find . -type f -name "*.sh" ! -path "*/node_modules/*" ! -path "*/.git/*" ! -path "*/.fzf/*" ! -path "*/.vscode/*" ! -path "*/.config/nvim/*" ! -path "*/.config/*"; \
 	find .bin -type f 2>/dev/null | while read -r f; do \
 		shebang=$$(head -n1 "$$f" 2>/dev/null); \
-		echo "$$shebang" | grep -qE '^\#!/.*zsh' && continue; \
-		echo "$$shebang" | grep -qE '^\#!/.*(ba)?sh' && echo "$$f"; \
+		echo "$$shebang" | grep -qE '^#!/.*zsh' && continue; \
+		echo "$$shebang" | grep -qE '^#!/.*(ba)?sh' && echo "$$f"; \
 	done)
 PYTHON_FILES := $(shell find . -type f -name "*.py" ! -path "*/\.*" ! -path "*/node_modules/*" ! -path "*/.venv/*")
 YAML_FILES := $(shell find . -type f \( -name "*.yaml" -o -name "*.yml" \) ! -path "*/\.*" ! -path "*/node_modules/*")
@@ -296,13 +296,9 @@ lint-markdown: ## Lint Markdown files with markdownlint
 
 lint-js: ## Lint JavaScript files with ESLint
 	@echo -e "$(CYAN)Linting JavaScript files...$(RESET)"
-	@JS_FILES=$$(find . -type f -name "*.js" ! -path "*/\.*" ! -path "*/node_modules/*"); \
+	@JS_FILES=$$(find . -type f -name "*.js" ! -path "*/\.*" ! -path "*/node_modules/*" ! -path "*/.eslintrc.json"); \
 	if [ -n "$$JS_FILES" ]; then \
-		if [ -f ".eslintrc.json" ]; then \
-			echo "$$JS_FILES" | xargs eslint; \
-		else \
-			echo "$$JS_FILES" | xargs eslint --config .eslintrc.json; \
-		fi && \
+		echo "$$JS_FILES" | xargs npx eslint && \
 		echo -e "$(GREEN)✓ JavaScript files passed linting$(RESET)"; \
 	else \
 		echo -e "$(YELLOW)No JavaScript files found$(RESET)"; \

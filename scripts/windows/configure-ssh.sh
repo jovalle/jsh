@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Create symlinks for SSH config and key from WSL to Windows (requires elevation)
 
-KEY_SOURCE=$(wslpath -w ~/.jsh/.ssh/id_rsa)
-CONFIG_SOURCE=$(wslpath -w ~/.jsh/.ssh/config-windows)
+KEY_SOURCE=$(wslpath -w ~/.jsh/dotfiles/.ssh/id_rsa)
+CONFIG_SOURCE=$(wslpath -w ~/.jsh/dotfiles/.ssh/config-windows)
 DEST_DIR="C:\\Users\\jay\\.ssh"
 KEY_DEST="${DEST_DIR}\\id_rsa"
 CONFIG_DEST="${DEST_DIR}\\config"
@@ -15,15 +15,22 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Start-Process powers
 
 echo ""
 echo "Validating symlinks..."
-KEY_LINK_INFO=$(powershell.exe -NoProfile -Command "Get-Item '${KEY_DEST}' | Select-Object LinkType, Target | Format-List" 2>&1)
-CONFIG_LINK_INFO=$(powershell.exe -NoProfile -Command "Get-Item '${CONFIG_DEST}' | Select-Object LinkType, Target | Format-List" 2>&1)
 
-if echo "${KEY_LINK_INFO}" | grep -q "SymbolicLink" && echo "${CONFIG_LINK_INFO}" | grep -q "SymbolicLink"; then
+# Check if symlinks exist and have targets
+KEY_EXISTS=$(powershell.exe -NoProfile -Command "if (Test-Path '${KEY_DEST}') { 'true' } else { 'false' }" 2>&1 | tr -d '\r')
+CONFIG_EXISTS=$(powershell.exe -NoProfile -Command "if (Test-Path '${CONFIG_DEST}') { 'true' } else { 'false' }" 2>&1 | tr -d '\r')
+
+if [[ "${KEY_EXISTS}" == "true" ]] && [[ "${CONFIG_EXISTS}" == "true" ]]; then
+  KEY_LINK_INFO=$(powershell.exe -NoProfile -Command "Get-Item '${KEY_DEST}' | Select-Object LinkType, Target | Format-List" 2>&1)
+  CONFIG_LINK_INFO=$(powershell.exe -NoProfile -Command "Get-Item '${CONFIG_DEST}' | Select-Object LinkType, Target | Format-List" 2>&1)
+
   echo "✓ SSH key symlink created successfully"
   echo "${KEY_LINK_INFO}"
   echo "✓ SSH config symlink created successfully"
   echo "${CONFIG_LINK_INFO}"
 else
   echo "✗ Error: Symlink validation failed"
+  echo "  Key exists: ${KEY_EXISTS}"
+  echo "  Config exists: ${CONFIG_EXISTS}"
   exit 1
 fi

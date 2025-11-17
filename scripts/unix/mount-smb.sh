@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Generic auto-mount script for SMB shares
 
-CONFIG_FILE="${HOME}/.mounts.json"
+CONFIG_FILE="${JSH:-${HOME}/.jsh}/.mounts.json"
 MOUNT_NAME="$1"
 
 if [[ -z "${MOUNT_NAME}" ]]; then

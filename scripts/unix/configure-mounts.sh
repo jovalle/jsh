@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Configure and mount SMB shares
 
-# Generic config file (stowed from .jsh/.mounts.json to ~/.mounts.json, synced via Syncthing)
-CONFIG_FILE="${HOME}/.mounts.json"
+# Generic config file (.mounts.json in $JSH root, synced via Syncthing)
+CONFIG_FILE="${JSH:-${HOME}/.jsh}/.mounts.json"
 
 # Detect OS
 if [[ "${OSTYPE}" == "darwin"* ]]; then

@@ -1,6 +1,6 @@
-[submodule ".fzf"]
+[submodule "fzf"]
 	path = .fzf
 	url = https://github.com/junegunn/fzf.git
-[submodule ".config/nvim"]
-	path = .config/nvim
+[submodule "nvim"]
+	path = dotfiles/.config/nvim
 	url = https://github.com/LazyVim/starter.git
