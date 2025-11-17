@@ -1,5 +1,1 @@
-{
-  "path": "cz-conventional-changelog",
-  "maxHeaderWidth": 72,
-  "maxLineWidth": 100
-}
+dotfiles/.czrc

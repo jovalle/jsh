@@ -110,7 +110,7 @@ _jsh() {
 
 _jsh_mount() {
     local -a mounts
-    local mounts_file="${HOME}/.jsh/.mounts.json"
+    local mounts_file="${JSH:-${HOME}/.jsh}/.mounts.json"
 
     # Dynamically extract mount names from .mounts.json if it exists
     if [[ -f "$mounts_file" ]] && command -v jq &> /dev/null; then

@@ -21,9 +21,9 @@ log_error() { echo -e "${RED}[ERROR]${NC} $*"; }
 
 # Check if Ghostty is installed
 if [[ ! -d "/Applications/Ghostty.app" ]]; then
-    log_error "Ghostty.app not found in /Applications"
-    log_error "Please install Ghostty first"
-    exit 1
+  log_error "Ghostty.app not found in /Applications"
+  log_error "Please install Ghostty first"
+  exit 1
 fi
 
 log_info "Creating Ghostty launcher applications..."
@@ -40,13 +40,13 @@ CUSTOM_ICON="$HOME/.jsh/configs/macos/icons/terminal.icns"
 SYSTEM_ICON="/System/Applications/Utilities/Terminal.app/Contents/Resources/Terminal.icns"
 
 if [[ -f "$CUSTOM_ICON" ]]; then
-    ICON_SOURCE="$CUSTOM_ICON"
-    log_info "Using custom Terminal icon from repository"
+  ICON_SOURCE="$CUSTOM_ICON"
+  log_info "Using custom Terminal icon from repository"
 elif [[ -f "$SYSTEM_ICON" ]]; then
-    ICON_SOURCE="$SYSTEM_ICON"
-    log_info "Using system Terminal.app icon"
+  ICON_SOURCE="$SYSTEM_ICON"
+  log_info "Using system Terminal.app icon"
 else
-    log_warn "No Terminal icon found, apps will use default AppleScript icon"
+  log_warn "No Terminal icon found, apps will use default AppleScript icon"
 fi
 
 # Create launcher apps
@@ -57,17 +57,17 @@ osacompile -o "$app_path" "$SCRIPT_FILE"
 
 # Copy Terminal icon if we found one
 if [[ -n "$ICON_SOURCE" ]]; then
-    log_info "Copying Terminal icon to Terminal.app..."
-    mkdir -p "${app_path}/Contents/Resources"
-    cp "$ICON_SOURCE" "${app_path}/Contents/Resources/applet.icns"
+  log_info "Copying Terminal icon to Terminal.app..."
+  mkdir -p "${app_path}/Contents/Resources"
+  cp "$ICON_SOURCE" "${app_path}/Contents/Resources/applet.icns"
 
-    # Update icon cache
-    touch "$app_path"
+  # Update icon cache
+  touch "$app_path"
 fi
 
 # Force Spotlight to index the new app
 log_info "Indexing Terminal.app in Spotlight..."
-mdimport "$app_path" 2>/dev/null || true
+mdimport "$app_path" 2> /dev/null || true
 
 log_info "✓ Terminal.app created successfully"
 

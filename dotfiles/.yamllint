@@ -1,0 +1,40 @@
+---
+# yamllint configuration
+extends: default
+
+rules:
+  # Line length - 120 for flexibility
+  line-length:
+    max: 120
+    level: warning
+
+  # Document start marker (---) not required
+  document-start: disable
+
+  # Comments formatting
+  comments:
+    min-spaces-from-content: 1
+  comments-indentation: disable
+
+  # Boolean values - strict true/false, on/off allowed for compatibility
+  truthy:
+    allowed-values: ['true', 'false', 'on', 'off']
+
+  # Indentation - 2 spaces
+  indentation:
+    spaces: 2
+    indent-sequences: true
+    check-multi-line-strings: false
+
+  # Bracket spacing
+  braces:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+
+  brackets:
+    min-spaces-inside: 0
+    max-spaces-inside: 0
+
+  # Empty lines
+  empty-lines:
+    max: 2

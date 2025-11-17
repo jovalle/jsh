@@ -123,7 +123,7 @@ cmd_help() {
     %F{green}brew%f          Manage Homebrew packages (add, remove, sync, check, install, uninstall)
     %F{green}status%f        Show comprehensive status of installed packages
     %F{green}doctor%f        Run health checks and diagnostics
-    %F{green}clean%f         Clean up brew caches and broken symlinks
+    %F{green}clean%f         Clean up brew caches and broken symlinks [--auto|-y]
     %F{green}backup%f        Backup current configuration
     %F{green}restore%f       Restore configuration from backup
     %F{green}list%f          List all managed packages and configurations
@@ -137,12 +137,14 @@ cmd_help() {
     jsh init                     # First-time setup
     jsh update                   # Update everything
     jsh status                   # Check system status
-    jsh sync                     # Synchronize formulae between platforms
-    jsh brew add jq              # Add a formula
-    jsh brew add firefox --cask  # Add a cask
-    jsh brew remove tldr -y      # Remove a formula
-    jsh brew check               # Check for outdated packages
+    jsh brew setup               # Setup Homebrew
+    jsh brew check               # Check for outdated or unsupported packages
+    jsh brew check jq            # Validate specific package availability
+    jsh brew install git         # Install a package (passthrough to brew)
     jsh doctor                   # Run diagnostics
+    jsh clean                    # Interactive cleanup
+    jsh clean --force            # Non-interactive cleanup (auto-accept all prompts)
+    jsh clean -y                 # Same as --force
     jsh mount storage            # Mount specific share
 
 %BDOCUMENTATION:%b
@@ -183,12 +185,6 @@ cmd_init() {
     }
     task --taskfile taskfile.yaml setup
 
-    info "Step 3/4: Validating symlinks"
-    validate_symlinks
-
-    info "Step 4/4: Validating configurations"
-    validate_configs
-
     success "jsh initialization complete!"
 }
 
@@ -196,6 +192,10 @@ cmd_update() {
     header "Updating jsh environment"
 
     check_task || return 1
+
+    info "Updating zinit..."
+    zsh -ic 'zinit self-update' 2>/dev/null || true
+    zsh -ic 'zinit update --all' 2>/dev/null || true
 
     info "Running task update..."
     cd "${ROOT_DIR}" && task --taskfile taskfile.yaml update
@@ -272,19 +272,18 @@ cmd_status() {
     # Homebrew services
     echo -e "${BOLD}${MAGENTA}Homebrew Services:${RESET}"
     if cmd_exists brew; then
-        brew services list 2>/dev/null | tail -n +2 | while IFS= read -r line; do
-            local service status
+        while IFS= read -r line; do
             service=$(echo "$line" | awk '{print $1}')
-            status=$(echo "$line" | awk '{print $2}')
+            svc_status=$(echo "$line" | awk '{print $2}')
 
-            if [[ "$status" == "started" ]]; then
+            if [[ "$svc_status" == "started" ]]; then
                 echo -e "  ${GREEN}●${RESET} ${service} (${GREEN}running${RESET})"
-            elif [[ "$status" == "stopped" ]]; then
+            elif [[ "$svc_status" == "stopped" ]]; then
                 echo -e "  ${RED}●${RESET} ${service} (${RED}stopped${RESET})"
             else
-                echo -e "  ${YELLOW}●${RESET} ${service} (${YELLOW}${status}${RESET})"
+                echo -e "  ${YELLOW}●${RESET} ${service} (${YELLOW}${svc_status}${RESET})"
             fi
-        done
+        done < <(brew services list 2>/dev/null | tail -n +2)
     fi
     echo
 
@@ -321,10 +320,10 @@ cmd_status() {
         branch=$(git branch --show-current 2>/dev/null || echo "unknown")
         echo -e "  Branch:  ${CYAN}${branch}${RESET}"
 
-        local status
-        status=$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')
-        if [[ "$status" -gt 0 ]]; then
-            echo -e "  Changes: ${YELLOW}${status}${RESET} uncommitted changes"
+        local git_status
+        git_status=$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')
+        if [[ "$git_status" -gt 0 ]]; then
+            echo -e "  Changes: ${YELLOW}${git_status}${RESET} uncommitted changes"
         else
             echo -e "  Changes: ${GREEN}clean${RESET}"
         fi
@@ -426,7 +425,7 @@ cmd_clean() {
 
     check_task || return 1
 
-    info "Running interactive cleanup..."
+    info "Running cleanup..."
     cd "${ROOT_DIR}" && task --taskfile taskfile.yaml clean
 }
 
@@ -605,26 +604,11 @@ cmd_brew() {
     shift || true
 
     case "$subcmd" in
-        add)
-            check_brew || return 1
-            "${ROOT_DIR}/scripts/unix/brew.sh" add "$@"
-            ;;
-        remove|rm)
-            check_brew || return 1
-            "${ROOT_DIR}/scripts/unix/brew.sh" remove "$@"
-            ;;
-        sync)
-            cmd_sync "$@"
+        setup)
+            "${ROOT_DIR}/scripts/unix/brew.sh" setup
             ;;
         check)
-            check_brew || return 1
             "${ROOT_DIR}/scripts/unix/brew.sh" check "$@"
-            ;;
-        install)
-            "${ROOT_DIR}/scripts/unix/brew.sh" install
-            ;;
-        uninstall)
-            "${ROOT_DIR}/scripts/unix/brew.sh" uninstall "$@"
             ;;
         help|--help|-h)
             echo -e "${BOLD}${CYAN}jsh brew${RESET} - Homebrew package management"
@@ -632,10 +616,11 @@ cmd_brew() {
             "${ROOT_DIR}/scripts/unix/brew.sh"
             ;;
         *)
-            error "Unknown brew subcommand: ${subcmd}"
-            info "Available subcommands: add, remove, sync, check, install, uninstall"
-            info "Run 'jsh brew help' for more information"
-            return 1
+            # Pass through to brew
+            if ! check_brew; then
+                return 1
+            fi
+            "${ROOT_DIR}/scripts/unix/brew.sh" "$subcmd" "$@"
             ;;
     esac
 }

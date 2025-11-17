@@ -82,10 +82,26 @@ zinit ice depth=1
 zinit light romkatv/powerlevel10k
 
 # Load plugins
-zinit light Aloxaf/fzf-tab                    # Enhanced tab completion with fzf
-zinit light zsh-users/zsh-completions         # Additional completions
-zinit light zsh-users/zsh-autosuggestions     # Command suggestions from history
-zinit light zsh-users/zsh-syntax-highlighting # Syntax highlighting
+zinit light Aloxaf/fzf-tab                       # Enhanced tab completion with fzf
+zinit light zsh-users/zsh-completions            # Additional completions
+zinit light zsh-users/zsh-autosuggestions        # Command suggestions from history
+zinit light zdharma-continuum/fast-syntax-highlighting # Fast, modular syntax highlighting
+
+# Docker support
+zinit light akarzim/zsh-docker-aliases           # Docker command aliases
+
+# Command history & suggestions
+zinit light MichaelAquilina/zsh-you-should-use  # You should use notifications
+zinit light wfxr/forgit                          # Git command shortcuts
+
+# Note: atuin is now managed separately - install via brew: brew install atuin
+
+# Node version management
+zinit light lukechilds/zsh-nvm                   # NVM plugin loader
+
+# Utilities
+zinit light mafredri/zsh-async                   # Asynchronous task runner
+zinit light supercrabtree/k                      # Enhanced directory listing (aliased as 't')
 
 # ============================================================================
 # 3. SHELL OPTIONS & KEYBINDINGS
@@ -108,6 +124,12 @@ bindkey -M viins '^[[3~' delete-char
 bindkey -M viins '^H' backward-kill-word        # Ctrl+Backspace
 bindkey -M viins '^W' backward-kill-word        # Ctrl+W (standard)
 bindkey -M viins '^[^?' backward-kill-word      # Alt+Backspace
+
+# zsh-autosuggestions keybindings (macOS compatible)
+# On macOS, use End key or Escape to accept suggestions
+bindkey '^ ' autosuggest-accept                 # Ctrl+Space accepts suggestion
+# For arrow key acceptance (works on most terminals)
+bindkey '^[[C' autosuggest-accept                # Right arrow key
 
 # Shell options (all at once)
 setopt AUTO_CD COMPLETE_IN_WORD extended_history hist_find_no_dups hist_ignore_all_dups \
@@ -206,9 +228,33 @@ alias ..='cd ../' .2='cd ../../' .3='cd ../../../' .4='cd ../../../../' .5='cd .
 
 # ---- File Operations ----
 
-alias cp='cp -iv' mv='mv -iv' rm='rm -i' mkdir='mkdir -pv' t='touch' dud='du -d 1 -h' duf='du -sh *'
+alias cp='cp -iv' mv='mv -iv' rm='rm -i' mkdir='mkdir -pv' dud='du -d 1 -h' duf='du -sh *'
 alias ls='ls -a --color=auto' l='ls -l' ll='ls -la' lll='ls -laFh'
 alias psg='ps aux | grep -i --color=auto' psl='ps aux | less'
+
+# 't' command: either 'touch' files or run 'k' (better ls) for directories
+t() {
+  if [[ $# -eq 0 ]]; then
+    # No arguments: list current directory with k
+    k
+  else
+    # Check if arguments are existing directories
+    local all_dirs=true
+    for arg in "$@"; do
+      [[ ! -d "$arg" ]] && { all_dirs=false; break; }
+    done
+
+    if [[ "$all_dirs" == true ]]; then
+      # All arguments are directories: run k on each
+      for dir in "$@"; do
+        k "$dir"
+      done
+    else
+      # Not all directories: run touch
+      touch "$@"
+    fi
+  fi
+}
 
 # ---- Permissions ----
 
@@ -509,8 +555,8 @@ dedup_path
 
 # ---- Brew Update Checker ----
 
-# Check for outdated Homebrew packages
-command -v brew &>/dev/null && jsh brew check
+# Check for outdated Homebrew packages (quiet mode: only output if issues found)
+command -v brew &>/dev/null && jsh brew check --quiet
 
 # ============================================================================
 # 9. LOCAL CUSTOMIZATIONS

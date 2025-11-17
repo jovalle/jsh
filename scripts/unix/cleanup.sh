@@ -8,6 +8,24 @@ set -euo pipefail
 
 ROOT_DIR="${1:-$HOME/.jsh}"
 
+# Check for --force or -y flag for non-interactive mode
+FORCE=false
+if [[ "${2:-}" == "--force" ]] || [[ "${2:-}" == "-y" ]]; then
+  FORCE=true
+fi
+
+# Helper function to prompt user or auto-accept
+confirm_action() {
+  local prompt="$1"
+  if [[ "$FORCE" == true ]]; then
+    return 0
+  fi
+  read -p "$prompt [Y/n] " -n 1 -r REPLY
+  echo ""
+  REPLY=${REPLY:-Y}
+  [[ $REPLY =~ ^[Yy]$ ]]
+}
+
 echo "🧹 JSH Cleanup Utility"
 echo "====================="
 echo ""
@@ -35,10 +53,7 @@ else
     echo "  📄 $file ($SIZE)"
   done
   echo ""
-  read -p "Remove sync-conflict files? [Y/n] " -n 1 -r REPLY
-  echo ""
-  REPLY=${REPLY:-Y}
-  if [[ $REPLY =~ ^[Yy]$ ]]; then
+  if confirm_action "Remove sync-conflict files?"; then
     echo "$CONFLICT_FILES" | while IFS= read -r file; do
       echo "  🗑️  Removing: $file"
       rm -f "$file"
@@ -62,10 +77,7 @@ else
     echo "  ❌ $link"
   done
   echo ""
-  read -p "Remove broken symlinks? [Y/n] " -n 1 -r REPLY
-  echo ""
-  REPLY=${REPLY:-Y}
-  if [[ $REPLY =~ ^[Yy]$ ]]; then
+  if confirm_action "Remove broken symlinks?"; then
     echo "$BROKEN_LINKS" | while IFS= read -r link; do
       echo "  🗑️  Removing: $link"
       rm "$link"
@@ -79,10 +91,7 @@ fi
 
 # 3. Homebrew cleanup
 echo "3️⃣  Homebrew cleanup (remove old versions and downloads)..."
-read -p "Run brew cleanup? [Y/n] " -n 1 -r REPLY
-echo ""
-REPLY=${REPLY:-Y}
-if [[ $REPLY =~ ^[Yy]$ ]]; then
+if confirm_action "Run brew cleanup?"; then
   echo "🍺 Running brew cleanup..."
   brew cleanup -s 2>&1 | head -n 20
   echo "✅ Brew cleanup complete"
@@ -112,10 +121,7 @@ if [ $TOTAL_SIZE -gt 0 ]; then
   echo ""
   echo "  Total: $TOTAL_SIZE_HUMAN"
   echo ""
-  read -p "Clear system caches? [Y/n] " -n 1 -r REPLY
-  echo ""
-  REPLY=${REPLY:-Y}
-  if [[ $REPLY =~ ^[Yy]$ ]]; then
+  if confirm_action "Clear system caches?"; then
     for cache_dir in "${CACHE_DIRS[@]}"; do
       if [ -d "$cache_dir" ] && [ -n "$cache_dir" ]; then
         echo "  🗑️  Clearing $cache_dir..."

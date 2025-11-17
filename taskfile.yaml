@@ -11,12 +11,6 @@ includes:
   wsl: ".taskfiles/windows/taskfile.yaml"
 
 tasks:
-  chsh:
-    cmd: chsh -s /bin/zsh
-    desc: Change shell to Zsh
-    status:
-      - test "$(basename -- "$SHELL")" == "zsh"
-
   clean:
     cmd: bash {{.ROOT_DIR}}/scripts/unix/cleanup.sh {{.ROOT_DIR}}
     desc: Clean up system (sync-conflicts, broken symlinks, caches, etc.)
@@ -25,7 +19,6 @@ tasks:
   configure:
     cmds:
       - task: stow
-      - task: chsh
       - task: configure-links
       - task: os:configure
     desc: Configure OS-specific settings and applications
@@ -88,11 +81,31 @@ tasks:
             echo "🗑️  Removing broken symlink: $link"
             rm "$link"
           done
-      - stow -v . --adopt
+      - stow -v dotfiles
       - echo "✅ Dotfiles deployed successfully"
     desc: Deploy dotfiles to home directory using GNU stow
     dir: "{{.ROOT_DIR}}"
     silent: true
+
+  unstow:
+    cmds:
+      - |
+        echo "🔍 Finding and removing all stow-managed symlinks (including orphaned)..."
+        find ~ -maxdepth 1 -type l -print | \
+          while read -r link; do
+            target=$(readlink "$link" 2>/dev/null || echo "")
+            if [[ -z "$target" || ! -e "$target" ]]; then
+              echo "🗑️  Removing symlink: $link (orphaned)"
+              rm "$link"
+            elif [[ "$target" == *"{{.ROOT_DIR}}"* ]]; then
+              echo "🗑️  Removing symlink: $link -> $target"
+              rm "$link"
+            fi
+          done
+      - echo "✅ Symlinks removed successfully"
+    desc: "Remove stow-managed symlinks (debugging measure, includes orphaned links)"
+    dir: "{{.ROOT_DIR}}"
+    interactive: true
 
   uninstall:
     cmds:
@@ -104,14 +117,10 @@ tasks:
 
   update:
     cmds:
-      - cmd: zsh -ic 'zinit self-update'
-        ignore_error: true
-      - cmd: zsh -ic 'zinit update --all'
-        ignore_error: true
       - cmd: brew update
       - cmd: brew upgrade
       - task: os:upgrade
-      - cmd: "{{.ROOT_DIR}}/scripts/unix/brew.sh check --force"
+      - cmd: jsh brew check
         ignore_error: true
     desc: Upgrade brew packages and OS-specific packages
 
