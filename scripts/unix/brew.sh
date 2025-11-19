@@ -332,7 +332,18 @@ validate_package() {
 # Comprehensive check: outdated packages, invalid packages, unsupported platform packages
 comprehensive_check() {
   local forced_platform="${1:-}"  # Optional forced platform: 'linux' or 'darwin'
-  local quiet_mode="${2:-false}"   # Optional quiet mode
+  local quiet_mode="${2:-false}"  # Optional quiet mode
+  local force_check="${3:-false}" # Optional force check
+
+  local marker_file="${ROOT_DIR}/.brewcheck"
+
+  if [[ "$force_check" != "true" ]] && [[ -f "$marker_file" ]]; then
+    # Check if file is less than 24 hours old
+    if [[ -n $(find "$marker_file" -mtime -1 2>/dev/null) ]]; then
+      [[ "$quiet_mode" != "true" ]] && info "⏳ Brew check ran recently. Skipping..."
+      return 0
+    fi
+  fi
 
   if [[ "$quiet_mode" != "true" ]]; then
     info "🔍 Running comprehensive Homebrew check..."
@@ -418,6 +429,9 @@ comprehensive_check() {
     esac
   fi
 
+  # Update marker file
+  touch "$marker_file"
+
   # Summary
   if [[ $issues_found -eq 0 ]]; then
     [[ "$quiet_mode" != "true" ]] && success "All checks passed! No issues found."
@@ -437,6 +451,7 @@ brew_check() {
 
   local forced_platform=""
   local quiet_mode=false
+  local force_check=false
   local args=()
 
   # Parse platform flags
@@ -454,9 +469,14 @@ brew_check() {
         quiet_mode=true
         shift
         ;;
+      --force | -f)
+        force_check=true
+        shift
+        ;;
       --help | -h)
-        info "Usage: jsh brew check [--quiet] [--linux|--darwin|--macos] [package]"
+        info "Usage: jsh brew check [--quiet] [--force] [--linux|--darwin|--macos] [package]"
         info "  --quiet   Silent mode, only output if issues found"
+        info "  --force   Force check even if run recently"
         info "  --linux   Force check as if on Linux platform"
         info "  --darwin  Force check as if on Darwin/macOS platform"
         info "  --macos   Alias for --darwin"
@@ -464,7 +484,7 @@ brew_check() {
         ;;
       -*)
         error "Unknown flag: $1"
-        info "Usage: jsh brew check [--quiet] [--linux|--darwin|--macos] [package]"
+        info "Usage: jsh brew check [--quiet] [--force] [--linux|--darwin|--macos] [package]"
         return 1
         ;;
       *)
@@ -481,11 +501,7 @@ brew_check() {
   fi
 
   # Otherwise run comprehensive checks
-  if [[ "$quiet_mode" == "true" ]]; then
-    comprehensive_check "$forced_platform" true
-  else
-    comprehensive_check "$forced_platform"
-  fi
+  comprehensive_check "$forced_platform" "$quiet_mode" "$force_check"
 }
 
 # ============================================================================

@@ -74,12 +74,12 @@ define format_files_find
 endef
 
 # Find files by type
-# Shell files: Find by .sh extension OR by shebang in .bin/ directory
+# Shell files: Find by .sh extension OR by shebang in bin/ directory
 SHELL_FILES := $(shell find . -type f -name "*.sh" ! -path "*/node_modules/*" ! -path "*/.git/*" ! -path "*/.fzf/*" ! -path "*/.vscode/*" ! -path "*/.config/nvim/*" ! -path "*/.config/*"; \
-	find .bin -type f 2>/dev/null | while read -r f; do \
+	find bin -type f 2>/dev/null | while read -r f; do \
 		shebang=$$(head -n1 "$$f" 2>/dev/null); \
-		echo "$$shebang" | grep -qE '^#!/.*zsh' && continue; \
-		echo "$$shebang" | grep -qE '^#!/.*(ba)?sh' && echo "$$f"; \
+		echo "$$shebang" | grep -qE '^\#!/.*zsh' && continue; \
+		echo "$$shebang" | grep -qE '^\#!/.*(ba)?sh' && echo "$$f"; \
 	done)
 PYTHON_FILES := $(shell find . -type f -name "*.py" ! -path "*/\.*" ! -path "*/node_modules/*" ! -path "*/.venv/*")
 YAML_FILES := $(shell find . -type f \( -name "*.yaml" -o -name "*.yml" \) ! -path "*/\.*" ! -path "*/node_modules/*")

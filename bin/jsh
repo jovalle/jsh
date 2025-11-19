@@ -1,0 +1,1214 @@
+#!/usr/bin/env bash
+
+# ============================================================================
+# jsh
+# ============================================================================
+# A comprehensive command-line interface for managing the jsh project.
+# ============================================================================
+
+set -e
+
+# ==============================================================================
+# Configuration & Variables
+# ==============================================================================
+
+# Resolve the true path of the script to find the repository root
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  DIR="$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )"
+
+# If script is in bin, root is 1 level up
+if [[ "$SCRIPT_DIR" == *"bin" ]]; then
+  ROOT_DIR="$(dirname "$SCRIPT_DIR")"
+else
+  ROOT_DIR="$SCRIPT_DIR"
+fi
+
+OS="$(uname -s)"
+HOSTNAME_WIN="COLOSSUS"
+
+# Load .env if it exists
+if [[ -f "$ROOT_DIR/.env" ]]; then
+  source "$ROOT_DIR/.env"
+fi
+
+# --- macOS Casks ---
+CASKS=(
+  appcleaner
+  bitwarden
+  brave-browser
+  caffeine
+  claude-code
+  firefox
+  font-jetbrains-mono-nerd-font
+  ghostty
+  istat-menus
+  keyboardcleantool
+  macfuse
+  mounty
+  openvpn-connect
+  orbstack
+  plexamp
+  scroll-reverser
+  signal
+  spotify
+  sublime-text
+  tailscale-app
+  todoist-app
+  visual-studio-code
+  wifiman
+  zoom
+)
+
+# --- macOS Formulae ---
+FORMULAE_DARWIN=(
+  age
+  awscli
+  bat
+  btop
+  cloudflared
+  coreutils
+  curl
+  diffutils
+  direnv
+  docker
+  dos2unix
+  exiftool
+  eza
+  fastfetch
+  ffmpeg
+  fileicon
+  gawk
+  gemini-cli
+  gh
+  git
+  gnu-sed
+  go
+  grc
+  grep
+  gromgit/fuse/ntfs-3g-mac
+  helm
+  helmfile
+  hugo
+  ipmitool
+  jq
+  k9s
+  kind
+  krew
+  kubecm
+  kubecolor
+  kubernetes-cli
+  kubescape
+  kubetail
+  make
+  mas
+  mpv
+  neovim
+  netcat
+  nmap
+  node
+  ntfs-3g-mac
+  opentofu
+  pipx
+  poetry
+  prettier
+  python
+  qwen-code
+  readline
+  ripgrep
+  rsync
+  sops
+  speedtest-cli
+  sshpass
+  stow
+  syncthing
+  talosctl
+  tlrc
+  tmux
+  tree
+  uv
+  vim
+  watch
+  wget
+  xh
+  xz
+  yq
+  zoxide
+  zsh
+)
+
+# --- Linux Formulae ---
+FORMULAE_LINUX=(
+  age
+  awscli
+  bat
+  btop
+  cloudflared
+  coreutils
+  curl
+  diffutils
+  direnv
+  docker
+  dos2unix
+  exiftool
+  eza
+  fastfetch
+  ffmpeg
+  gawk
+  gemini-cli
+  gh
+  git
+  gnu-sed
+  go
+  grc
+  grep
+  helm
+  helmfile
+  hugo
+  ipmitool
+  jq
+  k9s
+  kind
+  krew
+  kubecm
+  kubecolor
+  kubernetes-cli
+  kubescape
+  kubetail
+  make
+  mpv
+  neovim
+  netcat
+  nmap
+  node
+  opentofu
+  pipx
+  poetry
+  prettier
+  python
+  qwen-code
+  readline
+  ripgrep
+  rsync
+  sops
+  speedtest-cli
+  sshpass
+  stow
+  syncthing
+  talosctl
+  tlrc
+  tmux
+  tree
+  uv
+  vim
+  watch
+  wget
+  xh
+  xz
+  yq
+  zoxide
+  zsh
+)
+
+# --- Linux Packages (apt) ---
+PACKAGES_LINUX=(
+  build-essential
+  cifs-utils
+  dkms
+  net-tools
+  nvme-cli
+  s-tui
+)
+
+# --- Windows Apps (winget) ---
+APPS_WIN=(
+  Brave.Brave
+  Chocolatey.Chocolatey
+  Doist.Todoist
+  Git.Git
+  Microsoft.PowerToys
+  Microsoft.VisualStudioCode
+  Microsoft.WindowsTerminal
+  Mozilla.Firefox
+  Rufus.Rufus
+  Syncthing.Syncthing
+  Zoom.Zoom
+  mpv.net
+)
+
+# --- Windows Fonts (chocolatey) ---
+FONTS_WIN=(
+  JetBrainsMono
+)
+
+# --- Brew Services ---
+SERVICES=(
+  syncthing
+)
+
+# --- Brew Links ---
+LINKS=(
+  mpv
+  tlrc
+)
+
+# ==============================================================================
+# Helper Functions
+# ==============================================================================
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
+BOLD='\033[1m'
+RESET='\033[0m'
+
+log() { echo -e "${BLUE}🔹 $1${RESET}"; }
+info() { echo -e "${CYAN}ℹ️  $1${RESET}"; }
+warn() { echo -e "${YELLOW}⚠️  $1${RESET}"; }
+error() { echo -e "${RED}❌ $1${RESET}"; exit 1; }
+success() { echo -e "${GREEN}✅ $1${RESET}"; }
+header() { echo -e "\n${BOLD}${BLUE}▶ $1${RESET}\n"; }
+
+confirm() {
+    local prompt="$1"
+    local response
+    read -r -p "${prompt} (y/N): " response
+    case "$response" in
+        y|Y|yes|YES) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+cmd_exists() { command -v "$1" &> /dev/null; }
+
+is_macos() { [[ "$OS" == "Darwin" ]]; }
+is_linux() { [[ "$OS" == "Linux" ]]; }
+is_wsl() { grep -qi microsoft /proc/version 2>/dev/null; }
+
+check_brew() {
+  if ! command -v brew &>/dev/null; then
+    warn "Homebrew not found. Skipping brew-related tasks."
+    return 1
+  fi
+  return 0
+}
+
+apply_brew_shellenv() {
+  local brew_bin="$1"
+  [[ -n "$brew_bin" && -x "$brew_bin" ]] || return 1
+
+  local brew_env
+  if brew_env="$("$brew_bin" shellenv)"; then
+    eval "$brew_env"
+    return 0
+  fi
+
+  return 1
+}
+
+ensure_brew() {
+  if command -v brew &> /dev/null; then
+    return 0
+  fi
+
+  log "Checking for existing Homebrew installation..."
+  local brew_candidates=(
+    "/opt/homebrew/bin/brew"
+    "/usr/local/bin/brew"
+    "/home/linuxbrew/.linuxbrew/bin/brew"
+    "${HOME}/.linuxbrew/bin/brew"
+    "${HOME}/linuxbrew/.linuxbrew/bin/brew"
+  )
+
+  for brew_bin in "${brew_candidates[@]}"; do
+    if [[ -x "${brew_bin}" ]]; then
+      log "Found Homebrew at ${brew_bin}, loading environment..."
+      if apply_brew_shellenv "${brew_bin}"; then
+        return 0
+      fi
+    fi
+  done
+
+  log "Installing Homebrew..."
+  local install_script
+  install_script="$(mktemp)"
+  if curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh -o "${install_script}"; then
+    /bin/bash "${install_script}"
+    rm -f "${install_script}"
+
+    # Load env after install
+    if is_macos; then
+      apply_brew_shellenv "/opt/homebrew/bin/brew" || apply_brew_shellenv "/usr/local/bin/brew"
+    else
+      apply_brew_shellenv "/home/linuxbrew/.linuxbrew/bin/brew" || apply_brew_shellenv "${HOME}/.linuxbrew/bin/brew"
+    fi
+  else
+    error "Failed to download Homebrew install script."
+  fi
+}
+
+# ==============================================================================
+# Core Task Functions
+# ==============================================================================
+
+# @cmd bootstrap : Bootstrap the environment (install brew, stow, etc.)
+task_bootstrap() {
+  local install_packages=true
+  local skip_brew=false
+  local dry_run=false
+
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --no-install) install_packages=false; shift ;;
+      --skip-brew) skip_brew=true; shift ;;
+      --dry-run) dry_run=true; shift ;;
+      *) shift ;;
+    esac
+  done
+
+  header "Bootstrapping environment"
+
+  # 1. Git Submodules
+  if [[ -f "$ROOT_DIR/.gitmodules" ]]; then
+    log "Initializing git submodules..."
+    if [[ "$dry_run" == "false" ]]; then
+      git -C "$ROOT_DIR" submodule update --init --recursive
+    fi
+  fi
+
+  # 2. Homebrew
+  if [[ "$install_packages" == "true" && "$skip_brew" == "false" ]]; then
+    if [[ "$dry_run" == "false" ]]; then
+      ensure_brew
+    fi
+  else
+    log "Skipping Homebrew installation..."
+  fi
+
+  # 3. Basic Tools
+  if [[ "$install_packages" == "true" ]]; then
+    log "Installing basic tools..."
+    local basic_tools=(
+      curl
+      jq
+      make
+      python
+      stow
+      timeout
+      vim
+      zsh
+    )
+    if command -v brew &>/dev/null; then
+      for tool in "${basic_tools[@]}"; do
+        if ! command -v "$tool" &>/dev/null; then
+          log "Installing $tool..."
+          local pkg="$tool"
+          [[ "$tool" == "timeout" ]] && pkg="coreutils"
+          if [[ "$dry_run" == "false" ]]; then
+            brew install "$pkg"
+          fi
+        fi
+      done
+    fi
+  fi
+
+  # 4. Shell Setup
+  log "Configuring shell..."
+  if command -v brew &>/dev/null; then
+    local brew_zsh
+    brew_zsh="$(brew --prefix)/bin/zsh"
+    if [[ -x "$brew_zsh" ]]; then
+      if ! grep -q "^$brew_zsh$" /etc/shells 2>/dev/null; then
+        log "Adding $brew_zsh to /etc/shells..."
+        if [[ "$dry_run" == "false" ]]; then
+          echo "$brew_zsh" | sudo tee -a /etc/shells > /dev/null
+        fi
+      fi
+
+      local current_shell
+      if is_macos; then
+        current_shell=$(dscl . -read ~/ UserShell | awk '{print $2}')
+      else
+        current_shell=$(getent passwd "$(whoami)" | cut -d: -f7)
+      fi
+
+      if [[ "$current_shell" != "$brew_zsh" ]]; then
+        log "Changing default shell to $brew_zsh..."
+        if [[ "$dry_run" == "false" ]]; then
+          chsh -s "$brew_zsh" || warn "Failed to change shell. Try manually: chsh -s $brew_zsh"
+        fi
+      fi
+    fi
+  fi
+
+  # 5. Stow
+  if [[ "$dry_run" == "false" ]]; then
+    task_stow
+  else
+    log "DRY RUN: task_stow"
+  fi
+
+  success "Bootstrap complete! Please restart your shell."
+}
+
+# @cmd clean : Clean up system
+task_clean() {
+  header "Cleaning up system"
+  bash "$ROOT_DIR/scripts/unix/cleanup.sh" "$ROOT_DIR"
+}
+
+# @cmd mount : Mount SMB shares
+task_mount() {
+  header "Mounting shares"
+  bash "$ROOT_DIR/scripts/unix/configure-mounts.sh" "$@"
+}
+
+# @cmd stow : Deploy dotfiles
+task_stow() {
+  log "Checking for broken symlinks..."
+  find ~ -maxdepth 1 -type l ! -exec test -e {} \; -print | while read -r link; do
+    echo "🗑️  Removing broken symlink: $link"
+    rm "$link"
+  done
+
+  log "Deploying dotfiles..."
+  if command -v stow &>/dev/null; then
+    # Ensure we are in the root dir for stow to work correctly with relative paths if needed
+    pushd "$ROOT_DIR" > /dev/null
+    stow -v dotfiles
+    popd > /dev/null
+    success "Dotfiles deployed successfully"
+  else
+    warn "stow not found. Please install stow."
+  fi
+}
+
+# @cmd unstow : Remove dotfiles
+task_unstow() {
+  log "Removing stow-managed symlinks..."
+  find ~ -maxdepth 1 -type l -print | while read -r link; do
+    target=$(readlink "$link" 2>/dev/null || echo "")
+    if [[ -z "$target" || ! -e "$target" ]]; then
+      echo "🗑️  Removing symlink: $link (orphaned)"
+      rm "$link"
+    elif [[ "$target" == *"$ROOT_DIR"* ]]; then
+      echo "🗑️  Removing symlink: $link"
+      rm "$link"
+    fi
+  done
+}
+
+task_install_casks() {
+  check_brew || return
+  log "Installing Casks..."
+  brew install --force --cask "${CASKS[@]}"
+}
+
+task_install_formulae() {
+  check_brew || return
+  log "Installing Formulae..."
+  if is_macos; then
+    brew install --force "${FORMULAE_DARWIN[@]}"
+  else
+    brew install --force "${FORMULAE_LINUX[@]}"
+  fi
+}
+
+task_configure_links() {
+  check_brew || return
+  log "Configuring Brew Links..."
+  brew link --overwrite --force "${LINKS[@]}"
+}
+
+task_start_services() {
+  check_brew || return
+  log "Starting Services..."
+  brew services start "${SERVICES[@]}"
+}
+
+task_install_linux_packages() {
+  log "Updating apt cache..."
+  sudo apt update
+  log "Installing apt packages..."
+  sudo apt install -y "${PACKAGES_LINUX[@]}"
+}
+
+task_configure_macos() {
+  log "Configuring macOS..."
+
+  # Ghostty
+  if [[ -d "/Applications/Ghostty.app" ]]; then
+    bash "$ROOT_DIR/scripts/macos/configure-ghostty-aliases.sh"
+  fi
+
+  # Firefox
+  local ff_dir
+  ff_dir=$(find "$HOME/Library/Application Support/Firefox/Profiles" -type d -name "*.default-release" 2>/dev/null | head -n 1)
+  if [[ -n "$ff_dir" && -d "/Applications/Firefox.app" ]]; then
+    log "Configuring Firefox..."
+    ln -sf "$ROOT_DIR/configs/firefox/user.js" "$ff_dir/user.js"
+  else
+    warn "Firefox not found or profile not detected."
+  fi
+
+  # VSCode
+  if [[ -d "/Applications/Visual Studio Code.app" ]]; then
+    log "Configuring VSCode..."
+    local vscode_user="$HOME/Library/Application Support/Code/User"
+    mkdir -p "$vscode_user"
+    ln -sf "$ROOT_DIR/configs/vscode/keybindings.json" "$vscode_user/keybindings.json"
+    ln -sf "$ROOT_DIR/configs/vscode/settings.json" "$vscode_user/settings.json"
+  else
+    warn "VSCode not found."
+  fi
+}
+
+task_configure_linux() {
+  log "Configuring Linux..."
+  bash "$ROOT_DIR/scripts/linux/configure-sudoers.sh"
+
+  if is_wsl; then
+    task_configure_wsl
+  fi
+}
+
+task_configure_wsl() {
+  log "Configuring WSL..."
+  task_configure_windows
+}
+
+task_install_wsl() {
+  log "Installing WSL specific packages..."
+  task_install_windows
+}
+
+# @cmd wsl : Windows Subsystem for Linux integration
+# @cmd wsl configure : Configure Windows host from WSL
+task_configure_windows() {
+  log "Configuring Windows..."
+
+  # Hostname
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Start-Process powershell -ArgumentList \"-NoProfile -ExecutionPolicy Bypass -Command \`\"\$current = [System.Net.Dns]::GetHostName(); if (\$current -ne '$HOSTNAME_WIN') { Write-Host '🖥️  Setting hostname to $HOSTNAME_WIN...'; Rename-Computer -NewName '$HOSTNAME_WIN' -Force; Write-Host '⚠️  Restart required' } else { Write-Host '✅ Hostname already set' }\`\"\" -Verb RunAs -Wait"
+
+  # SSH
+  bash "$ROOT_DIR/scripts/windows/configure-ssh.sh"
+
+  # Terminal
+  bash "$ROOT_DIR/scripts/windows/configure-terminal.sh"
+
+  # VSCode
+  bash "$ROOT_DIR/scripts/windows/configure-vscode.sh"
+}
+
+# @cmd wsl install : Install Windows apps from WSL
+task_install_windows() {
+  log "Installing Windows Apps..."
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath \"winget\" -ArgumentList \"install ${APPS_WIN[*]}\" -Verb RunAs -Wait"
+
+  log "Installing Nerd Fonts..."
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Start-Process powershell -ArgumentList \"refreshenv; choco install $(printf "nerd-fonts-%s " "${FONTS_WIN[@]}") -y\" -Verb RunAs -Wait"
+}
+
+# @cmd install : Install packages
+task_install() {
+  header "Installing packages"
+  if is_macos; then
+    task_install_casks
+    task_install_formulae
+    task_start_services
+  elif is_linux; then
+    task_install_linux_packages
+    if is_wsl; then
+      task_install_wsl
+    fi
+    task_install_formulae
+    task_start_services
+  fi
+}
+
+# @cmd configure : Configure settings and apps
+task_configure() {
+  header "Configuring environment"
+  task_stow
+  task_configure_links
+
+  if is_macos; then
+    task_configure_macos
+  elif is_linux; then
+    task_configure_linux
+  fi
+}
+
+# @cmd setup : Install and configure everything (post-bootstrap)
+task_setup() {
+  task_install
+  task_configure
+}
+
+# @cmd upgrade : Upgrade packages
+task_upgrade() {
+  header "Upgrading packages"
+
+  # Update zinit if present
+  if command -v zsh &>/dev/null; then
+    log "Updating zinit..."
+    zsh -ic 'zinit self-update' 2>/dev/null || true
+    zsh -ic 'zinit update --all' 2>/dev/null || true
+  fi
+
+  if is_macos; then
+    if command -v brew &>/dev/null; then
+        log "Upgrading Homebrew packages..."
+        brew update && brew upgrade
+    fi
+    if command -v mas &>/dev/null; then
+      log "Upgrading Mac App Store apps..."
+      mas upgrade
+    else
+      warn "mas not installed - skipping App Store updates"
+    fi
+  elif is_linux; then
+    log "Upgrading apt packages..."
+    sudo apt update && sudo apt upgrade -y
+    if command -v brew &>/dev/null; then
+        log "Upgrading Homebrew packages..."
+        brew update && brew upgrade
+    fi
+  fi
+}
+
+# ==============================================================================
+# Utility Commands (Restored & Adapted)
+# ==============================================================================
+
+# @cmd status : Show system status
+cmd_status() {
+    header "System Status"
+
+    check_brew || return 1
+
+    # Homebrew formulae
+    echo -e "${BOLD}${MAGENTA}Homebrew Formulae:${RESET}"
+    if cmd_exists brew; then
+        local formulae_count
+        formulae_count=$(brew list --formula 2>/dev/null | wc -l | tr -d ' ')
+        echo -e "  Installed: ${GREEN}${formulae_count}${RESET} formulae"
+
+        # Check for outdated
+        local outdated
+        outdated=$(brew outdated --formula 2>/dev/null | wc -l | tr -d ' ')
+        if [[ "$outdated" -gt 0 ]]; then
+            echo -e "  Outdated:  ${YELLOW}${outdated}${RESET} formulae"
+        else
+            echo -e "  Outdated:  ${GREEN}0${RESET} (all up to date)"
+        fi
+    fi
+    echo
+
+    # Homebrew casks (macOS only)
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        echo -e "${BOLD}${MAGENTA}Homebrew Casks:${RESET}"
+        local casks_count
+        casks_count=$(brew list --cask 2>/dev/null | wc -l | tr -d ' ')
+        echo -e "  Installed: ${GREEN}${casks_count}${RESET} casks"
+
+        local outdated_casks
+        outdated_casks=$(brew outdated --cask 2>/dev/null | wc -l | tr -d ' ')
+        if [[ "$outdated_casks" -gt 0 ]]; then
+            echo -e "  Outdated:  ${YELLOW}${outdated_casks}${RESET} casks"
+        else
+            echo -e "  Outdated:  ${GREEN}0${RESET} (all up to date)"
+        fi
+        echo
+    fi
+
+    # Homebrew services
+    echo -e "${BOLD}${MAGENTA}Homebrew Services:${RESET}"
+    if cmd_exists brew; then
+        while IFS= read -r line; do
+            service=$(echo "$line" | awk '{print $1}')
+            svc_status=$(echo "$line" | awk '{print $2}')
+
+            if [[ "$svc_status" == "started" ]]; then
+                echo -e "  ${GREEN}●${RESET} ${service} (${GREEN}running${RESET})"
+            elif [[ "$svc_status" == "stopped" ]]; then
+                echo -e "  ${RED}●${RESET} ${service} (${RED}stopped${RESET})"
+            else
+                echo -e "  ${YELLOW}●${RESET} ${service} (${YELLOW}${svc_status}${RESET})"
+            fi
+        done < <(brew services list 2>/dev/null | tail -n +2)
+    fi
+    echo
+
+    # Symlinks
+    echo -e "${BOLD}${MAGENTA}Dotfile Symlinks:${RESET}"
+    local symlink_count=0
+    local broken_count=0
+
+    # Count symlinks pointing to ROOT_DIR
+    while IFS= read -r link; do
+        ((symlink_count++))
+        if [[ ! -e "$link" ]]; then
+            ((broken_count++))
+        fi
+    done < <(find "$HOME" -maxdepth 1 -type l 2>/dev/null | while read -r link; do
+        if [[ "$(readlink "$link")" == "${ROOT_DIR}"* ]]; then
+            echo "$link"
+        fi
+    done)
+
+    echo -e "  Total:  ${GREEN}${symlink_count}${RESET} symlinks"
+    if [[ "$broken_count" -gt 0 ]]; then
+        echo -e "  Broken: ${RED}${broken_count}${RESET} symlinks"
+    else
+        echo -e "  Broken: ${GREEN}0${RESET} (all valid)"
+    fi
+    echo
+
+    # Git status
+    echo -e "${BOLD}${MAGENTA}Git Repository:${RESET}"
+    if [[ -d "${ROOT_DIR}/.git" ]]; then
+        pushd "${ROOT_DIR}" > /dev/null
+        local branch
+        branch=$(git branch --show-current 2>/dev/null || echo "unknown")
+        echo -e "  Branch:  ${CYAN}${branch}${RESET}"
+
+        local git_status
+        git_status=$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')
+        if [[ "$git_status" -gt 0 ]]; then
+            echo -e "  Changes: ${YELLOW}${git_status}${RESET} uncommitted changes"
+        else
+            echo -e "  Changes: ${GREEN}clean${RESET}"
+        fi
+        popd > /dev/null
+    fi
+    echo
+
+    # System info
+    echo -e "${BOLD}${MAGENTA}System Information:${RESET}"
+    echo -e "  OS:     $(uname -s) $(uname -r)"
+    echo -e "  Shell:  ${SHELL} (${ZSH_VERSION:-unknown})"
+    echo -e "  Arch:   $(uname -m)"
+    echo
+}
+
+# @cmd doctor : Run diagnostics
+cmd_doctor() {
+    header "Running jsh diagnostics"
+
+    local issues=0
+
+    # Check for required commands
+    echo -e "${BOLD}Checking required commands...${RESET}"
+    local required_cmds=(brew stow git curl jq vim zsh)
+    for cmd in "${required_cmds[@]}"; do
+        if cmd_exists "$cmd"; then
+            echo -e "  ${GREEN}✓${RESET} ${cmd}"
+        else
+            echo -e "  ${RED}✗${RESET} ${cmd} (missing)"
+            ((issues++))
+        fi
+    done
+    echo
+
+    # Check for broken symlinks
+    echo -e "${BOLD}Checking for broken symlinks...${RESET}"
+    local broken_links=()
+    while IFS= read -r link; do
+        broken_links+=("$link")
+    done < <(find "$HOME" -maxdepth 1 -type l ! -exec test -e {} \; -print 2>/dev/null)
+
+    if [[ ${#broken_links[@]} -eq 0 ]]; then
+        echo -e "  ${GREEN}✓${RESET} No broken symlinks found"
+    else
+        echo -e "  ${YELLOW}⚠${RESET} Found ${#broken_links[@]} broken symlink(s):"
+        for link in "${broken_links[@]}"; do
+            echo -e "    ${RED}→${RESET} $link"
+            ((issues++))
+        done
+    fi
+    echo
+
+    # Check Git repository status
+    echo -e "${BOLD}Checking Git repository...${RESET}"
+    if [[ -d "${ROOT_DIR}/.git" ]]; then
+        pushd "${ROOT_DIR}" > /dev/null
+        if git rev-parse --git-dir > /dev/null 2>&1; then
+            echo -e "  ${GREEN}✓${RESET} Git repository is valid"
+        else
+            echo -e "  ${RED}✗${RESET} Git repository is corrupted"
+            ((issues++))
+        fi
+
+        # Check for submodules
+        if [[ -f "${ROOT_DIR}/.gitmodules" ]]; then
+            if git submodule status | grep -q '^-'; then
+                echo -e "  ${YELLOW}⚠${RESET} Some submodules are not initialized"
+                ((issues++))
+            else
+                echo -e "  ${GREEN}✓${RESET} All submodules initialized"
+            fi
+        fi
+        popd > /dev/null
+    else
+        echo -e "  ${RED}✗${RESET} Not a Git repository"
+        ((issues++))
+    fi
+    echo
+
+    # Check Homebrew health
+    if cmd_exists brew; then
+        echo -e "${BOLD}Checking Homebrew...${RESET}"
+        if brew doctor > /dev/null 2>&1; then
+            echo -e "  ${GREEN}✓${RESET} Homebrew is healthy"
+        else
+            echo -e "  ${YELLOW}⚠${RESET} Homebrew has warnings (run 'brew doctor' for details)"
+        fi
+    fi
+    echo
+
+    # Summary
+    if [[ $issues -eq 0 ]]; then
+        success "All checks passed! No issues found."
+    else
+        warn "Found ${issues} issue(s). Please review the output above."
+        return 1
+    fi
+}
+
+# @cmd backup : Backup configuration
+cmd_backup() {
+    header "Backing up jsh configuration"
+
+    local backup_dir="${HOME}/.jsh-backups"
+    local timestamp
+    timestamp=$(date +%Y%m%d_%H%M%S)
+    local backup_path="${backup_dir}/jsh_${timestamp}"
+
+    mkdir -p "$backup_dir"
+
+    info "Creating backup at: ${backup_path}"
+
+    # Backup key files
+    mkdir -p "${backup_path}"
+
+    # Copy important config files
+    local configs=(.zshrc .gitconfig .vimrc .tmux.conf)
+    for config in "${configs[@]}"; do
+        if [[ -f "${HOME}/${config}" ]]; then
+            cp "${HOME}/${config}" "${backup_path}/"
+            echo -e "  ${GREEN}✓${RESET} Backed up ${config}"
+        fi
+    done
+
+    # Backup brew packages list
+    if cmd_exists brew; then
+        brew bundle dump --file="${backup_path}/Brewfile" --force 2>/dev/null
+        echo -e "  ${GREEN}✓${RESET} Backed up Brewfile"
+    fi
+
+    success "Backup created at: ${backup_path}"
+}
+
+# @cmd restore : Restore configuration
+cmd_restore() {
+    header "Restoring jsh configuration"
+
+    local backup_dir="${HOME}/.jsh-backups"
+
+    if [[ ! -d "$backup_dir" ]]; then
+        error "No backups found at ${backup_dir}"
+        return 1
+    fi
+
+    # List available backups
+    echo -e "${BOLD}Available backups:${RESET}"
+    local backups=()
+    while IFS= read -r backup; do
+        backups+=("$backup")
+        echo -e "  ${CYAN}$(basename "$backup")${RESET}"
+    done < <(find "$backup_dir" -maxdepth 1 -type d -name "jsh_*" | sort -r)
+
+    if [[ ${#backups[@]} -eq 0 ]]; then
+        error "No backups found"
+        return 1
+    fi
+
+    echo
+    read -r -p "Enter backup name to restore (or 'latest'): " backup_name
+
+    local restore_path
+    if [[ "$backup_name" == "latest" ]]; then
+        restore_path="${backups[0]}"
+    else
+        restore_path="${backup_dir}/${backup_name}"
+    fi
+
+    if [[ ! -d "$restore_path" ]]; then
+        error "Backup not found: ${restore_path}"
+        return 1
+    fi
+
+    warn "This will overwrite your current configuration!"
+    if ! confirm "Continue with restore?"; then
+        info "Restore cancelled"
+        return 0
+    fi
+
+    # Restore files
+    for file in "${restore_path}"/*; do
+        local filename
+        filename=$(basename "$file")
+        if [[ "$filename" != "Brewfile" ]]; then
+            cp "$file" "${HOME}/${filename}"
+            echo -e "  ${GREEN}✓${RESET} Restored ${filename}"
+        fi
+    done
+
+    success "Restore complete from: $(basename "$restore_path")"
+}
+
+# @cmd list : List managed packages
+cmd_list() {
+    header "Managed Packages and Configurations"
+
+    echo -e "${BOLD}${MAGENTA}Managed Formulae (Darwin):${RESET}"
+    printf '%s\n' "${FORMULAE_DARWIN[@]}" | column
+    echo
+    echo -e "${BOLD}${MAGENTA}Managed Formulae (Linux):${RESET}"
+    printf '%s\n' "${FORMULAE_LINUX[@]}" | column
+    echo
+    echo -e "${BOLD}${MAGENTA}Managed Casks:${RESET}"
+    printf '%s\n' "${CASKS[@]}" | column
+    echo
+
+    if cmd_exists brew; then
+        echo -e "${BOLD}${MAGENTA}Installed Formulae:${RESET}"
+        brew list --formula -1 | head -20
+        local total
+        total=$(brew list --formula 2>/dev/null | wc -l | tr -d ' ')
+        if [[ $total -gt 20 ]]; then
+            echo -e "  ${YELLOW}... and $((total - 20)) more${RESET}"
+        fi
+        echo
+
+        if [[ "$(uname -s)" == "Darwin" ]]; then
+            echo -e "${BOLD}${MAGENTA}Installed Casks:${RESET}"
+            brew list --cask -1 | head -20
+            local cask_total
+            cask_total=$(brew list --cask 2>/dev/null | wc -l | tr -d ' ')
+            if [[ $cask_total -gt 20 ]]; then
+                echo -e "  ${YELLOW}... and $((cask_total - 20)) more${RESET}"
+            fi
+            echo
+        fi
+    fi
+
+    echo -e "${BOLD}${MAGENTA}Managed Configurations:${RESET}"
+    if [[ -d "${ROOT_DIR}/configs" ]]; then
+        find "${ROOT_DIR}/configs" -type f ! -path "*/.*" | while IFS= read -r config; do
+            echo -e "  ${CYAN}→${RESET} ${config#${ROOT_DIR}/}"
+        done
+    fi
+}
+
+# @cmd brew : Manage Homebrew
+cmd_brew() {
+    local subcmd="${1:-help}"
+    shift || true
+
+    case "$subcmd" in
+        setup)
+            "${ROOT_DIR}/scripts/unix/brew.sh" setup
+            ;;
+        check)
+            "${ROOT_DIR}/scripts/unix/brew.sh" check "$@"
+            ;;
+        help|--help|-h)
+            echo -e "${BOLD}${CYAN}jsh brew${RESET} - Homebrew package management"
+            echo
+            "${ROOT_DIR}/scripts/unix/brew.sh"
+            ;;
+        *)
+            # Pass through to brew
+            if ! check_brew; then
+                return 1
+            fi
+            "${ROOT_DIR}/scripts/unix/brew.sh" "$subcmd" "$@"
+            ;;
+    esac
+}
+
+# @cmd completion : Generate completion script
+cmd_completion() {
+    local src="${SOURCE:-$0}"
+
+    cat <<EOF
+#compdef jsh
+
+_jsh() {
+    local context state state_descr line
+    typeset -A opt_args
+
+    _arguments -C \\
+        '1: :_jsh_commands' \\
+        '*:: :->args'
+
+    case \$state in
+        args)
+            case \$line[1] in
+EOF
+
+    # Generate cases for subcommands
+    local prev_parent=""
+    grep '^# @cmd' "$src" | sed 's/^# @cmd //' | while read -r line; do
+        cmd_part="${line%% :*}"
+        if [[ "$cmd_part" == *" "* ]]; then
+            parent="${cmd_part%% *}"
+            if [[ "$parent" != "$prev_parent" ]]; then
+                echo "                $parent)"
+                echo "                    _arguments '1: :_jsh_${parent}_commands'"
+                echo "                    ;;"
+                prev_parent="$parent"
+            fi
+        fi
+    done
+
+    cat <<EOF
+                *)
+                    ;;
+            esac
+            ;;
+    esac
+}
+
+_jsh_commands() {
+    local -a commands
+    commands=(
+EOF
+
+    # Top level commands
+    grep '^# @cmd' "$src" | sed 's/^# @cmd //' | while read -r line; do
+        cmd_part="${line%% :*}"
+        desc="${line#* : }"
+        if [[ "$cmd_part" != *" "* ]]; then
+            echo "        '$cmd_part:$desc'"
+        fi
+    done
+
+    cat <<EOF
+    )
+    _describe -t commands 'jsh command' commands
+}
+EOF
+
+    # Subcommand functions
+    local parents
+    parents=$(grep '^# @cmd' "$src" | sed 's/^# @cmd //' | while read -r line; do
+        cmd_part="${line%% :*}"
+        if [[ "$cmd_part" == *" "* ]]; then
+            echo "${cmd_part%% *}"
+        fi
+    done | sort -u)
+
+    for parent in $parents; do
+        echo ""
+        echo "_jsh_${parent}_commands() {"
+        echo "    local -a commands"
+        echo "    commands=("
+        grep "^# @cmd $parent " "$src" | sed "s/^# @cmd $parent //" | while read -r line; do
+            # Trim leading space if any
+            line="${line## }"
+            subcmd="${line%% :*}"
+            if [[ -z "$subcmd" || "$subcmd" == :* ]]; then continue; fi
+            desc="${line#* : }"
+            echo "        '$subcmd:$desc'"
+        done
+        echo "    )"
+        echo "    _describe -t commands '$parent command' commands"
+        echo "}"
+    done
+
+    echo ""
+    echo "_jsh"
+}
+
+# ==============================================================================
+# Main Dispatcher
+# ==============================================================================
+
+# @cmd help : Show this help message
+show_help() {
+  echo -e "${BOLD}${CYAN}jsh${RESET} - Dotfiles Management Utility"
+  echo ""
+  echo -e "${BOLD}USAGE:${RESET}"
+  echo "  jsh <command> [options]"
+  echo ""
+  echo -e "${BOLD}COMMANDS:${RESET}"
+  echo -e "  ${GREEN}bootstrap${RESET}       Bootstrap the environment (install brew, stow, etc.)"
+  echo -e "  ${GREEN}setup${RESET}           Install and configure everything (post-bootstrap)"
+  echo -e "  ${GREEN}install${RESET}         Install packages"
+  echo -e "  ${GREEN}configure${RESET}       Configure settings and apps"
+  echo -e "  ${GREEN}clean${RESET}           Clean up system"
+  echo -e "  ${GREEN}mount${RESET}           Mount SMB shares"
+  echo -e "  ${GREEN}stow${RESET}            Deploy dotfiles"
+  echo -e "  ${GREEN}unstow${RESET}          Remove dotfiles"
+  echo -e "  ${GREEN}upgrade${RESET}         Upgrade packages"
+  echo -e "  ${GREEN}status${RESET}          Show system status"
+  echo -e "  ${GREEN}doctor${RESET}          Run diagnostics"
+  echo -e "  ${GREEN}backup${RESET}          Backup configuration"
+  echo -e "  ${GREEN}restore${RESET}         Restore configuration"
+  echo -e "  ${GREEN}list${RESET}            List managed packages"
+  echo -e "  ${GREEN}brew${RESET}            Manage Homebrew"
+  echo -e "  ${GREEN}wsl configure${RESET}   Configure Windows host from WSL"
+  echo -e "  ${GREEN}wsl install${RESET}     Install Windows apps from WSL"
+  echo -e "  ${GREEN}completion${RESET}      Generate completion script"
+  echo -e "  ${GREEN}help${RESET}            Show this help message"
+  echo ""
+}
+
+if [[ $# -eq 0 ]]; then
+  show_help
+  exit 0
+fi
+
+COMMAND="$1"
+shift
+
+case "$COMMAND" in
+  bootstrap|init) task_bootstrap "$@" ;;
+  setup) task_setup "$@" ;;
+  install) task_install "$@" ;;
+  configure) task_configure "$@" ;;
+  clean|cleanup) task_clean "$@" ;;
+  mount) task_mount "$@" ;;
+  stow|link) task_stow "$@" ;;
+  unstow|unlink) task_unstow "$@" ;;
+  upgrade|update) task_upgrade "$@" ;;
+  status) cmd_status "$@" ;;
+  doctor|check) cmd_doctor "$@" ;;
+  backup) cmd_backup "$@" ;;
+  restore) cmd_restore "$@" ;;
+  list|ls) cmd_list "$@" ;;
+  brew) cmd_brew "$@" ;;
+  wsl)
+    SUBCOMMAND="$1"
+    shift
+    case "$SUBCOMMAND" in
+      configure) task_configure_windows "$@" ;;
+      install) task_install_windows "$@" ;;
+      *) error "Unknown wsl command: $SUBCOMMAND" ;;
+    esac
+    ;;
+  completion) cmd_completion ;;
+  help|--help|-h) show_help ;;
+  *) error "Unknown command: $COMMAND" ;;
+esac

@@ -14,6 +14,24 @@ fi
 # Get mount name from first argument or default to "media"
 MOUNT_NAME="${1:-media}"
 
+# Helper function to URL encode strings
+urlencode() {
+  local string="${1}"
+  local strlen=${#string}
+  local encoded=""
+  local pos c o
+
+  for (( pos=0 ; pos<strlen ; pos++ )); do
+     c=${string:$pos:1}
+     case "$c" in
+        [-_.~a-zA-Z0-9] ) o="${c}" ;;
+        * )               printf -v o '%%%02x' "'$c"
+     esac
+     encoded+="${o}"
+  done
+  echo "${encoded}"
+}
+
 # Helper function to read from JSON config
 read_config() {
   local key="$1"
@@ -442,7 +460,10 @@ else
   # MACOS SETUP
   # Build mount command
   if [[ -n "${SMB_USER}" ]]; then
-    MOUNT_URL="//${SMB_USER}:${SMB_PASS}@${SMB_SHARE#//}"
+    # URL encode credentials to handle special characters
+    ENCODED_USER=$(urlencode "${SMB_USER}")
+    ENCODED_PASS=$(urlencode "${SMB_PASS}")
+    MOUNT_URL="//${ENCODED_USER}:${ENCODED_PASS}@${SMB_SHARE#//}"
   else
     MOUNT_URL="${SMB_SHARE}"
   fi
@@ -464,7 +485,7 @@ else
 
   # Mount the share using mount_smbfs
   echo "Mounting ${SMB_SHARE} to ${MOUNT_POINT}..."
-  if mount_smbfs "${MOUNT_URL}" "${MOUNT_POINT}" 2> /dev/null; then
+  if mount_smbfs "${MOUNT_URL}" "${MOUNT_POINT}"; then
     echo "✓ Successfully mounted"
     df -h "${MOUNT_POINT}"
   else
@@ -475,10 +496,10 @@ else
 
   # Create LaunchAgent for persistent mounting
   echo ""
-  echo -n "Create LaunchAgent for automatic mounting at login? [Y/n]: "
+  echo -n "Create LaunchAgent for automatic mounting at login? [y/N]: "
   read -r CREATE_AGENT
 
-  if [[ ! "${CREATE_AGENT}" =~ ^[Nn]$ ]]; then
+  if [[ "${CREATE_AGENT}" =~ ^[Yy]$ ]]; then
     AGENT_NAME="com.user.smbmount.${MOUNT_NAME}"
     AGENT_PLIST="${HOME}/Library/LaunchAgents/${AGENT_NAME}.plist"
     MOUNT_SCRIPT="${HOME}/.jsh/scripts/unix/mount-smb.sh"
