@@ -125,12 +125,6 @@ bindkey -M viins '^H' backward-kill-word        # Ctrl+Backspace
 bindkey -M viins '^W' backward-kill-word        # Ctrl+W (standard)
 bindkey -M viins '^[^?' backward-kill-word      # Alt+Backspace
 
-# zsh-autosuggestions keybindings (macOS compatible)
-# On macOS, use End key or Escape to accept suggestions
-bindkey '^ ' autosuggest-accept                 # Ctrl+Space accepts suggestion
-# For arrow key acceptance (works on most terminals)
-bindkey '^[[C' autosuggest-accept                # Right arrow key
-
 # Shell options (all at once)
 setopt AUTO_CD COMPLETE_IN_WORD extended_history hist_find_no_dups hist_ignore_all_dups \
         hist_ignore_dups hist_ignore_space hist_save_no_dups INTERACTIVE_COMMENTS \
@@ -156,7 +150,7 @@ MAILCHECK=0                         # Disable mail checking
 # Must be set before tool completions to ensure binaries are found
 local_paths=(
   "${HOME}/.local/bin"                      # user local bin
-  "${JSH}/.bin"                             # jsh local bin
+  "${JSH}/bin"                             # jsh local bin
   "${JSH}/.fzf/bin"                         # fzf bin
   "${HOME}/go/bin"                          # go bin
   "${HOME}/.linuxbrew/bin"                  # Linuxbrew user install
@@ -283,7 +277,8 @@ alias gvimdiff='git difftool --tool=vimdiff --no-prompt'
 
 # ---- Kubernetes ----
 
-alias k='kubectl' kav='kubectl api-versions' kci='kubectl cluster-info' kctx='kubectx' kns='kubens'
+alias k='kubectl' kav='kubectl api-versions' kci='kubectl cluster-info' kaf='kubectl apply -f'
+alias kctx='kubectx' kns='kubens'
 alias kctx+='kubectx --add' kctx-='kubectx --delete'
 alias kdf='kubectl delete -f' kexec='kubectl exec -it' netshoot='kubectl run tmp-shell --rm -i --tty --image nicolaka/netshoot'
 
@@ -300,13 +295,13 @@ alias proxy-='unset {http,https}_proxy {HTTP,HTTPS}_PROXY {NO_PROXY,no_proxy}'
 # ---- Colorized Output ----
 
 if command -v grc &>/dev/null; then
-  alias colorize='grc -es --colour=auto'
+  alias colorize='command grc -es --colour=auto'
 
   # Find grc config directory (cross-platform)
   # shellcheck disable=SC1073,SC1072  # Anonymous function syntax is zsh-specific
   () {
     local grc_conf_dir=""
-    for dir in /opt/homebrew/share/grc /usr/share/grc /usr/local/share/grc; do
+    for dir in /opt/homebrew/share/grc /usr/share/grc /usr/local/share/grc /home/linuxbrew/.linuxbrew/share/grc; do
       [[ -d "$dir" ]] && { grc_conf_dir="$dir"; break; }
     done
 
@@ -555,7 +550,7 @@ dedup_path
 
 # ---- Brew Update Checker ----
 
-# Check for outdated Homebrew packages (quiet mode: only output if issues found)
+# Check for outdated Homebrew packages
 command -v brew &>/dev/null && jsh brew check --quiet
 
 # ============================================================================

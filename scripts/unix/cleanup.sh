@@ -32,7 +32,12 @@ echo ""
 
 # 1. Sync-conflict files
 echo "1️⃣  Checking for sync-conflict files in .jsh directory..."
-PATTERNS=("*.sync-conflict-*" "*conflicted copy*" "*.conflict" "*-conflict-*")
+PATTERNS=(
+  "*.sync-conflict-*"
+  "*conflicted copy*"
+  "*.conflict"
+  "*-conflict-*"
+)
 CONFLICT_FILES=""
 for pattern in "${PATTERNS[@]}"; do
   FOUND=$(find "$ROOT_DIR" -type f -iname "$pattern" 2> /dev/null || true)
@@ -91,12 +96,16 @@ fi
 
 # 3. Homebrew cleanup
 echo "3️⃣  Homebrew cleanup (remove old versions and downloads)..."
-if confirm_action "Run brew cleanup?"; then
-  echo "🍺 Running brew cleanup..."
-  brew cleanup -s 2>&1 | head -n 20
-  echo "✅ Brew cleanup complete"
+if command -v brew &> /dev/null; then
+  if confirm_action "Run brew cleanup?"; then
+    echo "🍺 Running brew cleanup..."
+    brew cleanup -s 2>&1 | head -n 20
+    echo "✅ Brew cleanup complete"
+  else
+    echo "⏭️ Skipped brew cleanup"
+  fi
 else
-  echo "⏭️ Skipped brew cleanup"
+  echo "⏭️ Brew not found, skipping cleanup"
 fi
 echo ""
 

@@ -45,7 +45,9 @@
 .VolumeIcon.icns
 ._*
 .apdisk
+.brewcheck
 .com.apple.timemachine.donotpresent
+.config/syncthing
 .envrc
 .fseventsd
 .fzf
