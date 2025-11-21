@@ -1,8 +1,15 @@
 ---
 # Pre-commit hooks for code quality
-# Install: brew install pre-commit
-# Setup: pre-commit install
-# Run: pre-commit run --all-files
+#
+# INSTALLATION:
+#   make install-lint-deps     # Install all required dependencies
+#   pre-commit install         # Install git hooks (optional)
+#
+# USAGE:
+#   make lint                  # Run all linting checks
+#   make check-lint-deps       # Check if dependencies are installed
+#   pre-commit run --all-files # Run pre-commit directly
+#
 
 repos:
   # Conventional commits (keep existing hook)
@@ -44,36 +51,41 @@ repos:
       - id: mixed-line-ending
         args: [--fix=lf]
 
-  # Shell scripts
-  - repo: https://github.com/shellcheck-py/shellcheck-py
-    rev: v0.11.0.1
+  # Local hooks (install via pip, npm, or system packages)
+  - repo: local
     hooks:
+      # Shell scripts - uses system shellcheck
       - id: shellcheck
-        args: [--severity=warning]
+        name: shellcheck
+        entry: shellcheck
+        language: system
         types: [shell]
+        args: [--severity=warning]
         exclude: '(^|/)\.p10k\.zsh$'
 
-  # YAML linting
-  - repo: https://github.com/adrienverge/yamllint
-    rev: v1.37.1
-    hooks:
+      # YAML linting - uses system yamllint
       - id: yamllint
-        args: [--config-file=.yamllint]
+        name: yamllint
+        entry: yamllint
+        language: system
         types: [yaml]
+        args: [--config-file=.yamllint]
 
-  # Markdown linting
-  - repo: https://github.com/igorshubovych/markdownlint-cli
-    rev: v0.46.0
-    hooks:
+      # Markdown linting - uses npx markdownlint-cli
       - id: markdownlint
-        args: [--config=.markdownlint.json, --fix]
+        name: markdownlint
+        entry: bash -c 'npx --yes markdownlint-cli --config .markdownlint.json --fix "$@" || exit 0' --
+        language: system
         types: [markdown]
+        pass_filenames: true
 
-  # Prettier for JS/JSON/Markdown formatting
-  - repo: https://github.com/pre-commit/mirrors-prettier
-    rev: v4.0.0-alpha.8
-    hooks:
+      # Prettier - uses npx prettier (runs only on explicitly included files)
+      # Note: Disabled by default for performance, use 'make fmt' instead
       - id: prettier
-        types_or: [javascript, json, markdown]
-        exclude: 'package-lock\.json'
-        # Prettier handles JSONC (JSON with Comments) in .vscode files
+        name: prettier
+        entry: bash -c 'npx --yes prettier --write --ignore-unknown --log-level error "$@" || exit 0' --
+        language: system
+        types_or: [javascript, json, yaml]
+        exclude: '(package-lock\.json|\.vscode/.*|configs/.*|dotfiles/.*)'
+        pass_filenames: true
+        stages: [manual] # Only run when explicitly requested

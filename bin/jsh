@@ -278,10 +278,11 @@ header() { echo -e "\n${BOLD}${BLUE}▶ $1${RESET}\n"; }
 confirm() {
     local prompt="$1"
     local response
-    read -r -p "${prompt} (y/N): " response
+    read -n 1 -r -p "${prompt} (y/N): " response
+    echo  # Print newline after single character input
     case "$response" in
-        y|Y|yes|YES) return 0 ;;
-        *) return 1 ;;
+        y|Y) return 0 ;;
+        *) return 1 ;;  # Default is No (empty/Enter counts as No)
     esac
 }
 
@@ -334,6 +335,15 @@ ensure_brew() {
       fi
     fi
   done
+
+  # Check for sudo access before attempting installation
+  if ! sudo -n true 2>/dev/null; then
+    echo -e "${RED}❌ Homebrew installation requires sudo access${RESET}" >&2
+    echo -e "${CYAN}ℹ️  Please ensure you have sudo permissions, or use an alternative installation method:${RESET}" >&2
+    echo -e "${CYAN}ℹ️  https://docs.brew.sh/Installation#alternative-installs${RESET}" >&2
+    warn "Skipping Homebrew installation..." >&2
+    return 1
+  fi
 
   log "Installing Homebrew..."
   local install_script
@@ -398,7 +408,9 @@ task_bootstrap() {
   # 2. Homebrew
   if [[ "$install_packages" == "true" && "$skip_brew" == "false" ]]; then
     if [[ "$dry_run" == "false" ]]; then
-      ensure_brew
+      if ! ensure_brew; then
+        warn "Continuing without Homebrew..."
+      fi
     fi
   else
     log "Skipping Homebrew installation..."
@@ -461,9 +473,9 @@ task_bootstrap() {
 
   # 5. Link dotfiles
   if [[ "$dry_run" == "false" ]]; then
-    task_link
+    task_stow
   else
-    log "DRY RUN: task_link"
+    log "DRY RUN: task_stow"
   fi
 
   success "Bootstrap complete!"
@@ -480,170 +492,303 @@ task_clean() {
   bash "$ROOT_DIR/scripts/unix/cleanup.sh" "$ROOT_DIR"
 }
 
-# @cmd link : Link dotfiles
-task_link() {
-  shopt -s dotglob
+# @cmd stow : Deploy dotfiles
+task_stow() {
   local dotfiles_dir="$ROOT_DIR/dotfiles"
-  local target_dir="$HOME"
 
-  # Check for broken symlinks
-  log "Checking for broken symlinks..."
-  local broken_links=()
+  log "Checking for orphaned symlinks..."
+
+  # Check home directory for orphaned symlinks
+  local orphaned_links=()
   while IFS= read -r link; do
-    broken_links+=("$link")
-  done < <(find "$target_dir" -maxdepth 1 -type l ! -exec test -e {} \; -print)
+    orphaned_links+=("$link")
+  done < <(find ~ -maxdepth 1 -type l ! -exec test -e {} \; -print 2>/dev/null)
 
-  if [ ${#broken_links[@]} -gt 0 ]; then
-    warn "Found broken symlinks:"
-    for link in "${broken_links[@]}"; do
-      echo "  $link"
-    done
-
-    echo -n "Delete broken symlinks? [Y/n] "
-    read -n 1 -r REPLY
-    echo ""
-    if [[ "$REPLY" =~ ^[Yy]$ ]] || [[ -z "$REPLY" ]]; then
-      for link in "${broken_links[@]}"; do
-        rm "$link"
-        log "Deleted $link"
-      done
-    else
-      log "Skipping deletion of broken symlinks."
-    fi
+  # Check .config directory for orphaned symlinks
+  if [[ -d "$HOME/.config" ]]; then
+    while IFS= read -r link; do
+      orphaned_links+=("$link")
+    done < <(find "$HOME/.config" -maxdepth 1 -type l ! -exec test -e {} \; -print 2>/dev/null)
   fi
 
-  log "Linking dotfiles..."
-
-  link_recursive() {
-    local src_dir="$1"
-    local dest_dir="$2"
-
-    for src_path in "$src_dir"/*; do
-      [ -e "$src_path" ] || continue
-      local filename
-      filename=$(basename "$src_path")
-      local dest_path="$dest_dir/$filename"
-
-      [[ "$filename" == ".DS_Store" ]] && continue
-
-      if [ -d "$src_path" ] && [ ! -L "$src_path" ]; then
-        # Special handling for .config: always recurse, converting symlink to dir if needed
-        if [[ "$filename" == ".config" ]]; then
-          if [ -L "$dest_path" ]; then
-            log "Removing symlink $dest_path to convert to directory"
-            rm "$dest_path"
-          fi
-          mkdir -p "$dest_path"
-          link_recursive "$src_path" "$dest_path"
-          continue
-        fi
-
-        # Standard recursion for existing directories
-        if [ -d "$dest_path" ] && [ ! -L "$dest_path" ]; then
-          link_recursive "$src_path" "$dest_path"
-          continue
-        fi
-      fi
-
-      link_item "$src_path" "$dest_path"
+  # Prompt to remove orphaned symlinks if any found
+  if [[ ${#orphaned_links[@]} -gt 0 ]]; then
+    warn "Found ${#orphaned_links[@]} orphaned symlink(s):"
+    for link in "${orphaned_links[@]}"; do
+      local target
+      target=$(readlink "$link" 2>/dev/null || echo "<unreadable>")
+      echo "  📍 $link -> $target"
     done
-  }
+    echo ""
 
-  link_item() {
-    local src="$1"
-    local dest="$2"
-
-    if [ -L "$dest" ]; then
-      local current_target
-      current_target=$(readlink "$dest")
-      if [ "$current_target" == "$src" ]; then
-        return
-      fi
-
-      if [[ "$current_target" == "$ROOT_DIR"* ]]; then
-        rm "$dest"
-        ln -s "$src" "$dest"
-        success "Relinked $dest -> $src"
-        return
-      fi
-
-      backup_item "$dest"
-    elif [ -e "$dest" ]; then
-      backup_item "$dest"
+    if confirm "Remove all orphaned symlinks?"; then
+      for link in "${orphaned_links[@]}"; do
+        echo "🗑️  Removing: $link"
+        rm "$link"
+      done
+      success "Removed ${#orphaned_links[@]} orphaned symlink(s)"
+    else
+      info "Skipping orphaned symlink removal"
     fi
+    echo ""
+  fi
 
-    ln -s "$src" "$dest"
-    success "Linked $dest -> $src"
-  }
+  log "Deploying dotfiles..."
 
-  backup_item() {
-    local item="$1"
-    local backup="${item}-bak"
-    warn "Backing up $item to $backup"
-    mv "$item" "$backup"
-  }
+  # Ensure .config directory exists in home
+  mkdir -p "$HOME/.config"
 
-  link_recursive "$dotfiles_dir" "$target_dir"
-  shopt -u dotglob
-  success "Dotfiles linked successfully"
+  # Process each item in dotfiles directory
+  for item in "$dotfiles_dir"/.* "$dotfiles_dir"/*; do
+    # Skip . and ..
+    [[ "$(basename "$item")" == "." || "$(basename "$item")" == ".." ]] && continue
+
+    # Skip if item doesn't exist (glob didn't match)
+    [[ ! -e "$item" ]] && continue
+
+    local basename_item
+    basename_item=$(basename "$item")
+    local target="$HOME/$basename_item"
+
+    # Special handling for .config directory
+    if [[ "$basename_item" == ".config" ]]; then
+      log "Processing .config directory..."
+
+      # Iterate through items in .config
+      for config_item in "$item"/*; do
+        [[ ! -e "$config_item" ]] && continue
+
+        local config_basename
+        config_basename=$(basename "$config_item")
+        local config_target="$HOME/.config/$config_basename"
+
+        # Backup existing target if it exists and is not already a jsh symlink
+        if [[ -e "$config_target" || -L "$config_target" ]]; then
+          local link_target
+          link_target=$(readlink "$config_target" 2>/dev/null || echo "")
+
+          # Only backup if it's not already pointing to our dotfiles
+          if [[ "$link_target" != "$config_item" ]]; then
+            local backup_path="${config_target}-backup"
+
+            if [[ -L "$config_target" ]]; then
+              # If it's a symlink to something else, preserve it
+              log "Backing up symlink $config_target -> $backup_path"
+              mv "$config_target" "$backup_path"
+            elif [[ -e "$config_target" ]]; then
+              # If it's a file or directory, back it up
+              log "Backing up $config_target -> $backup_path"
+              mv "$config_target" "$backup_path"
+            fi
+          else
+            # Already pointing to correct location, just remove and recreate
+            rm "$config_target"
+          fi
+        fi
+
+        # Create symlink
+        ln -sf "$config_item" "$config_target"
+        echo "  ✓ Linked $config_basename"
+      done
+    else
+      # Handle regular dotfiles
+
+      # Backup existing target if it exists and is not already a jsh symlink
+      if [[ -e "$target" || -L "$target" ]]; then
+        local link_target
+        link_target=$(readlink "$target" 2>/dev/null || echo "")
+
+        # Only backup if it's not already pointing to our dotfiles
+        if [[ "$link_target" != "$item" ]]; then
+          local backup_path="${target}-backup"
+
+          if [[ -L "$target" ]]; then
+            # If it's a symlink to something else, preserve it
+            log "Backing up symlink $target -> $backup_path"
+            mv "$target" "$backup_path"
+          elif [[ -e "$target" ]]; then
+            # If it's a file or directory, back it up
+            log "Backing up $target -> $backup_path"
+            mv "$target" "$backup_path"
+          fi
+        else
+          # Already pointing to correct location, just remove and recreate
+          rm "$target"
+        fi
+      fi
+
+      # Create symlink
+      ln -sf "$item" "$target"
+      echo "  ✓ Linked $basename_item"
+    fi
+  done
+
+  success "Dotfiles deployed successfully"
 }
 
-# @cmd unlink : Remove dotfiles and restore backups
-task_unlink() {
-  shopt -s dotglob
+# @cmd unstow : Remove dotfiles
+task_unstow() {
   local dotfiles_dir="$ROOT_DIR/dotfiles"
-  local target_dir="$HOME"
 
-  log "Unlinking dotfiles..."
+  log "Removing jsh-managed symlinks..."
 
-  unlink_recursive() {
-    local src_dir="$1"
-    local dest_dir="$2"
+  # Remove symlinks from home directory
+  find ~ -maxdepth 1 -type l -print | while read -r link; do
+    target=$(readlink "$link" 2>/dev/null || echo "")
+    if [[ -z "$target" || ! -e "$target" ]]; then
+      echo "🗑️  Removing symlink: $link (orphaned)"
+      rm "$link"
+    elif [[ "$target" == *"$ROOT_DIR/dotfiles"* ]]; then
+      echo "🗑️  Removing symlink: $link"
+      rm "$link"
+    fi
+  done
 
-    for src_path in "$src_dir"/*; do
-      [ -e "$src_path" ] || continue
-      local filename
-      filename=$(basename "$src_path")
-      local dest_path="$dest_dir/$filename"
-
-      [[ "$filename" == ".DS_Store" ]] && continue
-
-      if [ -d "$src_path" ] && [ ! -L "$src_path" ]; then
-        if [ -d "$dest_path" ] && [ ! -L "$dest_path" ]; then
-          unlink_recursive "$src_path" "$dest_path"
-          # Try to remove dir if empty
-          rmdir "$dest_path" 2>/dev/null && log "Removed empty directory $dest_path"
-          continue
-        fi
+  # Remove symlinks from .config directory
+  if [[ -d "$HOME/.config" ]]; then
+    find "$HOME/.config" -maxdepth 1 -type l -print | while read -r link; do
+      target=$(readlink "$link" 2>/dev/null || echo "")
+      if [[ -z "$target" || ! -e "$target" ]]; then
+        echo "🗑️  Removing symlink: $link (orphaned)"
+        rm "$link"
+      elif [[ "$target" == *"$ROOT_DIR/dotfiles/.config"* ]]; then
+        echo "🗑️  Removing symlink: $link"
+        rm "$link"
       fi
-
-      unlink_item "$src_path" "$dest_path"
     done
-  }
+  fi
 
-  unlink_item() {
-    local src="$1"
-    local dest="$2"
+  success "Dotfiles symlinks removed"
+}
 
-    if [ -L "$dest" ]; then
-      local current_target
-      current_target=$(readlink "$dest")
-      if [ "$current_target" == "$src" ]; then
-        rm "$dest"
-        log "Removed link $dest"
+# @cmd uninstall : Completely uninstall jsh (remove symlinks and restore backups)
+task_uninstall() {
+  header "Uninstalling jsh"
 
-        local backup="${dest}-bak"
-        if [ -e "$backup" ]; then
-          mv "$backup" "$dest"
-          success "Restored backup $backup to $dest"
+  warn "This will remove all jsh-managed symlinks and restore original files."
+  if ! confirm "Continue with uninstall?"; then
+    info "Uninstall cancelled"
+    return 0
+  fi
+
+  local dotfiles_dir="$ROOT_DIR/dotfiles"
+  local removed_count=0
+  local restored_count=0
+
+  log "Removing jsh-managed symlinks from home directory..."
+
+  # Process home directory symlinks
+  for item in "$dotfiles_dir"/.* "$dotfiles_dir"/*; do
+    [[ "$(basename "$item")" == "." || "$(basename "$item")" == ".." ]] && continue
+    [[ ! -e "$item" ]] && continue
+
+    local basename_item
+    basename_item=$(basename "$item")
+    local target="$HOME/$basename_item"
+
+    # Skip .config as we handle it separately
+    if [[ "$basename_item" == ".config" ]]; then
+      continue
+    fi
+
+    # Remove jsh symlink if it exists
+    if [[ -L "$target" ]]; then
+      local link_target
+      link_target=$(readlink "$target" 2>/dev/null || echo "")
+
+      if [[ "$link_target" == "$item" ]]; then
+        echo "🗑️  Removing symlink: $target"
+        rm "$target"
+        ((removed_count++))
+
+        # Restore backup if it exists
+        local backup_path="${target}-backup"
+        if [[ -e "$backup_path" || -L "$backup_path" ]]; then
+          echo "♻️  Restoring backup: $backup_path -> $target"
+          mv "$backup_path" "$target"
+          ((restored_count++))
         fi
       fi
     fi
-  }
+  done
 
-  unlink_recursive "$dotfiles_dir" "$target_dir"
-  shopt -u dotglob
-  success "Dotfiles unlinked successfully"
+  log "Removing jsh-managed symlinks from .config directory..."
+
+  # Process .config directory symlinks
+  if [[ -d "$dotfiles_dir/.config" ]]; then
+    for config_item in "$dotfiles_dir/.config"/*; do
+      [[ ! -e "$config_item" ]] && continue
+
+      local config_basename
+      config_basename=$(basename "$config_item")
+      local config_target="$HOME/.config/$config_basename"
+
+      # Remove jsh symlink if it exists
+      if [[ -L "$config_target" ]]; then
+        local link_target
+        link_target=$(readlink "$config_target" 2>/dev/null || echo "")
+
+        if [[ "$link_target" == "$config_item" ]]; then
+          echo "🗑️  Removing symlink: $config_target"
+          rm "$config_target"
+          ((removed_count++))
+
+          # Restore backup if it exists
+          local backup_path="${config_target}-backup"
+          if [[ -e "$backup_path" || -L "$backup_path" ]]; then
+            echo "♻️  Restoring backup: $backup_path -> $config_target"
+            mv "$backup_path" "$config_target"
+            ((restored_count++))
+          fi
+        fi
+      fi
+    done
+  fi
+
+  # Clean up any remaining orphaned symlinks
+  log "Cleaning up orphaned symlinks..."
+
+  find ~ -maxdepth 1 -type l ! -exec test -e {} \; -print 2>/dev/null | while read -r link; do
+    local link_target
+    link_target=$(readlink "$link" 2>/dev/null || echo "")
+
+    if [[ "$link_target" == *"$ROOT_DIR"* ]]; then
+      echo "🗑️  Removing orphaned symlink: $link"
+      rm "$link"
+      ((removed_count++))
+    fi
+  done
+
+  if [[ -d "$HOME/.config" ]]; then
+    find "$HOME/.config" -maxdepth 1 -type l ! -exec test -e {} \; -print 2>/dev/null | while read -r link; do
+      local link_target
+      link_target=$(readlink "$link" 2>/dev/null || echo "")
+
+      if [[ "$link_target" == *"$ROOT_DIR"* ]]; then
+        echo "🗑️  Removing orphaned symlink: $link"
+        rm "$link"
+        ((removed_count++))
+      fi
+    done
+  fi
+
+  # Remove jsh bin from PATH (user must manually edit shell config)
+  info "Note: You may want to remove '$ROOT_DIR/bin' from your PATH"
+  info "      Edit your shell configuration file (~/.zshrc, ~/.bashrc, etc.)"
+
+  # Summary
+  echo ""
+  success "Uninstall complete!"
+  info "  Removed symlinks: $removed_count"
+  info "  Restored backups: $restored_count"
+
+  if [[ $restored_count -gt 0 ]]; then
+    info ""
+    info "Your original files have been restored."
+  fi
+
+  info ""
+  info "To completely remove jsh, run: rm -rf $ROOT_DIR"
 }
 
 task_install_casks() {
@@ -778,7 +923,7 @@ task_install() {
 # @cmd configure : Configure settings and apps
 task_configure() {
   header "Configuring environment"
-  task_link
+  task_stow
   task_configure_links
 
   if is_macos; then
@@ -1299,8 +1444,9 @@ show_help() {
   echo -e "  ${GREEN}install${RESET}         Install packages"
   echo -e "  ${GREEN}configure${RESET}       Configure settings and apps"
   echo -e "  ${GREEN}clean${RESET}           Clean up system"
-  echo -e "  ${GREEN}link${RESET}            Deploy dotfiles"
-  echo -e "  ${GREEN}unlink${RESET}          Remove dotfiles"
+  echo -e "  ${GREEN}stow${RESET}            Deploy dotfiles"
+  echo -e "  ${GREEN}unstow${RESET}          Remove dotfiles"
+  echo -e "  ${GREEN}uninstall${RESET}       Completely uninstall jsh (remove symlinks and restore backups)"
   echo -e "  ${GREEN}upgrade${RESET}         Upgrade packages"
   echo -e "  ${GREEN}status${RESET}          Show system status"
   echo -e "  ${GREEN}doctor${RESET}          Run diagnostics"
@@ -1329,8 +1475,9 @@ case "$COMMAND" in
   install) task_install "$@" ;;
   configure) task_configure "$@" ;;
   clean|cleanup) task_clean "$@" ;;
-  link) task_link "$@" ;;
-  unlink) task_unlink "$@" ;;
+  stow|link) task_stow "$@" ;;
+  unstow|unlink) task_unstow "$@" ;;
+  uninstall) task_uninstall "$@" ;;
   upgrade|update) task_upgrade "$@" ;;
   status) cmd_status "$@" ;;
   doctor|check) cmd_doctor "$@" ;;

@@ -151,6 +151,14 @@ brew_setup() {
     fi
   fi
 
+  # Check for sudo access before attempting installation
+  if ! sudo -n true 2>/dev/null; then
+    error "Homebrew installation requires sudo access"
+    info "Please ensure you have sudo permissions, or use an alternative installation method:"
+    info "https://docs.brew.sh/Installation#alternative-installs"
+    return 1
+  fi
+
   info "Installing Homebrew/Linuxbrew..."
   echo ""
 
