@@ -1,8 +1,5 @@
 /****************************************************************************
- * Betterfox                                                                *
- * "Ad meliora"                                                             *
- * version: 126                                                             *
- * url: https://github.com/yokoffing/Betterfox                              *
+ * Betterfox + Arkenfox Hybrid (Optimized for jsh)                         *
  ****************************************************************************/
 
 /****************************************************************************
@@ -226,15 +223,13 @@ user_pref('findbar.highlightAll', true);
 user_pref('layout.word_select.eat_space_to_next_word', false);
 
 /****************************************************************************
- * START: MY OVERRIDES                                                      *
+ * SECTION: USER OVERRIDES (Fixes & Optimizations)                          *
  ****************************************************************************/
-// visit https://github.com/yokoffing/Betterfox/wiki/Common-Overrides
-// visit https://github.com/yokoffing/Betterfox/wiki/Optional-Hardening
-// Enter your personal overrides below this line:
 
 /** UI **/
 user_pref('browser.urlbar.suggest.recentsearches', false);
 user_pref('browser.warnOnQuitShortcut', false);
+user_pref('browser.startup.homepage', 'about:blank');
 
 /** PRIVACY **/
 user_pref('dom.private-attribution.submission.enabled', false);
@@ -277,10 +272,11 @@ user_pref('services.sync.engine.creditcards', false);
 user_pref('services.sync.engine.addresses', false);
 
 /** ENHANCED PRIVACY **/
-// Fingerprinting protection
-user_pref('privacy.resistFingerprinting', true);
+// Fingerprinting protection (modern FPP instead of nuclear RFP)
+user_pref('privacy.resistFingerprinting', false);
 user_pref('privacy.resistFingerprinting.block_mozAddonManager', true);
 user_pref('privacy.fingerprintingProtection', true);
+user_pref('privacy.fingerprintingProtection.pbmode', true);
 user_pref('privacy.fingerprintingProtection.overrides', '+AllTargets,-CSSPrefersColorScheme');
 
 // Query parameter stripping
@@ -347,28 +343,27 @@ user_pref('browser.cache.isolation_on_shutdown', true);
 user_pref('plugins.flashPlayer.Enable', false);
 
 /** SECURITY HARDENING **/
-// Safe browsing settings (block_dangerous disabled per user preference)
+// Safe browsing settings
 user_pref('browser.safebrowsing.downloads.remote.block_dangerous', true);
 user_pref('browser.safebrowsing.downloads.remote.block_dangerous_host', true);
 user_pref('browser.safebrowsing.downloads.remote.block_potentially_unwanted', true);
 user_pref('browser.safebrowsing.downloads.remote.block_uncommon', true);
 
-// WebGL privacy (disable if sites break)
-user_pref('webgl.disabled', true);
+// WebGL privacy
+user_pref('webgl.disabled', false); // Reenabled to alleviate CPU
 user_pref('webgl.enable-debug-renderer-info', false);
 
 // Canvas fingerprinting protection
 user_pref('privacy.resistFingerprinting.randomDataOnCanvasExtract', true);
 
-// Disable WebRTC IP leak (may break video calls)
-user_pref('media.peerconnection.enabled', false);
+// Allow WebRTC (Teams/Zoom/Meet) - Override default disabled setting
+user_pref('media.peerconnection.enabled', true);
 
-// Disable clipboard events (reduces tracking)
-user_pref('dom.event.clipboardevents.enabled', false);
+// Allow clipboard events (for certain web apps)
+user_pref('dom.event.clipboardevents.enabled', true);
 
 /** QUALITY OF LIFE **/
-// Popup window sizing
-// (allow extensions like Bitwarden to size windows correctly)
+// Popup window sizing (allow extensions like Bitwarden to size windows correctly)
 user_pref('dom.disable_window_open_feature.width', false);
 user_pref('dom.disable_window_open_feature.height', false);
 user_pref('dom.disable_window_open_feature.status', false);
@@ -379,8 +374,8 @@ user_pref('general.smoothScroll.msdPhysics.enabled', true);
 user_pref('mousewheel.default.delta_multiplier_y', 275);
 
 // Faster tab warming
-user_pref('browser.sessionstore.restore_on_demand', false);
-user_pref('browser.sessionstore.restore_tabs_lazily', false);
+user_pref('browser.sessionstore.restore_on_demand', true);
+user_pref('browser.sessionstore.restore_tabs_lazily', true);
 
 // Home page
 user_pref('browser.newtabpage.activity-stream.discoverystream.enabled', false);
@@ -392,13 +387,6 @@ user_pref('browser.newtabpage.activity-stream.showSearch', false);
 user_pref('browser.newtabpage.activity-stream.showSponsored', false);
 user_pref('browser.newtabpage.activity-stream.showSponsoredTopSites', false);
 user_pref('browser.newtabpage.activity-stream.showWeather', false);
-user_pref('browser.startup.homepage', 'about:blank', true);
-
-/****************************************************************************
- * SECTION: SMOOTHFOX                                                       *
- ****************************************************************************/
-// visit https://github.com/yokoffing/Betterfox/blob/main/Smoothfox.js
-// Enter your scrolling overrides below this line:
 
 /****************************************************************************
  * END: BETTERFOX                                                           *
