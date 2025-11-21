@@ -242,10 +242,96 @@ check-json-syntax: ## Check JSON syntax
 
 ##@ Linting
 
-lint: ensure-tools lint-shell lint-python lint-yaml lint-markdown lint-js ## Lint all files
+check-lint-deps: ## Check if linting dependencies are installed
+	@echo -e "$(CYAN)Checking linting dependencies...$(RESET)"
+	@missing=0; \
+	echo -e "$(BLUE)Required tools:$(RESET)"; \
+	for tool in pre-commit shellcheck yamllint npm; do \
+		if command -v $$tool >/dev/null 2>&1; then \
+			echo -e "  ${GREEN}✓${RESET} $$tool"; \
+		else \
+			echo -e "  ${RED}✗${RESET} $$tool (missing)"; \
+			missing=$$((missing + 1)); \
+		fi; \
+	done; \
+	if [ $$missing -gt 0 ]; then \
+		echo -e "\n$(YELLOW)Run 'make install-lint-deps' to install missing dependencies$(RESET)"; \
+		exit 1; \
+	else \
+		echo -e "\n$(GREEN)✓ All linting dependencies are installed$(RESET)"; \
+	fi
+
+install-lint-deps: ## Install linting dependencies (pre-commit, shellcheck, yamllint, npm)
+	@echo -e "$(CYAN)Installing linting dependencies...$(RESET)"
+	@echo ""
+	@echo -e "$(BLUE)Installing pre-commit...$(RESET)"
+	@if ! command -v pre-commit >/dev/null 2>&1; then \
+		pip3 install --user pre-commit 2>/dev/null || pip install --user pre-commit || \
+		{ echo -e "$(RED)Failed to install pre-commit. Please install Python and pip first.$(RESET)"; exit 1; }; \
+		echo -e "$(GREEN)✓ pre-commit installed$(RESET)"; \
+	else \
+		echo -e "$(GREEN)✓ pre-commit already installed$(RESET)"; \
+	fi
+	@echo ""
+	@echo -e "$(BLUE)Installing shellcheck...$(RESET)"
+	@if ! command -v shellcheck >/dev/null 2>&1; then \
+		if command -v brew >/dev/null 2>&1; then \
+			brew install shellcheck && echo -e "$(GREEN)✓ shellcheck installed via Homebrew$(RESET)"; \
+		elif command -v apt-get >/dev/null 2>&1; then \
+			echo -e "$(YELLOW)Installing shellcheck requires sudo...$(RESET)"; \
+			sudo apt-get update && sudo apt-get install -y shellcheck && \
+			echo -e "$(GREEN)✓ shellcheck installed via apt$(RESET)"; \
+		else \
+			echo -e "$(YELLOW)⚠ Cannot auto-install shellcheck. Please install manually:$(RESET)"; \
+			echo -e "  macOS: brew install shellcheck"; \
+			echo -e "  Linux: sudo apt-get install shellcheck"; \
+		fi; \
+	else \
+		echo -e "$(GREEN)✓ shellcheck already installed$(RESET)"; \
+	fi
+	@echo ""
+	@echo -e "$(BLUE)Installing yamllint...$(RESET)"
+	@if ! command -v yamllint >/dev/null 2>&1; then \
+		pip3 install --user yamllint 2>/dev/null || pip install --user yamllint || \
+		echo -e "$(YELLOW)⚠ Failed to install yamllint via pip$(RESET)"; \
+		if command -v yamllint >/dev/null 2>&1; then \
+			echo -e "$(GREEN)✓ yamllint installed$(RESET)"; \
+		fi; \
+	else \
+		echo -e "$(GREEN)✓ yamllint already installed$(RESET)"; \
+	fi
+	@echo ""
+	@echo -e "$(BLUE)Checking npm/node...$(RESET)"
+	@if ! command -v npm >/dev/null 2>&1; then \
+		if command -v brew >/dev/null 2>&1; then \
+			brew install node && echo -e "$(GREEN)✓ node/npm installed via Homebrew$(RESET)"; \
+		else \
+			echo -e "$(YELLOW)⚠ npm not found. markdownlint requires npm.$(RESET)"; \
+			echo -e "  Install Node.js from: https://nodejs.org/"; \
+			echo -e "  Or via package manager: sudo apt-get install nodejs npm"; \
+		fi; \
+	else \
+		echo -e "$(GREEN)✓ npm already installed$(RESET)"; \
+	fi
+	@echo ""
+	@echo -e "$(GREEN)✓ Dependency installation complete!$(RESET)"
+	@echo -e "$(CYAN)Note: markdownlint-cli and prettier will be installed automatically via npx$(RESET)"
+
+ensure-lint-deps: ## Ensure linting dependencies are installed (auto-install if needed)
+	@$(MAKE) check-lint-deps >/dev/null 2>&1 || $(MAKE) install-lint-deps
+
+lint: ensure-lint-deps ## Lint all files using pre-commit
+	@echo -e "$(CYAN)Running pre-commit on all files...$(RESET)"
+	@pre-commit run --all-files && \
+		echo -e "$(GREEN)✓ All linting checks passed$(RESET)" || \
+		(echo -e "$(RED)✗ Some linting checks failed$(RESET)"; exit 1)
 
 lint-shell: ## Lint shell scripts with shellcheck
 	@echo -e "$(CYAN)Linting shell scripts...$(RESET)"
+	@if ! command -v pre-commit >/dev/null 2>&1; then \
+		echo -e "$(YELLOW)Installing pre-commit via pip...$(RESET)"; \
+		pip3 install --user pre-commit 2>/dev/null || pip install --user pre-commit; \
+	fi
 	@if [ -n "$(SHELL_FILES)" ]; then \
 		pre-commit run shellcheck --files $(SHELL_FILES) && \
 		echo -e "$(GREEN)✓ Shell scripts passed linting$(RESET)"; \
@@ -253,11 +339,14 @@ lint-shell: ## Lint shell scripts with shellcheck
 		echo -e "$(YELLOW)No shell files found$(RESET)"; \
 	fi
 
-lint-python: ## Lint Python files with pylint
+lint-python: ## Lint Python files with pre-commit
 	@echo -e "$(CYAN)Linting Python files...$(RESET)"
+	@if ! command -v pre-commit >/dev/null 2>&1; then \
+		echo -e "$(YELLOW)Installing pre-commit via pip...$(RESET)"; \
+		pip3 install --user pre-commit 2>/dev/null || pip install --user pre-commit; \
+	fi
 	@if [ -n "$(PYTHON_FILES)" ]; then \
-		pylint --rcfile=.pylintrc $(PYTHON_FILES) 2>/dev/null || \
-		pylint $(PYTHON_FILES) && \
+		pre-commit run --files $(PYTHON_FILES) && \
 		echo -e "$(GREEN)✓ Python files passed linting$(RESET)"; \
 	else \
 		echo -e "$(YELLOW)No Python files found$(RESET)"; \
@@ -265,6 +354,10 @@ lint-python: ## Lint Python files with pylint
 
 lint-yaml: ## Lint YAML files with yamllint
 	@echo -e "$(CYAN)Linting YAML files...$(RESET)"
+	@if ! command -v pre-commit >/dev/null 2>&1; then \
+		echo -e "$(YELLOW)Installing pre-commit via pip...$(RESET)"; \
+		pip3 install --user pre-commit 2>/dev/null || pip install --user pre-commit; \
+	fi
 	@if [ -n "$(YAML_FILES)" ]; then \
 		pre-commit run yamllint --files $(YAML_FILES) && \
 		echo -e "$(GREEN)✓ YAML files passed linting$(RESET)"; \
@@ -274,6 +367,10 @@ lint-yaml: ## Lint YAML files with yamllint
 
 lint-markdown: ## Lint Markdown files with markdownlint
 	@echo -e "$(CYAN)Linting Markdown files...$(RESET)"
+	@if ! command -v pre-commit >/dev/null 2>&1; then \
+		echo -e "$(YELLOW)Installing pre-commit via pip...$(RESET)"; \
+		pip3 install --user pre-commit 2>/dev/null || pip install --user pre-commit; \
+	fi
 	@if [ -n "$(MD_FILES)" ]; then \
 		pre-commit run markdownlint --files $(MD_FILES) && \
 		echo -e "$(GREEN)✓ Markdown files passed linting$(RESET)"; \
@@ -281,11 +378,15 @@ lint-markdown: ## Lint Markdown files with markdownlint
 		echo -e "$(YELLOW)No Markdown files found$(RESET)"; \
 	fi
 
-lint-js: ## Lint JavaScript files with ESLint
+lint-js: ## Lint JavaScript files with prettier via pre-commit
 	@echo -e "$(CYAN)Linting JavaScript files...$(RESET)"
+	@if ! command -v pre-commit >/dev/null 2>&1; then \
+		echo -e "$(YELLOW)Installing pre-commit via pip...$(RESET)"; \
+		pip3 install --user pre-commit 2>/dev/null || pip install --user pre-commit; \
+	fi
 	@JS_FILES=$$(find . -type f -name "*.js" ! -path "*/\.*" ! -path "*/node_modules/*" ! -path "*/.eslintrc.json"); \
 	if [ -n "$$JS_FILES" ]; then \
-		echo "$$JS_FILES" | xargs npx eslint && \
+		pre-commit run prettier --files $$JS_FILES --hook-stage manual && \
 		echo -e "$(GREEN)✓ JavaScript files passed linting$(RESET)"; \
 	else \
 		echo -e "$(YELLOW)No JavaScript files found$(RESET)"; \
