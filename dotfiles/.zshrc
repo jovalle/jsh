@@ -1,313 +1,145 @@
-#
 # .zshrc - Zsh Configuration
-#
-# Load Order:
-#   1. Essential Exports
-#   2. Plugin System
-#   3. Shell Options & Keybindings
-#   4. Path Setup
-#   5. Completion System
-#   6. Shell Aliases
-#   7. Shell Functions
-#   8. Automations
-#   9. Local Customizations
-#
+
+# Source common configuration
+if [[ -f "${HOME}/.jsh/dotfiles/.jshrc" ]]; then
+  source "${HOME}/.jsh/dotfiles/.jshrc"
+elif [[ -f "${HOME}/.jshrc" ]]; then
+  source "${HOME}/.jshrc"
+fi
 
 # ============================================================================
-# 1. ESSENTIAL EXPORTS
+# PLUGIN SYSTEM
 # ============================================================================
-
-# Core paths and editors
-export CLICOLORS=1                               # Colorize output
-export EDITOR=vim                                # Default CLI editor
-export VISUAL=vim                                # Default full-screen editor
-export TERM=xterm-256color                       # Terminal type for 256 colors
-export SH=${SHELL##*/}                           # Shell type reference
-
-# Project/work directories
-export GIT_BASE=${HOME}/projects                 # Git projects base
-export WORK_DIR=${GIT_BASE}                      # Default work directory
-export JSH=${JSH_ROOT:-${HOME}}/.jsh             # Ideal JSH location
-export JSH_CUSTOM=${HOME}/.jsh_local             # Local overrides (optional)
-
-# Silence/optimize specific tools
-export DIRENV_LOG_FORMAT=                        # Silence direnv for p10k
-export GITSTATUS_RESPONSE_TIMEOUT=5              # Quick timeout for git status
-export DIRENV_WARN_TIMEOUT=30s                   # Direnv timeout
-export PYTHONDONTWRITEBYTECODE=1                 # No .pyc files on import
-export SSHRC_EXTRAS='.inputrc .tmux.conf .vimrc' # Files to import on SSH
-
-# Shell environment
-export LANG=en_US.UTF-8                          # Default locale
-export LC_ALL=en_US.UTF-8                        # Override all locales
-export XDG_CONFIG_HOME="${HOME}/.config"         # Wwhere apps should store config files, cache files, and data files
 
 # Zinit
 export ZINIT_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}/zinit/zinit.git"
 
-# fzf
-export FZF_BASE="${JSH}/.fzf"
-
-# Terminal optimizations
-export LESS="-RXE"                          # No wrapping, no clearing, exit on EOF
-setopt NO_PROMPT_CR                         # Don't add CR before prompt
-
-# ---- Color helper functions ---
-if command -v tput &>/dev/null; then
-  error() { echo -e "$(tput setaf 1)$*$(tput sgr0)"; }      # Red
-  warn() { echo -e "$(tput setaf 3)$*$(tput sgr0)"; }       # Yellow/Orange
-  success() { echo -e "$(tput setaf 2)$*$(tput sgr0)"; }    # Green
-  info() { echo -e "$(tput setaf 4)$*$(tput sgr0)"; }       # Blue
-else
-  error() { echo -e "\033[31m$*\033[0m"; }                  # Red
-  warn() { echo -e "\033[33m$*\033[0m"; }                   # Yellow
-  success() { echo -e "\033[32m$*\033[0m"; }                # Green
-  info() { echo -e "\033[34m$*\033[0m"; }                   # Blue
-fi
-
-# ============================================================================
-# 2. PLUGIN SYSTEM
-# ============================================================================
-
-# Verify fzf is available (should be initialized as submodule via setup.sh)
+# Verify fzf is available
 if [[ ! -d "${FZF_BASE}" ]]; then
   warn "fzf submodule not found. Run: git submodule update --init"
 fi
 
 # Download Zinit if missing
 if [[ ! -d "${ZINIT_HOME}" ]]; then
-  mkdir -p "$(dirname "${ZINIT_HOME}")"
-  git clone https://github.com/zdharma-continuum/zinit.git "${ZINIT_HOME}"
+    # Minimal mode: Don't download, just warn and skip
+    warn "Zinit not found. Skipping plugins."
+else
+    # Initialize Zinit
+    source "${ZINIT_HOME}/zinit.zsh"
+
+    # Load theme (Powerlevel10k)
+    if [[ -r "${XDG_CACHE_HOME:-${HOME}/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
+      source "${XDG_CACHE_HOME:-${HOME}/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
+    fi
+
+    zinit ice depth=1
+    zinit light romkatv/powerlevel10k
+
+    # Load plugins
+    zinit light Aloxaf/fzf-tab
+    zinit light zsh-users/zsh-completions
+    zinit light zsh-users/zsh-autosuggestions
+    zinit light zdharma-continuum/fast-syntax-highlighting
+    zinit light akarzim/zsh-docker-aliases
+    zinit light MichaelAquilina/zsh-you-should-use
+    zinit light wfxr/forgit
+    zinit light lukechilds/zsh-nvm
+    zinit light mafredri/zsh-async
+    zinit light supercrabtree/k
 fi
 
-# Initialize Zinit
-# shellcheck disable=SC1091  # Dynamic source, path verified above
-source "${ZINIT_HOME}/zinit.zsh"
-
-# Load theme (Powerlevel10k - instant prompt must be here)
-# shellcheck disable=SC2296  # Zsh-specific parameter expansion syntax
-if [[ -r "${XDG_CACHE_HOME:-${HOME}/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
-  # shellcheck disable=SC1090  # Dynamic source, path depends on runtime vars
-  source "${XDG_CACHE_HOME:-${HOME}/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
-fi
-
-zinit ice depth=1
-zinit light romkatv/powerlevel10k
-
-# Load plugins
-zinit light Aloxaf/fzf-tab                       # Enhanced tab completion with fzf
-zinit light zsh-users/zsh-completions            # Additional completions
-zinit light zsh-users/zsh-autosuggestions        # Command suggestions from history
-zinit light zdharma-continuum/fast-syntax-highlighting # Fast, modular syntax highlighting
-
-# Docker support
-zinit light akarzim/zsh-docker-aliases           # Docker command aliases
-
-# Command history & suggestions
-zinit light MichaelAquilina/zsh-you-should-use  # You should use notifications
-zinit light wfxr/forgit                          # Git command shortcuts
-
-# Note: atuin is now managed separately - install via brew: brew install atuin
-
-# Node version management
-zinit light lukechilds/zsh-nvm                   # NVM plugin loader
-
-# Utilities
-zinit light mafredri/zsh-async                   # Asynchronous task runner
-zinit light supercrabtree/k                      # Enhanced directory listing (aliased as 't')
-
 # ============================================================================
-# 3. SHELL OPTIONS & KEYBINDINGS
+# SHELL OPTIONS & KEYBINDINGS
 # ============================================================================
 
-# Vi mode with sensible keybindings
+# Vi mode
 bindkey -v
 
-# Incremental search in vi mode
+# Incremental search
 bindkey -M vicmd '^R' history-incremental-search-backward
 bindkey -M vicmd '^S' history-incremental-search-forward
 bindkey -M viins '^R' history-incremental-search-backward
 bindkey -M viins '^S' history-incremental-search-forward
 
-# Delete key fixes for vi mode
+# Delete key fixes
 bindkey -M vicmd '^[[3~' delete-char
 bindkey -M viins '^[[3~' delete-char
 
-# Word deletion with Ctrl+Backspace and Ctrl+W
-bindkey -M viins '^H' backward-kill-word        # Ctrl+Backspace
-bindkey -M viins '^W' backward-kill-word        # Ctrl+W (standard)
-bindkey -M viins '^[^?' backward-kill-word      # Alt+Backspace
+# Word deletion
+bindkey -M viins '^H' backward-kill-word
+bindkey -M viins '^W' backward-kill-word
+bindkey -M viins '^[^?' backward-kill-word
 
-# Shell options (all at once)
+# Shell options
 setopt AUTO_CD COMPLETE_IN_WORD extended_history hist_find_no_dups hist_ignore_all_dups \
         hist_ignore_dups hist_ignore_space hist_save_no_dups INTERACTIVE_COMMENTS \
         NO_BEEP NOBGNICE HUP INC_APPEND_HISTORY SHARE_HISTORY
 
 # History configuration
-export HISTDUP=erase                  # Erase duplicates
-export HISTFILE="${JSH}/.zsh_history" # Store in syncthing-synced directory
-export HISTSIZE=50000                 # Number of commands to keep in memory
-export HIST_STAMPS=iso                # Timestamp format
-export SAVEHIST=50000                 # Number of commands to save to file
+export HISTDUP=erase
+export HISTFILE="${JSH}/.zsh_history"
+export HISTSIZE=50000
+export HIST_STAMPS=iso
+export SAVEHIST=50000
 
 # Completion options
-LISTMAX=0                           # Automatically paginate completions
-export LISTMAX                      # Used by zsh completion system
-MAILCHECK=0                         # Disable mail checking
+LISTMAX=0
+export LISTMAX
+MAILCHECK=0
 
 # ============================================================================
-# 4. PATH SETUP
+# COMPLETION SYSTEM
 # ============================================================================
 
-# Paths - ORDER MATTERS (priority: local > jsh > system)
-# Must be set before tool completions to ensure binaries are found
-local_paths=(
-  "${HOME}/.local/bin"                      # user local bin
-  "${JSH}/bin"                             # jsh local bin
-  "${JSH}/.fzf/bin"                         # fzf bin
-  "${HOME}/go/bin"                          # go bin
-  "${HOME}/.linuxbrew/bin"                  # Linuxbrew user install
-  "${HOME}/linuxbrew/.linuxbrew/bin"        # Alternative user path
-  "/home/linuxbrew/.linuxbrew/bin"          # Linuxbrew default
-  "/opt/homebrew/bin"                       # macOS Apple Silicon
-)
-
-# Build a prefix of existing dirs (preserve order) and prepend once
-local_prefix=""
-for p in "${local_paths[@]}"; do
-  if [[ -d "${p}" ]]; then
-    if [[ -z "${local_prefix}" ]]; then
-      local_prefix="${p}"
-    else
-      local_prefix="${local_prefix}:${p}"
-    fi
-  fi
-done
-
-if [[ -n "${local_prefix}" ]]; then
-  export PATH="${local_prefix}:${PATH}"
-fi
-
-unset local_paths local_prefix
-
-# ============================================================================
-# 5. COMPLETION SYSTEM
-# ============================================================================
-
-# Add custom completions directory to fpath
 fpath=(~/.zsh/completions "${fpath[@]}")
-
-# Initialize completion system
 autoload -Uz compinit && compinit
 
-# Completion styling
-zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'  # Case insensitive
-# shellcheck disable=SC2296  # Zsh-specific parameter expansion syntax
-zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}" # Use LS_COLORS
-zstyle ':completion:*' menu no                          # Don't show menu by default
-
-# Fzf-tab preview settings
+zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
+zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}"
+zstyle ':completion:*' menu no
 zstyle ':fzf-tab:complete:cd:*' fzf-preview "ls --color \$realpath"
 
-# Replay cached completions from plugins
-zinit cdreplay -q
+if command -v zinit >/dev/null 2>&1; then
+    zinit cdreplay -q
+fi
 
-# ---- Tool Completions ----
-
-command -v brew &>/dev/null && eval "$(brew shellenv)"
-command -v direnv &>/dev/null && eval "$(direnv hook zsh)"
-command -v docker &>/dev/null && eval "$(docker completion zsh)"
-# shellcheck disable=SC1090  # Dynamic source from fzf
-command -v fzf &>/dev/null && source <(command fzf --zsh)
-# shellcheck disable=SC1090  # Dynamic source from kubectl
-command -v kubectl &>/dev/null && source <(kubectl completion zsh)
-# shellcheck disable=SC1090  # Dynamic source from task
-command -v task &>/dev/null && source <(task --completion zsh)
-command -v zoxide &>/dev/null && eval "$(zoxide init zsh)"
+# Tool Completions
+command -v brew >/dev/null 2>&1 && eval "$(brew shellenv)"
+command -v direnv >/dev/null 2>&1 && eval "$(direnv hook zsh)"
+command -v docker >/dev/null 2>&1 && eval "$(docker completion zsh)"
+command -v fzf >/dev/null 2>&1 && source <(command fzf --zsh)
+command -v kubectl >/dev/null 2>&1 && source <(kubectl completion zsh)
+command -v task >/dev/null 2>&1 && source <(task --completion zsh)
+command -v zoxide >/dev/null 2>&1 && eval "$(zoxide init zsh)"
 
 # ============================================================================
-# 6. SHELL ALIASES
+# MINIMAL PROMPT (Fallback)
 # ============================================================================
 
-# ---- Directory Navigation ----
+# If p10k is not loaded, set a minimal prompt
+if [[ -z "$P9K_VERSION" ]]; then
+    # Mimic p10k style: dir git_status
+    setopt PROMPT_SUBST
+    autoload -Uz vcs_info
+    zstyle ':vcs_info:*' enable git
+    zstyle ':vcs_info:git:*' formats ' %b'
 
-alias ..='cd ../' .2='cd ../../' .3='cd ../../../' .4='cd ../../../../' .5='cd ../../../../../' .6='cd ../../../../../../'
+    precmd() {
+        vcs_info
+    }
 
-# ---- File Operations ----
+    # Simple colored prompt
+    # %F{blue}%~%f: Current directory in blue
+    # %F{green}${vcs_info_msg_0_}%f: Git branch in green
+    # %#: Prompt char
+    PROMPT='%F{blue}%~%f%F{green}${vcs_info_msg_0_}%f %# '
+fi
 
-alias cp='cp -iv' mv='mv -iv' rm='rm -i' mkdir='mkdir -pv' dud='du -d 1 -h' duf='du -sh *'
-alias ls='ls -a --color=auto' l='ls -l' ll='ls -la' lll='ls -laFh'
-alias psg='ps aux | grep -i --color=auto' psl='ps aux | less'
+# Load p10k config if available
+[[ ! -f ${ZDOTDIR:-$HOME}/.p10k.zsh ]] || source ${ZDOTDIR:-$HOME}/.p10k.zsh
 
-# 't' command: either 'touch' files or run 'k' (better ls) for directories
-t() {
-  if [[ $# -eq 0 ]]; then
-    # No arguments: list current directory with k
-    k
-  else
-    # Check if arguments are existing directories
-    local all_dirs=true
-    for arg in "$@"; do
-      [[ ! -d "$arg" ]] && { all_dirs=false; break; }
-    done
-
-    if [[ "$all_dirs" == true ]]; then
-      # All arguments are directories: run k on each
-      for dir in "$@"; do
-        k "$dir"
-      done
-    else
-      # Not all directories: run touch
-      touch "$@"
-    fi
-  fi
-}
-
-# ---- Permissions ----
-
-alias 000='chmod 000' 640='chmod 640' 644='chmod 644' 755='chmod 755' 775='chmod 775' mx='chmod a+x'
-
-# ---- Terminal & System ----
-
-alias c='clear' ccd='clear && cd' e='exit' fix_stty='stty sane' epochtime='date +%s'
-alias ts='date +%F-%H%M' timestamp='date "+%Y%m%dT%H%M%S"'
-alias path='echo -e ${PATH//:/\\n}' perm='stat --printf "%a %n \n "' whatis='declare -f' which='type -a'
-alias h='history' w='watch -n1 -d -t ' glances='glances -1 -t 0.5'
-
-# ---- Superuser ----
-
-alias _='sudo' please='sudo'
-
-# ---- System Commands ----
-
-alias g='grep -i --color=auto' edit='vim' v='vim'
-
-# ---- Git ----
-
-alias g_='git commit -m' git+='git push --set-upstream origin $(git rev-parse --abbrev-ref HEAD)'
-alias git-='git reset HEAD~1' gl='git log --graph --oneline --color=always' gdiff='git diff --name-only master --color=auto'
-alias gvimdiff='git difftool --tool=vimdiff --no-prompt'
-
-# ---- Kubernetes ----
-
-alias k='kubectl' kav='kubectl api-versions' kci='kubectl cluster-info' kaf='kubectl apply -f'
-alias kctx='kubectx' kns='kubens'
-alias kctx+='kubectx --add' kctx-='kubectx --delete'
-alias kdf='kubectl delete -f' kexec='kubectl exec -it' netshoot='kubectl run tmp-shell --rm -i --tty --image nicolaka/netshoot'
-
-# ---- Infrastructure & Tools ----
-
-alias a='ansible' ap='ansible-playbook' av='ansible-vault' tf='terraform' pn='pnpm'
-
-# ---- SSH & Remote ----
-
-alias sshx='eval $(ssh-agent) && ssh-add 2>/dev/null'
-alias proxy+='export {{http,https}_proxy,{HTTP,HTTPS}_PROXY}=${PROXY_ENDPOINT}; export {NO_PROXY,no_proxy}=${PROXY_ENDPOINT:-go,localhost}'
-alias proxy-='unset {http,https}_proxy {HTTP,HTTPS}_PROXY {NO_PROXY,no_proxy}'
-
-# ---- Colorized Output ----
-
-if command -v grc &>/dev/null; then
+# ---- Colorized Output (grc) ----
+if command -v grc >/dev/null 2>&1; then
   alias colorize='command grc -es --colour=auto'
 
   # Find grc config directory (cross-platform)
@@ -337,7 +169,7 @@ if command -v grc &>/dev/null; then
             ;;
           *)
             # Skip if command already has an alias (e.g., ls=eza)
-            if ! alias "$cmd" &>/dev/null; then
+            if ! alias "$cmd" >/dev/null 2>&1; then
               # Standard alias for all other commands
               # shellcheck disable=SC2139  # Intentional expansion at definition time
               alias "$cmd"="colorize $cmd"
@@ -348,218 +180,3 @@ if command -v grc &>/dev/null; then
     fi
   }
 fi
-
-# ---- Development & Tmux ----
-
-alias vz='vim ~/.zshrc' show_options='shopt' tmux='tmux -2'
-
-# ---- GNU Tool Replacements ----
-
-# Use GNU variants for better feature set and Linux compatibility
-command -v gawk &>/dev/null && alias awk='gawk'
-command -v gbase64 &>/dev/null && alias base64='gbase64'
-command -v gbasename &>/dev/null && alias basename='gbasename'
-command -v gcat &>/dev/null && alias cat='gcat'
-command -v gchmod &>/dev/null && alias chmod='gchmod'
-command -v gchown &>/dev/null && alias chown='gchown'
-command -v gcp &>/dev/null && alias cp='gcp -iv'
-command -v gcut &>/dev/null && alias cut='gcut'
-command -v gdate &>/dev/null && alias date='gdate'
-command -v gdd &>/dev/null && alias dd='gdd'
-command -v gdf &>/dev/null && alias df='gdf'
-command -v gdirname &>/dev/null && alias dirname='gdirname'
-command -v gdu &>/dev/null && alias du='gdu'
-command -v gecho &>/dev/null && alias echo='gecho'
-command -v genv &>/dev/null && alias env='genv'
-command -v gfind &>/dev/null && alias find='gfind'
-command -v ggrep &>/dev/null && alias grep='ggrep --color=auto -i'
-command -v ghead &>/dev/null && alias head='ghead'
-command -v gln &>/dev/null && alias ln='gln'
-command -v gls &>/dev/null && alias gls='gls --color=auto' ls='gls --color=auto -a' l='gls --color=auto -l' ll='gls --color=auto -la' lll='gls --color=auto -laFh'
-command -v gmkdir &>/dev/null && alias mkdir='gmkdir -pv'
-command -v gmv &>/dev/null && alias mv='gmv -iv'
-command -v grm &>/dev/null && alias rm='grm -i'
-command -v gsed &>/dev/null && alias sed='gsed'
-command -v gsort &>/dev/null && alias sort='gsort'
-command -v gtail &>/dev/null && alias tail='gtail'
-command -v gtar &>/dev/null && alias tar='gtar'
-command -v gtouch &>/dev/null && alias touch='gtouch'
-command -v gtr &>/dev/null && alias tr='gtr'
-command -v guniq &>/dev/null && alias uniq='guniq'
-command -v gwc &>/dev/null && alias wc='gwc'
-command -v gwhich &>/dev/null && alias which='gwhich'
-command -v gxargs &>/dev/null && alias xargs='gxargs'
-
-# ---- Tool Replacements ----
-
-command -v eza &>/dev/null && alias l='eza -a -l --git --icons --color=always' ll='eza --git --icons --level=2 --long --tree --long --color=always' lll='eza --git --icons --long --tree --color=always'
-command -v hx &>/dev/null && alias vim='hx'
-command -v nvim &>/dev/null && alias vim='nvim'
-command -v vim &>/dev/null && alias vi='vim'
-
-# ============================================================================
-# 7. SHELL FUNCTIONS
-# ============================================================================
-
-# ---- System & Process Management ----
-
-caffeinate() { gnome-session-inhibit --inhibit idle:sleep sleep infinity; }
-ffpid() { lsof -t -c "$@"; }
-quiet() {
-  if [[ $# -eq 0 ]]; then
-    return
-  else
-    "$@" &> /dev/null
-  fi
-}
-
-# ---- Directory & File Operations ----
-
-duh() {
-  if [[ $(uname) == "Darwin" ]]; then
-    du -hd 1 "${1:-.}" | sort -h
-  else
-    du -h --max-depth=1 "${1:-.}" | sort -h
-  fi
-}
-
-extract() {
-  if [[ ! -f "$1" ]]; then
-    error "'$1' is not a valid file"
-    return 1
-  fi
-  case "$1" in
-    *.tar.bz2)   tar xjf "$1"     ;;
-    *.tar.gz)    tar xzf "$1"     ;;
-    *.bz2)       bunzip2 "$1"     ;;
-    *.rar)       unrar e "$1"     ;;
-    *.gz)        gunzip "$1"      ;;
-    *.tar)       tar xf "$1"      ;;
-    *.tbz2)      tar xjf "$1"     ;;
-    *.tgz)       tar xzf "$1"     ;;
-    *.zip)       unzip "$1"       ;;
-    *.Z)         uncompress "$1"  ;;
-    *.7z)        7z x "$1"        ;;
-    *)           error "'$1' cannot be extracted"; return 1 ;;
-  esac
-}
-
-ff() { /usr/bin/find . -name "$@"; }
-ffs() { /usr/bin/find . -name "$*"'*'; }
-ffe() { /usr/bin/find . -name '*'"$*"; }
-
-# ---- Git Utilities ----
-
-http2ssh() {
-  REPO_URL=$(git remote -v | grep -m1 '^origin' | sed -Ene's#.*(https://[^[:space:]]*).*#\1#p')
-  [[ -z "${REPO_URL}" ]] && { error "Could not identify repo URL"; return 1; }
-
-  USER=$(echo "${REPO_URL}" | sed -Ene's#https://github.com/([^/]*)/(.*)#\1#p')
-  [[ -z "${USER}" ]] && { error "Could not identify user"; return 2; }
-
-  REPO=$(echo "${REPO_URL}" | sed -Ene's#https://github.com/([^/]*)/(.*)#\2#p')
-  [[ -z "${REPO}" ]] && { error "Could not identify repo"; return 3; }
-
-  NEW_URL="git@github.com:${USER}/${REPO}"
-  warn "Changing repo URL from: '${REPO_URL}' to: '${NEW_URL}'"
-
-  if git remote set-url origin "${NEW_URL}"; then
-    success "New URL set"
-  else
-    error "Failed to set URL"
-    return 4
-  fi
-}
-
-# ---- Kubernetes Utilities ----
-
-nukem() {
-  [[ -z "$1" ]] && { echo "Usage: $0 <namespace>"; return 1; }
-  warn "Removing finalizers from namespace: $1"
-  if kubectl get namespace "$1" -o json | tr -d "\n" | \
-    sed "s/\"finalizers\": \[[^]]\+\]/\"finalizers\": []/" | \
-    kubectl replace --raw "/api/v1/namespaces/$1/finalize" -f -; then
-    success "Finalizers removed"
-  else
-    error "Failed"
-    return 2
-  fi
-}
-
-# ---- IPMI & Hardware Management ----
-
-ipmi() {
-  [[ -z "${IPMI_HOST}" || -z "${IPMI_USER}" || -z "${IPMI_CRED_FILE}" ]] && \
-    { error "IPMI env vars not set"; return 1; }
-  [[ $1 == "fan" ]] || { ipmitool -I lanplus -H "${IPMI_HOST}" -U "${IPMI_USER}" -f "${IPMI_CRED_FILE}" "$@"; return; }
-  ipmitool -I lanplus -H "${IPMI_HOST}" -U "${IPMI_USER}" -f "${IPMI_CRED_FILE}" raw 0x30 0x30 0x01 0x00
-  if [[ $# -eq 2 ]]; then
-    local hex_speed
-    hex_speed=$(printf '%x\n' "$2")
-    ipmitool -I lanplus -H "${IPMI_HOST}" -U "${IPMI_USER}" -f "${IPMI_CRED_FILE}" raw 0x30 0x30 0x02 0xff "0x${hex_speed}"
-  else
-    error "Usage: ipmi fan <speed_0-255>"
-    return 1
-  fi
-}
-
-# ---- Networking & Proxy ----
-
-proxy() {
-  local PROXY="${PROXY_ENDPOINT:-go,localhost}"
-  env http_proxy="${PROXY}" https_proxy="${PROXY}" HTTP_PROXY="${PROXY}" HTTPS_PROXY="${PROXY}" \
-      NO_PROXY="${PROXY}" no_proxy="${PROXY}" "$@"
-}
-
-# ---- Remote Development ----
-
-rcode() {
-  [[ $# -ne 2 ]] && { echo "Usage: rcode <ssh_host> <remote_path>"; return 1; }
-  code --remote "ssh-remote+${1}" "${2}"
-}
-
-# ============================================================================
-# 8. AUTOMATIONS
-# ============================================================================
-
-# ---- Path Deduplication ----
-
-# Function to remove duplicate PATH entries while preserving order
-dedup_path() {
-  # shellcheck disable=SC2296  # Zsh-specific parameter expansion syntax
-  local path_array=("${(s/:/)PATH}")
-  local -A seen
-  local clean_path=""
-
-  for dir in "${path_array[@]}"; do
-    if [[ -n "${dir}" ]] && [[ -z "${seen[${dir}]}" ]]; then
-      seen[${dir}]=1
-      if [[ -z "${clean_path}" ]]; then
-        clean_path="${dir}"
-      else
-        clean_path="${clean_path}:${dir}"
-      fi
-    fi
-  done
-
-  export PATH="${clean_path}"
-}
-
-# Deduplicate PATH entries
-dedup_path
-
-# ---- Brew Update Checker ----
-
-# Check for outdated Homebrew packages
-command -v brew &>/dev/null && jsh brew check --quiet
-
-# ============================================================================
-# 9. LOCAL CUSTOMIZATIONS
-# ============================================================================
-
-# To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
-# shellcheck disable=SC1090  # Dynamic source, standard p10k config
-[[ ! -f ${ZDOTDIR:-$HOME}/.p10k.zsh ]] || source ${ZDOTDIR:-$HOME}/.p10k.zsh
-
-# shellcheck disable=SC1090  # Dynamic source for local customizations
-[[ -f "${JSH_CUSTOM}" ]] && source "${JSH_CUSTOM}"

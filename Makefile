@@ -76,6 +76,7 @@ endef
 # Find files by type
 # Shell files: Find by .sh extension OR by shebang in bin/ directory
 SHELL_FILES := $(shell find . -type f -name "*.sh" ! -path "*/node_modules/*" ! -path "*/.git/*" ! -path "*/.fzf/*" ! -path "*/.vscode/*" ! -path "*/.config/nvim/*" ! -path "*/.config/*"; \
+	find dotfiles -type f \( -name ".bashrc" -o -name ".jshrc" \); \
 	find bin -type f 2>/dev/null | while read -r f; do \
 		shebang=$$(head -n1 "$$f" 2>/dev/null); \
 		echo "$$shebang" | grep -qE '^\#!/.*zsh' && continue; \
