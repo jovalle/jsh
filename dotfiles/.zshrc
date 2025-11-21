@@ -52,6 +52,19 @@ export FZF_BASE="${JSH}/.fzf"
 export LESS="-RXE"                          # No wrapping, no clearing, exit on EOF
 setopt NO_PROMPT_CR                         # Don't add CR before prompt
 
+# ---- Color helper functions ---
+if command -v tput &>/dev/null; then
+  error() { echo -e "$(tput setaf 1)$*$(tput sgr0)"; }      # Red
+  warn() { echo -e "$(tput setaf 3)$*$(tput sgr0)"; }       # Yellow/Orange
+  success() { echo -e "$(tput setaf 2)$*$(tput sgr0)"; }    # Green
+  info() { echo -e "$(tput setaf 4)$*$(tput sgr0)"; }       # Blue
+else
+  error() { echo -e "\033[31m$*\033[0m"; }                  # Red
+  warn() { echo -e "\033[33m$*\033[0m"; }                   # Yellow
+  success() { echo -e "\033[32m$*\033[0m"; }                # Green
+  info() { echo -e "\033[34m$*\033[0m"; }                   # Blue
+fi
+
 # ============================================================================
 # 2. PLUGIN SYSTEM
 # ============================================================================
@@ -388,19 +401,6 @@ command -v vim &>/dev/null && alias vi='vim'
 # 7. SHELL FUNCTIONS
 # ============================================================================
 
-# ---- Color helper functions ---
-if command -v tput &>/dev/null; then
-  error() { echo -e "$(tput setaf 1)$*$(tput sgr0)"; }      # Red
-  warn() { echo -e "$(tput setaf 3)$*$(tput sgr0)"; }       # Yellow/Orange
-  success() { echo -e "$(tput setaf 2)$*$(tput sgr0)"; }    # Green
-  info() { echo -e "$(tput setaf 4)$*$(tput sgr0)"; }       # Blue
-else
-  error() { echo -e "\033[31m$*\033[0m"; }                  # Red
-  warn() { echo -e "\033[33m$*\033[0m"; }                   # Yellow
-  success() { echo -e "\033[32m$*\033[0m"; }                # Green
-  info() { echo -e "\033[34m$*\033[0m"; }                   # Blue
-fi
-
 # ---- System & Process Management ----
 
 caffeinate() { gnome-session-inhibit --inhibit idle:sleep sleep infinity; }
@@ -559,7 +559,7 @@ command -v brew &>/dev/null && jsh brew check --quiet
 
 # To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
 # shellcheck disable=SC1090  # Dynamic source, standard p10k config
-[[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
+[[ ! -f ${ZDOTDIR:-$HOME}/.p10k.zsh ]] || source ${ZDOTDIR:-$HOME}/.p10k.zsh
 
 # shellcheck disable=SC1090  # Dynamic source for local customizations
 [[ -f "${JSH_CUSTOM}" ]] && source "${JSH_CUSTOM}"
