@@ -97,16 +97,12 @@ install-tools: ## Install required development tools
 	@command -v brew >/dev/null 2>&1 || { echo -e "$(RED)Homebrew not found. Please install it first.$(RESET)"; exit 1; }
 	@echo -e "$(CYAN)Installing Homebrew packages...$(RESET)"
 	@brew list shfmt >/dev/null 2>&1 || brew install shfmt
-	@brew list shellcheck >/dev/null 2>&1 || brew install shellcheck
-	@brew list yamllint >/dev/null 2>&1 || brew install yamllint
-	@brew list prettier >/dev/null 2>&1 || brew install prettier
 	@brew list hadolint >/dev/null 2>&1 || brew install hadolint
 	@brew list pre-commit >/dev/null 2>&1 || brew install pre-commit
 	@echo -e "$(CYAN)Installing Node.js packages...$(RESET)"
 	@command -v commitizen >/dev/null 2>&1 || npm install -g commitizen cz-conventional-changelog
 	@command -v commitlint >/dev/null 2>&1 || npm install -g @commitlint/cli @commitlint/config-conventional
 	@command -v eslint >/dev/null 2>&1 || npm install -g eslint eslint-config-google
-	@command -v markdownlint >/dev/null 2>&1 || npm install -g markdownlint-cli
 	@echo -e "$(CYAN)Installing Python packages...$(RESET)"
 	@pip3 install --upgrade black pylint autopep8 2>/dev/null || echo -e "$(YELLOW)Python tools skipped (pip3 not available)$(RESET)"
 	@echo -e "$(CYAN)Setting up pre-commit hooks...$(RESET)"
@@ -116,7 +112,7 @@ install-tools: ## Install required development tools
 check-tools: ## Check if required tools are installed
 	@echo -e "$(CYAN)Checking for required tools...$(RESET)"
 	@errors=0; \
-	for tool in shfmt shellcheck yamllint prettier black pylint eslint markdownlint pre-commit; do \
+	for tool in shfmt black pylint eslint pre-commit; do \
 		if command -v $$tool >/dev/null 2>&1; then \
 			echo -e "$(GREEN)✓$(RESET) $$tool"; \
 		else \
@@ -128,6 +124,9 @@ check-tools: ## Check if required tools are installed
 		echo -e "$(YELLOW)Run 'make install-tools' to install missing tools$(RESET)"; \
 		exit 1; \
 	fi
+
+ensure-tools: ## Ensure all tools are installed
+	@$(MAKE) check-tools >/dev/null 2>&1 || $(MAKE) install-tools
 
 ##@ Formatting
 
@@ -152,7 +151,8 @@ fmt-python: ## Format Python files
 fmt-yaml: ## Format YAML files
 	@echo -e "$(CYAN)Formatting YAML files...$(RESET)"
 	@if [ -n "$(YAML_FILES)" ]; then \
-		$(call format_files_find,find . -type f \( -name "*.yaml" -o -name "*.yml" \) ! -path "*/\\.*" ! -path "*/node_modules/*",prettier --write --print-width 100,YAML files); \
+		pre-commit run prettier --files $(YAML_FILES) || true; \
+		echo -e "$(GREEN)✓ YAML files formatted$(RESET)"; \
 	else \
 		echo -e "$(YELLOW)No YAML files found$(RESET)"; \
 	fi
@@ -160,7 +160,8 @@ fmt-yaml: ## Format YAML files
 fmt-json: ## Format JSON files
 	@echo -e "$(CYAN)Formatting JSON files...$(RESET)"
 	@if [ -n "$(JSON_FILES)" ]; then \
-		$(call format_files_find,find . -type f -name "*.json" ! -path "*/\\.*" ! -path "*/node_modules/*" ! -path "*/package*.json",prettier --write,JSON files); \
+		pre-commit run prettier --files $(JSON_FILES) || true; \
+		echo -e "$(GREEN)✓ JSON files formatted$(RESET)"; \
 	else \
 		echo -e "$(YELLOW)No JSON files found$(RESET)"; \
 	fi
@@ -168,7 +169,8 @@ fmt-json: ## Format JSON files
 fmt-markdown: ## Format Markdown files
 	@echo -e "$(CYAN)Formatting Markdown files...$(RESET)"
 	@if [ -n "$(MD_FILES)" ]; then \
-		$(call format_files_find,find . -type f -name "*.md" ! -path "*/\\.*" ! -path "*/node_modules/*",prettier --write --prose-wrap always,Markdown files); \
+		pre-commit run prettier --files $(MD_FILES) || true; \
+		echo -e "$(GREEN)✓ Markdown files formatted$(RESET)"; \
 	else \
 		echo -e "$(YELLOW)No Markdown files found$(RESET)"; \
 	fi
@@ -214,16 +216,8 @@ check-python-syntax: ## Check Python syntax
 check-yaml-syntax: ## Check YAML syntax
 	@echo -e "$(CYAN)Checking YAML syntax...$(RESET)"
 	@if [ -n "$(YAML_FILES)" ]; then \
-		errors=0; \
-		for file in $(YAML_FILES); do \
-			yamllint -d relaxed "$$file" 2>&1 || errors=$$((errors + 1)); \
-		done; \
-		if [ $$errors -eq 0 ]; then \
-			echo -e "$(GREEN)✓ All YAML files have valid syntax$(RESET)"; \
-		else \
-			echo -e "$(RED)✗ Found $$errors YAML file(s) with syntax errors$(RESET)"; \
-			exit 1; \
-		fi; \
+		pre-commit run yamllint --files $(YAML_FILES) && \
+		echo -e "$(GREEN)✓ All YAML files have valid syntax$(RESET)"; \
 	else \
 		echo -e "$(YELLOW)No YAML files found$(RESET)"; \
 	fi
@@ -247,12 +241,12 @@ check-json-syntax: ## Check JSON syntax
 
 ##@ Linting
 
-lint: lint-shell lint-python lint-yaml lint-markdown lint-js ## Lint all files
+lint: ensure-tools lint-shell lint-python lint-yaml lint-markdown lint-js ## Lint all files
 
 lint-shell: ## Lint shell scripts with shellcheck
 	@echo -e "$(CYAN)Linting shell scripts...$(RESET)"
 	@if [ -n "$(SHELL_FILES)" ]; then \
-		shellcheck -x -S warning $(SHELL_FILES) && \
+		pre-commit run shellcheck --files $(SHELL_FILES) && \
 		echo -e "$(GREEN)✓ Shell scripts passed linting$(RESET)"; \
 	else \
 		echo -e "$(YELLOW)No shell files found$(RESET)"; \
@@ -271,11 +265,7 @@ lint-python: ## Lint Python files with pylint
 lint-yaml: ## Lint YAML files with yamllint
 	@echo -e "$(CYAN)Linting YAML files...$(RESET)"
 	@if [ -n "$(YAML_FILES)" ]; then \
-		if [ -f "$(YAMLLINT_CONFIG)" ]; then \
-			yamllint -c $(YAMLLINT_CONFIG) $(YAML_FILES); \
-		else \
-			yamllint $(YAML_FILES); \
-		fi && \
+		pre-commit run yamllint --files $(YAML_FILES) && \
 		echo -e "$(GREEN)✓ YAML files passed linting$(RESET)"; \
 	else \
 		echo -e "$(YELLOW)No YAML files found$(RESET)"; \
@@ -284,11 +274,7 @@ lint-yaml: ## Lint YAML files with yamllint
 lint-markdown: ## Lint Markdown files with markdownlint
 	@echo -e "$(CYAN)Linting Markdown files...$(RESET)"
 	@if [ -n "$(MD_FILES)" ]; then \
-		if [ -f ".markdownlint.json" ]; then \
-			markdownlint --config .markdownlint.json $(MD_FILES); \
-		else \
-			markdownlint $(MD_FILES); \
-		fi && \
+		pre-commit run markdownlint --files $(MD_FILES) && \
 		echo -e "$(GREEN)✓ Markdown files passed linting$(RESET)"; \
 	else \
 		echo -e "$(YELLOW)No Markdown files found$(RESET)"; \
