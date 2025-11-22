@@ -45,6 +45,7 @@
 .VolumeIcon.icns
 ._*
 .apdisk
+.bash_history
 .brewcheck
 .com.apple.timemachine.donotpresent
 .config/syncthing

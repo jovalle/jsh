@@ -46,13 +46,13 @@ elif [[ -r /opt/homebrew/etc/profile.d/bash_completion.sh ]]; then
 fi
 
 # Tool Completions
-command -v brew >/dev/null 2>&1 && eval "$(brew shellenv)"
-command -v direnv >/dev/null 2>&1 && eval "$(direnv hook bash)"
-command -v docker >/dev/null 2>&1 && eval "$(docker completion bash)"
-command -v fzf >/dev/null 2>&1 && eval "$(fzf --bash)"
+command -v brew > /dev/null 2>&1 && eval "$(brew shellenv)"
+command -v direnv > /dev/null 2>&1 && eval "$(direnv hook bash)"
+command -v docker > /dev/null 2>&1 && eval "$(docker completion bash)"
+command -v fzf > /dev/null 2>&1 && eval "$(fzf --bash)"
 # shellcheck disable=SC1090
-command -v kubectl >/dev/null 2>&1 && source <(kubectl completion bash)
-command -v zoxide >/dev/null 2>&1 && eval "$(zoxide init bash)"
+command -v kubectl > /dev/null 2>&1 && source <(kubectl completion bash)
+command -v zoxide > /dev/null 2>&1 && eval "$(zoxide init bash)"
 
 # ============================================================================
 # MINIMAL PROMPT (Mimic p10k)
@@ -60,7 +60,7 @@ command -v zoxide >/dev/null 2>&1 && eval "$(zoxide init bash)"
 
 # Function to get git branch
 parse_git_branch() {
-     git branch 2> /dev/null | sed -e '/^[^*]/d' -e 's/* \(.*\)/ \1/'
+  git branch 2> /dev/null | sed -e '/^[^*]/d' -e 's/* \(.*\)/ \1/'
 }
 
 # Colors

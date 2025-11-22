@@ -152,7 +152,7 @@ brew_setup() {
   fi
 
   # Check for sudo access before attempting installation
-  if ! sudo -n true 2>/dev/null; then
+  if ! sudo -n true 2> /dev/null; then
     error "Homebrew installation requires sudo access"
     info "Please ensure you have sudo permissions, or use an alternative installation method:"
     info "https://docs.brew.sh/Installation#alternative-installs"
@@ -254,7 +254,7 @@ check_package_locally() {
 # Validate a specific package exists
 validate_package() {
   local pkg="$1"
-  local forced_platform="${2:-}"  # Optional forced platform: 'linux' or 'darwin'
+  local forced_platform="${2:-}" # Optional forced platform: 'linux' or 'darwin'
 
   info "Checking package: $pkg"
 
@@ -347,7 +347,7 @@ comprehensive_check() {
 
   if [[ "$force_check" != "true" ]] && [[ -f "$marker_file" ]]; then
     # Check if file is less than 24 hours old
-    if [[ -n $(find "$marker_file" -mtime -1 2>/dev/null) ]]; then
+    if [[ -n $(find "$marker_file" -mtime -1 2> /dev/null) ]]; then
       [[ "$quiet_mode" != "true" ]] && info "⏳ Brew check ran recently. Skipping..."
       return 0
     fi
@@ -376,9 +376,9 @@ comprehensive_check() {
     local outdated_count=0
 
     if outdated=$(brew outdated --quiet 2> /dev/null); then
-      outdated_count=$(echo "$outdated" | grep -c . 2>/dev/null || true)
+      outdated_count=$(echo "$outdated" | grep -c . 2> /dev/null || true)
       outdated_count=${outdated_count:-0}
-      outdated_count=$(( ${outdated_count//[!0-9]/} ))
+      outdated_count=$((${outdated_count//[!0-9]/}))
       if [[ $outdated_count -gt 0 ]]; then
         warning "Found $outdated_count outdated package(s):"
         echo "$outdated" | while IFS= read -r pkg; do
