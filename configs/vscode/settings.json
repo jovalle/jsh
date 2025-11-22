@@ -105,6 +105,7 @@
     "alias": true,
     "autoload": true,
     "awk": true,
+    "bash": true,
     "bash --version": {
       "approve": true,
       "matchCommandLine": true
@@ -112,7 +113,9 @@
     "brew": true,
     "cat": true,
     "chmod": true,
+    "command": true,
     "compinit": true,
+    "complete": true,
     "curl": true,
     "date": true,
     "defaults": true,
@@ -138,13 +141,14 @@
     "git remote": true,
     "git show": true,
     "git status": true,
-    "gitx": true,
     "go": true,
     "grep": true,
     "head": true,
     "helm": true,
     "jq": true,
+    "jsh": true,
     "kubectl": true,
+    "ln": true,
     "ls": true,
     "make": true,
     "mkdir": true,
@@ -155,6 +159,7 @@
     "osascript": true,
     "pip": true,
     "plutil": true,
+    "printf": true,
     "pwd": true,
     "pytest": true,
     "sed": true,
@@ -165,6 +170,7 @@
     },
     "stow": true,
     "tail": true,
+    "tar": true,
     "task": true,
     "timeout": true,
     "touch": true,
@@ -178,10 +184,15 @@
     "whoami": true,
     "xattr": true,
     "yarn": true,
+    "zsh": true,
     "zsh --version": {
       "approve": true,
       "matchCommandLine": true
-    }
+    },
+    "bin/jsh": true,
+    "/dev/null": true,
+    "git submodule": true,
+    "grc": true
   },
   "dev.containers.executeInWSL": true,
   "diffEditor.experimental.showMoves": true,
@@ -267,7 +278,7 @@
   "remote.SSH.useExecServer": true,
   "remote.SSH.useLocalServer": false,
   "scm.defaultViewMode": "tree",
-  "security.allowedUNCHosts": ["192.168.0.3", "wsl.localhost"],
+  "search.defaultViewMode": "tree",
   "security.workspace.trust.enabled": false,
   "security.workspace.trust.untrustedFiles": "open",
   "settingsSync.ignoredExtensions": [],
@@ -346,5 +357,6 @@
   "yaml.format.bracketSpacing": true,
   "yaml.format.enable": true,
   "yaml.format.singleQuote": false,
-  "yaml.validate": true
+  "yaml.validate": true,
+  "github.copilot.nextEditSuggestions.enabled": true
 }

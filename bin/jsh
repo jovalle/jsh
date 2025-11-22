@@ -15,11 +15,11 @@ set -e
 # Resolve the true path of the script to find the repository root
 SOURCE="${BASH_SOURCE[0]}"
 while [ -h "$SOURCE" ]; do
-  DIR="$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )"
+  DIR="$(cd -P "$(dirname "$SOURCE")" > /dev/null 2>&1 && pwd)"
   SOURCE="$(readlink "$SOURCE")"
   [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
 done
-SCRIPT_DIR="$( cd -P "$( dirname "$SOURCE" )" >/dev/null 2>&1 && pwd )"
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" > /dev/null 2>&1 && pwd)"
 
 # If script is in bin, root is 1 level up
 if [[ "$SCRIPT_DIR" == *"bin" ]]; then
@@ -36,212 +36,83 @@ if [[ -f "$ROOT_DIR/.env" ]]; then
   source "$ROOT_DIR/.env"
 fi
 
-# --- macOS Casks ---
-CASKS=(
-  appcleaner
-  bitwarden
-  brave-browser
-  caffeine
-  claude-code
-  firefox
-  font-jetbrains-mono-nerd-font
-  ghostty
-  istat-menus
-  keyboardcleantool
-  macfuse
-  mounty
-  openvpn-connect
-  orbstack
-  plexamp
-  scroll-reverser
-  signal
-  spotify
-  sublime-text
-  tailscale-app
-  todoist-app
-  visual-studio-code
-  wifiman
-  zoom
-)
+# ==============================================================================
+# Package Management - Load from JSON files
+# ==============================================================================
 
-# --- macOS Formulae ---
-FORMULAE_DARWIN=(
-  age
-  awscli
-  bat
-  btop
-  cloudflared
-  coreutils
-  curl
-  diffutils
-  direnv
-  docker
-  dos2unix
-  exiftool
-  eza
-  fastfetch
-  ffmpeg
-  fileicon
-  gawk
-  gemini-cli
-  gh
-  git
-  gnu-sed
-  go
-  grc
-  grep
-  gromgit/fuse/ntfs-3g-mac
-  helm
-  helmfile
-  hugo
-  ipmitool
-  jq
-  k9s
-  kind
-  krew
-  kubecm
-  kubecolor
-  kubernetes-cli
-  kubescape
-  kubetail
-  make
-  mas
-  mpv
-  neovim
-  netcat
-  nmap
-  node
-  ntfs-3g-mac
-  opentofu
-  pipx
-  poetry
-  prettier
-  python
-  qwen-code
-  readline
-  ripgrep
-  rsync
-  sops
-  speedtest-cli
-  sshpass
-  syncthing
-  talosctl
-  tlrc
-  tmux
-  tree
-  uv
-  vim
-  watch
-  wget
-  xh
-  xz
-  yq
-  zoxide
-  zsh
-)
+# Helper function to load packages from JSON file
+load_packages_from_json() {
+  local json_file="$1"
+  if [[ ! -f "$json_file" ]]; then
+    echo ""
+    return 1
+  fi
 
-# --- Linux Formulae ---
-FORMULAE_LINUX=(
-  age
-  awscli
-  bat
-  btop
-  cloudflared
-  coreutils
-  curl
-  diffutils
-  direnv
-  docker
-  dos2unix
-  exiftool
-  eza
-  fastfetch
-  ffmpeg
-  gawk
-  gemini-cli
-  gh
-  git
-  gnu-sed
-  go
-  grc
-  grep
-  helm
-  helmfile
-  hugo
-  ipmitool
-  jq
-  k9s
-  kind
-  krew
-  kubecm
-  kubecolor
-  kubernetes-cli
-  kubescape
-  kubetail
-  make
-  mpv
-  neovim
-  netcat
-  nmap
-  node
-  opentofu
-  pipx
-  poetry
-  prettier
-  python
-  qwen-code
-  readline
-  ripgrep
-  rsync
-  sops
-  speedtest-cli
-  sshpass
-  syncthing
-  talosctl
-  tlrc
-  tmux
-  tree
-  uv
-  vim
-  watch
-  wget
-  xh
-  xz
-  yq
-  zoxide
-  zsh
-)
+  # Parse JSON array and return space-separated list
+  if command -v jq &> /dev/null; then
+    jq -r '.[]' "$json_file" 2> /dev/null | tr '\n' ' '
+  else
+    # Fallback: simple grep-based parsing for JSON arrays
+    grep -o '"[^"]*"' "$json_file" | tr -d '"' | tr '\n' ' '
+  fi
+}
 
-# --- Linux Packages (apt) ---
-PACKAGES_LINUX=(
-  build-essential
-  cifs-utils
-  dkms
-  net-tools
-  nvme-cli
-  s-tui
-)
+# Load package arrays from JSON files
+CASKS=()
+if [[ -f "$ROOT_DIR/configs/macos/casks.json" ]]; then
+  mapfile -t CASKS < <(jq -r '.[]' "$ROOT_DIR/configs/macos/casks.json" 2> /dev/null || echo "")
+fi
 
-# --- Windows Apps (winget) ---
-APPS_WIN=(
-  Brave.Brave
-  Chocolatey.Chocolatey
-  Doist.Todoist
-  Git.Git
-  Microsoft.PowerToys
-  Microsoft.VisualStudioCode
-  Microsoft.WindowsTerminal
-  Mozilla.Firefox
-  Rufus.Rufus
-  Syncthing.Syncthing
-  Zoom.Zoom
-  mpv.net
-)
+FORMULAE_MACOS=()
+if [[ -f "$ROOT_DIR/configs/macos/formulae.json" ]]; then
+  mapfile -t FORMULAE_MACOS < <(jq -r '.[]' "$ROOT_DIR/configs/macos/formulae.json" 2> /dev/null || echo "")
+fi
 
-# --- Windows Fonts (chocolatey) ---
-FONTS_WIN=(
-  JetBrainsMono
-)
+FORMULAE_LINUX=()
+if [[ -f "$ROOT_DIR/configs/linux/formulae.json" ]]; then
+  mapfile -t FORMULAE_LINUX < <(jq -r '.[]' "$ROOT_DIR/configs/linux/formulae.json" 2> /dev/null || echo "")
+fi
+
+# Linux package managers (apt, dnf, pacman, etc.)
+PACKAGES_APT=()
+if [[ -f "$ROOT_DIR/configs/linux/apt.json" ]]; then
+  mapfile -t PACKAGES_APT < <(jq -r '.[]' "$ROOT_DIR/configs/linux/apt.json" 2> /dev/null || echo "")
+fi
+
+PACKAGES_DNF=()
+if [[ -f "$ROOT_DIR/configs/linux/dnf.json" ]]; then
+  mapfile -t PACKAGES_DNF < <(jq -r '.[]' "$ROOT_DIR/configs/linux/dnf.json" 2> /dev/null || echo "")
+fi
+
+PACKAGES_PACMAN=()
+if [[ -f "$ROOT_DIR/configs/linux/pacman.json" ]]; then
+  mapfile -t PACKAGES_PACMAN < <(jq -r '.[]' "$ROOT_DIR/configs/linux/pacman.json" 2> /dev/null || echo "")
+fi
+
+PACKAGES_YUM=()
+if [[ -f "$ROOT_DIR/configs/linux/yum.json" ]]; then
+  mapfile -t PACKAGES_YUM < <(jq -r '.[]' "$ROOT_DIR/configs/linux/yum.json" 2> /dev/null || echo "")
+fi
+
+PACKAGES_APK=()
+if [[ -f "$ROOT_DIR/configs/linux/apk.json" ]]; then
+  mapfile -t PACKAGES_APK < <(jq -r '.[]' "$ROOT_DIR/configs/linux/apk.json" 2> /dev/null || echo "")
+fi
+
+PACKAGES_ZYPPER=()
+if [[ -f "$ROOT_DIR/configs/linux/zypper.json" ]]; then
+  mapfile -t PACKAGES_ZYPPER < <(jq -r '.[]' "$ROOT_DIR/configs/linux/zypper.json" 2> /dev/null || echo "")
+fi
+
+APPS_WIN=()
+if [[ -f "$ROOT_DIR/configs/windows/winget.json" ]]; then
+  mapfile -t APPS_WIN < <(jq -r '.[]' "$ROOT_DIR/configs/windows/winget.json" 2> /dev/null || echo "")
+fi
+
+FONTS_WIN=()
+if [[ -f "$ROOT_DIR/configs/windows/fonts.json" ]]; then
+  mapfile -t FONTS_WIN < <(jq -r '.[]' "$ROOT_DIR/configs/windows/fonts.json" 2> /dev/null || echo "")
+fi
 
 # --- Brew Services ---
 SERVICES=(
@@ -271,29 +142,119 @@ RESET='\033[0m'
 log() { echo -e "${BLUE}🔹 $1${RESET}"; }
 info() { echo -e "${CYAN}ℹ️  $1${RESET}"; }
 warn() { echo -e "${YELLOW}⚠️  $1${RESET}"; }
-error() { echo -e "${RED}❌ $1${RESET}"; exit 1; }
+error() {
+  echo -e "${RED}❌ $1${RESET}"
+  exit 1
+}
 success() { echo -e "${GREEN}✅ $1${RESET}"; }
 header() { echo -e "\n${BOLD}${BLUE}▶ $1${RESET}\n"; }
 
 confirm() {
-    local prompt="$1"
-    local response
-    read -n 1 -r -p "${prompt} (y/N): " response
-    echo  # Print newline after single character input
-    case "$response" in
-        y|Y) return 0 ;;
-        *) return 1 ;;  # Default is No (empty/Enter counts as No)
-    esac
+  local prompt="$1"
+  local response
+  read -n 1 -r -p "${prompt} (y/N): " response
+  echo # Print newline after single character input
+  case "$response" in
+    y | Y) return 0 ;;
+    *) return 1 ;; # Default is No (empty/Enter counts as No)
+  esac
 }
 
 cmd_exists() { command -v "$1" &> /dev/null; }
 
 is_macos() { [[ "$OS" == "Darwin" ]]; }
 is_linux() { [[ "$OS" == "Linux" ]]; }
-is_wsl() { grep -qi microsoft /proc/version 2>/dev/null; }
+is_wsl() { grep -qi microsoft /proc/version 2> /dev/null; }
+
+# Get the user's login shell
+get_user_shell() {
+  local user_shell
+  if is_macos; then
+    user_shell=$(dscl . -read ~/ UserShell 2> /dev/null | awk '{print $2}')
+  else
+    user_shell=$(getent passwd "$(whoami)" 2> /dev/null | cut -d: -f7)
+  fi
+  echo "$user_shell"
+}
+
+# Install packages using the appropriate package manager
+install_package() {
+  local package="$1"
+
+  if is_macos; then
+    if command -v brew &> /dev/null; then
+      brew install "$package"
+    else
+      warn "No package manager available on macOS"
+      return 1
+    fi
+  elif is_linux; then
+    if command -v apt-get &> /dev/null; then
+      sudo apt-get install -y "$package"
+    elif command -v dnf &> /dev/null; then
+      sudo dnf install -y "$package"
+    elif command -v yum &> /dev/null; then
+      sudo yum install -y "$package"
+    elif command -v pacman &> /dev/null; then
+      sudo pacman -S --noconfirm "$package"
+    elif command -v apk &> /dev/null; then
+      sudo apk add "$package"
+    elif command -v zypper &> /dev/null; then
+      sudo zypper install -y "$package"
+    else
+      warn "No supported package manager found"
+      return 1
+    fi
+  else
+    warn "Unsupported operating system"
+    return 1
+  fi
+}
+
+# Update package manager cache
+update_package_cache() {
+  if is_linux; then
+    if command -v apt-get &> /dev/null; then
+      sudo apt-get update
+    elif command -v dnf &> /dev/null; then
+      sudo dnf check-update || true
+    elif command -v yum &> /dev/null; then
+      sudo yum check-update || true
+    elif command -v pacman &> /dev/null; then
+      sudo pacman -Sy
+    elif command -v apk &> /dev/null; then
+      sudo apk update
+    elif command -v zypper &> /dev/null; then
+      sudo zypper refresh
+    fi
+  fi
+}
+
+# Upgrade all packages
+upgrade_packages() {
+  if is_macos; then
+    if command -v brew &> /dev/null; then
+      brew update && brew upgrade
+    fi
+  elif is_linux; then
+    if command -v apt-get &> /dev/null; then
+      sudo apt-get update && sudo apt-get upgrade -y
+    elif command -v dnf &> /dev/null; then
+      sudo dnf upgrade -y
+    elif command -v yum &> /dev/null; then
+      sudo yum update -y
+    elif command -v pacman &> /dev/null; then
+      sudo pacman -Syu --noconfirm
+    elif command -v apk &> /dev/null; then
+      sudo apk upgrade
+    elif command -v zypper &> /dev/null; then
+      sudo zypper update -y
+    fi
+  fi
+}
 
 check_brew() {
-  if ! command -v brew &>/dev/null; then
+  if ! command -v brew &> /dev/null; then
     warn "Homebrew not found. Skipping brew-related tasks."
     return 1
   fi
@@ -337,7 +298,7 @@ ensure_brew() {
   done
 
   # Check for sudo access before attempting installation
-  if ! sudo -n true 2>/dev/null; then
+  if ! sudo -n true 2> /dev/null; then
     echo -e "${RED}❌ Homebrew installation requires sudo access${RESET}" >&2
     echo -e "${CYAN}ℹ️  Please ensure you have sudo permissions, or use an alternative installation method:${RESET}" >&2
     echo -e "${CYAN}ℹ️  https://docs.brew.sh/Installation#alternative-installs${RESET}" >&2
@@ -375,9 +336,18 @@ task_bootstrap() {
 
   while [[ $# -gt 0 ]]; do
     case $1 in
-      --no-install) install_packages=false; shift ;;
-      --skip-brew) skip_brew=true; shift ;;
-      --dry-run) dry_run=true; shift ;;
+      --no-install)
+        install_packages=false
+        shift
+        ;;
+      --skip-brew)
+        skip_brew=true
+        shift
+        ;;
+      --dry-run)
+        dry_run=true
+        shift
+        ;;
       *) shift ;;
     esac
   done
@@ -401,7 +371,7 @@ task_bootstrap() {
       export PATH="$ROOT_DIR/.fzf/bin:$PATH"
       # Source fzf shell integration if available
       # shellcheck source=/dev/null
-      command -v fzf &>/dev/null && source <(fzf --zsh) 2>/dev/null || true
+      command -v fzf &> /dev/null && source <(fzf --zsh) 2> /dev/null || true
     fi
   fi
 
@@ -426,11 +396,10 @@ task_bootstrap() {
       python
       timeout
       vim
-      zsh
     )
-    if command -v brew &>/dev/null; then
+    if command -v brew &> /dev/null; then
       for tool in "${basic_tools[@]}"; do
-        if ! command -v "$tool" &>/dev/null; then
+        if ! command -v "$tool" &> /dev/null; then
           log "Installing $tool..."
           local pkg="$tool"
           [[ "$tool" == "timeout" ]] && pkg="coreutils"
@@ -443,30 +412,45 @@ task_bootstrap() {
   fi
 
   # 4. Shell Setup
-  log "Configuring shell..."
-  if command -v brew &>/dev/null; then
-    local brew_zsh
-    brew_zsh="$(brew --prefix)/bin/zsh"
-    if [[ -x "$brew_zsh" ]]; then
-      if ! grep -q "^$brew_zsh$" /etc/shells 2>/dev/null; then
-        log "Adding $brew_zsh to /etc/shells..."
-        if [[ "$dry_run" == "false" ]]; then
-          echo "$brew_zsh" | sudo tee -a /etc/shells > /dev/null
+  if [[ "$install_packages" == "true" ]]; then
+    log "Configuring shell..."
+
+    # Install zsh if not present
+    if ! command -v zsh &> /dev/null; then
+      log "zsh not found, installing..."
+      if [[ "$dry_run" == "false" ]]; then
+        if is_macos; then
+          warn "zsh should be pre-installed on macOS. If missing, install manually."
+        else
+          install_package zsh || warn "Failed to install zsh"
         fi
       fi
+    fi
 
+    # Change shell to zsh if it's not already
+    if command -v zsh &> /dev/null; then
       local current_shell
-      if is_macos; then
-        current_shell=$(dscl . -read ~/ UserShell | awk '{print $2}')
-      else
-        current_shell=$(getent passwd "$(whoami)" | cut -d: -f7)
-      fi
+      current_shell=$(get_user_shell)
 
-      if [[ "$current_shell" != "$brew_zsh" ]]; then
-        log "Changing default shell to $brew_zsh..."
-        if [[ "$dry_run" == "false" ]]; then
-          chsh -s "$brew_zsh" || warn "Failed to change shell. Try manually: chsh -s $brew_zsh"
+      # Only change if current shell is not zsh
+      if [[ "$current_shell" != *"zsh"* ]]; then
+        local zsh_path
+        zsh_path=$(command -v zsh)
+
+        # Ensure zsh is in /etc/shells
+        if ! grep -q "^$zsh_path$" /etc/shells 2> /dev/null; then
+          log "Adding $zsh_path to /etc/shells..."
+          if [[ "$dry_run" == "false" ]]; then
+            echo "$zsh_path" | sudo tee -a /etc/shells > /dev/null
+          fi
         fi
+
+        log "Changing default shell to zsh..."
+        if [[ "$dry_run" == "false" ]]; then
+          chsh -s "$zsh_path" || warn "Failed to change shell. Try manually: chsh -s $zsh_path"
+        fi
+      else
+        info "Shell is already zsh"
       fi
     fi
   fi
@@ -502,13 +486,13 @@ task_stow() {
   local orphaned_links=()
   while IFS= read -r link; do
     orphaned_links+=("$link")
-  done < <(find ~ -maxdepth 1 -type l ! -exec test -e {} \; -print 2>/dev/null)
+  done < <(find ~ -maxdepth 1 -type l ! -exec test -e {} \; -print 2> /dev/null)
 
   # Check .config directory for orphaned symlinks
   if [[ -d "$HOME/.config" ]]; then
     while IFS= read -r link; do
       orphaned_links+=("$link")
-    done < <(find "$HOME/.config" -maxdepth 1 -type l ! -exec test -e {} \; -print 2>/dev/null)
+    done < <(find "$HOME/.config" -maxdepth 1 -type l ! -exec test -e {} \; -print 2> /dev/null)
   fi
 
   # Prompt to remove orphaned symlinks if any found
@@ -516,7 +500,7 @@ task_stow() {
     warn "Found ${#orphaned_links[@]} orphaned symlink(s):"
     for link in "${orphaned_links[@]}"; do
       local target
-      target=$(readlink "$link" 2>/dev/null || echo "<unreadable>")
+      target=$(readlink "$link" 2> /dev/null || echo "<unreadable>")
       echo "  📍 $link -> $target"
     done
     echo ""
@@ -565,7 +549,7 @@ task_stow() {
         # Backup existing target if it exists and is not already a jsh symlink
         if [[ -e "$config_target" || -L "$config_target" ]]; then
           local link_target
-          link_target=$(readlink "$config_target" 2>/dev/null || echo "")
+          link_target=$(readlink "$config_target" 2> /dev/null || echo "")
 
           # Only backup if it's not already pointing to our dotfiles
           if [[ "$link_target" != "$config_item" ]]; then
@@ -596,7 +580,7 @@ task_stow() {
       # Backup existing target if it exists and is not already a jsh symlink
       if [[ -e "$target" || -L "$target" ]]; then
         local link_target
-        link_target=$(readlink "$target" 2>/dev/null || echo "")
+        link_target=$(readlink "$target" 2> /dev/null || echo "")
 
         # Only backup if it's not already pointing to our dotfiles
         if [[ "$link_target" != "$item" ]]; then
@@ -634,7 +618,7 @@ task_unstow() {
 
   # Remove symlinks from home directory
   find ~ -maxdepth 1 -type l -print | while read -r link; do
-    target=$(readlink "$link" 2>/dev/null || echo "")
+    target=$(readlink "$link" 2> /dev/null || echo "")
     if [[ -z "$target" || ! -e "$target" ]]; then
       echo "🗑️  Removing symlink: $link (orphaned)"
       rm "$link"
@@ -647,7 +631,7 @@ task_unstow() {
   # Remove symlinks from .config directory
   if [[ -d "$HOME/.config" ]]; then
     find "$HOME/.config" -maxdepth 1 -type l -print | while read -r link; do
-      target=$(readlink "$link" 2>/dev/null || echo "")
+      target=$(readlink "$link" 2> /dev/null || echo "")
       if [[ -z "$target" || ! -e "$target" ]]; then
         echo "🗑️  Removing symlink: $link (orphaned)"
         rm "$link"
@@ -694,7 +678,7 @@ task_uninstall() {
     # Remove jsh symlink if it exists
     if [[ -L "$target" ]]; then
       local link_target
-      link_target=$(readlink "$target" 2>/dev/null || echo "")
+      link_target=$(readlink "$target" 2> /dev/null || echo "")
 
       if [[ "$link_target" == "$item" ]]; then
         echo "🗑️  Removing symlink: $target"
@@ -726,7 +710,7 @@ task_uninstall() {
       # Remove jsh symlink if it exists
       if [[ -L "$config_target" ]]; then
         local link_target
-        link_target=$(readlink "$config_target" 2>/dev/null || echo "")
+        link_target=$(readlink "$config_target" 2> /dev/null || echo "")
 
         if [[ "$link_target" == "$config_item" ]]; then
           echo "🗑️  Removing symlink: $config_target"
@@ -748,9 +732,9 @@ task_uninstall() {
   # Clean up any remaining orphaned symlinks
   log "Cleaning up orphaned symlinks..."
 
-  find ~ -maxdepth 1 -type l ! -exec test -e {} \; -print 2>/dev/null | while read -r link; do
+  find ~ -maxdepth 1 -type l ! -exec test -e {} \; -print 2> /dev/null | while read -r link; do
     local link_target
-    link_target=$(readlink "$link" 2>/dev/null || echo "")
+    link_target=$(readlink "$link" 2> /dev/null || echo "")
 
     if [[ "$link_target" == *"$ROOT_DIR"* ]]; then
       echo "🗑️  Removing orphaned symlink: $link"
@@ -760,9 +744,9 @@ task_uninstall() {
   done
 
   if [[ -d "$HOME/.config" ]]; then
-    find "$HOME/.config" -maxdepth 1 -type l ! -exec test -e {} \; -print 2>/dev/null | while read -r link; do
+    find "$HOME/.config" -maxdepth 1 -type l ! -exec test -e {} \; -print 2> /dev/null | while read -r link; do
       local link_target
-      link_target=$(readlink "$link" 2>/dev/null || echo "")
+      link_target=$(readlink "$link" 2> /dev/null || echo "")
 
       if [[ "$link_target" == *"$ROOT_DIR"* ]]; then
         echo "🗑️  Removing orphaned symlink: $link"
@@ -801,7 +785,7 @@ task_install_formulae() {
   check_brew || return
   log "Installing Formulae..."
   if is_macos; then
-    brew install --force "${FORMULAE_DARWIN[@]}"
+    brew install --force "${FORMULAE_MACOS[@]}"
   else
     brew install --force "${FORMULAE_LINUX[@]}"
   fi
@@ -820,10 +804,32 @@ task_start_services() {
 }
 
 task_install_linux_packages() {
-  log "Updating apt cache..."
-  sudo apt update
-  log "Installing apt packages..."
-  sudo apt install -y "${PACKAGES_LINUX[@]}"
+  log "Updating package cache..."
+  update_package_cache
+  log "Installing packages..."
+
+  # Determine which package array to use based on available package manager
+  local packages=()
+  if command -v apt-get &> /dev/null; then
+    packages=("${PACKAGES_APT[@]}")
+  elif command -v dnf &> /dev/null; then
+    packages=("${PACKAGES_DNF[@]}")
+  elif command -v yum &> /dev/null; then
+    packages=("${PACKAGES_YUM[@]}")
+  elif command -v pacman &> /dev/null; then
+    packages=("${PACKAGES_PACMAN[@]}")
+  elif command -v apk &> /dev/null; then
+    packages=("${PACKAGES_APK[@]}")
+  elif command -v zypper &> /dev/null; then
+    packages=("${PACKAGES_ZYPPER[@]}")
+  else
+    warn "No supported package manager found"
+    return 1
+  fi
+
+  for package in "${packages[@]}"; do
+    install_package "$package" || warn "Failed to install $package"
+  done
 }
 
 task_configure_macos() {
@@ -837,7 +843,7 @@ task_configure_macos() {
 
   # Firefox
   local ff_dir
-  ff_dir=$(find "$HOME/Library/Application Support/Firefox/Profiles" -type d -name "*.default-release" 2>/dev/null | head -n 1)
+  ff_dir=$(find "$HOME/Library/Application Support/Firefox/Profiles" -type d -name "*.default-release" 2> /dev/null | head -n 1)
   if [[ -n "$ff_dir" && -d "/Applications/Firefox.app" ]]; then
     log "Configuring Firefox..."
     ln -sf "$ROOT_DIR/configs/firefox/user.js" "$ff_dir/user.js"
@@ -866,6 +872,13 @@ task_configure_linux() {
   fi
 }
 
+# @cmd wsl : Windows Subsystem for Linux integration
+task_wsl() {
+  header "Configuring and installing Windows and apps via WSL"
+  task_configure_wsl
+  task_install_wsl
+}
+
 task_configure_wsl() {
   log "Configuring WSL..."
   task_configure_windows
@@ -876,8 +889,6 @@ task_install_wsl() {
   task_install_windows
 }
 
-# @cmd wsl : Windows Subsystem for Linux integration
-# @cmd wsl configure : Configure Windows host from WSL
 task_configure_windows() {
   log "Configuring Windows..."
 
@@ -887,14 +898,10 @@ task_configure_windows() {
   # SSH
   bash "$ROOT_DIR/scripts/windows/configure-ssh.sh"
 
-  # Terminal
-  bash "$ROOT_DIR/scripts/windows/configure-terminal.sh"
-
   # VSCode
   bash "$ROOT_DIR/scripts/windows/configure-vscode.sh"
 }
 
-# @cmd wsl install : Install Windows apps from WSL
 task_install_windows() {
   log "Installing Windows Apps..."
   powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath \"winget\" -ArgumentList \"install ${APPS_WIN[*]}\" -Verb RunAs -Wait"
@@ -906,18 +913,16 @@ task_install_windows() {
 # @cmd install : Install packages
 task_install() {
   header "Installing packages"
-  if is_macos; then
-    task_install_casks
-    task_install_formulae
-    task_start_services
-  elif is_linux; then
+  if is_linux; then
     task_install_linux_packages
     if is_wsl; then
       task_install_wsl
     fi
-    task_install_formulae
-    task_start_services
+  elif is_macos; then
+    task_install_casks
   fi
+  task_install_formulae
+  task_start_services
 }
 
 # @cmd configure : Configure settings and apps
@@ -944,29 +949,29 @@ task_upgrade() {
   header "Upgrading packages"
 
   # Update zinit if present
-  if command -v zsh &>/dev/null; then
+  if command -v zsh &> /dev/null; then
     log "Updating zinit..."
-    zsh -ic 'zinit self-update' 2>/dev/null || true
-    zsh -ic 'zinit update --all' 2>/dev/null || true
+    zsh -ic 'zinit self-update' 2> /dev/null || true
+    zsh -ic 'zinit update --all' 2> /dev/null || true
   fi
 
   if is_macos; then
-    if command -v brew &>/dev/null; then
-        log "Upgrading Homebrew packages..."
-        brew update && brew upgrade
+    if command -v brew &> /dev/null; then
+      log "Upgrading Homebrew packages..."
+      brew update && brew upgrade
     fi
-    if command -v mas &>/dev/null; then
+    if command -v mas &> /dev/null; then
       log "Upgrading Mac App Store apps..."
       mas upgrade
     else
       warn "mas not installed - skipping App Store updates"
     fi
   elif is_linux; then
-    log "Upgrading apt packages..."
-    sudo apt update && sudo apt upgrade -y
-    if command -v brew &>/dev/null; then
-        log "Upgrading Homebrew packages..."
-        brew update && brew upgrade
+    log "Upgrading packages..."
+    upgrade_packages
+    if command -v brew &> /dev/null; then
+      log "Upgrading Homebrew packages..."
+      brew update && brew upgrade
     fi
   fi
 }
@@ -977,367 +982,367 @@ task_upgrade() {
 
 # @cmd status : Show system status
 cmd_status() {
-    header "System Status"
+  header "System Status"
 
-    check_brew || return 1
+  check_brew || return 1
 
-    # Homebrew formulae
-    echo -e "${BOLD}${MAGENTA}Homebrew Formulae:${RESET}"
-    if cmd_exists brew; then
-        local formulae_count
-        formulae_count=$(brew list --formula 2>/dev/null | wc -l | tr -d ' ')
-        echo -e "  Installed: ${GREEN}${formulae_count}${RESET} formulae"
+  # Homebrew formulae
+  echo -e "${BOLD}${MAGENTA}Homebrew Formulae:${RESET}"
+  if cmd_exists brew; then
+    local formulae_count
+    formulae_count=$(brew list --formula 2> /dev/null | wc -l | tr -d ' ')
+    echo -e "  Installed: ${GREEN}${formulae_count}${RESET} formulae"
 
-        # Check for outdated
-        local outdated
-        outdated=$(brew outdated --formula 2>/dev/null | wc -l | tr -d ' ')
-        if [[ "$outdated" -gt 0 ]]; then
-            echo -e "  Outdated:  ${YELLOW}${outdated}${RESET} formulae"
-        else
-            echo -e "  Outdated:  ${GREEN}0${RESET} (all up to date)"
-        fi
-    fi
-    echo
-
-    # Homebrew casks (macOS only)
-    if [[ "$(uname -s)" == "Darwin" ]]; then
-        echo -e "${BOLD}${MAGENTA}Homebrew Casks:${RESET}"
-        local casks_count
-        casks_count=$(brew list --cask 2>/dev/null | wc -l | tr -d ' ')
-        echo -e "  Installed: ${GREEN}${casks_count}${RESET} casks"
-
-        local outdated_casks
-        outdated_casks=$(brew outdated --cask 2>/dev/null | wc -l | tr -d ' ')
-        if [[ "$outdated_casks" -gt 0 ]]; then
-            echo -e "  Outdated:  ${YELLOW}${outdated_casks}${RESET} casks"
-        else
-            echo -e "  Outdated:  ${GREEN}0${RESET} (all up to date)"
-        fi
-        echo
-    fi
-
-    # Homebrew services
-    echo -e "${BOLD}${MAGENTA}Homebrew Services:${RESET}"
-    if cmd_exists brew; then
-        while IFS= read -r line; do
-            service=$(echo "$line" | awk '{print $1}')
-            svc_status=$(echo "$line" | awk '{print $2}')
-
-            if [[ "$svc_status" == "started" ]]; then
-                echo -e "  ${GREEN}●${RESET} ${service} (${GREEN}running${RESET})"
-            elif [[ "$svc_status" == "stopped" ]]; then
-                echo -e "  ${RED}●${RESET} ${service} (${RED}stopped${RESET})"
-            else
-                echo -e "  ${YELLOW}●${RESET} ${service} (${YELLOW}${svc_status}${RESET})"
-            fi
-        done < <(brew services list 2>/dev/null | tail -n +2)
-    fi
-    echo
-
-    # Symlinks
-    echo -e "${BOLD}${MAGENTA}Dotfile Symlinks:${RESET}"
-    local symlink_count=0
-    local broken_count=0
-
-    # Count symlinks pointing to ROOT_DIR
-    while IFS= read -r link; do
-        ((symlink_count++))
-        if [[ ! -e "$link" ]]; then
-            ((broken_count++))
-        fi
-    done < <(find "$HOME" -maxdepth 1 -type l 2>/dev/null | while read -r link; do
-        if [[ "$(readlink "$link")" == "${ROOT_DIR}"* ]]; then
-            echo "$link"
-        fi
-    done)
-
-    echo -e "  Total:  ${GREEN}${symlink_count}${RESET} symlinks"
-    if [[ "$broken_count" -gt 0 ]]; then
-        echo -e "  Broken: ${RED}${broken_count}${RESET} symlinks"
+    # Check for outdated
+    local outdated
+    outdated=$(brew outdated --formula 2> /dev/null | wc -l | tr -d ' ')
+    if [[ "$outdated" -gt 0 ]]; then
+      echo -e "  Outdated:  ${YELLOW}${outdated}${RESET} formulae"
     else
-        echo -e "  Broken: ${GREEN}0${RESET} (all valid)"
+      echo -e "  Outdated:  ${GREEN}0${RESET} (all up to date)"
+    fi
+  fi
+  echo
+
+  # Homebrew casks (macOS only)
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    echo -e "${BOLD}${MAGENTA}Homebrew Casks:${RESET}"
+    local casks_count
+    casks_count=$(brew list --cask 2> /dev/null | wc -l | tr -d ' ')
+    echo -e "  Installed: ${GREEN}${casks_count}${RESET} casks"
+
+    local outdated_casks
+    outdated_casks=$(brew outdated --cask 2> /dev/null | wc -l | tr -d ' ')
+    if [[ "$outdated_casks" -gt 0 ]]; then
+      echo -e "  Outdated:  ${YELLOW}${outdated_casks}${RESET} casks"
+    else
+      echo -e "  Outdated:  ${GREEN}0${RESET} (all up to date)"
     fi
     echo
+  fi
 
-    # Git status
-    echo -e "${BOLD}${MAGENTA}Git Repository:${RESET}"
-    if [[ -d "${ROOT_DIR}/.git" ]]; then
-        pushd "${ROOT_DIR}" > /dev/null
-        local branch
-        branch=$(git branch --show-current 2>/dev/null || echo "unknown")
-        echo -e "  Branch:  ${CYAN}${branch}${RESET}"
+  # Homebrew services
+  echo -e "${BOLD}${MAGENTA}Homebrew Services:${RESET}"
+  if cmd_exists brew; then
+    while IFS= read -r line; do
+      service=$(echo "$line" | awk '{print $1}')
+      svc_status=$(echo "$line" | awk '{print $2}')
 
-        local git_status
-        git_status=$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')
-        if [[ "$git_status" -gt 0 ]]; then
-            echo -e "  Changes: ${YELLOW}${git_status}${RESET} uncommitted changes"
-        else
-            echo -e "  Changes: ${GREEN}clean${RESET}"
-        fi
-        popd > /dev/null
+      if [[ "$svc_status" == "started" ]]; then
+        echo -e "  ${GREEN}●${RESET} ${service} (${GREEN}running${RESET})"
+      elif [[ "$svc_status" == "stopped" ]]; then
+        echo -e "  ${RED}●${RESET} ${service} (${RED}stopped${RESET})"
+      else
+        echo -e "  ${YELLOW}●${RESET} ${service} (${YELLOW}${svc_status}${RESET})"
+      fi
+    done < <(brew services list 2> /dev/null | tail -n +2)
+  fi
+  echo
+
+  # Symlinks
+  echo -e "${BOLD}${MAGENTA}Dotfile Symlinks:${RESET}"
+  local symlink_count=0
+  local broken_count=0
+
+  # Count symlinks pointing to ROOT_DIR
+  while IFS= read -r link; do
+    ((symlink_count++))
+    if [[ ! -e "$link" ]]; then
+      ((broken_count++))
     fi
-    echo
+  done < <(find "$HOME" -maxdepth 1 -type l 2> /dev/null | while read -r link; do
+    if [[ "$(readlink "$link")" == "${ROOT_DIR}"* ]]; then
+      echo "$link"
+    fi
+  done)
 
-    # System info
-    echo -e "${BOLD}${MAGENTA}System Information:${RESET}"
-    echo -e "  OS:     $(uname -s) $(uname -r)"
-    echo -e "  Shell:  ${SHELL} (${ZSH_VERSION:-unknown})"
-    echo -e "  Arch:   $(uname -m)"
-    echo
+  echo -e "  Total:  ${GREEN}${symlink_count}${RESET} symlinks"
+  if [[ "$broken_count" -gt 0 ]]; then
+    echo -e "  Broken: ${RED}${broken_count}${RESET} symlinks"
+  else
+    echo -e "  Broken: ${GREEN}0${RESET} (all valid)"
+  fi
+  echo
+
+  # Git status
+  echo -e "${BOLD}${MAGENTA}Git Repository:${RESET}"
+  if [[ -d "${ROOT_DIR}/.git" ]]; then
+    pushd "${ROOT_DIR}" > /dev/null
+    local branch
+    branch=$(git branch --show-current 2> /dev/null || echo "unknown")
+    echo -e "  Branch:  ${CYAN}${branch}${RESET}"
+
+    local git_status
+    git_status=$(git status --porcelain 2> /dev/null | wc -l | tr -d ' ')
+    if [[ "$git_status" -gt 0 ]]; then
+      echo -e "  Changes: ${YELLOW}${git_status}${RESET} uncommitted changes"
+    else
+      echo -e "  Changes: ${GREEN}clean${RESET}"
+    fi
+    popd > /dev/null
+  fi
+  echo
+
+  # System info
+  echo -e "${BOLD}${MAGENTA}System Information:${RESET}"
+  echo -e "  OS:     $(uname -s) $(uname -r)"
+  echo -e "  Shell:  ${SHELL} (${ZSH_VERSION:-unknown})"
+  echo -e "  Arch:   $(uname -m)"
+  echo
 }
 
 # @cmd doctor : Run diagnostics
 cmd_doctor() {
-    header "Running jsh diagnostics"
+  header "Running jsh diagnostics"
 
-    local issues=0
+  local issues=0
 
-    # Check for required commands
-    echo -e "${BOLD}Checking required commands...${RESET}"
-    local required_cmds=(brew git curl jq vim zsh)
-    for cmd in "${required_cmds[@]}"; do
-        if cmd_exists "$cmd"; then
-            echo -e "  ${GREEN}✓${RESET} ${cmd}"
-        else
-            echo -e "  ${RED}✗${RESET} ${cmd} (missing)"
-            ((issues++))
-        fi
+  # Check for required commands
+  echo -e "${BOLD}Checking required commands...${RESET}"
+  local required_cmds=(brew git curl jq vim zsh)
+  for cmd in "${required_cmds[@]}"; do
+    if cmd_exists "$cmd"; then
+      echo -e "  ${GREEN}✓${RESET} ${cmd}"
+    else
+      echo -e "  ${RED}✗${RESET} ${cmd} (missing)"
+      ((issues++))
+    fi
+  done
+  echo
+
+  # Check for broken symlinks
+  echo -e "${BOLD}Checking for broken symlinks...${RESET}"
+  local broken_links=()
+  while IFS= read -r link; do
+    broken_links+=("$link")
+  done < <(find "$HOME" -maxdepth 1 -type l ! -exec test -e {} \; -print 2> /dev/null)
+
+  if [[ ${#broken_links[@]} -eq 0 ]]; then
+    echo -e "  ${GREEN}✓${RESET} No broken symlinks found"
+  else
+    echo -e "  ${YELLOW}⚠${RESET} Found ${#broken_links[@]} broken symlink(s):"
+    for link in "${broken_links[@]}"; do
+      echo -e "    ${RED}→${RESET} $link"
+      ((issues++))
     done
-    echo
+  fi
+  echo
 
-    # Check for broken symlinks
-    echo -e "${BOLD}Checking for broken symlinks...${RESET}"
-    local broken_links=()
-    while IFS= read -r link; do
-        broken_links+=("$link")
-    done < <(find "$HOME" -maxdepth 1 -type l ! -exec test -e {} \; -print 2>/dev/null)
-
-    if [[ ${#broken_links[@]} -eq 0 ]]; then
-        echo -e "  ${GREEN}✓${RESET} No broken symlinks found"
+  # Check Git repository status
+  echo -e "${BOLD}Checking Git repository...${RESET}"
+  if [[ -d "${ROOT_DIR}/.git" ]]; then
+    pushd "${ROOT_DIR}" > /dev/null
+    if git rev-parse --git-dir > /dev/null 2>&1; then
+      echo -e "  ${GREEN}✓${RESET} Git repository is valid"
     else
-        echo -e "  ${YELLOW}⚠${RESET} Found ${#broken_links[@]} broken symlink(s):"
-        for link in "${broken_links[@]}"; do
-            echo -e "    ${RED}→${RESET} $link"
-            ((issues++))
-        done
+      echo -e "  ${RED}✗${RESET} Git repository is corrupted"
+      ((issues++))
     fi
-    echo
 
-    # Check Git repository status
-    echo -e "${BOLD}Checking Git repository...${RESET}"
-    if [[ -d "${ROOT_DIR}/.git" ]]; then
-        pushd "${ROOT_DIR}" > /dev/null
-        if git rev-parse --git-dir > /dev/null 2>&1; then
-            echo -e "  ${GREEN}✓${RESET} Git repository is valid"
-        else
-            echo -e "  ${RED}✗${RESET} Git repository is corrupted"
-            ((issues++))
-        fi
-
-        # Check for submodules
-        if [[ -f "${ROOT_DIR}/.gitmodules" ]]; then
-            if git submodule status | grep -q '^-'; then
-                echo -e "  ${YELLOW}⚠${RESET} Some submodules are not initialized"
-                ((issues++))
-            else
-                echo -e "  ${GREEN}✓${RESET} All submodules initialized"
-            fi
-        fi
-        popd > /dev/null
-    else
-        echo -e "  ${RED}✗${RESET} Not a Git repository"
+    # Check for submodules
+    if [[ -f "${ROOT_DIR}/.gitmodules" ]]; then
+      if git submodule status | grep -q '^-'; then
+        echo -e "  ${YELLOW}⚠${RESET} Some submodules are not initialized"
         ((issues++))
+      else
+        echo -e "  ${GREEN}✓${RESET} All submodules initialized"
+      fi
     fi
-    echo
+    popd > /dev/null
+  else
+    echo -e "  ${RED}✗${RESET} Not a Git repository"
+    ((issues++))
+  fi
+  echo
 
-    # Check Homebrew health
-    if cmd_exists brew; then
-        echo -e "${BOLD}Checking Homebrew...${RESET}"
-        if brew doctor > /dev/null 2>&1; then
-            echo -e "  ${GREEN}✓${RESET} Homebrew is healthy"
-        else
-            echo -e "  ${YELLOW}⚠${RESET} Homebrew has warnings (run 'brew doctor' for details)"
-        fi
-    fi
-    echo
-
-    # Summary
-    if [[ $issues -eq 0 ]]; then
-        success "All checks passed! No issues found."
+  # Check Homebrew health
+  if cmd_exists brew; then
+    echo -e "${BOLD}Checking Homebrew...${RESET}"
+    if brew doctor > /dev/null 2>&1; then
+      echo -e "  ${GREEN}✓${RESET} Homebrew is healthy"
     else
-        warn "Found ${issues} issue(s). Please review the output above."
-        return 1
+      echo -e "  ${YELLOW}⚠${RESET} Homebrew has warnings (run 'brew doctor' for details)"
     fi
+  fi
+  echo
+
+  # Summary
+  if [[ $issues -eq 0 ]]; then
+    success "All checks passed! No issues found."
+  else
+    warn "Found ${issues} issue(s). Please review the output above."
+    return 1
+  fi
 }
 
 # @cmd backup : Backup configuration
 cmd_backup() {
-    header "Backing up jsh configuration"
+  header "Backing up jsh configuration"
 
-    local backup_dir="${HOME}/.jsh-backups"
-    local timestamp
-    timestamp=$(date +%Y%m%d_%H%M%S)
-    local backup_path="${backup_dir}/jsh_${timestamp}"
+  local backup_dir="${HOME}/.jsh-backups"
+  local timestamp
+  timestamp=$(date +%Y%m%d_%H%M%S)
+  local backup_path="${backup_dir}/jsh_${timestamp}"
 
-    mkdir -p "$backup_dir"
+  mkdir -p "$backup_dir"
 
-    info "Creating backup at: ${backup_path}"
+  info "Creating backup at: ${backup_path}"
 
-    # Backup key files
-    mkdir -p "${backup_path}"
+  # Backup key files
+  mkdir -p "${backup_path}"
 
-    # Copy important config files
-    local configs=(.zshrc .gitconfig .vimrc .tmux.conf)
-    for config in "${configs[@]}"; do
-        if [[ -f "${HOME}/${config}" ]]; then
-            cp "${HOME}/${config}" "${backup_path}/"
-            echo -e "  ${GREEN}✓${RESET} Backed up ${config}"
-        fi
-    done
-
-    # Backup brew packages list
-    if cmd_exists brew; then
-        brew bundle dump --file="${backup_path}/Brewfile" --force 2>/dev/null
-        echo -e "  ${GREEN}✓${RESET} Backed up Brewfile"
+  # Copy important config files
+  local configs=(.zshrc .gitconfig .vimrc .tmux.conf)
+  for config in "${configs[@]}"; do
+    if [[ -f "${HOME}/${config}" ]]; then
+      cp "${HOME}/${config}" "${backup_path}/"
+      echo -e "  ${GREEN}✓${RESET} Backed up ${config}"
     fi
+  done
 
-    success "Backup created at: ${backup_path}"
+  # Backup brew packages list
+  if cmd_exists brew; then
+    brew bundle dump --file="${backup_path}/Brewfile" --force 2> /dev/null
+    echo -e "  ${GREEN}✓${RESET} Backed up Brewfile"
+  fi
+
+  success "Backup created at: ${backup_path}"
 }
 
 # @cmd restore : Restore configuration
 cmd_restore() {
-    header "Restoring jsh configuration"
+  header "Restoring jsh configuration"
 
-    local backup_dir="${HOME}/.jsh-backups"
+  local backup_dir="${HOME}/.jsh-backups"
 
-    if [[ ! -d "$backup_dir" ]]; then
-        error "No backups found at ${backup_dir}"
-        return 1
+  if [[ ! -d "$backup_dir" ]]; then
+    error "No backups found at ${backup_dir}"
+    return 1
+  fi
+
+  # List available backups
+  echo -e "${BOLD}Available backups:${RESET}"
+  local backups=()
+  while IFS= read -r backup; do
+    backups+=("$backup")
+    echo -e "  ${CYAN}$(basename "$backup")${RESET}"
+  done < <(find "$backup_dir" -maxdepth 1 -type d -name "jsh_*" | sort -r)
+
+  if [[ ${#backups[@]} -eq 0 ]]; then
+    error "No backups found"
+    return 1
+  fi
+
+  echo
+  read -r -p "Enter backup name to restore (or 'latest'): " backup_name
+
+  local restore_path
+  if [[ "$backup_name" == "latest" ]]; then
+    restore_path="${backups[0]}"
+  else
+    restore_path="${backup_dir}/${backup_name}"
+  fi
+
+  if [[ ! -d "$restore_path" ]]; then
+    error "Backup not found: ${restore_path}"
+    return 1
+  fi
+
+  warn "This will overwrite your current configuration!"
+  if ! confirm "Continue with restore?"; then
+    info "Restore cancelled"
+    return 0
+  fi
+
+  # Restore files
+  for file in "${restore_path}"/*; do
+    local filename
+    filename=$(basename "$file")
+    if [[ "$filename" != "Brewfile" ]]; then
+      cp "$file" "${HOME}/${filename}"
+      echo -e "  ${GREEN}✓${RESET} Restored ${filename}"
     fi
+  done
 
-    # List available backups
-    echo -e "${BOLD}Available backups:${RESET}"
-    local backups=()
-    while IFS= read -r backup; do
-        backups+=("$backup")
-        echo -e "  ${CYAN}$(basename "$backup")${RESET}"
-    done < <(find "$backup_dir" -maxdepth 1 -type d -name "jsh_*" | sort -r)
-
-    if [[ ${#backups[@]} -eq 0 ]]; then
-        error "No backups found"
-        return 1
-    fi
-
-    echo
-    read -r -p "Enter backup name to restore (or 'latest'): " backup_name
-
-    local restore_path
-    if [[ "$backup_name" == "latest" ]]; then
-        restore_path="${backups[0]}"
-    else
-        restore_path="${backup_dir}/${backup_name}"
-    fi
-
-    if [[ ! -d "$restore_path" ]]; then
-        error "Backup not found: ${restore_path}"
-        return 1
-    fi
-
-    warn "This will overwrite your current configuration!"
-    if ! confirm "Continue with restore?"; then
-        info "Restore cancelled"
-        return 0
-    fi
-
-    # Restore files
-    for file in "${restore_path}"/*; do
-        local filename
-        filename=$(basename "$file")
-        if [[ "$filename" != "Brewfile" ]]; then
-            cp "$file" "${HOME}/${filename}"
-            echo -e "  ${GREEN}✓${RESET} Restored ${filename}"
-        fi
-    done
-
-    success "Restore complete from: $(basename "$restore_path")"
+  success "Restore complete from: $(basename "$restore_path")"
 }
 
 # @cmd list : List managed packages
 cmd_list() {
-    header "Managed Packages and Configurations"
+  header "Managed Packages and Configurations"
 
-    echo -e "${BOLD}${MAGENTA}Managed Formulae (Darwin):${RESET}"
-    printf '%s\n' "${FORMULAE_DARWIN[@]}" | column
-    echo
-    echo -e "${BOLD}${MAGENTA}Managed Formulae (Linux):${RESET}"
-    printf '%s\n' "${FORMULAE_LINUX[@]}" | column
-    echo
-    echo -e "${BOLD}${MAGENTA}Managed Casks:${RESET}"
-    printf '%s\n' "${CASKS[@]}" | column
-    echo
+  echo -e "${BOLD}${MAGENTA}Managed Formulae (macOS):${RESET}"
+  printf '%s\n' "${FORMULAE_MACOS[@]}" | column
+  echo
+  echo -e "${BOLD}${MAGENTA}Managed Formulae (Linux):${RESET}"
+  printf '%s\n' "${FORMULAE_LINUX[@]}" | column
+  echo
+  echo -e "${BOLD}${MAGENTA}Managed Casks:${RESET}"
+  printf '%s\n' "${CASKS[@]}" | column
+  echo
 
-    if cmd_exists brew; then
-        echo -e "${BOLD}${MAGENTA}Installed Formulae:${RESET}"
-        brew list --formula -1 | head -20
-        local total
-        total=$(brew list --formula 2>/dev/null | wc -l | tr -d ' ')
-        if [[ $total -gt 20 ]]; then
-            echo -e "  ${YELLOW}... and $((total - 20)) more${RESET}"
-        fi
-        echo
-
-        if [[ "$(uname -s)" == "Darwin" ]]; then
-            echo -e "${BOLD}${MAGENTA}Installed Casks:${RESET}"
-            brew list --cask -1 | head -20
-            local cask_total
-            cask_total=$(brew list --cask 2>/dev/null | wc -l | tr -d ' ')
-            if [[ $cask_total -gt 20 ]]; then
-                echo -e "  ${YELLOW}... and $((cask_total - 20)) more${RESET}"
-            fi
-            echo
-        fi
+  if cmd_exists brew; then
+    echo -e "${BOLD}${MAGENTA}Installed Formulae:${RESET}"
+    brew list --formula -1 | head -20
+    local total
+    total=$(brew list --formula 2> /dev/null | wc -l | tr -d ' ')
+    if [[ $total -gt 20 ]]; then
+      echo -e "  ${YELLOW}... and $((total - 20)) more${RESET}"
     fi
+    echo
 
-    echo -e "${BOLD}${MAGENTA}Managed Configurations:${RESET}"
-    if [[ -d "${ROOT_DIR}/configs" ]]; then
-        find "${ROOT_DIR}/configs" -type f ! -path "*/.*" | while IFS= read -r config; do
-            echo -e "  ${CYAN}→${RESET} ${config#${ROOT_DIR}/}"
-        done
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+      echo -e "${BOLD}${MAGENTA}Installed Casks:${RESET}"
+      brew list --cask -1 | head -20
+      local cask_total
+      cask_total=$(brew list --cask 2> /dev/null | wc -l | tr -d ' ')
+      if [[ $cask_total -gt 20 ]]; then
+        echo -e "  ${YELLOW}... and $((cask_total - 20)) more${RESET}"
+      fi
+      echo
     fi
+  fi
+
+  echo -e "${BOLD}${MAGENTA}Managed Configurations:${RESET}"
+  if [[ -d "${ROOT_DIR}/configs" ]]; then
+    find "${ROOT_DIR}/configs" -type f ! -path "*/.*" | while IFS= read -r config; do
+      echo -e "  ${CYAN}→${RESET} ${config#${ROOT_DIR}/}"
+    done
+  fi
 }
 
 # @cmd brew : Manage Homebrew
 cmd_brew() {
-    local subcmd="${1:-help}"
-    shift || true
+  local subcmd="${1:-help}"
+  shift || true
 
-    case "$subcmd" in
-        setup)
-            "${ROOT_DIR}/scripts/unix/brew.sh" setup
-            ;;
-        check)
-            "${ROOT_DIR}/scripts/unix/brew.sh" check "$@"
-            ;;
-        help|--help|-h)
-            echo -e "${BOLD}${CYAN}jsh brew${RESET} - Homebrew package management"
-            echo
-            "${ROOT_DIR}/scripts/unix/brew.sh"
-            ;;
-        *)
-            # Pass through to brew
-            if ! check_brew; then
-                return 1
-            fi
-            "${ROOT_DIR}/scripts/unix/brew.sh" "$subcmd" "$@"
-            ;;
-    esac
+  case "$subcmd" in
+    setup)
+      "${ROOT_DIR}/scripts/unix/brew.sh" setup
+      ;;
+    check)
+      "${ROOT_DIR}/scripts/unix/brew.sh" check "$@"
+      ;;
+    help | --help | -h)
+      echo -e "${BOLD}${CYAN}jsh brew${RESET} - Homebrew package management"
+      echo
+      "${ROOT_DIR}/scripts/unix/brew.sh"
+      ;;
+    *)
+      # Pass through to brew
+      if ! check_brew; then
+        return 1
+      fi
+      "${ROOT_DIR}/scripts/unix/brew.sh" "$subcmd" "$@"
+      ;;
+  esac
 }
 
 # @cmd completion : Generate completion script
 cmd_completion() {
-    local src="${SOURCE:-$0}"
+  local src="${SOURCE:-$0}"
 
-    cat <<EOF
+  cat << EOF
 #compdef jsh
 
 _jsh() {
@@ -1353,27 +1358,27 @@ _jsh() {
             case \$line[1] in
 EOF
 
-    # Generate cases for subcommands
-    local prev_parent=""
-    grep '^# @cmd' "$src" | sed 's/^# @cmd //' | while read -r line; do
-        cmd_part="${line%% :*}"
-        if [[ "$cmd_part" == *" "* ]]; then
-            parent="${cmd_part%% *}"
-            if [[ "$parent" != "$prev_parent" ]]; then
-                echo "                $parent)"
-                echo "                    _arguments '1: :_jsh_${parent}_commands'"
-                echo "                    ;;"
-                prev_parent="$parent"
-            fi
-        fi
-    done
+  # Generate cases for subcommands
+  local prev_parent=""
+  grep '^# @cmd' "$src" | sed 's/^# @cmd //' | while read -r line; do
+    cmd_part="${line%% :*}"
+    if [[ "$cmd_part" == *" "* ]]; then
+      parent="${cmd_part%% *}"
+      if [[ "$parent" != "$prev_parent" ]]; then
+        echo "                $parent)"
+        echo "                    _arguments '1: :_jsh_${parent}_commands'"
+        echo "                    ;;"
+        prev_parent="$parent"
+      fi
+    fi
+  done
 
-    cat <<EOF
-                *)
-                    ;;
-            esac
-            ;;
-    esac
+  cat << EOF
+              *)
+                ;;
+          esac
+          ;;
+  esac
 }
 
 _jsh_commands() {
@@ -1381,50 +1386,50 @@ _jsh_commands() {
     commands=(
 EOF
 
-    # Top level commands
-    grep '^# @cmd' "$src" | sed 's/^# @cmd //' | while read -r line; do
-        cmd_part="${line%% :*}"
-        desc="${line#* : }"
-        if [[ "$cmd_part" != *" "* ]]; then
-            echo "        '$cmd_part:$desc'"
-        fi
-    done
+  # Top level commands
+  grep '^# @cmd' "$src" | sed 's/^# @cmd //' | while read -r line; do
+    cmd_part="${line%% :*}"
+    desc="${line#* : }"
+    if [[ "$cmd_part" != *" "* ]]; then
+      echo "        '$cmd_part:$desc'"
+    fi
+  done
 
-    cat <<EOF
+  cat << EOF
     )
     _describe -t commands 'jsh command' commands
 }
 EOF
 
-    # Subcommand functions
-    local parents
-    parents=$(grep '^# @cmd' "$src" | sed 's/^# @cmd //' | while read -r line; do
-        cmd_part="${line%% :*}"
-        if [[ "$cmd_part" == *" "* ]]; then
-            echo "${cmd_part%% *}"
-        fi
-    done | sort -u)
+  # Subcommand functions
+  local parents
+  parents=$(grep '^# @cmd' "$src" | sed 's/^# @cmd //' | while read -r line; do
+    cmd_part="${line%% :*}"
+    if [[ "$cmd_part" == *" "* ]]; then
+      echo "${cmd_part%% *}"
+    fi
+  done | sort -u)
 
-    for parent in $parents; do
-        echo ""
-        echo "_jsh_${parent}_commands() {"
-        echo "    local -a commands"
-        echo "    commands=("
-        grep "^# @cmd $parent " "$src" | sed "s/^# @cmd $parent //" | while read -r line; do
-            # Trim leading space if any
-            line="${line## }"
-            subcmd="${line%% :*}"
-            if [[ -z "$subcmd" || "$subcmd" == :* ]]; then continue; fi
-            desc="${line#* : }"
-            echo "        '$subcmd:$desc'"
-        done
-        echo "    )"
-        echo "    _describe -t commands '$parent command' commands"
-        echo "}"
-    done
-
+  for parent in $parents; do
     echo ""
-    echo "_jsh"
+    echo "_jsh_${parent}_commands() {"
+    echo "    local -a commands"
+    echo "    commands=("
+    grep "^# @cmd $parent " "$src" | sed "s/^# @cmd $parent //" | while read -r line; do
+      # Trim leading space if any
+      line="${line## }"
+      subcmd="${line%% :*}"
+      if [[ -z "$subcmd" || "$subcmd" == :* ]]; then continue; fi
+      desc="${line#* : }"
+      echo "        '$subcmd:$desc'"
+    done
+    echo "    )"
+    echo "    _describe -t commands '$parent command' commands"
+    echo "}"
+  done
+
+  echo ""
+  echo "_jsh"
 }
 
 # ==============================================================================
@@ -1454,8 +1459,7 @@ show_help() {
   echo -e "  ${GREEN}restore${RESET}         Restore configuration"
   echo -e "  ${GREEN}list${RESET}            List managed packages"
   echo -e "  ${GREEN}brew${RESET}            Manage Homebrew"
-  echo -e "  ${GREEN}wsl configure${RESET}   Configure Windows host from WSL"
-  echo -e "  ${GREEN}wsl install${RESET}     Install Windows apps from WSL"
+  echo -e "  ${GREEN}wsl${RESET}             Configure Windows host and install apps via WSL"
   echo -e "  ${GREEN}completion${RESET}      Generate completion script"
   echo -e "  ${GREEN}help${RESET}            Show this help message"
   echo ""
@@ -1470,31 +1474,23 @@ COMMAND="$1"
 shift
 
 case "$COMMAND" in
-  bootstrap|init) task_bootstrap "$@" ;;
+  bootstrap | init) task_bootstrap "$@" ;;
   setup) task_setup "$@" ;;
   install) task_install "$@" ;;
   configure) task_configure "$@" ;;
-  clean|cleanup) task_clean "$@" ;;
-  stow|link) task_stow "$@" ;;
-  unstow|unlink) task_unstow "$@" ;;
+  clean | cleanup) task_clean "$@" ;;
+  stow | link) task_stow "$@" ;;
+  unstow | unlink) task_unstow "$@" ;;
   uninstall) task_uninstall "$@" ;;
-  upgrade|update) task_upgrade "$@" ;;
+  upgrade | update) task_upgrade "$@" ;;
   status) cmd_status "$@" ;;
-  doctor|check) cmd_doctor "$@" ;;
+  doctor | check) cmd_doctor "$@" ;;
   backup) cmd_backup "$@" ;;
   restore) cmd_restore "$@" ;;
-  list|ls) cmd_list "$@" ;;
+  list | ls) cmd_list "$@" ;;
   brew) cmd_brew "$@" ;;
-  wsl)
-    SUBCOMMAND="$1"
-    shift
-    case "$SUBCOMMAND" in
-      configure) task_configure_windows "$@" ;;
-      install) task_install_windows "$@" ;;
-      *) error "Unknown wsl command: $SUBCOMMAND" ;;
-    esac
-    ;;
+  wsl) task_wsl "$@" ;;
   completion) cmd_completion ;;
-  help|--help|-h) show_help ;;
+  help | --help | -h) show_help ;;
   *) error "Unknown command: $COMMAND" ;;
 esac

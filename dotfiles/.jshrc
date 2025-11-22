@@ -5,48 +5,44 @@
 # ============================================================================
 
 # Core paths and editors
-export CLICOLORS=1                               # Colorize output
-export EDITOR=vim                                # Default CLI editor
-export VISUAL=vim                                # Default full-screen editor
-export TERM=xterm-256color                       # Terminal type for 256 colors
+export CLICOLORS=1         # Colorize output
+export EDITOR=vim          # Default CLI editor
+export VISUAL=vim          # Default full-screen editor
+export TERM=xterm-256color # Terminal type for 256 colors
 # SH variable might differ, but let's try to detect
 export SH=${SHELL##*/}
 
 # Project/work directories
-export GIT_BASE=${HOME}/projects                 # Git projects base
-export WORK_DIR=${GIT_BASE}                      # Default work directory
-export JSH=${JSH_ROOT:-${HOME}}/.jsh             # Ideal JSH location
-export JSH_CUSTOM=${HOME}/.jsh_local             # Local overrides (optional)
+export GIT_BASE=${HOME}/projects     # Git projects base
+export WORK_DIR=${GIT_BASE}          # Default work directory
+export JSH=${JSH_ROOT:-${HOME}}/.jsh # Ideal JSH location
+export JSH_CUSTOM=${HOME}/.jsh_local # Local overrides (optional)
 
 # Silence/optimize specific tools
-export DIRENV_LOG_FORMAT=                        # Silence direnv for p10k
-export GITSTATUS_RESPONSE_TIMEOUT=5              # Quick timeout for git status
-export DIRENV_WARN_TIMEOUT=30s                   # Direnv timeout
-export PYTHONDONTWRITEBYTECODE=1                 # No .pyc files on import
-export SSHRC_EXTRAS='.inputrc .tmux.conf .vimrc' # Files to import on SSH
+export DIRENV_LOG_FORMAT=           # Silence direnv for p10k
+export GITSTATUS_RESPONSE_TIMEOUT=5 # Quick timeout for git status
+export DIRENV_WARN_TIMEOUT=30s      # Direnv timeout
+export PYTHONDONTWRITEBYTECODE=1    # No .pyc files on import
 
 # Shell environment
-export LANG=en_US.UTF-8                          # Default locale
-export LC_ALL=en_US.UTF-8                        # Override all locales
-export XDG_CONFIG_HOME="${HOME}/.config"         # Wwhere apps should store config files
-
-# Fzf
-export FZF_BASE="${JSH}/.fzf"
+export LANG=en_US.UTF-8                  # Default locale
+export LC_ALL=en_US.UTF-8                # Override all locales
+export XDG_CONFIG_HOME="${HOME}/.config" # Wwhere apps should store config files
 
 # Terminal optimizations
-export LESS="-RXE"                          # No wrapping, no clearing, exit on EOF
+export LESS="-RXE" # No wrapping, no clearing, exit on EOF
 
 # ---- Color helper functions ---
-if command -v tput >/dev/null 2>&1; then
-  error() { echo -e "$(tput setaf 1)$*$(tput sgr0)"; }      # Red
-  warn() { echo -e "$(tput setaf 3)$*$(tput sgr0)"; }       # Yellow/Orange
-  success() { echo -e "$(tput setaf 2)$*$(tput sgr0)"; }    # Green
-  info() { echo -e "$(tput setaf 4)$*$(tput sgr0)"; }       # Blue
+if command -v tput > /dev/null 2>&1; then
+  error() { echo -e "$(tput setaf 1)$*$(tput sgr0)"; }   # Red
+  warn() { echo -e "$(tput setaf 3)$*$(tput sgr0)"; }    # Yellow/Orange
+  success() { echo -e "$(tput setaf 2)$*$(tput sgr0)"; } # Green
+  info() { echo -e "$(tput setaf 4)$*$(tput sgr0)"; }    # Blue
 else
-  error() { echo -e "\033[31m$*\033[0m"; }                  # Red
-  warn() { echo -e "\033[33m$*\033[0m"; }                   # Yellow
-  success() { echo -e "\033[32m$*\033[0m"; }                # Green
-  info() { echo -e "\033[34m$*\033[0m"; }                   # Blue
+  error() { echo -e "\033[31m$*\033[0m"; }   # Red
+  warn() { echo -e "\033[33m$*\033[0m"; }    # Yellow
+  success() { echo -e "\033[32m$*\033[0m"; } # Green
+  info() { echo -e "\033[34m$*\033[0m"; }    # Blue
 fi
 
 # ============================================================================
@@ -100,16 +96,19 @@ alias psg='ps aux | grep -i' psl='ps aux | less'
 # 't' command
 t() {
   if [[ $# -eq 0 ]]; then
-    if command -v k >/dev/null 2>&1; then k; else ls -la; fi
+    if command -v k > /dev/null 2>&1; then k; else ls -la; fi
   else
     local all_dirs=true
     for arg in "$@"; do
-      [[ ! -d "$arg" ]] && { all_dirs=false; break; }
+      [[ ! -d "$arg" ]] && {
+        all_dirs=false
+        break
+      }
     done
 
     if [[ "$all_dirs" == true ]]; then
       for dir in "$@"; do
-        if command -v k >/dev/null 2>&1; then k "$dir"; else ls -la "$dir"; fi
+        if command -v k > /dev/null 2>&1; then k "$dir"; else ls -la "$dir"; fi
       done
     else
       touch "$@"
@@ -169,45 +168,45 @@ alias tmux='tmux -2'
 
 # ---- GNU Tool Replacements ----
 # (Keeping the checks)
-command -v gawk >/dev/null 2>&1 && alias awk='command gawk'
-command -v gbase64 >/dev/null 2>&1 && alias base64='command gbase64'
-command -v gbasename >/dev/null 2>&1 && alias basename='command gbasename'
-command -v gcat >/dev/null 2>&1 && alias cat='command gcat'
-command -v gchmod >/dev/null 2>&1 && alias chmod='command gchmod'
-command -v gchown >/dev/null 2>&1 && alias chown='command gchown'
-command -v gcp >/dev/null 2>&1 && alias cp='command gcp -iv'
-command -v gcut >/dev/null 2>&1 && alias cut='command gcut'
-command -v gdate >/dev/null 2>&1 && alias date='command gdate'
-command -v gdd >/dev/null 2>&1 && alias dd='command gdd'
-command -v gdf >/dev/null 2>&1 && alias df='command gdf'
-command -v gdirname >/dev/null 2>&1 && alias dirname='command gdirname'
-command -v gdu >/dev/null 2>&1 && alias du='command gdu'
-command -v gecho >/dev/null 2>&1 && alias echo='command gecho'
-command -v genv >/dev/null 2>&1 && alias env='command genv'
-command -v gfind >/dev/null 2>&1 && alias find='command gfind'
-command -v ggrep >/dev/null 2>&1 && alias grep='command ggrep --color=auto -i'
-command -v ghead >/dev/null 2>&1 && alias head='command ghead'
-command -v gln >/dev/null 2>&1 && alias ln='command gln'
-command -v gls >/dev/null 2>&1 && alias gls='command gls --color=auto' ls='command gls --color=auto -a' l='command gls --color=auto -l' ll='command gls --color=auto -la' lll='command gls --color=auto -laFh'
-command -v gmkdir >/dev/null 2>&1 && alias mkdir='command gmkdir -pv'
-command -v gmv >/dev/null 2>&1 && alias mv='command gmv -iv'
-command -v grm >/dev/null 2>&1 && alias rm='command grm -i'
-command -v gsed >/dev/null 2>&1 && alias sed='command gsed'
-command -v gsort >/dev/null 2>&1 && alias sort='command gsort'
-command -v gtail >/dev/null 2>&1 && alias tail='command gtail'
-command -v gtar >/dev/null 2>&1 && alias tar='command gtar'
-command -v gtouch >/dev/null 2>&1 && alias touch='command gtouch'
-command -v gtr >/dev/null 2>&1 && alias tr='command gtr'
-command -v guniq >/dev/null 2>&1 && alias uniq='command guniq'
-command -v gwc >/dev/null 2>&1 && alias wc='command gwc'
-command -v gwhich >/dev/null 2>&1 && alias which='command gwhich'
-command -v gxargs >/dev/null 2>&1 && alias xargs='command gxargs'
+command -v gawk > /dev/null 2>&1 && alias awk='command gawk'
+command -v gbase64 > /dev/null 2>&1 && alias base64='command gbase64'
+command -v gbasename > /dev/null 2>&1 && alias basename='command gbasename'
+command -v gcat > /dev/null 2>&1 && alias cat='command gcat'
+command -v gchmod > /dev/null 2>&1 && alias chmod='command gchmod'
+command -v gchown > /dev/null 2>&1 && alias chown='command gchown'
+command -v gcp > /dev/null 2>&1 && alias cp='command gcp -iv'
+command -v gcut > /dev/null 2>&1 && alias cut='command gcut'
+command -v gdate > /dev/null 2>&1 && alias date='command gdate'
+command -v gdd > /dev/null 2>&1 && alias dd='command gdd'
+command -v gdf > /dev/null 2>&1 && alias df='command gdf'
+command -v gdirname > /dev/null 2>&1 && alias dirname='command gdirname'
+command -v gdu > /dev/null 2>&1 && alias du='command gdu'
+command -v gecho > /dev/null 2>&1 && alias echo='command gecho'
+command -v genv > /dev/null 2>&1 && alias env='command genv'
+command -v gfind > /dev/null 2>&1 && alias find='command gfind'
+command -v ggrep > /dev/null 2>&1 && alias grep='command ggrep --color=auto -i'
+command -v ghead > /dev/null 2>&1 && alias head='command ghead'
+command -v gln > /dev/null 2>&1 && alias ln='command gln'
+command -v gls > /dev/null 2>&1 && alias gls='command gls --color=auto' ls='command gls --color=auto -a' l='command gls --color=auto -l' ll='command gls --color=auto -la' lll='command gls --color=auto -laFh'
+command -v gmkdir > /dev/null 2>&1 && alias mkdir='command gmkdir -pv'
+command -v gmv > /dev/null 2>&1 && alias mv='command gmv -iv'
+command -v grm > /dev/null 2>&1 && alias rm='command grm -i'
+command -v gsed > /dev/null 2>&1 && alias sed='command gsed'
+command -v gsort > /dev/null 2>&1 && alias sort='command gsort'
+command -v gtail > /dev/null 2>&1 && alias tail='command gtail'
+command -v gtar > /dev/null 2>&1 && alias tar='command gtar'
+command -v gtouch > /dev/null 2>&1 && alias touch='command gtouch'
+command -v gtr > /dev/null 2>&1 && alias tr='command gtr'
+command -v guniq > /dev/null 2>&1 && alias uniq='command guniq'
+command -v gwc > /dev/null 2>&1 && alias wc='command gwc'
+command -v gwhich > /dev/null 2>&1 && alias which='command gwhich'
+command -v gxargs > /dev/null 2>&1 && alias xargs='command gxargs'
 
 # ---- Tool Replacements ----
-command -v eza >/dev/null 2>&1 && alias l='eza -a -l --git --icons --color=always' ll='eza --git --icons --level=2 --long --tree --long --color=always' lll='eza --git --icons --long --tree --color=always'
-command -v hx >/dev/null 2>&1 && alias vim='hx'
-command -v nvim >/dev/null 2>&1 && alias vim='nvim'
-command -v vim >/dev/null 2>&1 && alias vi='vim'
+command -v eza > /dev/null 2>&1 && alias l='eza -a -l --git --icons --color=always' ll='eza --git --icons --level=2 --long --tree --long --color=always' lll='eza --git --icons --long --tree --color=always'
+command -v hx > /dev/null 2>&1 && alias vim='hx'
+command -v nvim > /dev/null 2>&1 && alias vim='nvim'
+command -v vim > /dev/null 2>&1 && alias vi='vim'
 
 # ============================================================================
 # 4. SHELL FUNCTIONS
@@ -237,18 +236,21 @@ extract() {
     return 1
   fi
   case "$1" in
-    *.tar.bz2)   tar xjf "$1"     ;;
-    *.tar.gz)    tar xzf "$1"     ;;
-    *.bz2)       bunzip2 "$1"     ;;
-    *.rar)       unrar e "$1"     ;;
-    *.gz)        gunzip "$1"      ;;
-    *.tar)       tar xf "$1"      ;;
-    *.tbz2)      tar xjf "$1"     ;;
-    *.tgz)       tar xzf "$1"     ;;
-    *.zip)       unzip "$1"       ;;
-    *.Z)         uncompress "$1"  ;;
-    *.7z)        7z x "$1"        ;;
-    *)           error "'$1' cannot be extracted"; return 1 ;;
+    *.tar.bz2) tar xjf "$1" ;;
+    *.tar.gz) tar xzf "$1" ;;
+    *.bz2) bunzip2 "$1" ;;
+    *.rar) unrar e "$1" ;;
+    *.gz) gunzip "$1" ;;
+    *.tar) tar xf "$1" ;;
+    *.tbz2) tar xjf "$1" ;;
+    *.tgz) tar xzf "$1" ;;
+    *.zip) unzip "$1" ;;
+    *.Z) uncompress "$1" ;;
+    *.7z) 7z x "$1" ;;
+    *)
+      error "'$1' cannot be extracted"
+      return 1
+      ;;
   esac
 }
 
@@ -258,13 +260,22 @@ ffe() { /usr/bin/find . -name '*'"$*"; }
 
 http2ssh() {
   REPO_URL=$(git remote -v | grep -m1 '^origin' | sed -Ene's#.*(https://[^[:space:]]*).*#\1#p')
-  [[ -z "${REPO_URL}" ]] && { error "Could not identify repo URL"; return 1; }
+  [[ -z "${REPO_URL}" ]] && {
+    error "Could not identify repo URL"
+    return 1
+  }
 
   USER=$(echo "${REPO_URL}" | sed -Ene's#https://github.com/([^/]*)/(.*)#\1#p')
-  [[ -z "${USER}" ]] && { error "Could not identify user"; return 2; }
+  [[ -z "${USER}" ]] && {
+    error "Could not identify user"
+    return 2
+  }
 
   REPO=$(echo "${REPO_URL}" | sed -Ene's#https://github.com/([^/]*)/(.*)#\2#p')
-  [[ -z "${REPO}" ]] && { error "Could not identify repo"; return 3; }
+  [[ -z "${REPO}" ]] && {
+    error "Could not identify repo"
+    return 3
+  }
 
   NEW_URL="git@github.com:${USER}/${REPO}"
   warn "Changing repo URL from: '${REPO_URL}' to: '${NEW_URL}'"
@@ -278,10 +289,13 @@ http2ssh() {
 }
 
 nukem() {
-  [[ -z "$1" ]] && { echo "Usage: $0 <namespace>"; return 1; }
+  [[ -z "$1" ]] && {
+    echo "Usage: $0 <namespace>"
+    return 1
+  }
   warn "Removing finalizers from namespace: $1"
-  if kubectl get namespace "$1" -o json | tr -d "\n" | \
-    sed "s/\"finalizers\": \[[^]]\+\]/\"finalizers\": []/" | \
+  if kubectl get namespace "$1" -o json | tr -d "\n" |
+    sed "s/\"finalizers\": \[[^]]\+\]/\"finalizers\": []/" |
     kubectl replace --raw "/api/v1/namespaces/$1/finalize" -f -; then
     success "Finalizers removed"
   else
@@ -291,9 +305,15 @@ nukem() {
 }
 
 ipmi() {
-  [[ -z "${IPMI_HOST}" || -z "${IPMI_USER}" || -z "${IPMI_CRED_FILE}" ]] && \
-    { error "IPMI env vars not set"; return 1; }
-  [[ $1 == "fan" ]] || { ipmitool -I lanplus -H "${IPMI_HOST}" -U "${IPMI_USER}" -f "${IPMI_CRED_FILE}" "$@"; return; }
+  [[ -z "${IPMI_HOST}" || -z "${IPMI_USER}" || -z "${IPMI_CRED_FILE}" ]] &&
+    {
+      error "IPMI env vars not set"
+      return 1
+    }
+  [[ $1 == "fan" ]] || {
+    ipmitool -I lanplus -H "${IPMI_HOST}" -U "${IPMI_USER}" -f "${IPMI_CRED_FILE}" "$@"
+    return
+  }
   ipmitool -I lanplus -H "${IPMI_HOST}" -U "${IPMI_USER}" -f "${IPMI_CRED_FILE}" raw 0x30 0x30 0x01 0x00
   if [[ $# -eq 2 ]]; then
     local hex_speed
@@ -308,11 +328,14 @@ ipmi() {
 proxy() {
   local PROXY="${PROXY_ENDPOINT:-go,localhost}"
   env http_proxy="${PROXY}" https_proxy="${PROXY}" HTTP_PROXY="${PROXY}" HTTPS_PROXY="${PROXY}" \
-      NO_PROXY="${PROXY}" no_proxy="${PROXY}" "$@"
+    NO_PROXY="${PROXY}" no_proxy="${PROXY}" "$@"
 }
 
 rcode() {
-  [[ $# -ne 2 ]] && { echo "Usage: rcode <ssh_host> <remote_path>"; return 1; }
+  [[ $# -ne 2 ]] && {
+    echo "Usage: rcode <ssh_host> <remote_path>"
+    return 1
+  }
   code --remote "ssh-remote+${1}" "${2}"
 }
 
@@ -326,10 +349,10 @@ dedup_path() {
 dedup_path
 
 # Check for outdated Homebrew packages
-if command -v brew >/dev/null 2>&1; then
-    if command -v jsh >/dev/null 2>&1; then
-        jsh brew check --quiet
-    fi
+if command -v brew > /dev/null 2>&1; then
+  if command -v jsh > /dev/null 2>&1; then
+    jsh brew check --quiet
+  fi
 fi
 
 # Load local customizations

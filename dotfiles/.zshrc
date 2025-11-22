@@ -14,11 +14,6 @@ fi
 # Zinit
 export ZINIT_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}/zinit/zinit.git"
 
-# Verify fzf is available
-if [[ ! -d "${FZF_BASE}" ]]; then
-  warn "fzf submodule not found. Run: git submodule update --init"
-fi
-
 # Download Zinit if missing
 if [[ ! -d "${ZINIT_HOME}" ]]; then
     # Minimal mode: Don't download, just warn and skip

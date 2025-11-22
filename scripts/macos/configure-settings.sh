@@ -26,8 +26,8 @@ log_section() { echo -e "\n${BLUE}[====]${NC} $*"; }
 
 # Check if running on macOS
 if [[ "$OSTYPE" != "darwin"* ]]; then
-    log_error "This script is intended for macOS only."
-    exit 1
+  log_error "This script is intended for macOS only."
+  exit 1
 fi
 
 log_info "Starting macOS configuration for privacy, simplicity, and minimal noise..."
@@ -41,11 +41,11 @@ log_section "Configuring Privacy & Security Settings"
 
 # Disable analytics and telemetry
 log_info "Disabling analytics and telemetry..."
-defaults write com.apple.AdLib allowApplePersonalizedAdvertising -bool false 2>/dev/null || true
-defaults write com.apple.AdLib allowIdentifierForAdvertising -bool false 2>/dev/null || true
-if sudo -n true 2>/dev/null; then
-    sudo defaults write /Library/Application\ Support/CrashReporter/DiagnosticMessagesHistory.plist AutoSubmit -bool false 2>/dev/null || true
-    sudo defaults write /Library/Application\ Support/CrashReporter/DiagnosticMessagesHistory.plist ThirdPartyDataSubmit -bool false 2>/dev/null || true
+defaults write com.apple.AdLib allowApplePersonalizedAdvertising -bool false 2> /dev/null || true
+defaults write com.apple.AdLib allowIdentifierForAdvertising -bool false 2> /dev/null || true
+if sudo -n true 2> /dev/null; then
+  sudo defaults write /Library/Application\ Support/CrashReporter/DiagnosticMessagesHistory.plist AutoSubmit -bool false 2> /dev/null || true
+  sudo defaults write /Library/Application\ Support/CrashReporter/DiagnosticMessagesHistory.plist ThirdPartyDataSubmit -bool false 2> /dev/null || true
 fi
 
 # Disable Siri and dictation
@@ -58,7 +58,7 @@ defaults write com.apple.assistant.support "Dictation Enabled" -bool false
 
 # Disable Spotlight suggestions
 log_info "Disabling Spotlight suggestions..."
-defaults write com.apple.lookup.shared LookupSuggestionsDisabled -bool true 2>/dev/null || true
+defaults write com.apple.lookup.shared LookupSuggestionsDisabled -bool true 2> /dev/null || true
 
 # Disable location services (requires manual configuration in System Settings)
 # Note: Location services must be configured manually in System Settings > Privacy & Security
@@ -73,23 +73,23 @@ defaults write ~/Library/Preferences/ByHost/com.apple.coreservices.useractivityd
 
 # Safari privacy settings (if Safari is installed and not sandboxed)
 if [[ -d "/Applications/Safari.app" ]]; then
-    log_info "Configuring Safari privacy settings..."
-    defaults write com.apple.Safari SendDoNotTrackHTTPHeader -bool true 2>/dev/null || true
-    defaults write com.apple.Safari AutoFillPasswords -bool false 2>/dev/null || true
-    defaults write com.apple.Safari AutoFillCreditCardData -bool false 2>/dev/null || true
-    defaults write com.apple.Safari IncludeInternalDebugMenu -bool true 2>/dev/null || true
-    defaults write com.apple.Safari IncludeDevelopMenu -bool true 2>/dev/null || true
-    defaults write com.apple.Safari WebKitDeveloperExtrasEnabledPreferenceKey -bool true 2>/dev/null || true
-    defaults write com.apple.Safari com.apple.Safari.ContentPageGroupIdentifier.WebKit2DeveloperExtrasEnabled -bool true 2>/dev/null || true
-    defaults write com.apple.Safari WebContinuousSpellCheckingEnabled -bool false 2>/dev/null || true
-    defaults write com.apple.Safari WebAutomaticSpellingCorrectionEnabled -bool false 2>/dev/null || true
+  log_info "Configuring Safari privacy settings..."
+  defaults write com.apple.Safari SendDoNotTrackHTTPHeader -bool true 2> /dev/null || true
+  defaults write com.apple.Safari AutoFillPasswords -bool false 2> /dev/null || true
+  defaults write com.apple.Safari AutoFillCreditCardData -bool false 2> /dev/null || true
+  defaults write com.apple.Safari IncludeInternalDebugMenu -bool true 2> /dev/null || true
+  defaults write com.apple.Safari IncludeDevelopMenu -bool true 2> /dev/null || true
+  defaults write com.apple.Safari WebKitDeveloperExtrasEnabledPreferenceKey -bool true 2> /dev/null || true
+  defaults write com.apple.Safari com.apple.Safari.ContentPageGroupIdentifier.WebKit2DeveloperExtrasEnabled -bool true 2> /dev/null || true
+  defaults write com.apple.Safari WebContinuousSpellCheckingEnabled -bool false 2> /dev/null || true
+  defaults write com.apple.Safari WebAutomaticSpellingCorrectionEnabled -bool false 2> /dev/null || true
 fi
 
 # Disable recent items
 log_info "Clearing and limiting recent items..."
 defaults write com.apple.dock show-recents -bool false
-defaults write -g NSNavRecentPlacesLimit -int 0 2>/dev/null || true
-defaults write NSGlobalDomain NSRecentDocumentsLimit -int 0 2>/dev/null || true
+defaults write -g NSNavRecentPlacesLimit -int 0 2> /dev/null || true
+defaults write NSGlobalDomain NSRecentDocumentsLimit -int 0 2> /dev/null || true
 
 # Disable crash reporter
 log_info "Disabling crash reporter..."
@@ -97,9 +97,9 @@ defaults write com.apple.CrashReporter DialogType -string "none"
 
 # Disable automatic app updates and checks (for manual control)
 log_info "Configuring software update preferences..."
-defaults write com.apple.SoftwareUpdate AutomaticCheckEnabled -bool true 2>/dev/null || true
-defaults write com.apple.SoftwareUpdate AutomaticDownload -bool false 2>/dev/null || true
-defaults write com.apple.commerce AutoUpdate -bool false 2>/dev/null || true
+defaults write com.apple.SoftwareUpdate AutomaticCheckEnabled -bool true 2> /dev/null || true
+defaults write com.apple.SoftwareUpdate AutomaticDownload -bool false 2> /dev/null || true
+defaults write com.apple.commerce AutoUpdate -bool false 2> /dev/null || true
 
 ###############################################################################
 # SIMPLICITY & UI MINIMALISM
@@ -110,9 +110,9 @@ log_section "Configuring UI Simplicity Settings"
 # Minimize menu bar items
 log_info "Configuring menu bar..."
 defaults write com.apple.systemuiserver menuExtras -array \
-    "/System/Library/CoreServices/Menu Extras/AirPort.menu" \
-    "/System/Library/CoreServices/Menu Extras/Battery.menu" \
-    "/System/Library/CoreServices/Menu Extras/Clock.menu"
+  "/System/Library/CoreServices/Menu Extras/AirPort.menu" \
+  "/System/Library/CoreServices/Menu Extras/Battery.menu" \
+  "/System/Library/CoreServices/Menu Extras/Clock.menu"
 defaults write com.apple.controlcenter "NSStatusItem Visible Battery" -bool true
 defaults write com.apple.controlcenter "NSStatusItem Visible Bluetooth" -bool false
 defaults write com.apple.controlcenter "NSStatusItem Visible Clock" -bool true
@@ -121,7 +121,7 @@ defaults write com.apple.controlcenter "NSStatusItem Visible WiFi" -bool true
 
 # Hide Spotlight icon
 log_info "Hiding Spotlight icon from menu bar..."
-defaults write com.apple.Spotlight MenuItemHidden -bool true 2>/dev/null || true
+defaults write com.apple.Spotlight MenuItemHidden -bool true 2> /dev/null || true
 
 # Desktop - hide icons and clean appearance
 log_info "Simplifying desktop..."
@@ -164,7 +164,7 @@ defaults write com.apple.dock wvous-br-corner -int 0
 
 # Launchpad - reset and minimize
 log_info "Resetting Launchpad..."
-find ~/Library/Application\ Support/Dock -name "*.db" -maxdepth 1 -delete 2>/dev/null || true
+find ~/Library/Application\ Support/Dock -name "*.db" -maxdepth 1 -delete 2> /dev/null || true
 
 ###############################################################################
 # NOISE CANCELLATION (SOUNDS, NOTIFICATIONS, DISTRACTIONS)
@@ -180,8 +180,8 @@ defaults write NSGlobalDomain com.apple.sound.beep.feedback -bool false
 defaults write NSGlobalDomain com.apple.sound.beep.volume -float 0
 
 # Disable sound effects on boot (requires admin privileges)
-if sudo -n true 2>/dev/null; then
-    sudo nvram SystemAudioVolume=" " 2>/dev/null || log_warn "Could not disable boot sound (may require SIP disabled)"
+if sudo -n true 2> /dev/null; then
+  sudo nvram SystemAudioVolume=" " 2> /dev/null || log_warn "Could not disable boot sound (may require SIP disabled)"
 fi
 
 # Disable user interface sound effects
@@ -193,13 +193,13 @@ defaults write com.apple.notificationcenterui ShowInNotificationCenter -bool fal
 defaults write com.apple.notificationcenterui DisplayNotificationCenter -bool false
 
 # Disable automatic brightness (requires admin privileges)
-if sudo -n true 2>/dev/null; then
-    sudo defaults write /Library/Preferences/com.apple.iokit.AmbientLightSensor "Automatic Display Enabled" -bool false 2>/dev/null || true
+if sudo -n true 2> /dev/null; then
+  sudo defaults write /Library/Preferences/com.apple.iokit.AmbientLightSensor "Automatic Display Enabled" -bool false 2> /dev/null || true
 fi
 
 # Disable keyboard illumination in low light (requires admin privileges)
-if sudo -n true 2>/dev/null; then
-    sudo defaults write /Library/Preferences/com.apple.iokit.AmbientLightSensor "Automatic Keyboard Enabled" -bool false 2>/dev/null || true
+if sudo -n true 2> /dev/null; then
+  sudo defaults write /Library/Preferences/com.apple.iokit.AmbientLightSensor "Automatic Keyboard Enabled" -bool false 2> /dev/null || true
 fi
 
 # Disable time machine prompts
@@ -212,7 +212,7 @@ defaults -currentHost write com.apple.ImageCapture disableHotPlug -bool true
 
 # Reduce transparency for better focus
 log_info "Reducing transparency..."
-defaults write com.apple.universalaccess reduceTransparency -bool true 2>/dev/null || defaults write NSGlobalDomain AppleReduceDesktopTinting -bool true 2>/dev/null || true
+defaults write com.apple.universalaccess reduceTransparency -bool true 2> /dev/null || defaults write NSGlobalDomain AppleReduceDesktopTinting -bool true 2> /dev/null || true
 
 # Disable automatic app termination
 log_info "Disabling automatic app termination..."
@@ -320,7 +320,7 @@ log_section "Finalizing Configuration"
 # Kill affected applications
 log_info "Restarting affected applications..."
 for app in "Activity Monitor" "cfprefsd" "Dock" "Finder" "Safari" "SystemUIServer" "Terminal"; do
-    killall "${app}" &>/dev/null || true
+  killall "${app}" &> /dev/null || true
 done
 
 echo ""
