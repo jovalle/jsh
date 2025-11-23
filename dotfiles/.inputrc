@@ -36,3 +36,6 @@ set editing-mode vi
 
 # Eliminate unwanted prefixed (e.g. '200~') when pasting text
 set enable-bracketed-paste off
+
+# Treat hyphens and underscores as equivalent
+set completion-map-case on

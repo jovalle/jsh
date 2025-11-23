@@ -68,7 +68,10 @@ bindkey -M viins '^[^?' backward-kill-word
 # Shell options
 setopt AUTO_CD COMPLETE_IN_WORD extended_history hist_find_no_dups hist_ignore_all_dups \
         hist_ignore_dups hist_ignore_space hist_save_no_dups INTERACTIVE_COMMENTS \
-        NO_BEEP NOBGNICE HUP INC_APPEND_HISTORY SHARE_HISTORY
+        NO_BEEP NOBGNICE HUP INC_APPEND_HISTORY SHARE_HISTORY CORRECT
+
+# Magic space (!!<space> to expand last command)
+bindkey ' ' magic-space
 
 # History configuration
 export HISTDUP=erase
@@ -89,10 +92,13 @@ MAILCHECK=0
 fpath=(~/.zsh/completions "${fpath[@]}")
 autoload -Uz compinit && compinit
 
-zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
+zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}' 'r:|[._-]=* r:|=*'
 zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}"
 zstyle ':completion:*' menu no
-zstyle ':fzf-tab:complete:cd:*' fzf-preview "ls --color \$realpath"
+zstyle ':fzf-tab:complete:cd:*' fzf-preview "${LS_PREVIEW} \$realpath"
+zstyle ':fzf-tab:*' fzf-bindings 'tab:accept'
+zstyle ':fzf-tab:*' accept-line enter
+zstyle ':fzf-tab:*' continuous-trigger 'tab'
 
 if command -v zinit >/dev/null 2>&1; then
     zinit cdreplay -q
