@@ -28,10 +28,17 @@ shopt -s autocd
 shopt -s cdspell
 shopt -s checkwinsize
 shopt -s cmdhist
+shopt -s dirspell
 shopt -s dotglob
 shopt -s expand_aliases
 shopt -s extglob
 shopt -s globstar
+
+# Record each line as it gets issued
+export PROMPT_COMMAND='history -a'
+
+# Enable history expansion with space (!!<space> to expand last command)
+bind Space:magic-space
 
 # ============================================================================
 # COMPLETION SYSTEM
@@ -55,18 +62,9 @@ command -v kubectl > /dev/null 2>&1 && source <(kubectl completion bash)
 command -v zoxide > /dev/null 2>&1 && eval "$(zoxide init bash)"
 
 # ============================================================================
-# MINIMAL PROMPT (Mimic p10k)
+# PROMPT
 # ============================================================================
 
-# Function to get git branch
-parse_git_branch() {
-  git branch 2> /dev/null | sed -e '/^[^*]/d' -e 's/* \(.*\)/ \1/'
-}
-
-# Colors
-RESET="\[\033[0m\]"
-BLUE="\[\033[34m\]"
-GREEN="\[\033[32m\]"
-
-# Prompt structure: Dir (Blue) Git (Green) $
-PS1="${BLUE}\w${GREEN} \$(parse_git_branch)${RESET} \$ "
+if [[ -f "${HOME}/.jsh/scripts/unix/bash-powerline.sh" ]]; then
+    source "${HOME}/.jsh/scripts/unix/bash-powerline.sh"
+fi

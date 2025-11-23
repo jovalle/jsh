@@ -89,7 +89,27 @@ alias ..='cd ../' .2='cd ../../' .3='cd ../../../' .4='cd ../../../../' .5='cd .
 alias cp='cp -iv' mv='mv -iv' rm='rm -i' mkdir='mkdir -pv'
 # dud/duf might vary by OS/shell but usually fine
 alias dud='du -d 1 -h' duf='du -sh *'
-alias ls='ls -a' # Basic ls, color added later if supported
+
+# Colorize essential binaries
+alias grep='grep --color=auto'
+
+# ls color support detection
+if command ls --color -d . >/dev/null 2>&1; then
+  alias ls='ls --color=auto -a'
+  export LS_PREVIEW="ls --color=always"
+elif command ls -G -d . >/dev/null 2>&1; then
+  alias ls='ls -G -a'
+  export LS_PREVIEW="ls -G"
+else
+  alias ls='ls -a'
+  export LS_PREVIEW="ls"
+fi
+
+# diff color support detection
+if command diff --color /dev/null /dev/null >/dev/null 2>&1; then
+  alias diff='diff --color=auto'
+fi
+
 alias l='ls -l' ll='ls -la' lll='ls -laFh'
 alias psg='ps aux | grep -i' psl='ps aux | less'
 
@@ -353,6 +373,19 @@ if command -v brew > /dev/null 2>&1; then
   if command -v jsh > /dev/null 2>&1; then
     jsh brew check --quiet
   fi
+fi
+
+# Navigation: Search path for cd
+export CDPATH=".:~:~/projects:~/.jsh"
+
+# Safety: Prevent file overwrite on stdout redirection
+# History Hygiene: Ignore specific commands
+if [[ -n "$BASH_VERSION" ]]; then
+  set -o noclobber
+  export HISTIGNORE="&:[ ]*:exit:ls:bg:fg:history:clear"
+elif [[ -n "$ZSH_VERSION" ]]; then
+  setopt NO_CLOBBER
+  export HISTORY_IGNORE="(ls|cd|pwd|exit|cd ..)"
 fi
 
 # Load local customizations

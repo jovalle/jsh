@@ -328,7 +328,7 @@ ensure_brew() {
 # Core Task Functions
 # ==============================================================================
 
-# @cmd bootstrap : Bootstrap the environment (install brew, etc.)
+# @cmd bootstrap : Bootstrap the environment (core deps, dotfiles, shell prompt)
 task_bootstrap() {
   local install_packages=true
   local skip_brew=false
