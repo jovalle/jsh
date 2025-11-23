@@ -14,7 +14,7 @@ __powerline() {
     COLOR_USER_HOST=${COLOR_USER_HOST:-'\[\033[38;5;178m\]'} # gold
 
     # Symbols
-    SYMBOL_GIT_BRANCH=${SYMBOL_GIT_BRANCH:-⑂}
+    SYMBOL_GIT_BRANCH=${SYMBOL_GIT_BRANCH:-}
     SYMBOL_GIT_MODIFIED=${SYMBOL_GIT_MODIFIED:-*}
     SYMBOL_GIT_PUSH=${SYMBOL_GIT_PUSH:-↑}
     SYMBOL_GIT_PULL=${SYMBOL_GIT_PULL:-↓}
@@ -24,7 +24,7 @@ __powerline() {
       case "$(uname)" in
           Darwin)   PS_SYMBOL='';;
           Linux)    PS_SYMBOL='';;
-          *)        PS_SYMBOL='%';;
+          *)        PS_SYMBOL='$';;
       esac
     fi
 

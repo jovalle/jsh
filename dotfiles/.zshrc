@@ -60,6 +60,26 @@ bindkey -M viins '^S' history-incremental-search-forward
 bindkey -M vicmd '^[[3~' delete-char
 bindkey -M viins '^[[3~' delete-char
 
+# Word navigation (cross-platform support)
+# macOS Terminal (Option+Arrow sends escape sequences)
+bindkey -M viins '^[b' backward-word         # Option+Left (macOS)
+bindkey -M viins '^[f' forward-word          # Option+Right (macOS)
+bindkey -M vicmd '^[b' backward-word         # Option+Left (macOS)
+bindkey -M vicmd '^[f' forward-word          # Option+Right (macOS)
+# Alternative sequences for other terminals
+bindkey -M viins '^[^[[C' forward-word       # Alt+Right
+bindkey -M viins '^[^[[D' backward-word      # Alt+Left
+bindkey -M vicmd '^[^[[C' forward-word       # Alt+Right
+bindkey -M vicmd '^[^[[D' backward-word      # Alt+Left
+bindkey -M viins '^[[1;3C' forward-word      # Alt+Right (xterm)
+bindkey -M viins '^[[1;3D' backward-word     # Alt+Left (xterm)
+bindkey -M vicmd '^[[1;3C' forward-word      # Alt+Right (xterm)
+bindkey -M vicmd '^[[1;3D' backward-word     # Alt+Left (xterm)
+bindkey -M viins '^[[1;5C' forward-word      # Ctrl+Right (Linux)
+bindkey -M viins '^[[1;5D' backward-word     # Ctrl+Left (Linux)
+bindkey -M vicmd '^[[1;5C' forward-word      # Ctrl+Right (Linux)
+bindkey -M vicmd '^[[1;5D' backward-word     # Ctrl+Left (Linux)
+
 # Word deletion
 bindkey -M viins '^H' backward-kill-word
 bindkey -M viins '^W' backward-kill-word

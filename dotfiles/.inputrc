@@ -34,6 +34,18 @@ set convert-meta off
 # Set vi style shortcuts (shell agnostic)
 set editing-mode vi
 
+# Word navigation (cross-platform support)
+# macOS Terminal (Option+Arrow)
+"\eb": backward-word
+"\ef": forward-word
+# Alternative sequences for other terminals
+"\e\e[C": forward-word
+"\e\e[D": backward-word
+"\e[1;3C": forward-word
+"\e[1;3D": backward-word
+"\e[1;5C": forward-word
+"\e[1;5D": backward-word
+
 # Eliminate unwanted prefixed (e.g. '200~') when pasting text
 set enable-bracketed-paste off
 
