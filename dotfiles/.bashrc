@@ -66,5 +66,5 @@ command -v zoxide > /dev/null 2>&1 && eval "$(zoxide init bash)"
 # ============================================================================
 
 if [[ -f "${HOME}/.jsh/scripts/unix/bash-powerline.sh" ]]; then
-    source "${HOME}/.jsh/scripts/unix/bash-powerline.sh"
+  source "${HOME}/.jsh/scripts/unix/bash-powerline.sh"
 fi

@@ -25,9 +25,12 @@ export DIRENV_WARN_TIMEOUT=30s      # Direnv timeout
 export PYTHONDONTWRITEBYTECODE=1    # No .pyc files on import
 
 # Shell environment
-export LANG=en_US.UTF-8                  # Default locale
-export LC_ALL=en_US.UTF-8                # Override all locales
-export XDG_CONFIG_HOME="${HOME}/.config" # Wwhere apps should store config files
+export LANG=en_US.UTF-8 # Default locale
+# Only set LC_ALL if the locale is available (prevents warnings)
+if locale -a 2> /dev/null | grep -q "^en_US.UTF-8\|^en_US.utf8"; then
+  export LC_ALL=en_US.UTF-8 # Override all locales
+fi
+export XDG_CONFIG_HOME="${HOME}/.config" # Where apps should store config files
 
 # Terminal optimizations
 export LESS="-RXE" # No wrapping, no clearing, exit on EOF
@@ -94,10 +97,10 @@ alias dud='du -d 1 -h' duf='du -sh *'
 alias grep='grep --color=auto'
 
 # ls color support detection
-if command ls --color -d . >/dev/null 2>&1; then
+if command ls --color -d . > /dev/null 2>&1; then
   alias ls='ls --color=auto -a'
   export LS_PREVIEW="ls --color=always"
-elif command ls -G -d . >/dev/null 2>&1; then
+elif command ls -G -d . > /dev/null 2>&1; then
   alias ls='ls -G -a'
   export LS_PREVIEW="ls -G"
 else
@@ -106,7 +109,7 @@ else
 fi
 
 # diff color support detection
-if command diff --color /dev/null /dev/null >/dev/null 2>&1; then
+if command diff --color /dev/null /dev/null > /dev/null 2>&1; then
   alias diff='diff --color=auto'
 fi
 
@@ -357,6 +360,11 @@ rcode() {
     return 1
   }
   code --remote "ssh-remote+${1}" "${2}"
+}
+
+# Test minimal zsh prompt (without p10k)
+zsh-minimal() {
+  env ZSH_MINIMAL=1 zsh
 }
 
 # Path deduplication (POSIX compliant using awk)
