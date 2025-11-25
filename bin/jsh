@@ -29,7 +29,6 @@ else
 fi
 
 OS="$(uname -s)"
-HOSTNAME_WIN="COLOSSUS"
 
 # Load .env if it exists
 if [[ -f "$ROOT_DIR/.env" ]]; then
@@ -40,79 +39,69 @@ fi
 # Package Management - Load from JSON files
 # ==============================================================================
 
-# Helper function to load packages from JSON file
+# Helper function to load packages from JSON file into an array
+# Compatible with Bash 3.2+ (macOS default) - avoids mapfile which requires Bash 4+
 load_packages_from_json() {
   local json_file="$1"
   if [[ ! -f "$json_file" ]]; then
-    echo ""
     return 1
   fi
 
-  # Parse JSON array and return space-separated list
+  # Parse JSON array and output each item on a separate line
   if command -v jq &> /dev/null; then
-    jq -r '.[]' "$json_file" 2> /dev/null | tr '\n' ' '
+    jq -r '.[]' "$json_file" 2> /dev/null
   else
     # Fallback: simple grep-based parsing for JSON arrays
-    grep -o '"[^"]*"' "$json_file" | tr -d '"' | tr '\n' ' '
+    grep -o '"[^"]*"' "$json_file" | tr -d '"'
   fi
 }
 
-# Load package arrays from JSON files
+# Load package arrays from JSON files using a while loop (Bash 3.2 compatible)
 CASKS=()
-if [[ -f "$ROOT_DIR/configs/macos/casks.json" ]]; then
-  mapfile -t CASKS < <(jq -r '.[]' "$ROOT_DIR/configs/macos/casks.json" 2> /dev/null || echo "")
-fi
+while IFS= read -r line; do
+  [[ -n "$line" ]] && CASKS+=("$line")
+done < <(load_packages_from_json "$ROOT_DIR/configs/macos/casks.json")
 
 FORMULAE_MACOS=()
-if [[ -f "$ROOT_DIR/configs/macos/formulae.json" ]]; then
-  mapfile -t FORMULAE_MACOS < <(jq -r '.[]' "$ROOT_DIR/configs/macos/formulae.json" 2> /dev/null || echo "")
-fi
+while IFS= read -r line; do
+  [[ -n "$line" ]] && FORMULAE_MACOS+=("$line")
+done < <(load_packages_from_json "$ROOT_DIR/configs/macos/formulae.json")
 
 FORMULAE_LINUX=()
-if [[ -f "$ROOT_DIR/configs/linux/formulae.json" ]]; then
-  mapfile -t FORMULAE_LINUX < <(jq -r '.[]' "$ROOT_DIR/configs/linux/formulae.json" 2> /dev/null || echo "")
-fi
+while IFS= read -r line; do
+  [[ -n "$line" ]] && FORMULAE_LINUX+=("$line")
+done < <(load_packages_from_json "$ROOT_DIR/configs/linux/formulae.json")
 
 # Linux package managers (apt, dnf, pacman, etc.)
 PACKAGES_APT=()
-if [[ -f "$ROOT_DIR/configs/linux/apt.json" ]]; then
-  mapfile -t PACKAGES_APT < <(jq -r '.[]' "$ROOT_DIR/configs/linux/apt.json" 2> /dev/null || echo "")
-fi
+while IFS= read -r line; do
+  [[ -n "$line" ]] && PACKAGES_APT+=("$line")
+done < <(load_packages_from_json "$ROOT_DIR/configs/linux/apt.json")
 
 PACKAGES_DNF=()
-if [[ -f "$ROOT_DIR/configs/linux/dnf.json" ]]; then
-  mapfile -t PACKAGES_DNF < <(jq -r '.[]' "$ROOT_DIR/configs/linux/dnf.json" 2> /dev/null || echo "")
-fi
+while IFS= read -r line; do
+  [[ -n "$line" ]] && PACKAGES_DNF+=("$line")
+done < <(load_packages_from_json "$ROOT_DIR/configs/linux/dnf.json")
 
 PACKAGES_PACMAN=()
-if [[ -f "$ROOT_DIR/configs/linux/pacman.json" ]]; then
-  mapfile -t PACKAGES_PACMAN < <(jq -r '.[]' "$ROOT_DIR/configs/linux/pacman.json" 2> /dev/null || echo "")
-fi
+while IFS= read -r line; do
+  [[ -n "$line" ]] && PACKAGES_PACMAN+=("$line")
+done < <(load_packages_from_json "$ROOT_DIR/configs/linux/pacman.json")
 
 PACKAGES_YUM=()
-if [[ -f "$ROOT_DIR/configs/linux/yum.json" ]]; then
-  mapfile -t PACKAGES_YUM < <(jq -r '.[]' "$ROOT_DIR/configs/linux/yum.json" 2> /dev/null || echo "")
-fi
+while IFS= read -r line; do
+  [[ -n "$line" ]] && PACKAGES_YUM+=("$line")
+done < <(load_packages_from_json "$ROOT_DIR/configs/linux/yum.json")
 
 PACKAGES_APK=()
-if [[ -f "$ROOT_DIR/configs/linux/apk.json" ]]; then
-  mapfile -t PACKAGES_APK < <(jq -r '.[]' "$ROOT_DIR/configs/linux/apk.json" 2> /dev/null || echo "")
-fi
+while IFS= read -r line; do
+  [[ -n "$line" ]] && PACKAGES_APK+=("$line")
+done < <(load_packages_from_json "$ROOT_DIR/configs/linux/apk.json")
 
 PACKAGES_ZYPPER=()
-if [[ -f "$ROOT_DIR/configs/linux/zypper.json" ]]; then
-  mapfile -t PACKAGES_ZYPPER < <(jq -r '.[]' "$ROOT_DIR/configs/linux/zypper.json" 2> /dev/null || echo "")
-fi
-
-APPS_WIN=()
-if [[ -f "$ROOT_DIR/configs/windows/winget.json" ]]; then
-  mapfile -t APPS_WIN < <(jq -r '.[]' "$ROOT_DIR/configs/windows/winget.json" 2> /dev/null || echo "")
-fi
-
-FONTS_WIN=()
-if [[ -f "$ROOT_DIR/configs/windows/fonts.json" ]]; then
-  mapfile -t FONTS_WIN < <(jq -r '.[]' "$ROOT_DIR/configs/windows/fonts.json" 2> /dev/null || echo "")
-fi
+while IFS= read -r line; do
+  [[ -n "$line" ]] && PACKAGES_ZYPPER+=("$line")
+done < <(load_packages_from_json "$ROOT_DIR/configs/linux/zypper.json")
 
 # --- Brew Services ---
 SERVICES=(
@@ -866,48 +855,12 @@ task_configure_macos() {
 task_configure_linux() {
   log "Configuring Linux..."
   bash "$ROOT_DIR/scripts/linux/configure-sudoers.sh"
-
-  if is_wsl; then
-    task_configure_wsl
-  fi
 }
 
 # @cmd wsl : Windows Subsystem for Linux integration
 task_wsl() {
   header "Configuring and installing Windows and apps via WSL"
-  task_configure_wsl
-  task_install_wsl
-}
-
-task_configure_wsl() {
-  log "Configuring WSL..."
-  task_configure_windows
-}
-
-task_install_wsl() {
-  log "Installing WSL specific packages..."
-  task_install_windows
-}
-
-task_configure_windows() {
-  log "Configuring Windows..."
-
-  # Hostname
-  powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Start-Process powershell -ArgumentList \"-NoProfile -ExecutionPolicy Bypass -Command \`\"\$current = [System.Net.Dns]::GetHostName(); if (\$current -ne '$HOSTNAME_WIN') { Write-Host '🖥️  Setting hostname to $HOSTNAME_WIN...'; Rename-Computer -NewName '$HOSTNAME_WIN' -Force; Write-Host '⚠️  Restart required' } else { Write-Host '✅ Hostname already set' }\`\"\" -Verb RunAs -Wait"
-
-  # SSH
-  bash "$ROOT_DIR/scripts/windows/configure-ssh.sh"
-
-  # VSCode
-  bash "$ROOT_DIR/scripts/windows/configure-vscode.sh"
-}
-
-task_install_windows() {
-  log "Installing Windows Apps..."
-  powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Start-Process -FilePath \"winget\" -ArgumentList \"install ${APPS_WIN[*]}\" -Verb RunAs -Wait"
-
-  log "Installing Nerd Fonts..."
-  powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Start-Process powershell -ArgumentList \"refreshenv; choco install $(printf "nerd-fonts-%s " "${FONTS_WIN[@]}") -y\" -Verb RunAs -Wait"
+  bash "$ROOT_DIR/scripts/windows/configure-windows.sh" --all
 }
 
 # @cmd install : Install packages
@@ -915,9 +868,6 @@ task_install() {
   header "Installing packages"
   if is_linux; then
     task_install_linux_packages
-    if is_wsl; then
-      task_install_wsl
-    fi
   elif is_macos; then
     task_install_casks
   fi
@@ -1099,7 +1049,7 @@ cmd_doctor() {
 
   # Check for required commands
   echo -e "${BOLD}Checking required commands...${RESET}"
-  local required_cmds=(brew git curl jq vim zsh)
+  local required_cmds=(brew git curl jq vim)
   for cmd in "${required_cmds[@]}"; do
     if cmd_exists "$cmd"; then
       echo -e "  ${GREEN}✓${RESET} ${cmd}"
@@ -1192,7 +1142,7 @@ cmd_backup() {
   mkdir -p "${backup_path}"
 
   # Copy important config files
-  local configs=(.zshrc .gitconfig .vimrc .tmux.conf)
+  local configs=(.jshrc .gitconfig .vimrc .tmux.conf)
   for config in "${configs[@]}"; do
     if [[ -f "${HOME}/${config}" ]]; then
       cp "${HOME}/${config}" "${backup_path}/"
@@ -1438,30 +1388,62 @@ EOF
 
 # @cmd help : Show this help message
 show_help() {
+  local src="${SOURCE:-$0}"
+
   echo -e "${BOLD}${CYAN}jsh${RESET} - Dotfiles Management Utility"
   echo ""
   echo -e "${BOLD}USAGE:${RESET}"
   echo "  jsh <command> [options]"
   echo ""
   echo -e "${BOLD}COMMANDS:${RESET}"
-  echo -e "  ${GREEN}bootstrap${RESET}       Bootstrap the environment (install brew, etc.)"
-  echo -e "  ${GREEN}setup${RESET}           Install and configure everything (post-bootstrap)"
-  echo -e "  ${GREEN}install${RESET}         Install packages"
-  echo -e "  ${GREEN}configure${RESET}       Configure settings and apps"
-  echo -e "  ${GREEN}clean${RESET}           Clean up system"
-  echo -e "  ${GREEN}stow${RESET}            Deploy dotfiles"
-  echo -e "  ${GREEN}unstow${RESET}          Remove dotfiles"
-  echo -e "  ${GREEN}uninstall${RESET}       Completely uninstall jsh (remove symlinks and restore backups)"
-  echo -e "  ${GREEN}upgrade${RESET}         Upgrade packages"
-  echo -e "  ${GREEN}status${RESET}          Show system status"
-  echo -e "  ${GREEN}doctor${RESET}          Run diagnostics"
-  echo -e "  ${GREEN}backup${RESET}          Backup configuration"
-  echo -e "  ${GREEN}restore${RESET}         Restore configuration"
-  echo -e "  ${GREEN}list${RESET}            List managed packages"
-  echo -e "  ${GREEN}brew${RESET}            Manage Homebrew"
-  echo -e "  ${GREEN}wsl${RESET}             Configure Windows host and install apps via WSL"
-  echo -e "  ${GREEN}completion${RESET}      Generate completion script"
-  echo -e "  ${GREEN}help${RESET}            Show this help message"
+
+  # Parse @cmd comments to generate help dynamically
+  local -a parent_cmds
+
+  # Collect and display top-level commands
+  while IFS= read -r line; do
+    local cmd_part="${line%% :*}"
+    local desc="${line#* : }"
+
+    if [[ "$cmd_part" != *" "* ]]; then
+      # Top-level command
+      printf "  ${GREEN}%-22s${RESET} %s\n" "$cmd_part" "$desc"
+    else
+      # Track parent for subcommands
+      local parent="${cmd_part%% *}"
+      if [[ ! " ${parent_cmds[*]} " =~ ${parent} ]]; then
+        parent_cmds+=("$parent")
+      fi
+    fi
+  done < <(grep '^# @cmd' "$src" | sed 's/^# @cmd //')
+
+  # Display parent commands with note about subcommands
+  for parent in "${parent_cmds[@]}"; do
+    local subs=""
+    local parent_desc=""
+
+    # Get parent description if it exists
+    while IFS= read -r line; do
+      local cmd_part="${line%% :*}"
+      local desc="${line#* : }"
+
+      if [[ "$cmd_part" == "$parent" ]]; then
+        parent_desc="$desc"
+      elif [[ "$cmd_part" == "$parent "* ]]; then
+        local sub="${cmd_part#* }"
+        if [[ -z "$subs" ]]; then
+          subs="$sub"
+        else
+          subs="$subs, $sub"
+        fi
+      fi
+    done < <(grep "^# @cmd $parent" "$src" | sed 's/^# @cmd //')
+
+    if [[ -n "$subs" ]]; then
+      printf "  ${GREEN}%-22s${RESET} %s (subcommands: %s)\n" "$parent" "$parent_desc" "$subs"
+    fi
+  done
+
   echo ""
 }
 
