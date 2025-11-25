@@ -15,9 +15,9 @@ fi
 export ZINIT_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}/zinit/zinit.git"
 
 # Download Zinit if missing
-if [[ ! -d "${ZINIT_HOME}" ]]; then
+if [[ ! -d "${ZINIT_HOME}" ]] || [[ -n "${ZSH_MINIMAL}" ]]; then
     # Minimal mode: Don't download, just warn and skip
-    warn "Zinit not found. Skipping plugins."
+    [[ -z "${ZSH_MINIMAL}" ]] && warn "Zinit not found. Skipping plugins."
 else
     # Initialize Zinit
     source "${ZINIT_HOME}/zinit.zsh"
@@ -137,23 +137,33 @@ command -v zoxide >/dev/null 2>&1 && eval "$(zoxide init zsh)"
 # MINIMAL PROMPT (Fallback)
 # ============================================================================
 
-# If p10k is not loaded, set a minimal prompt
-if [[ -z "$P9K_VERSION" ]]; then
-    # Mimic p10k style: dir git_status
+# If p10k is not loaded, set a minimal prompt matching bash-powerline style
+if [[ -z "$P9K_VERSION" ]] || [[ -n "${ZSH_MINIMAL}" ]]; then
     setopt PROMPT_SUBST
     autoload -Uz vcs_info
     zstyle ':vcs_info:*' enable git
     zstyle ':vcs_info:git:*' formats ' %b'
+    zstyle ':vcs_info:git:*' actionformats ' %b|%a'
+
+    # Set PS_SYMBOL based on OS (matching bash-powerline)
+    if [[ -z "$PS_SYMBOL" ]]; then
+      case "$(uname)" in
+          Darwin)   PS_SYMBOL='';;  # Apple logo
+          Linux)    PS_SYMBOL='';;  # Linux penguin
+          *)        PS_SYMBOL='$';;  # Generic prompt
+      esac
+    fi
 
     precmd() {
         vcs_info
     }
 
-    # Simple colored prompt
-    # %F{blue}%~%f: Current directory in blue
-    # %F{green}${vcs_info_msg_0_}%f: Git branch in green
-    # %#: Prompt char
-    PROMPT='%F{blue}%~%f%F{green}${vcs_info_msg_0_}%f %# '
+    # Prompt matching bash-powerline: PS_SYMBOL user@host dir <git> prompt_char
+    # %F{178}: gold color (matching bash COLOR_USER_HOST)
+    # %F{blue}: directory color
+    # %F{cyan}: git color
+    # %(?,%F{green},%F{red}): green ❯ on success, red ❯ on failure
+    PROMPT='$PS_SYMBOL %F{178}%n@%m%f %F{blue}%~%f%F{cyan}${vcs_info_msg_0_}%f %(?,%F{green},%F{red})❯%f '
 fi
 
 # Load p10k config if available
