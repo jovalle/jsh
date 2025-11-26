@@ -25,10 +25,21 @@ export DIRENV_WARN_TIMEOUT=30s      # Direnv timeout
 export PYTHONDONTWRITEBYTECODE=1    # No .pyc files on import
 
 # Shell environment
-export LANG=en_US.UTF-8 # Default locale
-# Only set LC_ALL if the locale is available (prevents warnings)
+# Default locale - use C.UTF-8 as fallback if en_US.UTF-8 unavailable
+if locale -a 2>/dev/null | grep -qE "^en_US\.UTF-8$|^en_US\.utf8$"; then
+  export LANG=en_US.UTF-8
+elif locale -a 2>/dev/null | grep -qE "^C\.UTF-8$|^C\.utf8$"; then
+  export LANG=C.UTF-8
+else
+  export LANG=C
+fi
+# Set LC_ALL only if a valid UTF-8 locale is available
 if locale -a 2> /dev/null | grep -q "^en_US.UTF-8\|^en_US.utf8"; then
-  export LC_ALL=en_US.UTF-8 # Override all locales
+  export LC_ALL=en_US.UTF-8
+elif locale -a 2>/dev/null | grep -qE "^C\.UTF-8$|^C\.utf8$"; then
+  export LC_ALL=C.UTF-8
+else
+  unset LC_ALL  # Prevent invalid locale errors
 fi
 export XDG_CONFIG_HOME="${HOME}/.config" # Where apps should store config files
 
