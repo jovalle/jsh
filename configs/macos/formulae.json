@@ -45,6 +45,7 @@
   "nmap",
   "node",
   "opentofu",
+  "oven-sh/bun/bun",
   "pipx",
   "poetry",
   "prettier",

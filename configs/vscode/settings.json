@@ -111,18 +111,25 @@
       "matchCommandLine": true
     },
     "brew": true,
+    "bun": true,
+    "bunx": true,
     "cat": true,
     "chmod": true,
     "code": true,
     "command": true,
     "compinit": true,
     "complete": true,
+    "cp": true,
     "curl": true,
     "date": true,
     "defaults": true,
     "dig": true,
     "direnv": true,
+    "dke": true,
+    "dkIin": true,
     "docker": true,
+    "dos2unix": true,
+    "dpkg": true,
     "echo": true,
     "env": true,
     "exec zsh": {
@@ -153,6 +160,7 @@
     "jsh": true,
     "kubectl": true,
     "ln": true,
+    "locale": true,
     "ls": true,
     "make": true,
     "mkdir": true,
@@ -160,6 +168,7 @@
     "npm": true,
     "npx": true,
     "nslookup": true,
+    "nx": true,
     "od": true,
     "openssl": true,
     "osascript": true,
@@ -167,6 +176,7 @@
     "plutil": true,
     "printf": true,
     "pwd": true,
+    "pwsh.exe": true,
     "pytest": true,
     "sed": true,
     "shellcheck": true,
@@ -174,6 +184,7 @@
       "approve": true,
       "matchCommandLine": true
     },
+    "ss": true,
     "stow": true,
     "tail": true,
     "tar": true,
@@ -183,12 +194,15 @@
     "true": true,
     "type": true,
     "uname": true,
+    "unix2dos": true,
     "uv": true,
     "wc": true,
     "wget": true,
+    "whence": true,
     "which": true,
     "whoami": true,
     "xattr": true,
+    "xxd": true,
     "yarn": true,
     "zsh": true,
     "zsh --version": {
@@ -250,6 +264,18 @@
   "git.openRepositoryInParentFolders": "always",
   "git.pruneOnFetch": true,
   "git.replaceTagsWhenPull": true,
+  "github.copilot.advanced": {
+    "debug.filterLogCategories": [],
+    "debug.overrideEngine": "",
+    "debug.overrideProxyUrl": "",
+    "debug.testOverrideProxyUrl": ""
+  },
+  "github.copilot.enable": {
+    "*": true,
+    "markdown": true,
+    "plaintext": false,
+    "scminput": false
+  },
   "github.copilot.nextEditSuggestions.enabled": true,
   "gitlens.advanced.messages": {
     "suppressGitMissingWarning": true,
@@ -300,6 +326,7 @@
   "terminal.integrated.defaultProfile.windows": "Debian (WSL)",
   "terminal.integrated.fontFamily": "JetBrainsMono NF, FiraCode Nerd Font, FiraCode NF, MesloLGS Nerd Font Mono, MesloLGS Nerd Font, MesloLGS NF, Meslo, Menlo, monospace",
   "terminal.integrated.fontSize": 12,
+  "terminal.integrated.gpuAcceleration": "on",
   "terminal.integrated.profiles.linux": {
     "bash": {
       "icon": "terminal-bash",
@@ -336,6 +363,11 @@
       "source": "PowerShell"
     }
   },
+  "terminal.integrated.scrollback": 100000,
+  "terminal.integrated.sendKeybindingsToShell": false,
+  "terminal.integrated.shellIntegration.enabled": true,
+  "terminal.integrated.shellIntegration.history": 100,
+  "terminal.integrated.smoothScrolling": true,
   "terminal.integrated.stickyScroll.enabled": true,
   "vim.useSystemClipboard": true,
   "vs-kubernetes": {
@@ -346,7 +378,10 @@
     "vs-kubernetes.kubectl-path.linux": "/home/jay/.local/state/vs-kubernetes/tools/kubectl/kubectl",
     "vs-kubernetes.kubectl-path.mac": "/opt/homebrew/bin/kubectl",
     "vs-kubernetes.minikube-path.linux": "/home/jay/.local/state/vs-kubernetes/tools/minikube/linux-amd64/minikube",
-    "vs-kubernetes.minikube-path.mac": "/Users/jay/.vs-kubernetes/tools/minikube/darwin-arm64/minikube"
+    "vs-kubernetes.minikube-path.mac": "/Users/jay/.vs-kubernetes/tools/minikube/darwin-arm64/minikube",
+    "vscode-kubernetes.helm-path-linux": "/home/e707376/linux_home/.local/state/vs-kubernetes/tools/helm/linux-amd64/helm",
+    "vscode-kubernetes.kubectl-path-linux": "/home/e707376/linux_home/.local/state/vs-kubernetes/tools/kubectl/kubectl",
+    "vscode-kubernetes.minikube-path-linux": "/home/e707376/linux_home/.local/state/vs-kubernetes/tools/minikube/linux-amd64/minikube"
   },
   "workbench.editorAssociations": {
     "*.plist": "default"
