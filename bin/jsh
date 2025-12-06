@@ -1459,7 +1459,7 @@ show_help() {
   echo ""
 }
 
-if [[ $# -eq 0 ]]; then
+if [[ $# -eq 0 ]] || [[ "$*" =~ (--help|-h) ]]; then
   show_help
   exit 0
 fi
