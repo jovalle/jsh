@@ -80,7 +80,6 @@ Temporary\ Items
 __pycache__
 bh_unicode_properties.cache
 dotfiles/.config/argocd
-dotfiles/.config/atuin
 dotfiles/.config/configstore
 dotfiles/.config/containers
 dotfiles/.config/flipperdevices.com
