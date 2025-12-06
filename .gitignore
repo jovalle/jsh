@@ -98,4 +98,5 @@ node_modules/
 oscrypto-ca-bundle.crt
 package-lock.json
 package.json
+profiles.json
 sftp-config.json

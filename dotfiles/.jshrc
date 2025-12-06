@@ -378,6 +378,95 @@ zsh-minimal() {
   env ZSH_MINIMAL=1 zsh
 }
 
+# Git User Profile Management
+gu() {
+  local profile_file="${JSH}/configs/git/profiles.json"
+
+  # Check if we're in a git repository
+  if ! git rev-parse --git-dir > /dev/null 2>&1; then
+    error "Not in a git repository"
+    return 1
+  fi
+
+  # Check if jq is installed
+  if ! command -v jq > /dev/null 2>&1; then
+    error "jq is required but not installed. Install with: brew install jq"
+    return 1
+  fi
+
+  # Check if config file exists
+  if [[ ! -f "${profile_file}" ]]; then
+    error "Git profiles config not found: ${profile_file}"
+    info "Create it with the following structure:"
+    cat << 'EXAMPLE'
+{
+  "profiles": {
+    "personal": {
+      "name": "Your Name",
+      "email": "personal@example.com",
+      "username": "personal-github"
+    },
+    "work": {
+      "name": "Your Work Name",
+      "email": "work@company.com",
+      "username": "work-github"
+    }
+  }
+}
+EXAMPLE
+    return 1
+  fi
+
+  # If no argument, show current config and available profiles
+  if [[ $# -eq 0 ]]; then
+    info "Current git configuration:"
+    echo "  Name:     $(git config user.name || echo '<not set>')"
+    echo "  Email:    $(git config user.email || echo '<not set>')"
+    echo "  Username: $(git config github.user || echo '<not set>')"
+    echo ""
+    info "Available profiles:"
+    jq -r '.profiles | keys[]' "${profile_file}" | sed 's/^/  - /'
+    echo ""
+    info "Usage: gu <profile_name>"
+    return 0
+  fi
+
+  local profile_name="$1"
+
+  # Extract profile data
+  local name email username
+  name=$(jq -r ".profiles.\"${profile_name}\".name // empty" "${profile_file}")
+  email=$(jq -r ".profiles.\"${profile_name}\".email // empty" "${profile_file}")
+  username=$(jq -r ".profiles.\"${profile_name}\".username // empty" "${profile_file}")
+
+  # Check if profile exists
+  if [[ -z "${name}" || -z "${email}" ]]; then
+    error "Profile '${profile_name}' not found in ${profile_file}"
+    info "Available profiles:"
+    jq -r '.profiles | keys[]' "${profile_file}" | sed 's/^/  - /'
+    return 1
+  fi
+
+  # Apply git config locally (repository-level)
+  info "Configuring git user profile: ${profile_name}"
+  git config user.name "${name}"
+  git config user.email "${email}"
+
+  # Set github.user if username is provided (useful for gh CLI and other tools)
+  if [[ -n "${username}" ]]; then
+    git config github.user "${username}"
+  fi
+
+  # Verify configuration
+  success "Git profile '${profile_name}' applied successfully!"
+  echo "  Name:     ${name}"
+  echo "  Email:    ${email}"
+  [[ -n "${username}" ]] && echo "  Username: ${username}"
+
+  # Show scope
+  info "Configuration is local to this repository: $(git rev-parse --show-toplevel)"
+}
+
 # Path deduplication (POSIX compliant using awk)
 dedup_path() {
   if [ -n "$PATH" ]; then

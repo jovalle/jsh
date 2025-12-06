@@ -1,0 +1,14 @@
+{
+  "profiles": {
+    "personal": {
+      "name": "Your Personal Name",
+      "email": "personal@example.com",
+      "username": "personal-github-handle"
+    },
+    "work": {
+      "name": "Your Work Name",
+      "email": "work@company.com",
+      "username": "work-github-handle"
+    }
+  }
+}
