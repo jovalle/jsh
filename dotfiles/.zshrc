@@ -41,6 +41,7 @@ else
     zinit light lukechilds/zsh-nvm
     zinit light mafredri/zsh-async
     zinit light supercrabtree/k
+    zinit light atuinsh/atuin
 fi
 
 # ============================================================================
@@ -95,7 +96,7 @@ bindkey ' ' magic-space
 
 # History configuration
 export HISTDUP=erase
-export HISTFILE="${JSH}/.zsh_history"
+export HISTFILE="${HOME}/.zsh_history"
 export HISTSIZE=50000
 export HIST_STAMPS=iso
 export SAVEHIST=50000
@@ -118,13 +119,12 @@ zstyle ':completion:*' menu no
 zstyle ':fzf-tab:complete:cd:*' fzf-preview "${LS_PREVIEW} \$realpath"
 zstyle ':fzf-tab:*' fzf-bindings 'tab:accept'
 zstyle ':fzf-tab:*' accept-line enter
-zstyle ':fzf-tab:*' continuous-trigger 'tab'
 
 if command -v zinit >/dev/null 2>&1; then
     zinit cdreplay -q
 fi
 
-# Tool Completions
+# Tool Completions (ordered)
 command -v brew >/dev/null 2>&1 && eval "$(brew shellenv)"
 command -v direnv >/dev/null 2>&1 && eval "$(direnv hook zsh)"
 command -v docker >/dev/null 2>&1 && eval "$(docker completion zsh)"
@@ -132,6 +132,7 @@ command -v fzf >/dev/null 2>&1 && source <(command fzf --zsh)
 command -v kubectl >/dev/null 2>&1 && source <(kubectl completion zsh)
 command -v task >/dev/null 2>&1 && source <(task --completion zsh)
 command -v zoxide >/dev/null 2>&1 && eval "$(zoxide init zsh)"
+command -v atuin >/dev/null 2>&1 && eval "$(atuin init zsh)"
 
 # ============================================================================
 # MINIMAL PROMPT (Fallback)
