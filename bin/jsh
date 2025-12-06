@@ -993,18 +993,30 @@ cmd_status() {
   echo -e "${BOLD}${MAGENTA}Dotfile Symlinks:${RESET}"
   local symlink_count=0
   local broken_count=0
+  local target
 
-  # Count symlinks pointing to ROOT_DIR
-  while IFS= read -r link; do
-    ((symlink_count++))
+  # Count symlinks pointing to ROOT_DIR - simpler approach without nested subshells
+  for link in "$HOME"/.* "$HOME"/*; do
+    # Skip if not a symlink
+    [[ ! -L "$link" ]] && continue
+
+    # Check if it points to ROOT_DIR
+    target=$(readlink "$link" 2>/dev/null || true)
+    if [[ -z "$target" ]]; then
+      continue
+    fi
+
+    # Use case statement for glob matching
+    case "$target" in
+      "$ROOT_DIR"*) ;;
+      *) continue ;;
+    esac
+
+    ((++symlink_count))
     if [[ ! -e "$link" ]]; then
-      ((broken_count++))
+      ((++broken_count))
     fi
-  done < <(find "$HOME" -maxdepth 1 -type l 2> /dev/null | while read -r link; do
-    if [[ "$(readlink "$link")" == "${ROOT_DIR}"* ]]; then
-      echo "$link"
-    fi
-  done)
+  done
 
   echo -e "  Total:  ${GREEN}${symlink_count}${RESET} symlinks"
   if [[ "$broken_count" -gt 0 ]]; then
