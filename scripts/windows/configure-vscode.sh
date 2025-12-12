@@ -1,12 +1,20 @@
 #!/usr/bin/env bash
 # Create symlink for VSCode settings.json (requires elevation)
 
+# Get Windows User Profile path
+WIN_USER_PROFILE=$(cmd.exe /c "echo %USERPROFILE%" 2>/dev/null | tr -d '\r')
+if [[ -z "$WIN_USER_PROFILE" ]]; then
+    echo "Error: Could not determine Windows User Profile."
+    exit 1
+fi
+
+WSL_USER_PROFILE=$(wslpath "$WIN_USER_PROFILE")
+VSCODE_USER_DIR="${WSL_USER_PROFILE}/AppData/Roaming/Code/User"
 SETTINGS_SRC="${HOME}/.jsh/configs/vscode/settings.json"
-VSCODE_USER_DIR="C:\\Users\\jay\\AppData\\Roaming\\Code\\User"
 
 # Check if VSCode is installed
-if [[ ! -d "/mnt/c/Users/jay/AppData/Roaming/Code" ]]; then
-  echo "Error: VSCode not found (check if installed)"
+if [[ ! -d "$VSCODE_USER_DIR" ]]; then
+  echo "Error: VSCode User directory not found at $VSCODE_USER_DIR"
   exit 1
 fi
 
