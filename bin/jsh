@@ -830,16 +830,6 @@ task_configure_macos() {
   # Dock
   bash "$ROOT_DIR/scripts/macos/configure-dock.sh"
 
-  # Firefox
-  local ff_dir
-  ff_dir=$(find "$HOME/Library/Application Support/Firefox/Profiles" -type d -name "*.default-release" 2> /dev/null | head -n 1)
-  if [[ -n "$ff_dir" && -d "/Applications/Firefox.app" ]]; then
-    log "Configuring Firefox..."
-    ln -sf "$ROOT_DIR/configs/firefox/user.js" "$ff_dir/user.js"
-  else
-    warn "Firefox not found or profile not detected."
-  fi
-
   # VSCode
   if [[ -d "/Applications/Visual Studio Code.app" ]]; then
     log "Configuring VSCode..."
