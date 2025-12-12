@@ -154,6 +154,313 @@ cmd_exists() { command -v "$1" &> /dev/null; }
 is_macos() { [[ "$OS" == "Darwin" ]]; }
 is_linux() { [[ "$OS" == "Linux" ]]; }
 is_wsl() { grep -qi microsoft /proc/version 2> /dev/null; }
+is_root() { [[ "${EUID:-$(id -u)}" -eq 0 ]]; }
+
+# ==============================================================================
+# Brew User Delegation (for running as root)
+# ==============================================================================
+
+# Default brew user if not configured
+BREW_USER="${BREW_USER:-}"
+
+# Check if a user exists on the system
+user_exists() {
+  local username="$1"
+  if is_macos; then
+    dscl . -read "/Users/$username" &> /dev/null
+  else
+    id "$username" &> /dev/null
+  fi
+}
+
+# Check if user is in admin/sudo group (idempotent check)
+user_in_admin_group() {
+  local username="$1"
+  if is_macos; then
+    dseditgroup -o checkmember -m "$username" admin &> /dev/null
+  else
+    # Check sudo or wheel group
+    if getent group sudo &> /dev/null; then
+      id -nG "$username" 2>/dev/null | grep -qw sudo
+    elif getent group wheel &> /dev/null; then
+      id -nG "$username" 2>/dev/null | grep -qw wheel
+    else
+      return 1
+    fi
+  fi
+}
+
+# Prompt for and create a standard user for brew delegation
+# Args: default_user, non_interactive (true/false)
+# Note: This function outputs the username to stdout for capture.
+#       All info/status messages go to stderr to avoid corrupting the output.
+create_brew_user() {
+  local default_user="${1:-jay}"
+  local non_interactive="${2:-false}"
+  local username
+
+  # In non-interactive mode, use default user directly
+  if [[ "$non_interactive" == "true" ]]; then
+    username="$default_user"
+    info "Non-interactive mode: using user '$username' for brew operations." >&2
+  else
+    echo "" >&2
+    warn "Homebrew cannot be run as root." >&2
+    info "A standard (non-root) user is required to install and manage Homebrew." >&2
+    echo "" >&2
+
+    # Prompt for username
+    read -r -p "Enter username for brew operations [$default_user]: " username
+    username="${username:-$default_user}"
+  fi
+
+  # Validate username
+  if [[ ! "$username" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+    error "Invalid username. Use lowercase letters, numbers, underscores, and hyphens."
+  fi
+
+  # Check if user already exists
+  if user_exists "$username"; then
+    info "User '$username' already exists." >&2
+
+    # Ensure user is in admin/sudo group
+    if ! user_in_admin_group "$username"; then
+      info "Adding '$username' to admin/sudo group..." >&2
+      if is_macos; then
+        sudo dseditgroup -o edit -a "$username" -t user admin 2>/dev/null || true
+      else
+        if getent group sudo &> /dev/null; then
+          sudo usermod -aG sudo "$username" 2>/dev/null || true
+        elif getent group wheel &> /dev/null; then
+          sudo usermod -aG wheel "$username" 2>/dev/null || true
+        fi
+      fi
+    fi
+
+    if [[ "$non_interactive" == "true" ]]; then
+      echo "$username"
+      return 0
+    fi
+
+    if confirm "Use '$username' for brew operations?"; then
+      echo "$username"
+      return 0
+    else
+      return 1
+    fi
+  fi
+
+  # Create the user
+  info "Creating user '$username'..." >&2
+
+  if is_macos; then
+    # macOS user creation
+    local max_id
+    max_id=$(dscl . -list /Users UniqueID | awk '{print $2}' | sort -n | tail -1)
+    local new_id=$((max_id + 1))
+
+    # Create user with dscl
+    sudo dscl . -create "/Users/$username"
+    sudo dscl . -create "/Users/$username" UserShell /bin/zsh
+    sudo dscl . -create "/Users/$username" RealName "$username"
+    sudo dscl . -create "/Users/$username" UniqueID "$new_id"
+    sudo dscl . -create "/Users/$username" PrimaryGroupID 20  # staff group
+    sudo dscl . -create "/Users/$username" NFSHomeDirectory "/Users/$username"
+
+    # Create home directory
+    sudo mkdir -p "/Users/$username"
+    sudo chown "$username:staff" "/Users/$username"
+
+    # Set password (skip in non-interactive mode - user can set later)
+    if [[ "$non_interactive" != "true" ]]; then
+      info "Setting password for $username..." >&2
+      sudo dscl . -passwd "/Users/$username"
+    else
+      info "Skipping password setup in non-interactive mode." >&2
+      info "Set password later with: sudo dscl . -passwd /Users/$username" >&2
+    fi
+
+    # Add to admin group for sudo access (needed for brew) - idempotent
+    sudo dseditgroup -o edit -a "$username" -t user admin 2>/dev/null || true
+
+  else
+    # Linux user creation
+    if command -v useradd &> /dev/null; then
+      sudo useradd -m -s /bin/bash "$username"
+    elif command -v adduser &> /dev/null; then
+      sudo adduser --disabled-password --gecos "" "$username"
+    else
+      error "No supported user creation tool found (useradd or adduser)"
+    fi
+
+    # Set password (skip in non-interactive mode)
+    if [[ "$non_interactive" != "true" ]]; then
+      info "Setting password for $username..." >&2
+      sudo passwd "$username"
+    else
+      info "Skipping password setup in non-interactive mode." >&2
+      info "Set password later with: sudo passwd $username" >&2
+    fi
+
+    # Add to sudo/wheel group
+    if getent group sudo &> /dev/null; then
+      sudo usermod -aG sudo "$username" 2>/dev/null || true
+    elif getent group wheel &> /dev/null; then
+      sudo usermod -aG wheel "$username" 2>/dev/null || true
+    fi
+  fi
+
+  if user_exists "$username"; then
+    success "User '$username' created successfully." >&2
+    echo "$username"
+    return 0
+  else
+    error "Failed to create user '$username'"
+  fi
+}
+
+# Configure root to delegate brew operations to the specified user
+configure_brew_delegation() {
+  local brew_user="$1"
+
+  if [[ -z "$brew_user" ]]; then
+    error "No brew user specified for delegation"
+  fi
+
+  # Save to .env file for persistence
+  local env_file="$ROOT_DIR/.env"
+
+  if [[ -f "$env_file" ]]; then
+    # Update existing BREW_USER or append
+    if grep -q "^BREW_USER=" "$env_file"; then
+      if is_macos; then
+        sed -i '' "s/^BREW_USER=.*/BREW_USER=$brew_user/" "$env_file"
+      else
+        sed -i "s/^BREW_USER=.*/BREW_USER=$brew_user/" "$env_file"
+      fi
+    else
+      echo "BREW_USER=$brew_user" >> "$env_file"
+    fi
+  else
+    echo "BREW_USER=$brew_user" > "$env_file"
+  fi
+
+  # Export for current session
+  export BREW_USER="$brew_user"
+
+  success "Brew delegation configured for user: $brew_user"
+  info "This setting is saved in $env_file"
+}
+
+# Run a command as the brew user (for root delegation)
+run_as_brew_user() {
+  local brew_user="${BREW_USER:-}"
+
+  if [[ -z "$brew_user" ]]; then
+    error "BREW_USER is not configured. Run 'jsh bootstrap' to set up brew delegation."
+  fi
+
+  if ! user_exists "$brew_user"; then
+    error "Brew user '$brew_user' does not exist."
+  fi
+
+  # Run the command as the brew user
+  sudo -u "$brew_user" "$@"
+}
+
+# Wrapper for brew command that handles root delegation
+brew_cmd() {
+  if is_root; then
+    if [[ -z "${BREW_USER:-}" ]]; then
+      warn "Running as root without configured brew user."
+      warn "Please run 'jsh bootstrap' to configure brew delegation."
+      return 1
+    fi
+    run_as_brew_user brew "$@"
+  else
+    brew "$@"
+  fi
+}
+
+# Check if brew user is configured and valid when running as root
+# Args: non_interactive (true/false)
+ensure_brew_user() {
+  local non_interactive="${1:-false}"
+
+  if ! is_root; then
+    return 0  # Not root, no delegation needed
+  fi
+
+  # Check if BREW_USER is already configured and valid
+  if [[ -n "${BREW_USER:-}" ]] && user_exists "$BREW_USER"; then
+    info "Using configured brew user: $BREW_USER"
+    # Ensure user is in admin group
+    if ! user_in_admin_group "$BREW_USER"; then
+      info "Ensuring '$BREW_USER' has admin/sudo access..."
+      if is_macos; then
+        sudo dseditgroup -o edit -a "$BREW_USER" -t user admin 2>/dev/null || true
+      else
+        if getent group sudo &> /dev/null; then
+          sudo usermod -aG sudo "$BREW_USER" 2>/dev/null || true
+        elif getent group wheel &> /dev/null; then
+          sudo usermod -aG wheel "$BREW_USER" 2>/dev/null || true
+        fi
+      fi
+    fi
+    return 0
+  fi
+
+  # BREW_USER is set but user doesn't exist - create it
+  if [[ -n "${BREW_USER:-}" ]]; then
+    info "BREW_USER='$BREW_USER' is configured but user does not exist."
+    local brew_user
+    brew_user=$(create_brew_user "$BREW_USER" "$non_interactive")
+    if [[ -n "$brew_user" ]]; then
+      configure_brew_delegation "$brew_user"
+      return 0
+    else
+      warn "Failed to create configured brew user."
+      return 1
+    fi
+  fi
+
+  # Need to set up brew user delegation
+  header "Root User Detected - Brew Delegation Setup"
+
+  warn "You are running as root."
+  info "Homebrew must be installed and run as a non-root user."
+  info "We'll set up a standard user to handle brew operations."
+  echo ""
+
+  # In non-interactive mode, use default user without prompting
+  if [[ "$non_interactive" == "true" ]]; then
+    local brew_user
+    brew_user=$(create_brew_user "jay" "true")
+    if [[ -n "$brew_user" ]]; then
+      configure_brew_delegation "$brew_user"
+      return 0
+    else
+      warn "Failed to create brew user in non-interactive mode."
+      return 1
+    fi
+  fi
+
+  if ! confirm "Would you like to configure a user for brew operations?"; then
+    warn "Skipping brew user setup. Homebrew features will be unavailable."
+    return 1
+  fi
+
+  local brew_user
+  brew_user=$(create_brew_user "jay" "false")
+
+  if [[ -n "$brew_user" ]]; then
+    configure_brew_delegation "$brew_user"
+    return 0
+  else
+    warn "Brew user setup cancelled."
+    return 1
+  fi
+}
 
 # Get the user's login shell
 get_user_shell() {
@@ -264,6 +571,76 @@ apply_brew_shellenv() {
 }
 
 ensure_brew() {
+  local non_interactive="${1:-false}"
+
+  # Handle root user - need to delegate to a standard user
+  if is_root; then
+    if ! ensure_brew_user "$non_interactive"; then
+      warn "Cannot install Homebrew as root without a delegated user."
+      return 1
+    fi
+
+    # Check if brew is already installed (check as brew user)
+    if run_as_brew_user command -v brew &> /dev/null; then
+      info "Homebrew is available via user: $BREW_USER"
+      return 0
+    fi
+
+    # Check common brew locations
+    local brew_candidates=(
+      "/opt/homebrew/bin/brew"
+      "/usr/local/bin/brew"
+      "/home/linuxbrew/.linuxbrew/bin/brew"
+    )
+
+    for brew_bin in "${brew_candidates[@]}"; do
+      if [[ -x "${brew_bin}" ]]; then
+        info "Found Homebrew at ${brew_bin} (accessible via user: $BREW_USER)"
+        return 0
+      fi
+    done
+
+    # Install Homebrew as the brew user
+    log "Installing Homebrew as user: $BREW_USER"
+
+    # Prepare the linuxbrew directory with proper ownership
+    # This allows the brew user to install without needing sudo during install
+    if is_linux; then
+      if [[ ! -d "/home/linuxbrew" ]]; then
+        log "Creating /home/linuxbrew directory..."
+        mkdir -p /home/linuxbrew/.linuxbrew
+        chown -R "$BREW_USER:$BREW_USER" /home/linuxbrew
+      elif [[ ! -w "/home/linuxbrew/.linuxbrew" ]] || [[ "$(stat -c '%U' /home/linuxbrew 2>/dev/null)" != "$BREW_USER" ]]; then
+        log "Fixing ownership of /home/linuxbrew..."
+        chown -R "$BREW_USER:$BREW_USER" /home/linuxbrew
+      fi
+    fi
+
+    local install_script
+    install_script="$(mktemp)"
+    chmod 644 "$install_script"
+
+    if curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh -o "${install_script}"; then
+      # Run install as the brew user with NONINTERACTIVE flag
+      if sudo -u "$BREW_USER" NONINTERACTIVE=1 /bin/bash "${install_script}"; then
+        rm -f "${install_script}"
+        success "Homebrew installed successfully for user: $BREW_USER"
+
+        # Display post-install instructions
+        info ""
+        info "To use brew commands as root, use: jsh brew <command>"
+        info "The BREW_USER setting is saved in $ROOT_DIR/.env"
+        return 0
+      else
+        rm -f "${install_script}"
+        error "Failed to install Homebrew as user: $BREW_USER"
+      fi
+    else
+      error "Failed to download Homebrew install script."
+    fi
+  fi
+
+  # Non-root path - original behavior
   if command -v brew &> /dev/null; then
     return 0
   fi
@@ -317,12 +694,49 @@ ensure_brew() {
 # Core Task Functions
 # ==============================================================================
 
-# @cmd bootstrap : Bootstrap the environment (core deps, dotfiles, shell prompt)
+# @cmd bootstrap : Bootstrap the environment (interactive setup with customization options)
 task_bootstrap() {
+  # Show detailed help if requested
+  if [[ "$1" == "--help" || "$1" == "-h" ]]; then
+    echo -e "${BOLD}${CYAN}jsh bootstrap${RESET} - Interactive environment setup"
+    echo ""
+    echo -e "${BOLD}USAGE:${RESET}"
+    echo "  jsh bootstrap [OPTIONS]"
+    echo ""
+    echo -e "${BOLD}DESCRIPTION:${RESET}"
+    echo "  Sets up your shell environment with interactive prompts to customize:"
+    echo "    • Shell selection (zsh, bash, or keep current)"
+    echo "    • Setup type (minimal or full-featured)"
+    echo "    • Package installation preferences"
+    echo "    • Plugin manager installation (zinit for zsh)"
+    echo ""
+    echo -e "${BOLD}OPTIONS:${RESET}"
+    echo "  -y, --non-interactive    Skip prompts, use defaults (zsh + full setup)"
+    echo "  --shell SHELL            Pre-select shell: zsh, bash, or skip"
+    echo "  --minimal                Use minimal setup (lightweight, no plugins)"
+    echo "  --full                   Use full setup (themes, plugins, completions)"
+    echo "  --no-install             Skip package installation"
+    echo "  --skip-brew              Skip Homebrew installation"
+    echo "  --dry-run                Show what would be done without doing it"
+    echo ""
+    echo -e "${BOLD}EXAMPLES:${RESET}"
+    echo "  jsh bootstrap                    # Interactive setup with prompts"
+    echo "  jsh bootstrap -y                 # Non-interactive with defaults"
+    echo "  jsh bootstrap --shell bash       # Pre-select bash shell"
+    echo "  jsh bootstrap --minimal          # Lightweight setup"
+    echo "  jsh bootstrap --dry-run          # Preview changes"
+    echo ""
+    return 0
+  fi
+
   local install_packages=true
   local skip_brew=false
   local dry_run=false
+  local interactive=true
+  local target_shell=""
+  local setup_type=""
 
+  # Parse command-line arguments
   while [[ $# -gt 0 ]]; do
     case $1 in
       --no-install)
@@ -337,11 +751,110 @@ task_bootstrap() {
         dry_run=true
         shift
         ;;
+      --non-interactive | -y)
+        interactive=false
+        shift
+        ;;
+      --shell)
+        target_shell="$2"
+        shift 2
+        ;;
+      --minimal)
+        setup_type="minimal"
+        shift
+        ;;
+      --full)
+        setup_type="full"
+        shift
+        ;;
       *) shift ;;
     esac
   done
 
-  header "Bootstrapping environment"
+  header "Bootstrapping jsh environment"
+
+  # Interactive prompts
+  if [[ "$interactive" == "true" ]]; then
+    echo ""
+    info "Welcome to jsh! Let's configure your shell environment."
+    echo ""
+
+    # Shell selection
+    if [[ -z "$target_shell" ]]; then
+      echo -e "${BOLD}Shell Selection:${RESET}"
+      echo "  1) zsh   (recommended - modern, feature-rich)"
+      echo "  2) bash  (traditional, widely compatible)"
+      echo "  3) skip  (keep current shell: $(basename "$SHELL"))"
+      echo ""
+      read -n 1 -r -p "Choose your shell (1-3): " shell_choice
+      echo ""
+      echo ""
+
+      case "$shell_choice" in
+        1) target_shell="zsh" ;;
+        2) target_shell="bash" ;;
+        3) target_shell="skip" ;;
+        *)
+          warn "Invalid choice, defaulting to zsh"
+          target_shell="zsh"
+          ;;
+      esac
+    fi
+
+    # Setup type selection
+    if [[ -z "$setup_type" ]]; then
+      echo -e "${BOLD}Setup Type:${RESET}"
+      echo "  1) Minimal  - Core tools only, lightweight shell"
+      echo "  2) Full     - All features: themes, plugins, completions"
+      echo ""
+      read -n 1 -r -p "Choose setup type (1-2): " setup_choice
+      echo ""
+      echo ""
+
+      case "$setup_choice" in
+        1) setup_type="minimal" ;;
+        2) setup_type="full" ;;
+        *)
+          warn "Invalid choice, defaulting to full"
+          setup_type="full"
+          ;;
+      esac
+    fi
+
+    # Package installation confirmation
+    if [[ "$install_packages" == "true" ]]; then
+      echo -e "${BOLD}Package Installation:${RESET}"
+      info "This will install/update:"
+      echo "  • Homebrew (package manager)"
+      echo "  • Essential tools (curl, jq, vim, etc.)"
+      if [[ "$target_shell" == "zsh" ]]; then
+        echo "  • Zsh shell"
+      elif [[ "$target_shell" == "bash" ]]; then
+        echo "  • Bash shell (if not present)"
+      fi
+      echo ""
+
+      if ! confirm "Proceed with package installation?"; then
+        install_packages=false
+        skip_brew=true
+        info "Skipping package installation"
+        echo ""
+      fi
+    fi
+  else
+    # Non-interactive defaults
+    [[ -z "$target_shell" ]] && target_shell="zsh"
+    [[ -z "$setup_type" ]] && setup_type="full"
+  fi
+
+  # Apply setup type
+  if [[ "$setup_type" == "minimal" ]]; then
+    export ZSH_MINIMAL=1
+    info "Minimal setup selected - lightweight configuration will be used"
+    echo ""
+  fi
+
+  header "Starting bootstrap process"
 
   # 1. Git Submodules
   if [[ -f "$ROOT_DIR/.gitmodules" ]]; then
@@ -367,7 +880,9 @@ task_bootstrap() {
   # 2. Homebrew
   if [[ "$install_packages" == "true" && "$skip_brew" == "false" ]]; then
     if [[ "$dry_run" == "false" ]]; then
-      if ! ensure_brew; then
+      local non_interactive_flag="false"
+      [[ "$interactive" == "false" ]] && non_interactive_flag="true"
+      if ! ensure_brew "$non_interactive_flag"; then
         warn "Continuing without Homebrew..."
       fi
     fi
@@ -401,47 +916,49 @@ task_bootstrap() {
   fi
 
   # 4. Shell Setup
-  if [[ "$install_packages" == "true" ]]; then
-    log "Configuring shell..."
+  if [[ "$install_packages" == "true" && "$target_shell" != "skip" ]]; then
+    log "Configuring shell: $target_shell"
 
-    # Install zsh if not present
-    if ! command -v zsh &> /dev/null; then
-      log "zsh not found, installing..."
+    # Install target shell if not present
+    if ! command -v "$target_shell" &> /dev/null; then
+      log "$target_shell not found, installing..."
       if [[ "$dry_run" == "false" ]]; then
-        if is_macos; then
+        if is_macos && [[ "$target_shell" == "zsh" ]]; then
           warn "zsh should be pre-installed on macOS. If missing, install manually."
         else
-          install_package zsh || warn "Failed to install zsh"
+          install_package "$target_shell" || warn "Failed to install $target_shell"
         fi
       fi
     fi
 
-    # Change shell to zsh if it's not already
-    if command -v zsh &> /dev/null; then
+    # Change shell if requested and available
+    if command -v "$target_shell" &> /dev/null; then
       local current_shell
       current_shell=$(get_user_shell)
 
-      # Only change if current shell is not zsh
-      if [[ "$current_shell" != *"zsh"* ]]; then
-        local zsh_path
-        zsh_path=$(command -v zsh)
+      # Only change if current shell is different
+      if [[ "$current_shell" != *"$target_shell"* ]]; then
+        local shell_path
+        shell_path=$(command -v "$target_shell")
 
-        # Ensure zsh is in /etc/shells
-        if ! grep -q "^$zsh_path$" /etc/shells 2> /dev/null; then
-          log "Adding $zsh_path to /etc/shells..."
+        # Ensure shell is in /etc/shells
+        if ! grep -q "^$shell_path$" /etc/shells 2> /dev/null; then
+          log "Adding $shell_path to /etc/shells..."
           if [[ "$dry_run" == "false" ]]; then
-            echo "$zsh_path" | sudo tee -a /etc/shells > /dev/null
+            echo "$shell_path" | sudo tee -a /etc/shells > /dev/null
           fi
         fi
 
-        log "Changing default shell to zsh..."
+        log "Changing default shell to $target_shell..."
         if [[ "$dry_run" == "false" ]]; then
-          chsh -s "$zsh_path" || warn "Failed to change shell. Try manually: chsh -s $zsh_path"
+          chsh -s "$shell_path" || warn "Failed to change shell. Try manually: chsh -s $shell_path"
         fi
       else
-        info "Shell is already zsh"
+        info "Shell is already $target_shell"
       fi
     fi
+  elif [[ "$target_shell" == "skip" ]]; then
+    info "Keeping current shell: $(basename "$SHELL")"
   fi
 
   # 5. Link dotfiles
@@ -451,11 +968,71 @@ task_bootstrap() {
     log "DRY RUN: task_stow"
   fi
 
+  # 6. Optional Zinit installation for enhanced shell experience
+  if [[ "$install_packages" == "true" && "$dry_run" == "false" && "$target_shell" == "zsh" ]]; then
+    local zinit_home="${XDG_DATA_HOME:-${HOME}/.local/share}/zinit/zinit.git"
+
+    # Only prompt if full setup and zinit not already installed
+    if [[ "$setup_type" == "full" && ! -d "${zinit_home}" ]]; then
+      echo ""
+      if [[ "$interactive" == "true" ]]; then
+        info "Zinit is a plugin manager that enables advanced shell features:"
+        info "  • Powerlevel10k theme (customizable prompt)"
+        info "  • Syntax highlighting and auto-suggestions"
+        info "  • Enhanced completions and fuzzy search"
+        echo ""
+
+        if confirm "Install zinit and plugins?"; then
+          log "Installing zinit..."
+          mkdir -p "${zinit_home%/*}"
+          if git clone https://github.com/zdharma-continuum/zinit.git "${zinit_home}"; then
+            success "Zinit installed successfully"
+          else
+            warn "Failed to install zinit. You can install it later with:"
+            warn "  git clone https://github.com/zdharma-continuum/zinit.git ${zinit_home}"
+          fi
+        else
+          info "Skipping zinit. You can install it later by running bootstrap again."
+        fi
+      else
+        # Non-interactive full setup: install zinit automatically
+        log "Installing zinit for full setup..."
+        mkdir -p "${zinit_home%/*}"
+        if git clone https://github.com/zdharma-continuum/zinit.git "${zinit_home}"; then
+          success "Zinit installed successfully"
+        else
+          warn "Failed to install zinit"
+        fi
+      fi
+    elif [[ "$setup_type" == "minimal" ]]; then
+      info "Skipping zinit (minimal setup). Set ZSH_MINIMAL=0 to enable plugins later."
+    fi
+  fi
+
   success "Bootstrap complete!"
 
-  if [[ "$dry_run" == "false" ]]; then
-    log "Switching to jsh..."
-    exec zsh
+  echo ""
+  info "Summary:"
+  info "  Shell:      $target_shell"
+  info "  Setup type: $setup_type"
+  info "  Packages:   $(if [[ "$install_packages" == "true" ]]; then echo "installed"; else echo "skipped"; fi)"
+  echo ""
+
+  if [[ "$dry_run" == "false" && "$target_shell" != "skip" ]]; then
+    if [[ "$interactive" == "false" ]]; then
+      # Non-interactive mode: start shell automatically
+      log "Starting $target_shell session..."
+      exec "$target_shell"
+    else
+      info "To activate your new shell environment, either:"
+      info "  1) Log out and log back in"
+      info "  2) Run: exec $target_shell"
+      echo ""
+      if confirm "Start new $target_shell session now?"; then
+        log "Starting $target_shell..."
+        exec "$target_shell"
+      fi
+    fi
   fi
 }
 
@@ -875,6 +1452,9 @@ task_configure() {
     task_configure_macos
   elif is_linux; then
     task_configure_linux
+    if is_wsl; then
+      task_wsl
+    fi
   fi
 }
 
@@ -1449,7 +2029,8 @@ show_help() {
   echo ""
 }
 
-if [[ $# -eq 0 ]] || [[ "$*" =~ (--help|-h) ]]; then
+# Check for help flag only when no command is provided or explicit help command
+if [[ $# -eq 0 ]] || [[ "$1" == "help" || "$1" == "--help" || "$1" == "-h" ]]; then
   show_help
   exit 0
 fi
