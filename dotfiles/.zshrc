@@ -16,9 +16,15 @@ export ZINIT_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}/zinit/zinit.git"
 
 # Download Zinit if missing
 if [[ ! -d "${ZINIT_HOME}" ]] || [[ -n "${ZSH_MINIMAL}" ]]; then
-    # Minimal mode: Don't download, just warn and skip
-    [[ -z "${ZSH_MINIMAL}" ]] && warn "Zinit not found. Skipping plugins."
+    # Minimal mode or zinit not installed: Skip plugins silently
+    :
 else
+    # Clean up broken completion symlinks to prevent compinit warnings
+    local zinit_completions="${ZINIT_HOME%/zinit.git}/completions"
+    if [[ -d "$zinit_completions" ]]; then
+        find "$zinit_completions" -type l ! -exec test -e {} \; -delete 2>/dev/null
+    fi
+
     # Initialize Zinit
     source "${ZINIT_HOME}/zinit.zsh"
 
@@ -41,7 +47,6 @@ else
     zinit light lukechilds/zsh-nvm
     zinit light mafredri/zsh-async
     zinit light supercrabtree/k
-    zinit light atuinsh/atuin
 fi
 
 # ============================================================================
