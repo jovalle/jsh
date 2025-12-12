@@ -28,6 +28,201 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # Helper Functions
 # ============================================================================
 
+is_root() { [[ "${EUID:-$(id -u)}" -eq 0 ]]; }
+
+# Check if a user exists on the system
+user_exists() {
+  local username="$1"
+  if [[ "${OSTYPE}" == "darwin"* ]]; then
+    dscl . -read "/Users/$username" &> /dev/null
+  else
+    id "$username" &> /dev/null
+  fi
+}
+
+# Load BREW_USER from .env if available
+load_brew_user() {
+  local env_file="${ROOT_DIR}/.env"
+  if [[ -f "$env_file" ]]; then
+    # Source the env file to get BREW_USER
+    # shellcheck source=/dev/null
+    source "$env_file"
+  fi
+}
+
+# Check if user is in admin/sudo group (idempotent check)
+user_in_admin_group() {
+  local username="$1"
+  if [[ "${OSTYPE}" == "darwin"* ]]; then
+    dseditgroup -o checkmember -m "$username" admin &> /dev/null
+  else
+    if getent group sudo &> /dev/null; then
+      id -nG "$username" 2>/dev/null | grep -qw sudo
+    elif getent group wheel &> /dev/null; then
+      id -nG "$username" 2>/dev/null | grep -qw wheel
+    else
+      return 1
+    fi
+  fi
+}
+
+# Prompt for and create a standard user for brew delegation
+# Args: default_user, non_interactive (true/false)
+# Note: This function outputs the username to stdout for capture.
+#       All info/status messages go to stderr to avoid corrupting the output.
+create_brew_user() {
+  local default_user="${1:-jay}"
+  local non_interactive="${2:-false}"
+  local username
+
+  # In non-interactive mode, use default user directly
+  if [[ "$non_interactive" == "true" ]]; then
+    username="$default_user"
+    info "Non-interactive mode: using user '$username' for brew operations." >&2
+  else
+    echo "" >&2
+    warning "Homebrew cannot be run as root." >&2
+    info "A standard (non-root) user is required to install and manage Homebrew." >&2
+    echo "" >&2
+
+    # Prompt for username
+    read -r -p "Enter username for brew operations [$default_user]: " username
+    username="${username:-$default_user}"
+  fi
+
+  # Validate username
+  if [[ ! "$username" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+    error "Invalid username. Use lowercase letters, numbers, underscores, and hyphens."
+    return 1
+  fi
+
+  # Check if user already exists (idempotent)
+  if user_exists "$username"; then
+    info "User '$username' already exists." >&2
+
+    # Ensure user is in admin/sudo group (idempotent)
+    if ! user_in_admin_group "$username"; then
+      info "Adding '$username' to admin/sudo group..." >&2
+      if [[ "${OSTYPE}" == "darwin"* ]]; then
+        sudo dseditgroup -o edit -a "$username" -t user admin 2>/dev/null || true
+      else
+        if getent group sudo &> /dev/null; then
+          sudo usermod -aG sudo "$username" 2>/dev/null || true
+        elif getent group wheel &> /dev/null; then
+          sudo usermod -aG wheel "$username" 2>/dev/null || true
+        fi
+      fi
+    fi
+
+    if [[ "$non_interactive" == "true" ]]; then
+      echo "$username"
+      return 0
+    fi
+
+    if confirm "Use '$username' for brew operations?"; then
+      echo "$username"
+      return 0
+    else
+      return 1
+    fi
+  fi
+
+  # Create the user
+  info "Creating user '$username'..." >&2
+
+  if [[ "${OSTYPE}" == "darwin"* ]]; then
+    # macOS user creation
+    local max_id
+    max_id=$(dscl . -list /Users UniqueID | awk '{print $2}' | sort -n | tail -1)
+    local new_id=$((max_id + 1))
+
+    sudo dscl . -create "/Users/$username"
+    sudo dscl . -create "/Users/$username" UserShell /bin/zsh
+    sudo dscl . -create "/Users/$username" RealName "$username"
+    sudo dscl . -create "/Users/$username" UniqueID "$new_id"
+    sudo dscl . -create "/Users/$username" PrimaryGroupID 20
+    sudo dscl . -create "/Users/$username" NFSHomeDirectory "/Users/$username"
+
+    sudo mkdir -p "/Users/$username"
+    sudo chown "$username:staff" "/Users/$username"
+
+    # Set password (skip in non-interactive mode)
+    if [[ "$non_interactive" != "true" ]]; then
+      info "Setting password for $username..." >&2
+      sudo dscl . -passwd "/Users/$username"
+    else
+      info "Skipping password setup in non-interactive mode." >&2
+      info "Set password later with: sudo dscl . -passwd /Users/$username" >&2
+    fi
+
+    # Add to admin group (idempotent)
+    sudo dseditgroup -o edit -a "$username" -t user admin 2>/dev/null || true
+  else
+    # Linux user creation
+    if command -v useradd &> /dev/null; then
+      sudo useradd -m -s /bin/bash "$username"
+    elif command -v adduser &> /dev/null; then
+      sudo adduser --disabled-password --gecos "" "$username"
+    else
+      error "No supported user creation tool found (useradd or adduser)"
+      return 1
+    fi
+
+    # Set password (skip in non-interactive mode)
+    if [[ "$non_interactive" != "true" ]]; then
+      info "Setting password for $username..." >&2
+      sudo passwd "$username"
+    else
+      info "Skipping password setup in non-interactive mode." >&2
+      info "Set password later with: sudo passwd $username" >&2
+    fi
+
+    # Add to sudo/wheel group (idempotent)
+    if getent group sudo &> /dev/null; then
+      sudo usermod -aG sudo "$username" 2>/dev/null || true
+    elif getent group wheel &> /dev/null; then
+      sudo usermod -aG wheel "$username" 2>/dev/null || true
+    fi
+  fi
+
+  if user_exists "$username"; then
+    success "User '$username' created successfully." >&2
+    echo "$username"
+    return 0
+  else
+    error "Failed to create user '$username'"
+    return 1
+  fi
+}
+
+# Configure brew user delegation and save to .env
+configure_brew_delegation() {
+  local brew_user="$1"
+  local env_file="${ROOT_DIR}/.env"
+
+  if [[ -z "$brew_user" ]]; then
+    error "No brew user specified for delegation"
+    return 1
+  fi
+
+  if [[ -f "$env_file" ]]; then
+    if grep -q "^BREW_USER=" "$env_file"; then
+      if [[ "${OSTYPE}" == "darwin"* ]]; then
+        sed -i '' "s/^BREW_USER=.*/BREW_USER=$brew_user/" "$env_file"
+      else
+        sed -i "s/^BREW_USER=.*/BREW_USER=$brew_user/" "$env_file"
+      fi
+    else
+      echo "BREW_USER=$brew_user" >> "$env_file"
+    fi
+  else
+    echo "BREW_USER=$brew_user" > "$env_file"
+  fi
+
+  export BREW_USER="$brew_user"
+  success "Brew delegation configured for user: $brew_user"
+}
+
 error() {
   echo -e "${RED}❌ $1${RESET}" >&2
 }
@@ -135,6 +330,109 @@ EOF
 # ============================================================================
 
 brew_setup() {
+  # Load any existing BREW_USER configuration
+  load_brew_user
+
+  # Handle root user - need to delegate to a standard user
+  if is_root; then
+    warning "Running as root. Homebrew must be installed as a non-root user."
+    echo ""
+
+    # Check if BREW_USER is already configured and user exists
+    if [[ -n "${BREW_USER:-}" ]] && user_exists "$BREW_USER"; then
+      info "Using configured brew user: $BREW_USER"
+      # Ensure user is in admin group (idempotent)
+      if ! user_in_admin_group "$BREW_USER"; then
+        info "Ensuring '$BREW_USER' has admin/sudo access..."
+        if [[ "${OSTYPE}" == "darwin"* ]]; then
+          sudo dseditgroup -o edit -a "$BREW_USER" -t user admin 2>/dev/null || true
+        else
+          if getent group sudo &> /dev/null; then
+            sudo usermod -aG sudo "$BREW_USER" 2>/dev/null || true
+          elif getent group wheel &> /dev/null; then
+            sudo usermod -aG wheel "$BREW_USER" 2>/dev/null || true
+          fi
+        fi
+      fi
+    elif [[ -n "${BREW_USER:-}" ]]; then
+      # BREW_USER is set but user doesn't exist - create it (non-interactive)
+      info "BREW_USER='$BREW_USER' is configured but user does not exist."
+      local brew_user
+      brew_user=$(create_brew_user "$BREW_USER" "true")
+      if [[ -z "$brew_user" ]]; then
+        error "Failed to create configured brew user."
+        return 1
+      fi
+      configure_brew_delegation "$brew_user"
+    else
+      # Need to set up brew user delegation interactively
+      if ! confirm "Would you like to configure a user for brew operations?"; then
+        warning "Skipping brew setup. Homebrew requires a non-root user."
+        return 1
+      fi
+
+      local brew_user
+      brew_user=$(create_brew_user "jay" "false")
+
+      if [[ -z "$brew_user" ]]; then
+        error "Brew user setup cancelled."
+        return 1
+      fi
+
+      configure_brew_delegation "$brew_user"
+    fi
+
+    # Check if brew is already installed
+    local BREW_PREFIX
+    BREW_PREFIX=$(detect_brew_path)
+
+    if [[ -n "$BREW_PREFIX" ]]; then
+      success "Homebrew is already installed at: $BREW_PREFIX"
+      info "Brew commands will be delegated to user: $BREW_USER"
+      return 0
+    fi
+
+    # Install Homebrew as the brew user
+    info "Installing Homebrew as user: $BREW_USER"
+    echo ""
+
+    # Prepare the linuxbrew directory with proper ownership
+    # This allows the brew user to install without needing sudo during install
+    if [[ "${OSTYPE}" == "linux"* ]] || grep -qi microsoft /proc/version 2> /dev/null; then
+      if [[ ! -d "/home/linuxbrew" ]]; then
+        info "Creating /home/linuxbrew directory..."
+        mkdir -p /home/linuxbrew/.linuxbrew
+        chown -R "$BREW_USER:$BREW_USER" /home/linuxbrew
+      elif [[ ! -w "/home/linuxbrew/.linuxbrew" ]] || [[ "$(stat -c '%U' /home/linuxbrew 2>/dev/null)" != "$BREW_USER" ]]; then
+        info "Fixing ownership of /home/linuxbrew..."
+        chown -R "$BREW_USER:$BREW_USER" /home/linuxbrew
+      fi
+    fi
+
+    local install_script
+    install_script="$(mktemp)"
+    chmod 644 "$install_script"
+
+    if curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh -o "${install_script}"; then
+      if sudo -u "$BREW_USER" NONINTERACTIVE=1 /bin/bash "${install_script}"; then
+        rm -f "${install_script}"
+        success "Homebrew installed successfully for user: $BREW_USER"
+        info ""
+        info "To use brew commands as root, use: jsh brew <command>"
+        info "The BREW_USER setting is saved in ${ROOT_DIR}/.env"
+        return 0
+      else
+        rm -f "${install_script}"
+        error "Failed to install Homebrew as user: $BREW_USER"
+        return 1
+      fi
+    else
+      error "Failed to download Homebrew install script."
+      return 1
+    fi
+  fi
+
+  # Non-root path - original behavior
   local BREW_PREFIX
   BREW_PREFIX=$(detect_brew_path)
 
@@ -451,8 +749,22 @@ comprehensive_check() {
 }
 
 brew_check() {
-  # If no brew is installed, skip
-  if ! command -v brew &> /dev/null; then
+  # Check if brew is installed (handle root delegation)
+  load_brew_user
+
+  local brew_available=false
+  if is_root; then
+    # When root, check if brew path exists and BREW_USER is configured
+    if [[ -n "${BREW_USER:-}" ]] && [[ -n "$(detect_brew_path)" ]]; then
+      brew_available=true
+    fi
+  else
+    if command -v brew &> /dev/null; then
+      brew_available=true
+    fi
+  fi
+
+  if [[ "$brew_available" != "true" ]]; then
     warning "Homebrew is not installed. Run: $0 setup"
     return 1
   fi
@@ -521,6 +833,30 @@ show_usage_and_exit() {
   exit 0
 }
 
+# Helper function to run brew (handles root delegation)
+run_brew() {
+  load_brew_user
+
+  if is_root; then
+    if [[ -z "${BREW_USER:-}" ]]; then
+      error "Running as root without configured brew user."
+      info "Run: $0 setup"
+      exit 1
+    fi
+
+    if ! user_exists "$BREW_USER"; then
+      error "Brew user '$BREW_USER' does not exist."
+      info "Run: $0 setup"
+      exit 1
+    fi
+
+    # Run brew as the delegated user
+    sudo -u "$BREW_USER" brew "$@"
+  else
+    brew "$@"
+  fi
+}
+
 # If no arguments, show usage
 if [[ $# -eq 0 ]]; then
   show_usage_and_exit
@@ -540,14 +876,36 @@ case "$COMMAND" in
     show_usage_and_exit
     ;;
   *)
-    # Pass through to brew
-    if ! command -v brew &> /dev/null; then
-      error "Homebrew is not installed"
-      info "Run: $0 setup"
-      exit 1
-    fi
+    # Pass through to brew (with root delegation if needed)
+    load_brew_user
 
-    # Forward all arguments to brew
-    brew "$COMMAND" "$@"
+    # Check if brew is available (directly or via delegation)
+    if is_root; then
+      if [[ -z "${BREW_USER:-}" ]]; then
+        error "Running as root without configured brew user."
+        info "Run: $0 setup"
+        exit 1
+      fi
+
+      # Check if brew exists for the delegated user
+      brew_path=$(detect_brew_path)
+      if [[ -z "$brew_path" ]]; then
+        error "Homebrew is not installed"
+        info "Run: $0 setup"
+        exit 1
+      fi
+
+      # Run brew as delegated user
+      sudo -u "$BREW_USER" "${brew_path}/bin/brew" "$COMMAND" "$@"
+    else
+      if ! command -v brew &> /dev/null; then
+        error "Homebrew is not installed"
+        info "Run: $0 setup"
+        exit 1
+      fi
+
+      # Forward all arguments to brew
+      brew "$COMMAND" "$@"
+    fi
     ;;
 esac

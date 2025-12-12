@@ -93,6 +93,35 @@ fi
 unset local_paths local_prefix
 
 # ============================================================================
+# 2b. HOMEBREW ENVIRONMENT SETUP
+# ============================================================================
+
+# Initialize Homebrew/Linuxbrew environment if available
+# This sets up HOMEBREW_PREFIX, HOMEBREW_CELLAR, MANPATH, INFOPATH, etc.
+# Note: Root users should use 'jsh brew' which delegates to BREW_USER
+_init_brew_env() {
+  # Skip for root - root should use 'jsh brew' for delegation
+  [[ "${EUID:-$(id -u)}" -eq 0 ]] && return 0
+
+  local brew_candidates=(
+    "/home/linuxbrew/.linuxbrew/bin/brew"
+    "/opt/homebrew/bin/brew"
+    "/usr/local/bin/brew"
+    "${HOME}/.linuxbrew/bin/brew"
+  )
+
+  for brew_bin in "${brew_candidates[@]}"; do
+    if [[ -x "${brew_bin}" ]]; then
+      eval "$("${brew_bin}" shellenv 2>/dev/null)"
+      return 0
+    fi
+  done
+  return 1
+}
+_init_brew_env
+unset -f _init_brew_env
+
+# ============================================================================
 # 3. SHELL ALIASES
 # ============================================================================
 

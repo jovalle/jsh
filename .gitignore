@@ -49,6 +49,7 @@
 .brewcheck
 .com.apple.timemachine.donotpresent
 .config/syncthing
+.env
 .envrc
 .fseventsd
 .fzf
