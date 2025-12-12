@@ -364,8 +364,13 @@ run_as_brew_user() {
     error "Brew user '$brew_user' does not exist."
   fi
 
-  # Run the command as the brew user
-  sudo -u "$brew_user" "$@"
+  # Get the brew user's home directory
+  local brew_user_home
+  brew_user_home=$(eval echo "~$brew_user")
+
+  # Run the command as the brew user from their home directory
+  # This avoids "current working directory must be readable" errors when running from /root
+  sudo -u "$brew_user" bash -c "cd '$brew_user_home' && \"\$@\"" -- "$@"
 }
 
 # Wrapper for brew command that handles root delegation
