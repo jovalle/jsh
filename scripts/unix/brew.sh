@@ -850,8 +850,8 @@ run_brew() {
       exit 1
     fi
 
-    # Run brew as the delegated user
-    sudo -u "$BREW_USER" brew "$@"
+    # Run brew as the delegated user (cd to /tmp first to avoid "directory does not exist" errors)
+    sudo -u "$BREW_USER" env -C /tmp brew "$@"
   else
     brew "$@"
   fi
@@ -895,8 +895,8 @@ case "$COMMAND" in
         exit 1
       fi
 
-      # Run brew as delegated user
-      sudo -u "$BREW_USER" "${brew_path}/bin/brew" "$COMMAND" "$@"
+      # Run brew as delegated user (cd to /tmp first to avoid "directory does not exist" errors)
+      sudo -u "$BREW_USER" env -C /tmp "${brew_path}/bin/brew" "$COMMAND" "$@"
     else
       if ! command -v brew &> /dev/null; then
         error "Homebrew is not installed"
