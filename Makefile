@@ -75,7 +75,7 @@ endef
 
 # Find files by type
 # Shell files: Find by .sh extension OR by shebang in bin/ directory
-SHELL_FILES := $(shell find . -type f -name "*.sh" ! -path "*/node_modules/*" ! -path "*/.git/*" ! -path "*/.fzf/*" ! -path "*/.vscode/*" ! -path "*/.config/nvim/*" ! -path "*/.config/*"; \
+SHELL_FILES := $(shell find . -type f -name "*.sh" ! -path "*/node_modules/*" ! -path "*/.git/*" ! -path "*/.fzf/*" ! -path "*/.vscode/*" ! -path "*/.config/nvim/*" ! -path "*/.config/*" ! -path "*/src/*"; \
 	find dotfiles -type f \( -name ".bashrc" -o -name ".jshrc" \); \
 	find bin -type f 2>/dev/null | while read -r f; do \
 		shebang=$$(head -n1 "$$f" 2>/dev/null); \
@@ -100,6 +100,14 @@ install-tools: ## Install required development tools
 	@brew list shfmt >/dev/null 2>&1 || brew install shfmt
 	@brew list hadolint >/dev/null 2>&1 || brew install hadolint
 	@brew list pre-commit >/dev/null 2>&1 || brew install pre-commit
+	@brew list ruby >/dev/null 2>&1 || brew install ruby
+	@echo -e "$(CYAN)Installing Ruby gems (using Homebrew Ruby)...$(RESET)"
+	@BREW_RUBY="$$(brew --prefix ruby)/bin"; \
+	BREW_GEM="$$BREW_RUBY/gem"; \
+	RUBY_VERSION=$$("$$BREW_RUBY/ruby" -e 'puts RUBY_VERSION'); \
+	export GEM_HOME="$$(brew --prefix)/lib/ruby/gems/$$RUBY_VERSION"; \
+	export GEM_PATH="$$GEM_HOME"; \
+	"$$BREW_GEM" list -i '^bashly$$' >/dev/null 2>&1 || "$$BREW_GEM" install bashly
 	@echo -e "$(CYAN)Installing Node.js packages...$(RESET)"
 	@command -v commitizen >/dev/null 2>&1 || npm install -g commitizen cz-conventional-changelog
 	@command -v commitlint >/dev/null 2>&1 || npm install -g @commitlint/cli @commitlint/config-conventional
