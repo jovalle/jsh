@@ -80,6 +80,7 @@ Network\ Trash\ Folder
 Temporary\ Items
 __pycache__
 bh_unicode_properties.cache
+bun.lockb
 dotfiles/.config/argocd
 dotfiles/.config/configstore
 dotfiles/.config/containers
