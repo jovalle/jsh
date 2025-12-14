@@ -52,14 +52,10 @@ elif [[ -r /opt/homebrew/etc/profile.d/bash_completion.sh ]]; then
   source /opt/homebrew/etc/profile.d/bash_completion.sh
 fi
 
-# Tool Completions
-command -v brew > /dev/null 2>&1 && eval "$(brew shellenv)"
-command -v direnv > /dev/null 2>&1 && eval "$(direnv hook bash)"
-command -v docker > /dev/null 2>&1 && eval "$(docker completion bash)"
-command -v fzf > /dev/null 2>&1 && eval "$(fzf --bash)"
-# shellcheck disable=SC1090
-command -v kubectl > /dev/null 2>&1 && source <(kubectl completion bash)
-command -v zoxide > /dev/null 2>&1 && eval "$(zoxide init bash)"
+# Load tool completions from jshrc helper
+if declare -f _jsh_load_completions > /dev/null 2>&1; then
+  _jsh_load_completions bash
+fi
 
 # ============================================================================
 # PROMPT

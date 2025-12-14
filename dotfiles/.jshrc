@@ -529,6 +529,108 @@ elif [[ -n "$ZSH_VERSION" ]]; then
   export HISTORY_IGNORE="(ls|cd|pwd|exit|cd ..)"
 fi
 
+# ============================================================================
+# 5. SHELL COMPLETION HELPERS
+# ============================================================================
+
+# Helper function to load tool completions (called from shell-specific configs)
+# Usage: _jsh_load_completions <shell_name>
+_jsh_load_completions() {
+  local shell="$1"
+
+  # Common completions for all shells
+  command -v direnv > /dev/null 2>&1 && eval "$(direnv hook ${shell})"
+  command -v docker > /dev/null 2>&1 && eval "$(docker completion ${shell})"
+  command -v task >/dev/null 2>&1 && source <(task --completion ${shell})
+  command -v zoxide > /dev/null 2>&1 && eval "$(zoxide init ${shell})"
+
+  # shellcheck disable=SC1090
+  command -v kubectl > /dev/null 2>&1 && source <(kubectl completion ${shell})
+  # shellcheck disable=SC1090
+  command -v uc > /dev/null 2>&1 && source <(uc completion ${shell})
+
+  # Shell-specific variations
+  case "${shell}" in
+    bash)
+      command -v fzf > /dev/null 2>&1 && eval "$(fzf --bash)"
+      ;;
+    zsh)
+      # shellcheck disable=SC1090
+      command -v fzf >/dev/null 2>&1 && source <(command fzf --zsh)
+      ;;
+    *)
+      warn "Unknown shell: ${shell}"
+      return 1
+  esac
+
+  # Configure atuin with fzf integration for reverse search
+  if command -v atuin >/dev/null 2>&1; then
+    # Disable default atuin up-arrow binding to use fzf instead
+    export ATUIN_NOBIND="true"
+    eval "$(atuin init ${shell})"
+
+    # Bind Ctrl+R to atuin search (keeps the TUI for manual searches)
+    case "${shell}" in
+      bash)
+        bind -x '"\C-r": __atuin_history'
+        ;;
+      zsh)
+        bindkey '^r' atuin-search
+        ;;
+    esac
+
+    # Custom fzf-based reverse search with atuin data showing relative times
+    __atuin_fzf_history() {
+      local selected clipboard_cmd
+
+      # Detect clipboard command
+      if command -v pbcopy >/dev/null 2>&1; then
+        clipboard_cmd="pbcopy"
+      elif command -v xclip >/dev/null 2>&1; then
+        clipboard_cmd="xclip -selection clipboard"
+      elif command -v xsel >/dev/null 2>&1; then
+        clipboard_cmd="xsel --clipboard --input"
+      elif command -v wl-copy >/dev/null 2>&1; then
+        clipboard_cmd="wl-copy"
+      else
+        clipboard_cmd="cat"  # fallback, just prints
+      fi
+
+      # Use atuin search to get formatted output with time and command
+      # Format: relative_time | duration | command
+      selected=$(atuin history list --format "{time} │ {duration} │ {command}" 2>/dev/null | \
+        fzf --ansi \
+            --tiebreak=index \
+            --height=40% \
+            --reverse \
+            --border \
+            --prompt="History > " \
+            --preview='echo {3..}' \
+            --preview-window=up:3:wrap \
+            --delimiter='│' \
+            --with-nth=1,2,3.. \
+            --bind="ctrl-y:execute-silent(echo {3..} | tr -d ' ' | ${clipboard_cmd})+abort" \
+            --header='CTRL-R: atuin TUI | CTRL-Y: copy | UP/DOWN: navigate' | \
+        awk -F'│' '{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $3); print $3}')
+
+      if [[ -n "$selected" ]]; then
+        case "${shell}" in
+          bash)
+            READLINE_LINE="$selected"
+            READLINE_POINT=${#READLINE_LINE}
+            ;;
+          zsh)
+            # shellcheck disable=SC2034
+            BUFFER="$selected"
+            # shellcheck disable=SC2034
+            CURSOR=${#BUFFER}
+            ;;
+        esac
+      fi
+    }
+  fi
+}
+
 # Load local customizations
 # shellcheck disable=SC1090
 [[ -f "${JSH_CUSTOM}" ]] && source "${JSH_CUSTOM}"
