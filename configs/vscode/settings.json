@@ -110,6 +110,7 @@
       "approve": true,
       "matchCommandLine": true
     },
+    "bashly": true,
     "brew": true,
     "bun": true,
     "bunx": true,
@@ -185,6 +186,7 @@
       "matchCommandLine": true
     },
     "ss": true,
+    "ssh": true,
     "stow": true,
     "tail": true,
     "tar": true,
@@ -193,6 +195,7 @@
     "touch": true,
     "true": true,
     "type": true,
+    "uc": true,
     "uname": true,
     "unix2dos": true,
     "uv": true,
@@ -225,6 +228,9 @@
   "diffEditor.useInlineViewWhenSpaceIsLimited": false,
   "diffEditor.wordWrap": "on",
   "editor.acceptSuggestionOnEnter": "off",
+  "editor.codeActionsOnSave": {
+    "source.fixAll": "explicit"
+  },
   "editor.defaultFormatter": "esbenp.prettier-vscode",
   "editor.fontFamily": "JetBrainsMono NF, Menlo, monospace",
   "editor.fontLigatures": true,

@@ -109,9 +109,18 @@ install-tools: ## Install required development tools
 	export GEM_PATH="$$GEM_HOME"; \
 	"$$BREW_GEM" list -i '^bashly$$' >/dev/null 2>&1 || "$$BREW_GEM" install bashly
 	@echo -e "$(CYAN)Installing Node.js packages...$(RESET)"
-	@command -v commitizen >/dev/null 2>&1 || npm install -g commitizen cz-conventional-changelog
-	@command -v commitlint >/dev/null 2>&1 || npm install -g @commitlint/cli @commitlint/config-conventional
-	@command -v eslint >/dev/null 2>&1 || npm install -g eslint eslint-config-google
+	@if ! command -v bun >/dev/null 2>&1; then \
+		echo -e "$(CYAN)Bun not found, installing...$(RESET)"; \
+		if command -v brew >/dev/null 2>&1; then \
+			brew install oven-sh/bun/bun && echo -e "$(GREEN)✓ bun installed via Homebrew$(RESET)"; \
+		else \
+			echo -e "$(YELLOW)⚠ Cannot install bun without Homebrew. Install manually from https://bun.sh$(RESET)"; \
+			exit 1; \
+		fi; \
+	fi
+	@command -v commitizen >/dev/null 2>&1 || bun install -g commitizen cz-conventional-changelog
+	@command -v commitlint >/dev/null 2>&1 || bun install -g @commitlint/cli @commitlint/config-conventional
+	@command -v eslint >/dev/null 2>&1 || bun install -g eslint eslint-config-google
 	@echo -e "$(CYAN)Installing Python packages...$(RESET)"
 	@pip3 install --upgrade black pylint autopep8 2>/dev/null || echo -e "$(YELLOW)Python tools skipped (pip3 not available)$(RESET)"
 	@echo -e "$(CYAN)Setting up pre-commit hooks...$(RESET)"
@@ -254,7 +263,7 @@ check-lint-deps: ## Check if linting dependencies are installed
 	@echo -e "$(CYAN)Checking linting dependencies...$(RESET)"
 	@missing=0; \
 	echo -e "$(BLUE)Required tools:$(RESET)"; \
-	for tool in pre-commit shellcheck yamllint npm; do \
+	for tool in pre-commit shellcheck yamllint bun; do \
 		if command -v $$tool >/dev/null 2>&1; then \
 			echo -e "  ${GREEN}✓${RESET} $$tool"; \
 		else \
@@ -269,7 +278,7 @@ check-lint-deps: ## Check if linting dependencies are installed
 		echo -e "\n$(GREEN)✓ All linting dependencies are installed$(RESET)"; \
 	fi
 
-install-lint-deps: ## Install linting dependencies (pre-commit, shellcheck, yamllint, npm)
+install-lint-deps: ## Install linting dependencies (pre-commit, shellcheck, yamllint, bun)
 	@echo -e "$(CYAN)Installing linting dependencies...$(RESET)"
 	@echo ""
 	@echo -e "$(BLUE)Installing pre-commit...$(RESET)"
@@ -309,21 +318,22 @@ install-lint-deps: ## Install linting dependencies (pre-commit, shellcheck, yaml
 		echo -e "$(GREEN)✓ yamllint already installed$(RESET)"; \
 	fi
 	@echo ""
-	@echo -e "$(BLUE)Checking npm/node...$(RESET)"
-	@if ! command -v npm >/dev/null 2>&1; then \
+	@echo -e "$(BLUE)Checking bun...$(RESET)"
+	@if ! command -v bun >/dev/null 2>&1; then \
 		if command -v brew >/dev/null 2>&1; then \
-			brew install node && echo -e "$(GREEN)✓ node/npm installed via Homebrew$(RESET)"; \
+			brew install oven-sh/bun/bun && echo -e "$(GREEN)✓ bun installed via Homebrew$(RESET)"; \
 		else \
-			echo -e "$(YELLOW)⚠ npm not found. markdownlint requires npm.$(RESET)"; \
-			echo -e "  Install Node.js from: https://nodejs.org/"; \
-			echo -e "  Or via package manager: sudo apt-get install nodejs npm"; \
+			echo -e "$(YELLOW)⚠ bun not found. markdownlint requires bun.$(RESET)"; \
+			echo -e "  Install Bun from: https://bun.sh/"; \
+			echo -e "  Or via curl: curl -fsSL https://bun.sh/install | bash"; \
+			exit 1; \
 		fi; \
 	else \
-		echo -e "$(GREEN)✓ npm already installed$(RESET)"; \
+		echo -e "$(GREEN)✓ bun already installed$(RESET)"; \
 	fi
 	@echo ""
 	@echo -e "$(GREEN)✓ Dependency installation complete!$(RESET)"
-	@echo -e "$(CYAN)Note: markdownlint-cli and prettier will be installed automatically via npx$(RESET)"
+	@echo -e "$(CYAN)Note: markdownlint-cli and prettier will be installed automatically via bunx$(RESET)"
 
 ensure-lint-deps: ## Ensure linting dependencies are installed (auto-install if needed)
 	@$(MAKE) check-lint-deps >/dev/null 2>&1 || $(MAKE) install-lint-deps
