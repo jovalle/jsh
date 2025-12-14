@@ -61,7 +61,7 @@ repos:
         language: system
         types: [shell]
         args: [--severity=warning]
-        exclude: '(^|/)\.p10k\.zsh$'
+        exclude: '(^|/)\.p10k\.zsh$|^src/'
 
       # YAML linting - uses system yamllint
       - id: yamllint

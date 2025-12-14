@@ -17,6 +17,7 @@ export GIT_BASE=${HOME}/projects     # Git projects base
 export WORK_DIR=${GIT_BASE}          # Default work directory
 export JSH=${JSH_ROOT:-${HOME}}/.jsh # Ideal JSH location
 export JSH_CUSTOM=${HOME}/.jsh_local # Local overrides (optional)
+export GEM_HOME="$HOME/.gem"         # Ruby gems location
 
 # Silence/optimize specific tools
 export DIRENV_LOG_FORMAT=           # Silence direnv for p10k
@@ -67,13 +68,16 @@ fi
 # Note: Array syntax is bash/zsh compatible
 local_paths=(
   "${HOME}/.local/bin"
-  "${JSH}/bin"
+  "${JSH}"          # jsh CLI script at repo root
+  "${JSH}/bin"      # Additional utilities
+  "${GEM_HOME}/bin"
   "${JSH}/.fzf/bin"
   "${HOME}/go/bin"
   "${HOME}/.linuxbrew/bin"
   "${HOME}/linuxbrew/.linuxbrew/bin"
   "/home/linuxbrew/.linuxbrew/bin"
   "/opt/homebrew/bin"
+  "/opt/homebrew/opt/ruby/bin"
 )
 
 local_prefix=""

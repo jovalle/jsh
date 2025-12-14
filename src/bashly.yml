@@ -1,0 +1,126 @@
+name: jsh
+help: Dotfiles and environment management utility
+version: 0.1.0
+
+x_lib_dirs:
+  - lib
+
+environment_variables:
+  - name: JSH_ROOT
+    help: Path to jsh repository root
+  - name: BREW_USER
+    help: User to run Homebrew commands as (when running as root)
+
+commands:
+  - name: init
+    help: Set up shell environment
+    flags:
+      - long: --non-interactive
+        short: -y
+        help: Use defaults (zsh + full)
+      - long: --shell
+        arg: shell
+        help: "Pre-select shell: zsh, bash, or skip"
+      - long: --minimal
+        help: Lightweight setup, no plugins
+      - long: --full
+        help: Full setup with themes, plugins, completions
+      - long: --setup
+        help: Also run install + configure after init
+      - long: --no-install
+        help: Skip package installation
+      - long: --skip-brew
+        help: Skip Homebrew installation
+      - long: --dry-run
+        help: Preview changes without applying
+
+  - name: install
+    help: Install packages
+    args:
+      - name: package
+        help: Package to install (omit to install all from config)
+    flags:
+      - long: --brew
+        help: Install via Homebrew/Linuxbrew
+      - long: --gem
+        help: Install via Ruby gem
+      - long: --bun
+        help: Install via bun (JavaScript runtime)
+      - long: --npm
+        help: Install via npm (Node.js)
+      - long: --pip
+        help: Install via pip (Python)
+      - long: --cargo
+        help: Install via cargo (Rust)
+      - long: --apt
+        help: Install via apt (Debian/Ubuntu)
+      - long: --dnf
+        help: Install via dnf (Fedora/RHEL)
+      - long: --pacman
+        help: Install via pacman (Arch Linux)
+      - long: --yum
+        help: Install via yum (CentOS/RHEL)
+      - long: --zypper
+        help: Install via zypper (openSUSE)
+
+  - name: uninstall
+    help: Uninstall a package and remove from config
+    args:
+      - name: package
+        required: true
+        help: Package to uninstall
+
+  - name: upgrade
+    alias: update
+    help: Upgrade all packages (brew, zinit, system)
+
+  - name: configure
+    help: Apply dotfiles, OS settings, and app configs
+
+  - name: dotfiles
+    help: Manage dotfile symlinks
+    flags:
+      - long: --status
+        short: -s
+        help: Show current symlink status
+      - long: --remove
+        short: -d
+        help: Remove dotfile symlinks
+
+  - name: clean
+    alias: cleanup
+    help: Remove caches, temp files, old Homebrew versions
+
+  - name: status
+    help: Show brew packages, services, symlinks, git status
+
+  - name: doctor
+    alias: check
+    help: Check for missing tools, broken symlinks, repo issues
+
+  - name: deinit
+    help: Remove jsh symlinks and restore backups
+
+  - name: brew
+    help: Homebrew wrapper (handles root delegation)
+    catch_all:
+      label: brew_args
+      help: All arguments to pass through to brew
+      required: false
+    args:
+      - name: subcommand
+        help: "Brew subcommand: setup, check, or any brew command"
+    flags:
+      - long: --quiet
+        short: -q
+        help: Silent mode (for check command)
+      - long: --force
+        short: -f
+        help: Force check even if run recently
+
+  - name: completions
+    help: Generate shell completion script
+    flags:
+      - long: --install
+        short: -i
+        help: Install completions to shell config
