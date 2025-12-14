@@ -449,6 +449,17 @@ pre-commit: check-syntax lint ## Run all pre-commit checks (syntax + lint)
 ci: check-syntax lint ## Run CI checks (syntax + lint)
 	@echo -e "$(GREEN)✓ All CI checks passed$(RESET)"
 
+##@ Build
+
+build: ## Regenerate jsh CLI from bashly sources
+	@echo -e "$(CYAN)Regenerating jsh CLI...$(RESET)"
+	@if ! command -v bashly >/dev/null 2>&1; then \
+		echo -e "$(RED)bashly not installed. Run 'make install-tools' first.$(RESET)"; \
+		exit 1; \
+	fi
+	@bashly generate && \
+		echo -e "$(GREEN)✓ jsh CLI regenerated successfully$(RESET)"
+
 ##@ Testing & Validation
 
 test: pre-commit ## Run all tests and validation

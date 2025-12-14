@@ -2,10 +2,10 @@
 # Create symlink for VSCode settings.json (requires elevation)
 
 # Get Windows User Profile path
-WIN_USER_PROFILE=$(cmd.exe /c "echo %USERPROFILE%" 2>/dev/null | tr -d '\r')
+WIN_USER_PROFILE=$(cmd.exe /c "echo %USERPROFILE%" 2> /dev/null | tr -d '\r')
 if [[ -z "$WIN_USER_PROFILE" ]]; then
-    echo "Error: Could not determine Windows User Profile."
-    exit 1
+  echo "Error: Could not determine Windows User Profile."
+  exit 1
 fi
 
 WSL_USER_PROFILE=$(wslpath "$WIN_USER_PROFILE")
