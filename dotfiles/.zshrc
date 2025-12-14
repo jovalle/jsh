@@ -129,15 +129,10 @@ if command -v zinit >/dev/null 2>&1; then
     zinit cdreplay -q
 fi
 
-# Tool Completions (ordered)
-command -v brew >/dev/null 2>&1 && eval "$(brew shellenv)"
-command -v direnv >/dev/null 2>&1 && eval "$(direnv hook zsh)"
-command -v docker >/dev/null 2>&1 && eval "$(docker completion zsh)"
-command -v fzf >/dev/null 2>&1 && source <(command fzf --zsh)
-command -v kubectl >/dev/null 2>&1 && source <(kubectl completion zsh)
-command -v task >/dev/null 2>&1 && source <(task --completion zsh)
-command -v zoxide >/dev/null 2>&1 && eval "$(zoxide init zsh)"
-command -v atuin >/dev/null 2>&1 && eval "$(atuin init zsh)"
+# Load tool completions from jshrc helper
+if declare -f _jsh_load_completions > /dev/null 2>&1; then
+  _jsh_load_completions zsh
+fi
 
 # ============================================================================
 # MINIMAL PROMPT (Fallback)
