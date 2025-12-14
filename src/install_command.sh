@@ -258,9 +258,12 @@ else
 
   # Install via specified package manager
   if install_via_package_manager "$package" "$pm"; then
-    search_cross_platform_packages "$package"
+    # Package installed successfully - don't search for cross-platform equivalents
+    success "Installation complete"
   else
     error "Failed to install '$package' via $pm"
+    # Only search for alternatives if installation failed
+    search_cross_platform_packages "$package"
     exit 1
   fi
 fi

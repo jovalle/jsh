@@ -570,9 +570,6 @@ inspect_args() {
 # src/lib/brew.sh
 # Homebrew management functions for jsh
 
-# Default brew user if not configured
-BREW_USER="${BREW_USER:-}"
-
 # ============================================================================
 # Core Helper Functions
 # ============================================================================
@@ -675,7 +672,18 @@ run_as_brew_user() {
 
   local brew_user_home
   brew_user_home=$(eval echo "~${brew_user}")
-  sudo -u "${brew_user}" bash -c "cd '${brew_user_home}' && \"\$@\"" -- "$@"
+
+  # Detect brew path and set up environment
+  local brew_prefix
+  brew_prefix=$(detect_brew_path)
+
+  if [[ -n "${brew_prefix}" ]]; then
+    # Run with brew environment properly configured
+    sudo -u "${brew_user}" bash -c "cd '${brew_user_home}' && eval \"\$(${brew_prefix}/bin/brew shellenv)\" && \"\$@\"" -- "$@"
+  else
+    # Fallback to basic execution
+    sudo -u "${brew_user}" bash -c "cd '${brew_user_home}' && \"\$@\"" -- "$@"
+  fi
 }
 
 # Prompt for and create a standard user for brew delegation
@@ -852,11 +860,33 @@ confirm() {
   esac
 }
 
+# Fix hostname resolution for sudo if needed
+fix_hostname_resolution() {
+  if is_linux; then
+    local hostname
+    hostname=$(cat /etc/hostname 2>/dev/null || hostname)
+
+    if [[ -n "${hostname}" ]] && ! grep -q "127.0.0.1.*${hostname}" /etc/hosts 2>/dev/null; then
+      info "Fixing hostname resolution in /etc/hosts..."
+      # Add hostname to the first 127.0.0.1 line if not already present
+      if grep -q "^127.0.0.1" /etc/hosts; then
+        sudo sed -i "0,/^127.0.0.1/{s/127.0.0.1\s/127.0.0.1       ${hostname} /}" /etc/hosts
+      else
+        echo "127.0.0.1       ${hostname}" | sudo tee -a /etc/hosts > /dev/null
+      fi
+      success "Hostname '${hostname}' added to /etc/hosts"
+    fi
+  fi
+}
+
 # ============================================================================
 # Setup Command
 # ============================================================================
 
 brew_setup() {
+  # Fix hostname resolution to prevent sudo warnings
+  fix_hostname_resolution
+
   # Load any existing BREW_USER configuration
   load_brew_user
 
@@ -1334,8 +1364,8 @@ run_brew() {
       return 1
     fi
 
-    # Run brew as the delegated user (cd to /tmp first to avoid "directory does not exist" errors)
-    sudo -u "${BREW_USER}" env -C /tmp brew "$@"
+    # Use run_as_brew_user to properly setup environment
+    run_as_brew_user brew "$@"
   else
     brew "$@"
   fi
@@ -1343,6 +1373,8 @@ run_brew() {
 
 # Wrapper for brew command that handles root delegation
 brew_cmd() {
+  load_brew_user
+
   if is_root; then
     if [[ -z "${BREW_USER:-}" ]]; then
       warn "Running as root without configured brew user."
@@ -2174,9 +2206,12 @@ jsh_install_command() {
 
     # Install via specified package manager
     if install_via_package_manager "$package" "$pm"; then
-      search_cross_platform_packages "$package"
+      # Package installed successfully - don't search for cross-platform equivalents
+      success "Installation complete"
     else
       error "Failed to install '$package' via $pm"
+      # Only search for alternatives if installation failed
+      search_cross_platform_packages "$package"
       exit 1
     fi
   fi
