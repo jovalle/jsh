@@ -210,6 +210,14 @@
       "matchCommandLine": true
     }
   },
+  "runOnSave.commands": [
+    {
+      "command": "sed -i '' -e ':a' -e '/./,$!d' ${file}",
+      "runIn": "backend",
+      "runningStatusMessage": "",
+      "finishStatusMessage": ""
+    }
+  ],
   "dev.containers.executeInWSL": true,
   "diffEditor.experimental.showMoves": true,
   "diffEditor.ignoreTrimWhitespace": false,
