@@ -27,9 +27,9 @@ export PYTHONDONTWRITEBYTECODE=1    # No .pyc files on import
 
 # Shell environment
 # Default locale - use C.UTF-8 as fallback if en_US.UTF-8 unavailable
-if locale -a 2>/dev/null | grep -qE "^en_US\.UTF-8$|^en_US\.utf8$"; then
+if locale -a 2> /dev/null | grep -qE "^en_US\.UTF-8$|^en_US\.utf8$"; then
   export LANG=en_US.UTF-8
-elif locale -a 2>/dev/null | grep -qE "^C\.UTF-8$|^C\.utf8$"; then
+elif locale -a 2> /dev/null | grep -qE "^C\.UTF-8$|^C\.utf8$"; then
   export LANG=C.UTF-8
 else
   export LANG=C
@@ -37,10 +37,10 @@ fi
 # Set LC_ALL only if a valid UTF-8 locale is available
 if locale -a 2> /dev/null | grep -q "^en_US.UTF-8\|^en_US.utf8"; then
   export LC_ALL=en_US.UTF-8
-elif locale -a 2>/dev/null | grep -qE "^C\.UTF-8$|^C\.utf8$"; then
+elif locale -a 2> /dev/null | grep -qE "^C\.UTF-8$|^C\.utf8$"; then
   export LC_ALL=C.UTF-8
 else
-  unset LC_ALL  # Prevent invalid locale errors
+  unset LC_ALL # Prevent invalid locale errors
 fi
 export XDG_CONFIG_HOME="${HOME}/.config" # Where apps should store config files
 
@@ -68,8 +68,8 @@ fi
 # Note: Array syntax is bash/zsh compatible
 local_paths=(
   "${HOME}/.local/bin"
-  "${JSH}"          # jsh CLI script at repo root
-  "${JSH}/bin"      # Additional utilities
+  "${JSH}"     # jsh CLI script at repo root
+  "${JSH}/bin" # Additional utilities
   "${GEM_HOME}/bin"
   "${JSH}/.fzf/bin"
   "${HOME}/go/bin"
@@ -116,7 +116,7 @@ _init_brew_env() {
 
   for brew_bin in "${brew_candidates[@]}"; do
     if [[ -x "${brew_bin}" ]]; then
-      eval "$("${brew_bin}" shellenv 2>/dev/null)"
+      eval "$("${brew_bin}" shellenv 2> /dev/null)"
       return 0
     fi
   done
@@ -541,7 +541,7 @@ _jsh_load_completions() {
   # Common completions for all shells
   command -v direnv > /dev/null 2>&1 && eval "$(direnv hook ${shell})"
   command -v docker > /dev/null 2>&1 && eval "$(docker completion ${shell})"
-  command -v task >/dev/null 2>&1 && source <(task --completion ${shell})
+  command -v task > /dev/null 2>&1 && source <(task --completion ${shell})
   command -v zoxide > /dev/null 2>&1 && eval "$(zoxide init ${shell})"
 
   # shellcheck disable=SC1090
@@ -556,15 +556,16 @@ _jsh_load_completions() {
       ;;
     zsh)
       # shellcheck disable=SC1090
-      command -v fzf >/dev/null 2>&1 && source <(command fzf --zsh)
+      command -v fzf > /dev/null 2>&1 && source <(command fzf --zsh)
       ;;
     *)
       warn "Unknown shell: ${shell}"
       return 1
+      ;;
   esac
 
   # Configure atuin with fzf integration for reverse search
-  if command -v atuin >/dev/null 2>&1; then
+  if command -v atuin > /dev/null 2>&1; then
     # Disable default atuin up-arrow binding to use fzf instead
     export ATUIN_NOBIND="true"
     eval "$(atuin init ${shell})"
@@ -584,33 +585,33 @@ _jsh_load_completions() {
       local selected clipboard_cmd
 
       # Detect clipboard command
-      if command -v pbcopy >/dev/null 2>&1; then
+      if command -v pbcopy > /dev/null 2>&1; then
         clipboard_cmd="pbcopy"
-      elif command -v xclip >/dev/null 2>&1; then
+      elif command -v xclip > /dev/null 2>&1; then
         clipboard_cmd="xclip -selection clipboard"
-      elif command -v xsel >/dev/null 2>&1; then
+      elif command -v xsel > /dev/null 2>&1; then
         clipboard_cmd="xsel --clipboard --input"
-      elif command -v wl-copy >/dev/null 2>&1; then
+      elif command -v wl-copy > /dev/null 2>&1; then
         clipboard_cmd="wl-copy"
       else
-        clipboard_cmd="cat"  # fallback, just prints
+        clipboard_cmd="cat" # fallback, just prints
       fi
 
       # Use atuin search to get formatted output with time and command
       # Format: relative_time | duration | command
-      selected=$(atuin history list --format "{time} │ {duration} │ {command}" 2>/dev/null | \
+      selected=$(atuin history list --format "{time} │ {duration} │ {command}" 2> /dev/null |
         fzf --ansi \
-            --tiebreak=index \
-            --height=40% \
-            --reverse \
-            --border \
-            --prompt="History > " \
-            --preview='echo {3..}' \
-            --preview-window=up:3:wrap \
-            --delimiter='│' \
-            --with-nth=1,2,3.. \
-            --bind="ctrl-y:execute-silent(echo {3..} | tr -d ' ' | ${clipboard_cmd})+abort" \
-            --header='CTRL-R: atuin TUI | CTRL-Y: copy | UP/DOWN: navigate' | \
+          --tiebreak=index \
+          --height=40% \
+          --reverse \
+          --border \
+          --prompt="History > " \
+          --preview='echo {3..}' \
+          --preview-window=up:3:wrap \
+          --delimiter='│' \
+          --with-nth=1,2,3.. \
+          --bind="ctrl-y:execute-silent(echo {3..} | tr -d ' ' | ${clipboard_cmd})+abort" \
+          --header='CTRL-R: atuin TUI | CTRL-Y: copy | UP/DOWN: navigate' |
         awk -F'│' '{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $3); print $3}')
 
       if [[ -n "$selected" ]]; then
