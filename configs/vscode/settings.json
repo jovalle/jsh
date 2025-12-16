@@ -106,10 +106,6 @@
     "autoload": true,
     "awk": true,
     "bash": true,
-    "bash --version": {
-      "approve": true,
-      "matchCommandLine": true
-    },
     "bashly": true,
     "brew": true,
     "bun": true,
@@ -157,6 +153,8 @@
     "grep": true,
     "head": true,
     "helm": true,
+    "hexdump": true,
+    "ip": true,
     "jq": true,
     "jsh": true,
     "kubectl": true,
@@ -173,6 +171,7 @@
     "od": true,
     "openssl": true,
     "osascript": true,
+    "ping": true,
     "pip": true,
     "plutil": true,
     "printf": true,
@@ -188,9 +187,11 @@
     "ss": true,
     "ssh": true,
     "stow": true,
+    "strings": true,
     "tail": true,
     "tar": true,
     "task": true,
+    "tee": true,
     "timeout": true,
     "touch": true,
     "true": true,
@@ -207,20 +208,8 @@
     "xattr": true,
     "xxd": true,
     "yarn": true,
-    "zsh": true,
-    "zsh --version": {
-      "approve": true,
-      "matchCommandLine": true
-    }
+    "zsh": true
   },
-  "runOnSave.commands": [
-    {
-      "command": "sed -i '' -e ':a' -e '/./,$!d' ${file}",
-      "runIn": "backend",
-      "runningStatusMessage": "",
-      "finishStatusMessage": ""
-    }
-  ],
   "dev.containers.executeInWSL": true,
   "diffEditor.experimental.showMoves": true,
   "diffEditor.ignoreTrimWhitespace": false,
@@ -258,7 +247,8 @@
   "explorer.confirmPasteNative": false,
   "extensions.ignoreRecommendations": true,
   "files.associations": {
-    "*.list": "dotenv"
+    "*.list": "dotenv",
+    "*.yaml.*": "yaml"
   },
   "files.eol": "\n",
   "files.exclude": {
@@ -298,6 +288,7 @@
   "go.formatTool": "goimports",
   "go.toolsManagement.autoUpdate": true,
   "go.useLanguageServer": true,
+  "javascript.updateImportsOnFileMove.enabled": "always",
   "makefile.configureOnOpen": true,
   "material-icon-theme.folders.theme": "specific",
   "prettier.requireConfig": true,
@@ -320,6 +311,14 @@
   "remote.SSH.suppressWindowsSshWarning": true,
   "remote.SSH.useExecServer": true,
   "remote.SSH.useLocalServer": false,
+  "runOnSave.commands": [
+    {
+      "command": "perl -i -pe 'BEGIN{$/=undef} s/^\\s+//s' ${file}",
+      "finishStatusMessage": "",
+      "runIn": "backend",
+      "runningStatusMessage": ""
+    }
+  ],
   "scm.defaultViewMode": "tree",
   "search.defaultViewMode": "tree",
   "security.workspace.trust.enabled": false,
@@ -383,6 +382,7 @@
   "terminal.integrated.shellIntegration.history": 100,
   "terminal.integrated.smoothScrolling": true,
   "terminal.integrated.stickyScroll.enabled": true,
+  "typescript.updateImportsOnFileMove.enabled": "always",
   "vim.useSystemClipboard": true,
   "vs-kubernetes": {
     "vs-kubernetes.crd-code-completion": "disabled",

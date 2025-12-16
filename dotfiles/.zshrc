@@ -11,6 +11,11 @@ fi
 # PLUGIN SYSTEM
 # ============================================================================
 
+# Disable "you should use" warnings when running as root
+if [[ "${EUID:-$(id -u)}" -eq 0 ]] || [[ "${USER}" == "root" ]]; then
+  export YSU_MODE=OFF
+fi
+
 # Zinit
 export ZINIT_HOME="${XDG_DATA_HOME:-${HOME}/.local/share}/zinit/zinit.git"
 
