@@ -17,7 +17,7 @@ export GIT_BASE=${HOME}/projects     # Git projects base
 export WORK_DIR=${GIT_BASE}          # Default work directory
 export JSH=${JSH_ROOT:-${HOME}}/.jsh # Ideal JSH location
 export JSH_CUSTOM=${HOME}/.jsh_local # Local overrides (optional)
-export GEM_HOME="$HOME/.gem"         # Ruby gems location
+export GEM_HOME="${HOME}/.gem"         # Ruby gems location
 
 # Silence/optimize specific tools
 export DIRENV_LOG_FORMAT=           # Silence direnv for p10k
@@ -35,7 +35,7 @@ else
   export LANG=C
 fi
 # Set LC_ALL only if a valid UTF-8 locale is available
-if locale -a 2> /dev/null | grep -q "^en_US.UTF-8\|^en_US.utf8"; then
+if locale -a 2> /dev/null | grep -qE "^en_US\.UTF-8$|^en_US\.utf8$"; then
   export LC_ALL=en_US.UTF-8
 elif locale -a 2> /dev/null | grep -qE "^C\.UTF-8$|^C\.utf8$"; then
   export LC_ALL=C.UTF-8
@@ -71,6 +71,7 @@ local_paths=(
   "${JSH}"     # jsh CLI script at repo root
   "${JSH}/bin" # Additional utilities
   "${GEM_HOME}/bin"
+  "${HOME}/.cargo/bin"
   "${JSH}/.fzf/bin"
   "${HOME}/go/bin"
   "${HOME}/.linuxbrew/bin"
@@ -135,7 +136,8 @@ alias ..='cd ../' .2='cd ../../' .3='cd ../../../' .4='cd ../../../../' .5='cd .
 # ---- File Operations ----
 alias cp='cp -iv' mv='mv -iv' rm='rm -i' mkdir='mkdir -pv'
 # dud/duf might vary by OS/shell but usually fine
-alias dud='du -d 1 -h' duf='du -sh *'
+alias dud='du -d 1 -h'
+alias duf='du -sh *'
 
 # Colorize essential binaries
 alias grep='grep --color=auto'
@@ -160,22 +162,24 @@ fi
 alias l='ls -l' ll='ls -la' lll='ls -laFh'
 alias psg='ps aux | grep -i' psl='ps aux | less'
 
-# 't' command
+# t - Wrapper for supercrabtree's k
+# A more informative 'ls' replacement that displays additional file information
+# including git status, file permissions, size, and last modified time
 t() {
   if [[ $# -eq 0 ]]; then
     if command -v k > /dev/null 2>&1; then k; else ls -la; fi
   else
     local all_dirs=true
     for arg in "$@"; do
-      [[ ! -d "$arg" ]] && {
+      [[ ! -d "${arg}" ]] && {
         all_dirs=false
         break
       }
     done
 
-    if [[ "$all_dirs" == true ]]; then
+    if [[ "${all_dirs}" == true ]]; then
       for dir in "$@"; do
-        if command -v k > /dev/null 2>&1; then k "$dir"; else ls -la "$dir"; fi
+        if command -v k > /dev/null 2>&1; then k "${dir}"; else ls -la "${dir}"; fi
       done
     else
       touch "$@"
@@ -224,8 +228,8 @@ alias a='ansible' ap='ansible-playbook' av='ansible-vault' tf='terraform' pn='pn
 alias sshx='eval $(ssh-agent) && ssh-add 2>/dev/null'
 # Proxy aliases
 # shellcheck disable=SC2154
-alias proxy+='export {{http,https}_proxy,{HTTP,HTTPS}_PROXY}=${PROXY_ENDPOINT}; export {NO_PROXY,no_proxy}=${PROXY_ENDPOINT:-go,localhost}'
-alias proxy-='unset {{http,https}_proxy,{HTTP,HTTPS}_PROXY,NO_PROXY,no_proxy}'
+alias proxy+='export {http,https}_proxy,{HTTP,HTTPS}_PROXY=${PROXY_ENDPOINT}; export {NO_PROXY,no_proxy}=${PROXY_ENDPOINT:-go,localhost}'
+alias proxy-='unset {http,https}_proxy,{HTTP,HTTPS}_PROXY,NO_PROXY,no_proxy'
 
 # ---- Development & Tmux ----
 alias vz='vim ~/.zshrc'
@@ -502,8 +506,8 @@ EXAMPLE
 
 # Path deduplication (POSIX compliant using awk)
 dedup_path() {
-  if [ -n "$PATH" ]; then
-    PATH=$(echo -n "$PATH" | awk -v RS=: -v ORS=: '!a[$0]++' | sed 's/:$//')
+  if [[ -n "${PATH}" ]]; then
+    PATH=$(echo -n "${PATH}" | awk -v RS=: -v ORS=: '!a[$0]++' | sed 's/:$//')
     export PATH
   fi
 }
@@ -520,11 +524,11 @@ fi
 export CDPATH=".:~:~/projects:~/.jsh"
 
 # Safety: Prevent file overwrite on stdout redirection
-# History Hygiene: Ignore specific commands
-if [[ -n "$BASH_VERSION" ]]; then
+# History hygiene: Ignore specific commands
+if [[ -n "${BASH_VERSION}" ]]; then
   set -o noclobber
   export HISTIGNORE="&:[ ]*:exit:ls:bg:fg:history:clear"
-elif [[ -n "$ZSH_VERSION" ]]; then
+elif [[ -n "${ZSH_VERSION}" ]]; then
   setopt NO_CLOBBER
   export HISTORY_IGNORE="(ls|cd|pwd|exit|cd ..)"
 fi
@@ -539,15 +543,15 @@ _jsh_load_completions() {
   local shell="$1"
 
   # Common completions for all shells
-  command -v direnv > /dev/null 2>&1 && eval "$(direnv hook ${shell})"
-  command -v docker > /dev/null 2>&1 && eval "$(docker completion ${shell})"
-  command -v task > /dev/null 2>&1 && source <(task --completion ${shell})
-  command -v zoxide > /dev/null 2>&1 && eval "$(zoxide init ${shell})"
+  command -v direnv > /dev/null 2>&1 && eval "$(direnv hook "${shell}")"
+  command -v docker > /dev/null 2>&1 && eval "$(docker completion "${shell}")"
+  command -v task > /dev/null 2>&1 && source <(task --completion "${shell}")
+  command -v zoxide > /dev/null 2>&1 && eval "$(zoxide init "${shell}")"
 
   # shellcheck disable=SC1090
-  command -v kubectl > /dev/null 2>&1 && source <(kubectl completion ${shell})
+  command -v kubectl > /dev/null 2>&1 && source <(kubectl completion "${shell}")
   # shellcheck disable=SC1090
-  command -v uc > /dev/null 2>&1 && source <(uc completion ${shell})
+  command -v uc > /dev/null 2>&1 && source <(uc completion "${shell}")
 
   # Shell-specific variations
   case "${shell}" in
@@ -568,7 +572,7 @@ _jsh_load_completions() {
   if command -v atuin > /dev/null 2>&1; then
     # Disable default atuin up-arrow binding to use fzf instead
     export ATUIN_NOBIND="true"
-    eval "$(atuin init ${shell})"
+    eval "$(atuin init "${shell}")"
 
     # Bind Ctrl+R to atuin search (keeps the TUI for manual searches)
     case "${shell}" in
@@ -614,16 +618,16 @@ _jsh_load_completions() {
           --header='CTRL-R: atuin TUI | CTRL-Y: copy | UP/DOWN: navigate' |
         awk -F'│' '{gsub(/^[[:space:]]+|[[:space:]]+$/, "", $3); print $3}')
 
-      if [[ -n "$selected" ]]; then
+      if [[ -n "${selected}" ]]; then
         case "${shell}" in
           bash)
-            READLINE_LINE="$selected"
+            READLINE_LINE="${selected}"
             READLINE_POINT=${#READLINE_LINE}
             ;;
           zsh)
             # shellcheck disable=SC2034
-            BUFFER="$selected"
-            # shellcheck disable=SC2034
+            BUFFER="${selected}"
+            # shellc${eck disa}ble=SC2034
             CURSOR=${#BUFFER}
             ;;
         esac
