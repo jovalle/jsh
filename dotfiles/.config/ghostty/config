@@ -5,6 +5,7 @@ background = #1e1e1e
 clipboard-read = allow
 clipboard-write = allow
 config-default-files = false
+confirm-close-surface = false
 copy-on-select = clipboard
 cursor-color = #ffffff
 cursor-text = #000000
