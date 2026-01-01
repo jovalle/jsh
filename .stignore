@@ -1,6 +1,0 @@
-.cache
-.config/syncthing
-.fzf/bin/*
-.fzf/**/*.sync-conflict-*
-.kube/cache
-.venv
