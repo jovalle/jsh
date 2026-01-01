@@ -1,0 +1,597 @@
+# ==============================================================================
+# Editor Config Configuration
+# ==============================================================================
+# Defines consistent coding styles across different editors and IDEs.
+# EditorConfig is supported natively or via plugins in:
+# - VS Code, Vim/Neovim, Sublime Text, Atom
+# - JetBrains IDEs (IntelliJ, WebStorm, PyCharm)
+# - Visual Studio, Eclipse, Emacs
+#
+# Documentation: https://editorconfig.org
+# Spec: https://spec.editorconfig.org
+#
+# Organization:
+#   1. Root Marker - Prevents ancestor directory .editorconfig from applying
+#   2. Universal Defaults - Applied to all files
+#   3. Web Technologies - JavaScript, TypeScript, HTML, CSS
+#   4. Data Formats - JSON, YAML, TOML, XML
+#   5. Programming Languages - Python, Go, Rust, Ruby, Java, C/C++
+#   6. Shell & Scripts - Bash, Zsh, PowerShell
+#   7. Documentation - Markdown, reStructuredText, AsciiDoc
+#   8. Configuration Files - Dockerfiles, Makefiles, INI
+#   9. Special Cases - Files requiring specific handling
+# ==============================================================================
+
+# ==============================================================================
+# 1. ROOT MARKER
+# ==============================================================================
+
+# This is the root EditorConfig file
+# Stop searching for .editorconfig files in parent directories
+root = true
+
+# ==============================================================================
+# 2. UNIVERSAL DEFAULTS
+# ==============================================================================
+
+# Applied to all files unless overridden by more specific sections
+[*]
+# Use UTF-8 encoding for all text files
+# Essential for internationalization and consistency
+charset = utf-8
+
+# Unix-style line endings (LF)
+# Prevents CRLF/LF mixing issues in version control
+# Windows users: Git handles conversion automatically
+end_of_line = lf
+
+# Insert a blank line at the end of every file
+# Required by POSIX and prevents diff noise
+insert_final_newline = true
+
+# Remove trailing whitespace on save
+# Eliminates unnecessary diff noise
+trim_trailing_whitespace = true
+
+# Default indentation: 2 spaces
+# Can be overridden per file type below
+indent_style = space
+indent_size = 2
+
+# ==============================================================================
+# 3. WEB TECHNOLOGIES
+# ==============================================================================
+
+# ---- JavaScript / TypeScript ----
+# Prettier defaults: 2 spaces
+[*.{js,mjs,cjs,jsx}]
+indent_style = space
+indent_size = 2
+max_line_length = 100
+
+[*.{ts,tsx,mts,cts}]
+indent_style = space
+indent_size = 2
+max_line_length = 100
+
+# ---- Vue / Svelte / Astro (Component frameworks) ----
+[*.{vue,svelte,astro}]
+indent_style = space
+indent_size = 2
+max_line_length = 100
+
+# ---- HTML / Templates ----
+[*.{html,htm,xhtml}]
+indent_style = space
+indent_size = 2
+max_line_length = 120
+
+# Jinja / Nunjucks / Twig templates
+[*.{jinja,jinja2,j2,njk,twig}]
+indent_style = space
+indent_size = 2
+
+# Handlebars / Mustache templates
+[*.{hbs,handlebars,mustache}]
+indent_style = space
+indent_size = 2
+
+# EJS / ERB templates
+[*.{ejs,erb}]
+indent_style = space
+indent_size = 2
+
+# ---- CSS / Styling ----
+[*.css]
+indent_style = space
+indent_size = 2
+max_line_length = 120
+
+# Sass/SCSS
+[*.{scss,sass}]
+indent_style = space
+indent_size = 2
+max_line_length = 120
+
+# Less
+[*.less]
+indent_style = space
+indent_size = 2
+max_line_length = 120
+
+# Stylus
+[*.styl]
+indent_style = space
+indent_size = 2
+
+# ==============================================================================
+# 4. DATA FORMATS
+# ==============================================================================
+
+# ---- JSON ----
+# 2 spaces is the most common convention
+[*.json]
+indent_style = space
+indent_size = 2
+max_line_length = off
+
+# JSON with comments (used by VS Code, TypeScript)
+[*.jsonc]
+indent_style = space
+indent_size = 2
+
+# JSON5 (extended JSON)
+[*.json5]
+indent_style = space
+indent_size = 2
+
+# ---- YAML ----
+# YAML is indent-sensitive; 2 spaces is standard
+[*.{yml,yaml}]
+indent_style = space
+indent_size = 2
+max_line_length = 120
+
+# ---- TOML ----
+# Used by Rust (Cargo.toml), Python (pyproject.toml), Hugo
+[*.toml]
+indent_style = space
+indent_size = 2
+max_line_length = 100
+
+# ---- XML ----
+# XML and related formats
+[*.{xml,xsd,xsl,xslt,wsdl}]
+indent_style = space
+indent_size = 2
+
+# SVG (XML-based vector graphics)
+[*.svg]
+indent_style = space
+indent_size = 2
+
+# Plist (Apple property lists)
+[*.plist]
+indent_style = space
+indent_size = 2
+
+# ---- GraphQL ----
+[*.{graphql,gql}]
+indent_style = space
+indent_size = 2
+max_line_length = 120
+
+# ---- Protocol Buffers ----
+[*.proto]
+indent_style = space
+indent_size = 2
+
+# ---- CSV / TSV ----
+# Don't modify whitespace in data files
+[*.{csv,tsv}]
+insert_final_newline = false
+trim_trailing_whitespace = false
+
+# ==============================================================================
+# 5. PROGRAMMING LANGUAGES
+# ==============================================================================
+
+# ---- Python ----
+# PEP 8: 4 spaces, 79/88 chars (Black uses 88)
+[*.{py,pyw,pyi}]
+indent_style = space
+indent_size = 4
+max_line_length = 88
+
+# Python stub files
+[*.pyi]
+indent_style = space
+indent_size = 4
+
+# Jupyter Notebooks (source cells)
+[*.ipynb]
+indent_style = space
+indent_size = 4
+
+# ---- Go ----
+# Go uses tabs (gofmt enforces this)
+[*.go]
+indent_style = tab
+indent_size = 4
+max_line_length = off
+
+# Go module files
+[go.mod]
+indent_style = tab
+indent_size = 4
+
+[go.sum]
+indent_style = tab
+indent_size = 4
+
+# ---- Rust ----
+# rustfmt defaults: 4 spaces
+[*.rs]
+indent_style = space
+indent_size = 4
+max_line_length = 100
+
+# ---- Ruby ----
+# Ruby community standard: 2 spaces
+[*.{rb,rake,gemspec}]
+indent_style = space
+indent_size = 2
+max_line_length = 120
+
+# Gemfile, Rakefile
+[{Gemfile,Rakefile,Vagrantfile}]
+indent_style = space
+indent_size = 2
+
+# ERB templates
+[*.erb]
+indent_style = space
+indent_size = 2
+
+# ---- Java / Kotlin / Scala ----
+# 4 spaces is standard for JVM languages
+[*.java]
+indent_style = space
+indent_size = 4
+max_line_length = 120
+
+[*.{kt,kts}]
+indent_style = space
+indent_size = 4
+max_line_length = 120
+
+[*.{scala,sc}]
+indent_style = space
+indent_size = 2
+max_line_length = 100
+
+# ---- C / C++ ----
+# Common conventions vary; 4 spaces is popular
+[*.{c,h}]
+indent_style = space
+indent_size = 4
+max_line_length = 100
+
+[*.{cpp,cc,cxx,hpp,hh,hxx}]
+indent_style = space
+indent_size = 4
+max_line_length = 100
+
+# ---- C# ----
+[*.{cs,csx}]
+indent_style = space
+indent_size = 4
+max_line_length = 120
+
+# ---- Swift ----
+[*.swift]
+indent_style = space
+indent_size = 4
+max_line_length = 120
+
+# ---- Objective-C ----
+[*.{m,mm}]
+indent_style = space
+indent_size = 4
+
+# ---- PHP ----
+# PSR-12: 4 spaces
+[*.{php,phtml}]
+indent_style = space
+indent_size = 4
+max_line_length = 120
+
+# ---- Lua ----
+[*.lua]
+indent_style = space
+indent_size = 2
+max_line_length = 120
+
+# ---- Perl ----
+[*.{pl,pm,t}]
+indent_style = space
+indent_size = 4
+
+# ---- R ----
+[*.{r,R,Rmd}]
+indent_style = space
+indent_size = 2
+
+# ---- Julia ----
+[*.jl]
+indent_style = space
+indent_size = 4
+
+# ---- Haskell ----
+[*.{hs,lhs}]
+indent_style = space
+indent_size = 2
+
+# ---- Elixir / Erlang ----
+[*.{ex,exs}]
+indent_style = space
+indent_size = 2
+
+[*.{erl,hrl}]
+indent_style = space
+indent_size = 4
+
+# ---- Clojure ----
+[*.{clj,cljs,cljc,edn}]
+indent_style = space
+indent_size = 2
+
+# ---- Lisp / Scheme ----
+[*.{lisp,lsp,cl,scm,ss,rkt}]
+indent_style = space
+indent_size = 2
+
+# ---- OCaml / ReasonML ----
+[*.{ml,mli,re,rei}]
+indent_style = space
+indent_size = 2
+
+# ---- F# ----
+[*.{fs,fsi,fsx}]
+indent_style = space
+indent_size = 4
+
+# ---- Nim ----
+[*.nim]
+indent_style = space
+indent_size = 2
+
+# ---- Zig ----
+[*.zig]
+indent_style = space
+indent_size = 4
+
+# ==============================================================================
+# 6. SHELL & SCRIPTS
+# ==============================================================================
+
+# ---- Bash / Zsh / Shell ----
+# shfmt defaults: tabs or 2 spaces (we use 2 spaces)
+[*.{sh,bash,zsh}]
+indent_style = space
+indent_size = 2
+
+# Common shell scripts without extension
+[{.bashrc,.bash_profile,.bash_logout,.zshrc,.zprofile,.profile}]
+indent_style = space
+indent_size = 2
+
+# ---- Fish Shell ----
+[*.fish]
+indent_style = space
+indent_size = 4
+
+# ---- PowerShell ----
+[*.{ps1,psm1,psd1}]
+indent_style = space
+indent_size = 4
+
+# ---- Batch / CMD ----
+[*.{bat,cmd}]
+indent_style = space
+indent_size = 4
+end_of_line = crlf
+
+# ---- Vim Script ----
+[*.vim]
+indent_style = space
+indent_size = 2
+
+# ==============================================================================
+# 7. DOCUMENTATION
+# ==============================================================================
+
+# ---- Markdown ----
+# Don't trim trailing whitespace (two spaces = line break in Markdown)
+[*.md]
+indent_style = space
+indent_size = 2
+max_line_length = 80
+trim_trailing_whitespace = false
+
+# MDX (Markdown with JSX)
+[*.mdx]
+indent_style = space
+indent_size = 2
+trim_trailing_whitespace = false
+
+# ---- reStructuredText ----
+[*.rst]
+indent_style = space
+indent_size = 3
+max_line_length = 79
+
+# ---- AsciiDoc ----
+[*.{adoc,asciidoc}]
+indent_style = space
+indent_size = 2
+max_line_length = 80
+
+# ---- Plain Text ----
+[*.txt]
+indent_style = space
+indent_size = 2
+
+# ---- LaTeX ----
+[*.{tex,sty,cls,bib}]
+indent_style = space
+indent_size = 2
+max_line_length = off
+
+# ==============================================================================
+# 8. CONFIGURATION FILES
+# ==============================================================================
+
+# ---- Makefile ----
+# Makefiles REQUIRE tabs for recipe indentation
+[{Makefile,makefile,*.mk,GNUmakefile}]
+indent_style = tab
+indent_size = 4
+
+# ---- CMake ----
+[{CMakeLists.txt,*.cmake}]
+indent_style = space
+indent_size = 2
+
+# ---- Docker ----
+[Dockerfile*]
+indent_style = space
+indent_size = 4
+
+[.dockerignore]
+indent_style = space
+indent_size = 2
+
+[docker-compose*.{yml,yaml}]
+indent_style = space
+indent_size = 2
+
+# ---- Kubernetes / Helm ----
+[*.{yaml,yml}]
+indent_style = space
+indent_size = 2
+
+# Helm charts
+[templates/*.{yaml,yml,tpl}]
+indent_style = space
+indent_size = 2
+
+# ---- Terraform / HCL ----
+[*.{tf,tfvars,hcl}]
+indent_style = space
+indent_size = 2
+
+# ---- Ansible ----
+[*.{ansible.yml,ansible.yaml}]
+indent_style = space
+indent_size = 2
+
+# Ansible inventory
+[hosts]
+indent_style = space
+indent_size = 2
+
+# ---- Nginx ----
+[*.conf]
+indent_style = space
+indent_size = 4
+
+[nginx.conf]
+indent_style = space
+indent_size = 4
+
+# ---- Apache ----
+[.htaccess]
+indent_style = space
+indent_size = 4
+
+# ---- INI / CFG ----
+[*.{ini,cfg,conf}]
+indent_style = space
+indent_size = 4
+
+# ---- EditorConfig itself ----
+[.editorconfig]
+indent_style = space
+indent_size = 2
+
+# ---- Git Configuration ----
+[{.gitattributes,.gitconfig,.gitignore,.gitmodules}]
+indent_style = space
+indent_size = 2
+
+# ---- npm / Node.js ----
+[{package.json,package-lock.json,.npmrc}]
+indent_style = space
+indent_size = 2
+
+# ---- ESLint / Prettier ----
+[{.eslintrc,.eslintrc.json,.eslintrc.yml,.prettierrc,.prettierrc.json}]
+indent_style = space
+indent_size = 2
+
+# ---- Babel ----
+[{.babelrc,.babelrc.json,babel.config.json}]
+indent_style = space
+indent_size = 2
+
+# ---- TypeScript ----
+[{tsconfig.json,tsconfig.*.json}]
+indent_style = space
+indent_size = 2
+
+# ---- VS Code ----
+[.vscode/*.json]
+indent_style = space
+indent_size = 4
+
+# ---- JetBrains ----
+[.idea/*.xml]
+indent_style = space
+indent_size = 2
+
+# ==============================================================================
+# 9. SPECIAL CASES
+# ==============================================================================
+
+# ---- Lock Files ----
+# Don't modify lock files (they're auto-generated)
+[{package-lock.json,yarn.lock,pnpm-lock.yaml,Cargo.lock,Gemfile.lock,poetry.lock,composer.lock}]
+indent_style = unset
+indent_size = unset
+
+# ---- Minified Files ----
+# Don't modify minified files
+[*.min.{js,css}]
+indent_style = unset
+insert_final_newline = false
+
+# ---- Diffs / Patches ----
+# Preserve exact formatting in diff files
+[*.{diff,patch}]
+trim_trailing_whitespace = false
+insert_final_newline = false
+
+# ---- Certificates / Keys ----
+# Don't modify crypto files
+[*.{pem,crt,key,pub}]
+insert_final_newline = false
+trim_trailing_whitespace = false
+
+# ---- Binary-like Text Files ----
+# Some files shouldn't be modified
+[*.{ico,pdf,png,jpg,jpeg,gif,webp,woff,woff2,ttf,otf,eot}]
+insert_final_newline = unset
+trim_trailing_whitespace = unset
+charset = unset
+end_of_line = unset

@@ -1,0 +1,352 @@
+#!/usr/bin/env bash
+# shellcheck shell=bash
+# nukem - Force-remove Kubernetes namespace stuck in Terminating state
+#
+# Safely removes finalizers from a namespace that's stuck terminating.
+# This is a destructive operation - use with caution.
+#
+# Usage: nukem [options] <namespace>
+
+set -euo pipefail
+
+# =============================================================================
+# Configuration
+# =============================================================================
+
+readonly SCRIPT_NAME="${0##*/}"
+readonly SCRIPT_VERSION="1.0.0"
+
+# Timeout for kubectl operations (seconds)
+readonly KUBECTL_TIMEOUT="${NUKEM_TIMEOUT:-30}"
+
+# =============================================================================
+# Colors & Output
+# =============================================================================
+
+# Detect color support
+if [[ -t 1 ]] && [[ "${NO_COLOR:-}" != "1" ]]; then
+    readonly C_RESET='\033[0m'
+    readonly C_RED='\033[0;31m'
+    readonly C_GREEN='\033[0;32m'
+    readonly C_YELLOW='\033[0;33m'
+    readonly C_BLUE='\033[0;34m'
+    readonly C_CYAN='\033[0;36m'
+    readonly C_BOLD='\033[1m'
+    readonly C_DIM='\033[2m'
+else
+    readonly C_RESET='' C_RED='' C_GREEN='' C_YELLOW=''
+    readonly C_BLUE='' C_CYAN='' C_BOLD='' C_DIM=''
+fi
+
+# Output helpers - color variables are safe in format strings here
+die()     { printf "%s%serror:%s %s\n" "${C_RED}" "${C_BOLD}" "${C_RESET}" "$*" >&2; exit 1; }
+warn()    { printf "%s%swarn:%s %s\n" "${C_YELLOW}" "${C_BOLD}" "${C_RESET}" "$*" >&2; }
+success() { printf "%s%ssuccess:%s %s\n" "${C_GREEN}" "${C_BOLD}" "${C_RESET}" "$*"; }
+info()    { printf "%sinfo:%s %s\n" "${C_BLUE}" "${C_RESET}" "$*"; }
+debug()   { [[ "${NUKEM_DEBUG:-0}" == "1" ]] && printf "%sdebug: %s%s\n" "${C_DIM}" "$*" "${C_RESET}" >&2 || true; }
+
+# =============================================================================
+# Help
+# =============================================================================
+
+show_help() {
+    cat << EOF
+${C_BOLD}nukem${C_RESET} - Force-remove Kubernetes namespace stuck in Terminating state
+
+${C_BOLD}USAGE${C_RESET}
+    ${SCRIPT_NAME} [options] <namespace>
+    ${SCRIPT_NAME} --list
+
+${C_BOLD}DESCRIPTION${C_RESET}
+    When a Kubernetes namespace gets stuck in "Terminating" state (often due to
+    finalizers on resources that no longer have controllers), this tool removes
+    the finalizers to allow the namespace to be deleted.
+
+    ${C_YELLOW}WARNING:${C_RESET} This is a destructive operation. Finalizers exist for a reason -
+    they ensure proper cleanup of external resources (load balancers, volumes,
+    etc.). Only use this when you're certain the finalizers are orphaned.
+
+${C_BOLD}OPTIONS${C_RESET}
+    -l, --list          List all namespaces in Terminating state
+    -f, --force         Skip confirmation prompt
+    -n, --dry-run       Show what would be done without making changes
+    -c, --context CTX   Use specific kubectl context
+    -v, --verbose       Enable verbose output
+    -h, --help          Show this help message
+    --version           Show version information
+
+${C_BOLD}EXAMPLES${C_RESET}
+    ${SCRIPT_NAME} stuck-namespace              # Remove finalizers (with confirmation)
+    ${SCRIPT_NAME} -f stuck-namespace           # Skip confirmation
+    ${SCRIPT_NAME} -n stuck-namespace           # Dry run
+    ${SCRIPT_NAME} --list                       # Show stuck namespaces
+    ${SCRIPT_NAME} -c prod-cluster my-ns        # Use specific context
+
+${C_BOLD}ENVIRONMENT${C_RESET}
+    NUKEM_TIMEOUT       Kubectl timeout in seconds (default: 30)
+    NUKEM_DEBUG         Enable debug output (set to 1)
+    NO_COLOR            Disable colored output (set to 1)
+
+${C_BOLD}EXIT CODES${C_RESET}
+    0   Success
+    1   General error
+    2   Namespace not found or not in Terminating state
+    3   User cancelled operation
+    130 Interrupted (Ctrl+C)
+
+${C_BOLD}VERSION${C_RESET}
+    ${SCRIPT_VERSION}
+
+EOF
+}
+
+# =============================================================================
+# Utilities
+# =============================================================================
+
+# Check if kubectl is available
+require_kubectl() {
+    if ! command -v kubectl &>/dev/null; then
+        die "kubectl is required but not installed"
+    fi
+}
+
+# Build kubectl command with optional context
+kubectl_cmd() {
+    local cmd=(kubectl)
+    [[ -n "${KUBECTL_CONTEXT:-}" ]] && cmd+=(--context "${KUBECTL_CONTEXT}")
+    cmd+=(--request-timeout="${KUBECTL_TIMEOUT}s")
+    "${cmd[@]}" "$@"
+}
+
+# List namespaces stuck in Terminating state
+list_terminating() {
+    info "Checking for namespaces in Terminating state..."
+
+    local namespaces
+    namespaces=$(kubectl_cmd get namespaces -o jsonpath='{range .items[?(@.status.phase=="Terminating")]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)
+
+    if [[ -z "${namespaces}" ]]; then
+        success "No namespaces stuck in Terminating state"
+        return 0
+    fi
+
+    printf "\n%sNamespaces in Terminating state:%s\n" "${C_BOLD}" "${C_RESET}"
+    printf "%s─────────────────────────────────%s\n" "${C_DIM}" "${C_RESET}"
+    while IFS= read -r ns; do
+        local finalizers
+        finalizers=$(kubectl_cmd get namespace "${ns}" -o jsonpath='{.spec.finalizers}' 2>/dev/null || echo "[]")
+        printf "  %s%s%s" "${C_CYAN}" "${ns}" "${C_RESET}"
+        if [[ "${finalizers}" != "[]" && "${finalizers}" != "" ]]; then
+            printf "  %sfinalizers: %s%s" "${C_DIM}" "${finalizers}" "${C_RESET}"
+        fi
+        printf "\n"
+    done <<< "${namespaces}"
+    printf "\n"
+}
+
+# Get namespace details
+get_namespace_info() {
+    local ns="$1"
+
+    # Check if namespace exists
+    if ! kubectl_cmd get namespace "${ns}" &>/dev/null; then
+        die "Namespace '${ns}' not found"
+    fi
+
+    # Get namespace phase
+    local phase
+    phase=$(kubectl_cmd get namespace "${ns}" -o jsonpath='{.status.phase}' 2>/dev/null)
+
+    if [[ "${phase}" != "Terminating" ]]; then
+        die "Namespace '${ns}' is not in Terminating state (current: ${phase:-Active})"
+    fi
+
+    # Get finalizers
+    local finalizers
+    finalizers=$(kubectl_cmd get namespace "${ns}" -o jsonpath='{.spec.finalizers}' 2>/dev/null || echo "[]")
+
+    printf '%s' "${finalizers}"
+}
+
+# Remove finalizers from namespace
+remove_finalizers() {
+    local ns="$1"
+    local dry_run="${2:-false}"
+
+    if [[ "${dry_run}" == "true" ]]; then
+        info "[DRY RUN] Would remove finalizers from namespace '${ns}'"
+
+        # Show current state
+        printf "\n%sCurrent namespace JSON:%s\n" "${C_BOLD}" "${C_RESET}"
+        kubectl_cmd get namespace "${ns}" -o json | head -30
+        printf "\n%s... (truncated)%s\n\n" "${C_DIM}" "${C_RESET}"
+
+        info "[DRY RUN] Would POST to: /api/v1/namespaces/${ns}/finalize"
+        return 0
+    fi
+
+    debug "Fetching namespace JSON..."
+    local ns_json
+    ns_json=$(kubectl_cmd get namespace "${ns}" -o json)
+
+    debug "Removing finalizers from JSON..."
+    # Remove finalizers array (handles both array content and empty array)
+    local modified_json
+    modified_json=$(echo "${ns_json}" | tr -d '\n' | sed 's/"finalizers":\s*\[[^]]*\]/"finalizers": []/')
+
+    debug "Applying modified namespace via finalize endpoint..."
+    if echo "${modified_json}" | kubectl_cmd replace --raw "/api/v1/namespaces/${ns}/finalize" -f - &>/dev/null; then
+        success "Finalizers removed from namespace '${ns}'"
+
+        # Wait a moment and check if it's gone
+        sleep 2
+        if ! kubectl_cmd get namespace "${ns}" &>/dev/null; then
+            success "Namespace '${ns}' has been deleted"
+        else
+            info "Namespace may take a moment to fully delete"
+        fi
+        return 0
+    else
+        die "Failed to remove finalizers from namespace '${ns}'"
+    fi
+}
+
+# Confirm action with user
+confirm() {
+    local prompt="$1"
+    local default="${2:-n}"
+
+    local yn_prompt
+    if [[ "${default}" == "y" ]]; then
+        yn_prompt="[Y/n]"
+    else
+        yn_prompt="[y/N]"
+    fi
+
+    printf '%s%s%s %s ' "${C_YELLOW}" "${prompt}" "${C_RESET}" "${yn_prompt}"
+    read -r response
+
+    case "${response}" in
+        [yY]|[yY][eE][sS])
+            return 0
+            ;;
+        [nN]|[nN][oO])
+            return 1
+            ;;
+        "")
+            [[ "${default}" == "y" ]] && return 0 || return 1
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+# =============================================================================
+# Main
+# =============================================================================
+
+main() {
+    local namespace=""
+    local force=false
+    local dry_run=false
+    local list_mode=false
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -h|--help)
+                show_help
+                exit 0
+                ;;
+            --version)
+                printf "%s version %s\n" "${SCRIPT_NAME}" "${SCRIPT_VERSION}"
+                exit 0
+                ;;
+            -l|--list)
+                list_mode=true
+                shift
+                ;;
+            -f|--force)
+                force=true
+                shift
+                ;;
+            -n|--dry-run)
+                dry_run=true
+                shift
+                ;;
+            -c|--context)
+                [[ $# -lt 2 ]] && die "Option $1 requires an argument"
+                KUBECTL_CONTEXT="$2"
+                shift 2
+                ;;
+            -v|--verbose)
+                NUKEM_DEBUG=1
+                export NUKEM_DEBUG
+                shift
+                ;;
+            -*)
+                die "Unknown option: $1 (use --help for usage)"
+                ;;
+            *)
+                if [[ -z "${namespace}" ]]; then
+                    namespace="$1"
+                else
+                    die "Unexpected argument: $1"
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    # Check requirements
+    require_kubectl
+
+    # Handle list mode
+    if [[ "${list_mode}" == "true" ]]; then
+        list_terminating
+        exit 0
+    fi
+
+    # Require namespace argument
+    if [[ -z "${namespace}" ]]; then
+        die "Namespace argument required (use --help for usage)"
+    fi
+
+    # Validate namespace exists and is terminating
+    info "Checking namespace '${namespace}'..."
+    local finalizers
+    finalizers=$(get_namespace_info "${namespace}")
+
+    if [[ "${finalizers}" == "[]" || -z "${finalizers}" ]]; then
+        warn "Namespace '${namespace}' has no finalizers (may delete on its own)"
+        if ! confirm "Proceed anyway?"; then
+            info "Operation cancelled"
+            exit 3
+        fi
+    fi
+
+    # Show warning and get confirmation
+    if [[ "${force}" != "true" && "${dry_run}" != "true" ]]; then
+        printf "\n%s%sWARNING:%s About to remove finalizers from namespace '%s'\n" "${C_YELLOW}" "${C_BOLD}" "${C_RESET}" "${namespace}"
+        printf "%sFinalizers: %s%s\n\n" "${C_DIM}" "${finalizers}" "${C_RESET}"
+        printf "This operation:\n"
+        printf "  * Is %sirreversible%s\n" "${C_RED}" "${C_RESET}"
+        printf "  * May leave orphaned external resources (LBs, volumes, etc.)\n"
+        printf "  * Should only be used when finalizers are known to be stuck\n\n"
+
+        if ! confirm "Are you sure you want to proceed?"; then
+            info "Operation cancelled"
+            exit 3
+        fi
+    fi
+
+    # Execute
+    remove_finalizers "${namespace}" "${dry_run}"
+}
+
+# Handle interrupts gracefully
+trap 'printf "\n"; die "Interrupted"' INT TERM
+
+main "$@"

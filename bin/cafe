@@ -1,0 +1,647 @@
+#!/usr/bin/env bash
+# shellcheck shell=bash
+# cafe - Prevent system sleep and idle (café: keep your system awake)
+#
+# Cross-platform utility to keep your system awake during long-running tasks.
+# Works on macOS (caffeinate), Linux (systemd-inhibit, gnome-session-inhibit,
+# xdg-screensaver), and falls back to keeping a process running.
+#
+# "Un café para mantener el sistema despierto" ☕
+#
+# Usage: cafe [options] [command...]
+
+set -euo pipefail
+
+# =============================================================================
+# Configuration
+# =============================================================================
+
+readonly SCRIPT_NAME="${0##*/}"
+readonly SCRIPT_VERSION="1.0.0"
+
+# Default duration (seconds) - 0 means indefinite
+CAFE_DURATION="${CAFE_DURATION:-0}"
+
+# Default inhibit reasons
+CAFE_REASON="${CAFE_REASON:-User requested via cafe command}"
+
+# PID file for background mode
+readonly CAFE_PID_FILE="${XDG_RUNTIME_DIR:-/tmp}/cafe.${USER:-$(id -un)}.pid"
+
+# =============================================================================
+# Colors & Output
+# =============================================================================
+
+if [[ -t 1 ]] && [[ "${NO_COLOR:-}" != "1" ]]; then
+    readonly C_RESET='\033[0m'
+    readonly C_RED='\033[0;31m'
+    readonly C_GREEN='\033[0;32m'
+    readonly C_YELLOW='\033[0;33m'
+    readonly C_BLUE='\033[0;34m'
+    readonly C_CYAN='\033[0;36m'
+    readonly C_BOLD='\033[1m'
+    readonly C_DIM='\033[2m'
+else
+    readonly C_RESET='' C_RED='' C_GREEN='' C_YELLOW=''
+    readonly C_BLUE='' C_CYAN='' C_BOLD='' C_DIM=''
+fi
+
+# Output helpers - color variables are safe in format strings here
+die()     { printf "%s%serror:%s %s\n" "${C_RED}" "${C_BOLD}" "${C_RESET}" "$*" >&2; exit 1; }
+warn()    { printf "%s%swarn:%s %s\n" "${C_YELLOW}" "${C_BOLD}" "${C_RESET}" "$*" >&2; }
+success() { printf "%s%ssuccess:%s %s\n" "${C_GREEN}" "${C_BOLD}" "${C_RESET}" "$*"; }
+info()    { printf "%sinfo:%s %s\n" "${C_BLUE}" "${C_RESET}" "$*"; }
+debug()   { [[ "${CAFE_DEBUG:-0}" == "1" ]] && printf "%sdebug: %s%s\n" "${C_DIM}" "$*" "${C_RESET}" >&2 || true; }
+
+# =============================================================================
+# Help
+# =============================================================================
+
+show_help() {
+    cat << EOF
+${C_BOLD}cafe${C_RESET} - Prevent system sleep and idle (café: keep your system awake) ☕
+
+${C_BOLD}USAGE${C_RESET}
+    ${SCRIPT_NAME} [options]                  # Keep awake until Ctrl+C
+    ${SCRIPT_NAME} [options] <command>...     # Keep awake while command runs
+    ${SCRIPT_NAME} -t <duration>              # Keep awake for duration
+    ${SCRIPT_NAME} --stop                     # Stop background cafe
+
+${C_BOLD}DESCRIPTION${C_RESET}
+    "Un café para mantener el sistema despierto" - A coffee to keep your system
+    awake. Prevents the system from sleeping, enabling the screensaver, or going
+    idle during long-running tasks like downloads, builds, or presentations.
+
+    Cross-platform support:
+    • macOS: Uses native 'caffeinate' command
+    • Linux: Uses systemd-inhibit, gnome-session-inhibit, or xdg-screensaver
+    • Fallback: Keeps a lightweight process running
+
+${C_BOLD}OPTIONS${C_RESET}
+    -t, --time DURATION     Keep awake for duration (e.g., 1h, 30m, 3600)
+    -d, --display           Also prevent display from sleeping
+    -i, --idle              Only prevent idle sleep (allow user-initiated sleep)
+    -s, --system            Also prevent system sleep (not just display)
+    -b, --background        Run in background (daemonize)
+    -r, --reason TEXT       Reason for inhibiting (shown in system UI)
+    --status                Show if cafe is currently running
+    --stop                  Stop background cafe instance
+    -v, --verbose           Enable verbose output
+    -h, --help              Show this help message
+    --version               Show version information
+
+${C_BOLD}DURATION FORMAT${C_RESET}
+    Durations can be specified as:
+    • Seconds: 3600
+    • Minutes: 30m or 30min
+    • Hours: 2h or 2hr or 2hours
+    • Combined: 1h30m
+
+${C_BOLD}EXAMPLES${C_RESET}
+    # Keep awake indefinitely (until Ctrl+C)
+    ${SCRIPT_NAME}
+
+    # Keep awake for 2 hours
+    ${SCRIPT_NAME} -t 2h
+
+    # Keep awake while downloading
+    ${SCRIPT_NAME} wget https://example.com/large-file.iso
+
+    # Keep awake during build (including display)
+    ${SCRIPT_NAME} -d make -j8
+
+    # Background mode for presentations
+    ${SCRIPT_NAME} -b -d -t 4h
+    ${SCRIPT_NAME} --status    # Check if running
+    ${SCRIPT_NAME} --stop      # Stop when done
+
+    # Custom reason (visible in GNOME/KDE power settings)
+    ${SCRIPT_NAME} -r "Running overnight backup" rsync -av /data /backup
+
+${C_BOLD}INHIBIT TYPES${C_RESET}
+    By default, cafe prevents:
+    • Automatic sleep/suspend
+    • Screensaver activation
+    • Automatic display dimming
+
+    Use -d/--display to also prevent display from sleeping.
+    Use -s/--system to prevent system-level sleep (requires privileges on some systems).
+
+${C_BOLD}PLATFORM NOTES${C_RESET}
+    ${C_CYAN}macOS:${C_RESET}
+        Uses the native 'caffeinate' command. All options supported.
+        Display sleep prevention requires the -d flag.
+
+    ${C_CYAN}Linux (systemd):${C_RESET}
+        Uses 'systemd-inhibit' for sleep/idle inhibition.
+        Works on any systemd-based distribution.
+
+    ${C_CYAN}Linux (GNOME):${C_RESET}
+        Uses 'gnome-session-inhibit' if available.
+        Integrates with GNOME power management UI.
+
+    ${C_CYAN}Linux (X11):${C_RESET}
+        Falls back to 'xdg-screensaver' and/or 'xset' commands.
+
+    ${C_CYAN}Fallback:${C_RESET}
+        If no system tool is available, uses a lightweight sleep loop.
+
+${C_BOLD}ENVIRONMENT${C_RESET}
+    CAFE_DURATION       Default duration in seconds (0 = indefinite)
+    CAFE_REASON         Default inhibit reason text
+    CAFE_DEBUG          Enable debug output (set to 1)
+    NO_COLOR            Disable colored output (set to 1)
+
+${C_BOLD}EXIT CODES${C_RESET}
+    0   Success (or wrapped command's exit code)
+    1   General error
+    2   No suitable inhibit method available
+    130 Interrupted (Ctrl+C)
+
+${C_BOLD}SEE ALSO${C_RESET}
+    caffeinate(8), systemd-inhibit(1), gnome-session-inhibit(1)
+
+${C_BOLD}VERSION${C_RESET}
+    ${SCRIPT_VERSION}
+
+EOF
+}
+
+# =============================================================================
+# Utilities
+# =============================================================================
+
+# Parse duration string to seconds
+parse_duration() {
+    local input="$1"
+    local total=0
+
+    # If it's just a number, assume seconds
+    if [[ "${input}" =~ ^[0-9]+$ ]]; then
+        printf '%s' "${input}"
+        return 0
+    fi
+
+    # Parse combined format like "1h30m"
+    local remaining="${input}"
+
+    # Hours
+    if [[ "${remaining}" =~ ([0-9]+)h(ours?|r)? ]]; then
+        total=$((total + BASH_REMATCH[1] * 3600))
+        remaining="${remaining/${BASH_REMATCH[0]}/}"
+    fi
+
+    # Minutes
+    if [[ "${remaining}" =~ ([0-9]+)m(in(utes?)?)? ]]; then
+        total=$((total + BASH_REMATCH[1] * 60))
+        remaining="${remaining/${BASH_REMATCH[0]}/}"
+    fi
+
+    # Seconds
+    if [[ "${remaining}" =~ ([0-9]+)s(ec(onds?)?)? ]]; then
+        total=$((total + BASH_REMATCH[1]))
+    fi
+
+    if [[ "${total}" -eq 0 ]]; then
+        die "Invalid duration format: ${input}\nExamples: 3600, 30m, 2h, 1h30m"
+    fi
+
+    printf '%s' "${total}"
+}
+
+# Format seconds to human-readable
+format_duration() {
+    local seconds="$1"
+    local hours=$((seconds / 3600))
+    local minutes=$(( (seconds % 3600) / 60 ))
+    local secs=$((seconds % 60))
+
+    if [[ "${hours}" -gt 0 ]]; then
+        printf '%dh%02dm%02ds' "${hours}" "${minutes}" "${secs}"
+    elif [[ "${minutes}" -gt 0 ]]; then
+        printf '%dm%02ds' "${minutes}" "${secs}"
+    else
+        printf '%ds' "${secs}"
+    fi
+}
+
+# Detect the best available inhibit method
+detect_inhibit_method() {
+    case "$(uname -s)" in
+        Darwin)
+            if command -v caffeinate &>/dev/null; then
+                printf 'caffeinate'
+                return 0
+            fi
+            ;;
+        Linux)
+            if command -v systemd-inhibit &>/dev/null; then
+                printf 'systemd-inhibit'
+                return 0
+            fi
+            if command -v gnome-session-inhibit &>/dev/null; then
+                printf 'gnome-session-inhibit'
+                return 0
+            fi
+            if command -v xdg-screensaver &>/dev/null; then
+                printf 'xdg-screensaver'
+                return 0
+            fi
+            ;;
+    esac
+
+    # Fallback
+    printf 'fallback'
+}
+
+# Check if background cafe is running
+is_running() {
+    if [[ -f "${CAFE_PID_FILE}" ]]; then
+        local pid
+        pid=$(cat "${CAFE_PID_FILE}" 2>/dev/null || true)
+        if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
+            return 0
+        fi
+        # Stale PID file
+        rm -f "${CAFE_PID_FILE}"
+    fi
+    return 1
+}
+
+# Show status
+show_status() {
+    if is_running; then
+        local pid
+        pid=$(cat "${CAFE_PID_FILE}")
+        success "Cafe is running (PID: ${pid})"
+
+        # Try to show remaining time on macOS
+        if [[ "$(uname -s)" == "Darwin" ]]; then
+            local start elapsed
+            if stat -f %m "${CAFE_PID_FILE}" &>/dev/null; then
+                start=$(stat -f %m "${CAFE_PID_FILE}")
+                elapsed=$(($(date +%s) - start))
+                printf "%sRunning for: %s%s\n" "${C_DIM}" "$(format_duration "${elapsed}")" "${C_RESET}"
+            fi
+        fi
+        return 0
+    else
+        info "Cafe is not running"
+        return 1
+    fi
+}
+
+# Stop background cafe
+stop_cafe() {
+    if [[ -f "${CAFE_PID_FILE}" ]]; then
+        local pid
+        pid=$(cat "${CAFE_PID_FILE}" 2>/dev/null || true)
+        if [[ -n "${pid}" ]]; then
+            if kill -0 "${pid}" 2>/dev/null; then
+                kill "${pid}" 2>/dev/null || true
+                # Wait briefly for clean shutdown
+                sleep 0.5
+                # Force kill if still running
+                kill -9 "${pid}" 2>/dev/null || true
+                success "Stopped cafe (PID: ${pid})"
+            fi
+        fi
+        rm -f "${CAFE_PID_FILE}"
+    else
+        info "No background cafe found"
+    fi
+}
+
+# =============================================================================
+# Inhibit Implementations
+# =============================================================================
+
+# macOS caffeinate
+run_caffeinate() {
+    local duration="$1"
+    local display="$2"
+    local system="$3"
+    shift 3
+    local cmd=("$@")
+
+    local args=()
+
+    # -i: prevent idle sleep
+    args+=(-i)
+
+    # -d: prevent display sleep
+    [[ "${display}" == "true" ]] && args+=(-d)
+
+    # -s: prevent system sleep
+    [[ "${system}" == "true" ]] && args+=(-s)
+
+    # -t: timeout
+    if [[ "${duration}" -gt 0 ]]; then
+        args+=(-t "${duration}")
+    fi
+
+    # -w: wait for process (when wrapping a command)
+    if [[ ${#cmd[@]} -gt 0 ]]; then
+        debug "Running: caffeinate ${args[*]} -- ${cmd[*]}"
+        caffeinate "${args[@]}" -- "${cmd[@]}"
+    else
+        debug "Running: caffeinate ${args[*]}"
+        caffeinate "${args[@]}"
+    fi
+}
+
+# Linux systemd-inhibit
+run_systemd_inhibit() {
+    local duration="$1"
+    local display="$2"
+    local system="$3"
+    local reason="$4"
+    shift 4
+    local cmd=("$@")
+
+    local what="idle:sleep"
+    [[ "${display}" == "true" ]] && what="${what}:handle-lid-switch"
+
+    local args=(
+        --what="${what}"
+        --who="${SCRIPT_NAME}"
+        --why="${reason}"
+        --mode=block
+    )
+
+    if [[ ${#cmd[@]} -gt 0 ]]; then
+        debug "Running: systemd-inhibit ${args[*]} -- ${cmd[*]}"
+        systemd-inhibit "${args[@]}" -- "${cmd[@]}"
+    else
+        # No command - use sleep
+        local sleep_cmd
+        if [[ "${duration}" -gt 0 ]]; then
+            sleep_cmd="sleep ${duration}"
+        else
+            sleep_cmd="sleep infinity"
+        fi
+        debug "Running: systemd-inhibit ${args[*]} -- ${sleep_cmd}"
+        # shellcheck disable=SC2086
+        systemd-inhibit "${args[@]}" -- ${sleep_cmd}
+    fi
+}
+
+# Linux gnome-session-inhibit
+run_gnome_inhibit() {
+    local duration="$1"
+    local display="$2"
+    local system="$3"
+    local reason="$4"
+    shift 4
+    local cmd=("$@")
+
+    local what="idle:suspend"
+    [[ "${display}" == "true" ]] && what="${what}:idle"
+
+    local args=(
+        --app-id="${SCRIPT_NAME}"
+        --reason="${reason}"
+        --inhibit="${what}"
+    )
+
+    if [[ ${#cmd[@]} -gt 0 ]]; then
+        debug "Running: gnome-session-inhibit ${args[*]} -- ${cmd[*]}"
+        gnome-session-inhibit "${args[@]}" -- "${cmd[@]}"
+    else
+        local sleep_cmd
+        if [[ "${duration}" -gt 0 ]]; then
+            sleep_cmd="sleep ${duration}"
+        else
+            sleep_cmd="sleep infinity"
+        fi
+        debug "Running: gnome-session-inhibit ${args[*]} -- ${sleep_cmd}"
+        # shellcheck disable=SC2086
+        gnome-session-inhibit "${args[@]}" -- ${sleep_cmd}
+    fi
+}
+
+# X11 xdg-screensaver fallback
+run_xdg_inhibit() {
+    local duration="$1"
+    shift 3  # Skip display, system, reason
+    local cmd=("$@")
+
+    # Get a window ID (use root window if none)
+    local window_id
+    if command -v xdotool &>/dev/null; then
+        window_id=$(xdotool getactivewindow 2>/dev/null || echo "root")
+    else
+        window_id="root"
+    fi
+
+    # Start screensaver inhibit
+    xdg-screensaver suspend "${window_id}" 2>/dev/null &
+    local inhibit_pid=$!
+
+    # Cleanup on exit
+    cleanup() {
+        kill "${inhibit_pid}" 2>/dev/null || true
+        xdg-screensaver resume "${window_id}" 2>/dev/null || true
+    }
+    trap cleanup EXIT
+
+    if [[ ${#cmd[@]} -gt 0 ]]; then
+        "${cmd[@]}"
+    else
+        if [[ "${duration}" -gt 0 ]]; then
+            sleep "${duration}"
+        else
+            sleep infinity
+        fi
+    fi
+}
+
+# Fallback: just keep running
+run_fallback() {
+    local duration="$1"
+    shift 3  # Skip display, system, reason
+    local cmd=("$@")
+
+    warn "No system inhibit tool found, using fallback method"
+    info "System may still sleep - consider installing systemd-inhibit or caffeinate"
+
+    if [[ ${#cmd[@]} -gt 0 ]]; then
+        "${cmd[@]}"
+    else
+        if [[ "${duration}" -gt 0 ]]; then
+            info "Keeping awake for $(format_duration "${duration}")..."
+            sleep "${duration}"
+        else
+            info "Keeping awake indefinitely (Ctrl+C to stop)..."
+            while true; do
+                sleep 60
+            done
+        fi
+    fi
+}
+
+# =============================================================================
+# Main
+# =============================================================================
+
+main() {
+    local duration="${CAFE_DURATION}"
+    local display=false
+    local system=false
+    local background=false
+    local reason="${CAFE_REASON}"
+    local verbose=false
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -h|--help)
+                show_help
+                exit 0
+                ;;
+            --version)
+                printf "%s version %s\n" "${SCRIPT_NAME}" "${SCRIPT_VERSION}"
+                exit 0
+                ;;
+            --status)
+                show_status
+                exit $?
+                ;;
+            --stop)
+                stop_cafe
+                exit 0
+                ;;
+            -t|--time)
+                [[ $# -lt 2 ]] && die "Option $1 requires an argument"
+                duration=$(parse_duration "$2")
+                shift 2
+                ;;
+            -d|--display)
+                display=true
+                shift
+                ;;
+            -i|--idle)
+                # Idle-only is the default behavior, this is a no-op for compatibility
+                shift
+                ;;
+            -s|--system)
+                system=true
+                shift
+                ;;
+            -b|--background)
+                background=true
+                shift
+                ;;
+            -r|--reason)
+                [[ $# -lt 2 ]] && die "Option $1 requires an argument"
+                reason="$2"
+                shift 2
+                ;;
+            -v|--verbose)
+                verbose=true
+                CAFE_DEBUG=1
+                export CAFE_DEBUG
+                shift
+                ;;
+            --)
+                shift
+                break
+                ;;
+            -*)
+                die "Unknown option: $1 (use --help for usage)"
+                ;;
+            *)
+                break
+                ;;
+        esac
+    done
+
+    # Remaining args are the command to wrap
+    local cmd=("$@")
+
+    # Detect method
+    local method
+    method=$(detect_inhibit_method)
+    debug "Using inhibit method: ${method}"
+
+    # Check for existing background process
+    if [[ "${background}" == "true" ]]; then
+        if is_running; then
+            warn "Cafe is already running in background"
+            show_status
+            exit 0
+        fi
+    fi
+
+    # Show what we're doing
+    if [[ "${verbose}" == "true" || "${background}" != "true" ]]; then
+        if [[ ${#cmd[@]} -gt 0 ]]; then
+            info "Running command with sleep inhibited..."
+        elif [[ "${duration}" -gt 0 ]]; then
+            info "Keeping awake for $(format_duration "${duration}")..."
+        else
+            info "Keeping awake indefinitely (Ctrl+C to stop)..."
+        fi
+        printf "%sMethod: %s | Display: %s | System: %s%s\n" \
+            "${C_DIM}" "${method}" "${display}" "${system}" "${C_RESET}"
+    fi
+
+    # Background mode
+    if [[ "${background}" == "true" ]]; then
+        (
+            # Daemonize
+            cd /
+            exec > /dev/null 2>&1
+            exec < /dev/null
+
+            # Run the inhibit
+            case "${method}" in
+                caffeinate)
+                    run_caffeinate "${duration}" "${display}" "${system}" "${cmd[@]}"
+                    ;;
+                systemd-inhibit)
+                    run_systemd_inhibit "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"
+                    ;;
+                gnome-session-inhibit)
+                    run_gnome_inhibit "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"
+                    ;;
+                xdg-screensaver)
+                    run_xdg_inhibit "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"
+                    ;;
+                fallback)
+                    run_fallback "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"
+                    ;;
+            esac
+        ) &
+
+        local bg_pid=$!
+        printf '%s' "${bg_pid}" > "${CAFE_PID_FILE}"
+        success "Started in background (PID: ${bg_pid})"
+        printf "%sUse '%s --stop' to stop%s\n" "${C_DIM}" "${SCRIPT_NAME}" "${C_RESET}"
+        exit 0
+    fi
+
+    # Foreground mode
+    case "${method}" in
+        caffeinate)
+            run_caffeinate "${duration}" "${display}" "${system}" "${cmd[@]}"
+            ;;
+        systemd-inhibit)
+            run_systemd_inhibit "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"
+            ;;
+        gnome-session-inhibit)
+            run_gnome_inhibit "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"
+            ;;
+        xdg-screensaver)
+            run_xdg_inhibit "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"
+            ;;
+        fallback)
+            run_fallback "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"
+            ;;
+    esac
+}
+
+# Handle interrupts gracefully
+trap 'printf "\n%sStopped%s\n" "${C_DIM}" "${C_RESET}"; exit 130' INT TERM
+
+main "$@"

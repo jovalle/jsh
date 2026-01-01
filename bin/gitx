@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+
+[[ -n $DEBUG ]] && set -x
+
+set -eou pipefail
+IFS=$'\n\t'
+
+abort() {
+  echo
+  echo "\033[31m$*\033[0m" 1>&2
+  exit 1
+}
+error() { echo -e "\033[31m$*\033[0m"; }
+warn() { echo -e "\033[33m$*\033[0m"; }
+success() { echo -e "\033[32m$*\033[0m"; }
+info() { echo -e "\033[34m$*\033[0m"; }
+usage() {
+  error "Usage: git update|<git_command>"
+  exit 1
+}
+
+get_repos() {
+  repo=""
+  if [ -n "${GIT_REPOS+x}" ] && [ -n "${GIT_REPOS}" ]; then
+    if [ -n "${GIT_BASE}" ]; then
+      repo="${GIT_BASE}/"
+    fi
+    # Extract repo names from URLs
+    git_repos=()
+    for url in "${GIT_REPOS[@]}"; do
+      repo_name=$(basename "${url%%@*}" .git)
+      git_repos+=("$repo_name")
+    done
+  else
+    mapfile -t git_repos < <(find . -maxdepth 2 -type d -name .git -prune -print0 | xargs -0 -n1 dirname | grep -vE '^\.?$')
+    # Always include current directory if it is a git repo
+    if [ -d .git ]; then
+      git_repos=("$(pwd)" "${git_repos[@]}")
+    fi
+  fi
+  for git_repo in "${git_repos[@]}"; do
+    echo "$git_repo"
+  done
+}
+
+case "$1" in
+  update)
+    mapfile -t repos < <(get_repos)
+    for repo in "${repos[@]}"; do
+      if [ -z "$repo" ]; then
+        repo="$(pwd)"
+        info "No repository path provided, using current directory: $repo"
+      fi
+      if [ -n "$GIT_BASE" ]; then
+        if [ -d "$GIT_BASE/$repo/.git" ]; then
+          info "Found repository at $GIT_BASE/$repo"
+          repo="$GIT_BASE/$repo"
+        elif [ -d "$GIT_BASE/$repo" ]; then
+          info "Found repository at $GIT_BASE/$repo"
+          repo="$GIT_BASE/$repo"
+        fi
+      fi
+      if [ ! -d "$repo/.git" ]; then
+        echo "No repository at $repo"
+        exit 1
+      fi
+
+      pushd "$repo" > /dev/null || exit 1
+
+      # Stash changes if any (including untracked)
+      stash_applied=false
+      if ! git diff --quiet || ! git diff --cached --quiet || [ -n "$(git ls-files --others --exclude-standard)" ]; then
+        git stash push -u -m "Auto-stash before update $(date +%Y-%m-%dT%H:%M:%S)" || {
+          popd > /dev/null
+          exit 1
+        }
+        stash_applied=true
+      fi
+
+      # Checkout branch: prefer master, then main, then develop
+      branch=""
+      for b in master main develop; do
+        if git show-ref --verify --quiet refs/heads/$b; then
+          branch="$b"
+          break
+        fi
+      done
+      if [ -z "$branch" ]; then
+        echo "No common upstream branch (master/main/develop) found."
+        popd > /dev/null
+        exit 1
+      fi
+      git checkout "$branch" || {
+        popd > /dev/null
+        exit 1
+      }
+
+      # Pull latest
+      git pull || {
+        popd > /dev/null
+        exit 1
+      }
+
+      # Apply stash if it was created
+      if [ "$stash_applied" = true ]; then
+        git stash list | grep 'Auto-stash before update' > /dev/null && git stash pop
+        if [ $? -ne 0 ]; then
+          echo "Conflicts occurred when applying stash. Please resolve them manually."
+        fi
+      fi
+
+      popd > /dev/null
+    done
+    ;;
+  *)
+    mapfile -t repos < <(get_repos)
+    for repo in "${repos[@]}"; do
+      info "Processing repository: $repo"
+      if [ ! -d "$repo/.git" ]; then
+        warn "$repo is not a git repository, skipping."
+        continue
+      fi
+      warn "git $*"
+      pushd "$repo" > /dev/null || exit 1
+      git "$@"
+      popd > /dev/null || exit 1
+    done
+    ;;
+esac

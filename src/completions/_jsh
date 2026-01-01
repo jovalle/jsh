@@ -1,0 +1,344 @@
+#compdef jsh
+# shellcheck shell=bash
+# shellcheck disable=SC2207,SC2296,SC2034,SC2154,SC2206,SC2155,SC2128,SC1087
+# SC2207: zsh array syntax differs from bash
+# SC2296: zsh parameter expansion syntax
+# SC2034: variables used by zsh completion system
+# SC2154: variables provided by zsh completion system
+# SC2206: word splitting is intentional for zsh arrays
+# SC2155: declare and assign separately - acceptable in completions
+# SC2128: zsh array subscripting syntax differs from bash
+# SC1087: zsh uses $var[idx] not ${var[idx]}
+
+# ============================================================================
+# jsh - Zsh Completion (Dynamic)
+# ============================================================================
+# Tab completion for the jsh CLI
+# All completions are dynamically extracted from the jsh script itself
+# to stay synchronized automatically
+# ============================================================================
+
+_jsh() {
+    local curcontext="$curcontext" state line
+    typeset -A opt_args
+
+    local jsh_path="${JSH_DIR:-${HOME}/.jsh}/jsh"
+
+    _arguments -C \
+        '1: :->command' \
+        '*::arg:->args'
+
+    case $state in
+        command)
+            _jsh_commands
+            ;;
+        args)
+            case $words[1] in
+                install)
+                    _jsh_install
+                    ;;
+                uninstall)
+                    _jsh_uninstall
+                    ;;
+                dotfiles|dots)
+                    _jsh_dotfiles
+                    ;;
+                edit)
+                    _jsh_edit
+                    ;;
+                doctor|check)
+                    _jsh_doctor
+                    ;;
+                teardown|deinit)
+                    _jsh_teardown
+                    ;;
+                ssh)
+                    _ssh_hosts
+                    ;;
+                *)
+                    ;;
+            esac
+            ;;
+    esac
+}
+
+# Dynamically extract main commands from jsh help output
+_jsh_commands() {
+    local -a commands
+    local jsh_path="${JSH_DIR:-${HOME}/.jsh}/jsh"
+
+    if [[ -x "$jsh_path" ]]; then
+        # Extract commands from help output - parse command sections
+        commands=(${(f)"$(
+            "$jsh_path" help 2>/dev/null | \
+            perl -pe 's/\e\[[0-9;]*m//g' | \
+            awk '
+                /^(SETUP|PACKAGE|INFO) COMMANDS:/ || /^SSH:/ { in_section=1; next }
+                /^[A-Z]/ { in_section=0 }
+                in_section && /^    [a-z]/ {
+                    # Extract command and description
+                    line = $0
+                    gsub(/^[ \t]+/, "", line)
+                    cmd = $1
+                    desc = line
+                    sub(/^[^ \t]+[ \t]+/, "", desc)
+                    if (cmd && desc) print cmd ":" desc
+                }
+            '
+        )"})
+
+        # Also add global options
+        commands+=(
+            '-h:Show help'
+            '--help:Show help'
+            '-v:Show version'
+            '--version:Show version'
+            '-r:Reload shell configuration'
+            '--reload:Reload shell configuration'
+        )
+    fi
+
+    _describe -t commands 'jsh commands' commands
+}
+
+# Dynamically extract install options from jsh script
+_jsh_install() {
+    local -a pm_flags
+    local jsh_path="${JSH_DIR:-${HOME}/.jsh}/jsh"
+
+    # Extract package manager flags from cmd_install function
+    if [[ -f "$jsh_path" ]]; then
+        pm_flags=(${(f)"$(
+            awk '
+                /^cmd_install\(\)/ { in_func=1 }
+                in_func && /^}$/ { in_func=0 }
+                in_func && /--[a-z]+\)/ {
+                    match($0, /--[a-z]+/)
+                    flag = substr($0, RSTART, RLENGTH)
+                    if (flag && flag != "--save" && flag != "--all") {
+                        gsub(/--/, "", flag)
+                        print flag
+                    }
+                }
+            ' "$jsh_path" | sort -u
+        )"})
+    fi
+
+    # Build arguments dynamically
+    local -a args
+    args=(
+        '(-a --all)'{-a,--all}'[Install all packages from config]'
+        '(-s --save)'{-s,--save}'[Save package to config after install]'
+    )
+
+    # Add package manager flags
+    for pm in "${pm_flags[@]}"; do
+        [[ -z "$pm" ]] && continue
+        args+=("--${pm}[Use ${pm}]")
+    done
+
+    args+=('*:package name:')
+
+    _arguments "${args[@]}"
+}
+
+# Dynamically extract uninstall options from jsh script
+_jsh_uninstall() {
+    local -a pm_flags packages
+    local jsh_path="${JSH_DIR:-${HOME}/.jsh}/jsh"
+
+    # Extract package manager flags from cmd_uninstall function
+    if [[ -f "$jsh_path" ]]; then
+        pm_flags=(${(f)"$(
+            awk '
+                /^cmd_uninstall\(\)/ { in_func=1 }
+                in_func && /^}$/ { in_func=0 }
+                in_func && /--[a-z]+\)/ {
+                    match($0, /--[a-z]+/)
+                    flag = substr($0, RSTART, RLENGTH)
+                    if (flag && flag != "--remove") {
+                        gsub(/--/, "", flag)
+                        print flag
+                    }
+                }
+            ' "$jsh_path" | sort -u
+        )"})
+    fi
+
+    # Get installed packages for completion
+    if command -v brew &>/dev/null; then
+        packages=(
+            ${(f)"$(brew list --formula 2>/dev/null)"}
+            ${(f)"$(brew list --cask 2>/dev/null)"}
+        )
+    fi
+
+    # Build arguments dynamically
+    local -a args
+    args=(
+        '(-r --remove)'{-r,--remove}'[Remove package from config after uninstall]'
+    )
+
+    # Add package manager flags
+    for pm in "${pm_flags[@]}"; do
+        [[ -z "$pm" ]] && continue
+        args+=("--${pm}[Use ${pm}]")
+    done
+
+    if [[ ${#packages[@]} -gt 0 ]]; then
+        args+=("*:package:($packages)")
+    else
+        args+=('*:package name:')
+    fi
+
+    _arguments "${args[@]}"
+}
+
+# Dynamically extract dotfiles subcommands from jsh script
+_jsh_dotfiles() {
+    local -a subcommands
+    local jsh_path="${JSH_DIR:-${HOME}/.jsh}/jsh"
+
+    # Extract subcommands from cmd_dotfiles function
+    if [[ -f "$jsh_path" ]]; then
+        subcommands=(${(f)"$(
+            awk '
+                /^cmd_dotfiles\(\)/ { in_func=1 }
+                in_func && /^}$/ { in_func=0 }
+                in_func && /case.*action/ { in_case=1 }
+                in_case && /esac/ { in_case=0 }
+                in_case && /^[[:space:]]+[a-z|]+\)/ {
+                    line = $0
+                    gsub(/^[[:space:]]+/, "", line)
+                    gsub(/\).*/, "", line)
+                    # Handle alternatives like "status|*"
+                    split(line, parts, "|")
+                    for (i in parts) {
+                        cmd = parts[i]
+                        gsub(/\*/, "", cmd)
+                        if (cmd && cmd !~ /^\*?$/) print cmd
+                    }
+                }
+            ' "$jsh_path" | sort -u
+        )"})
+    fi
+
+    # Build description array
+    local -a subcmd_descs
+    for cmd in "${subcommands[@]}"; do
+        case "$cmd" in
+            link)    subcmd_descs+=("link:Create symlinks for managed dotfiles") ;;
+            unlink)  subcmd_descs+=("unlink:Remove symlinks") ;;
+            restore) subcmd_descs+=("restore:Restore from backup") ;;
+            status)  subcmd_descs+=("status:Show status of dotfile symlinks") ;;
+            *)       subcmd_descs+=("${cmd}:${cmd} subcommand") ;;
+        esac
+    done
+
+    local curcontext="$curcontext" state line
+    typeset -A opt_args
+
+    _arguments -C \
+        '1: :->subcmd' \
+        '*:: :->args'
+
+    case $state in
+        subcmd)
+            _describe -t subcommands 'dotfiles subcommand' subcmd_descs
+            ;;
+        args)
+            case $line[1] in
+                restore)
+                    _jsh_dotfiles_restore
+                    ;;
+            esac
+            ;;
+    esac
+}
+
+_jsh_dotfiles_restore() {
+    local backup_dir="${HOME}/.jsh_backup"
+    local -a backups
+
+    backups=('latest:Restore from the most recent backup')
+
+    if [[ -d "$backup_dir" ]]; then
+        local -a backup_dirs
+        backup_dirs=(${(f)"$(find "$backup_dir" -maxdepth 1 -type d -name '[0-9]*' 2>/dev/null | sort -r)"})
+
+        for backup in "${backup_dirs[@]}"; do
+            local backup_name=$(basename "$backup")
+            backups+=("${backup_name}:Backup from ${backup_name}")
+        done
+    fi
+
+    _describe -t backups 'available backups' backups
+}
+
+# Dynamically extract edit targets from jsh script
+_jsh_edit() {
+    local -a configs
+    local jsh_path="${JSH_DIR:-${HOME}/.jsh}/jsh"
+
+    # Extract edit targets from cmd_edit function's case statement
+    if [[ -f "$jsh_path" ]]; then
+        configs=(${(f)"$(
+            awk '
+                /^cmd_edit\(\)/ { in_func=1 }
+                in_func && /^}$/ { exit }
+                in_func && /case.*file/ { in_case=1 }
+                in_case && /esac/ { in_case=0 }
+                in_case && /^[[:space:]]+[a-z0-9|]+\)/ {
+                    line = $0
+                    gsub(/^[[:space:]]+/, "", line)
+                    gsub(/\).*/, "", line)
+                    # Handle alternatives like "zsh|zshrc" or "p10k|prompt"
+                    split(line, parts, "|")
+                    for (i in parts) {
+                        cmd = parts[i]
+                        # Skip empty, wildcards, and quoted strings
+                        if (cmd && cmd !~ /^[\"\*]/ && cmd !~ /^\*?$/) {
+                            print cmd
+                        }
+                    }
+                }
+            ' "$jsh_path" | sort -u
+        )"})
+    fi
+
+    # Build description array with intelligent descriptions
+    local -a config_descs
+    for cfg in "${configs[@]}"; do
+        case "$cfg" in
+            zsh|zshrc)       config_descs+=("${cfg}:Edit zsh configuration") ;;
+            bash|bashrc)     config_descs+=("${cfg}:Edit bash configuration") ;;
+            aliases)         config_descs+=("${cfg}:Edit shell aliases") ;;
+            functions)       config_descs+=("${cfg}:Edit shell functions") ;;
+            p10k|prompt)     config_descs+=("${cfg}:Edit powerlevel10k config") ;;
+            tmux)            config_descs+=("${cfg}:Edit tmux configuration") ;;
+            git|gitconfig)   config_descs+=("${cfg}:Edit git configuration") ;;
+            nvim|neovim)     config_descs+=("${cfg}:Edit neovim configuration") ;;
+            vscode|code)     config_descs+=("${cfg}:Edit VSCode settings") ;;
+            local)           config_descs+=("${cfg}:Edit local overrides") ;;
+            *)               config_descs+=("${cfg}:Edit ${cfg} configuration") ;;
+        esac
+    done
+
+    _describe -t configs 'config file' config_descs
+}
+
+# Doctor command options
+_jsh_doctor() {
+    _arguments \
+        '(-f --fix)'{-f,--fix}'[Fix issues (remove broken symlinks)]'
+}
+
+# Teardown command options
+_jsh_teardown() {
+    _arguments \
+        '--full[Remove entire Jsh directory]' \
+        '(-r --restore)'{-r,--restore}'[Restore backed up dotfiles]' \
+        '(-y --yes)'{-y,--yes}'[Skip confirmation prompt]'
+}
+
+_jsh "$@"
