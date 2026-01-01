@@ -1,0 +1,281 @@
+# gitconfig - Jsh git configuration
+# Include local config with: git config --global include.path ~/.gitconfig
+
+[core]
+    editor = vim
+    pager = less -FRX
+    autocrlf = input
+    safecrlf = warn
+    whitespace = fix,-indent-with-non-tab,trailing-space,cr-at-eol
+    excludesfile = ~/.gitignore
+    attributesfile = ~/.gitattributes
+    # Performance for large repos
+    preloadindex = true
+    fscache = true
+    untrackedCache = true
+
+[init]
+    defaultBranch = main
+
+[commit]
+    verbose = true
+    gpgsign = false
+
+[push]
+    default = current
+    autoSetupRemote = true
+    followTags = true
+
+[pull]
+    rebase = true
+    ff = only
+
+[fetch]
+    prune = true
+    pruneTags = true
+    parallel = 0
+
+[merge]
+    ff = false
+    conflictstyle = zdiff3
+    tool = vimdiff
+
+[rebase]
+    autoSquash = true
+    autoStash = true
+
+[diff]
+    algorithm = histogram
+    colorMoved = zebra
+    colorMovedWS = allow-indentation-change
+    tool = vimdiff
+
+[branch]
+    autoSetupMerge = always
+    autoSetupRebase = always
+    sort = -committerdate
+
+[tag]
+    sort = -version:refname
+
+[status]
+    showStash = true
+    showUntrackedFiles = all
+
+[stash]
+    showPatch = true
+
+[log]
+    abbrevCommit = true
+    decorate = short
+
+[rerere]
+    enabled = true
+
+[help]
+    autocorrect = prompt
+
+[color]
+    ui = auto
+
+[color "branch"]
+    current = yellow bold
+    local = green
+    remote = cyan
+
+[color "diff"]
+    meta = yellow bold
+    frag = magenta bold
+    old = red bold
+    new = green bold
+    whitespace = red reverse
+
+[color "status"]
+    added = green
+    changed = yellow
+    untracked = cyan
+
+# =============================================================================
+# Aliases
+# =============================================================================
+
+[alias]
+    # Status
+    s = status -sb
+    st = status
+
+    # Log
+    l = log --oneline -20
+    lg = log --graph --pretty=format:'%Cred%h%Creset -%C(yellow)%d%Creset %s %Cgreen(%cr) %C(bold blue)<%an>%Creset' --abbrev-commit
+    ll = log --oneline --all --graph --decorate
+    last = log -1 HEAD --stat
+
+    # Diff
+    d = diff
+    ds = diff --staged
+    dc = diff --cached
+    dw = diff --word-diff
+
+    # Commit
+    c = commit
+    cm = commit -m
+    ca = commit --amend
+    can = commit --amend --no-edit
+    cane = commit --amend --no-edit
+
+    # Checkout / Branch
+    co = checkout
+    cb = checkout -b
+    sw = switch
+    sc = switch -c
+    br = branch
+    bra = branch -a
+    brd = branch -d
+    brD = branch -D
+
+    # Add
+    a = add
+    aa = add --all
+    ap = add -p
+
+    # Stash
+    ss = stash
+    sp = stash pop
+    sl = stash list
+    sd = stash drop
+    sa = stash apply
+
+    # Push / Pull
+    p = push
+    pf = push --force-with-lease
+    pu = push -u origin HEAD
+    pl = pull
+    pr = pull --rebase
+
+    # Fetch
+    f = fetch
+    fa = fetch --all --prune
+
+    # Merge / Rebase
+    m = merge
+    rb = rebase
+    rbi = rebase -i
+    rbc = rebase --continue
+    rba = rebase --abort
+
+    # Reset
+    rs = reset
+    rsh = reset --hard
+    rss = reset --soft
+    undo = reset --soft HEAD~1
+
+    # Cherry-pick
+    cp = cherry-pick
+    cpc = cherry-pick --continue
+    cpa = cherry-pick --abort
+
+    # Remote
+    rv = remote -v
+    ra = remote add
+    rr = remote remove
+
+    # Tags
+    t = tag
+    ta = tag -a
+
+    # WIP commits
+    wip = !git add -A && git commit -m 'WIP'
+    unwip = !git log -1 --format='%s' | grep -q '^WIP' && git reset HEAD~1
+
+    # Cleanup
+    cleanup = !git branch --merged | grep -v '\\*\\|main\\|master\\|develop' | xargs -n 1 git branch -d
+    cleanupremote = !git fetch -p && git branch -vv | grep ': gone]' | awk '{print $1}' | xargs -r git branch -d
+
+    # Search
+    find = log --pretty=format:'%C(yellow)%h %Cblue%ad %Creset%s %Cgreen[%an]%Cred%d' --decorate --date=short --all --grep
+    search = log --pretty=format:'%C(yellow)%h %Cblue%ad %Creset%s %Cgreen[%an]%Cred%d' --decorate --date=short --all -S
+
+    # Info
+    aliases = config --get-regexp alias
+    contributors = shortlog -sn --all
+    count = rev-list --count HEAD
+    root = rev-parse --show-toplevel
+
+    # Diff tools
+    dt = difftool
+    mt = mergetool
+
+# =============================================================================
+# URL Shortcuts
+# =============================================================================
+
+[url "git@github.com:"]
+    insteadOf = gh:
+    pushInsteadOf = https://github.com/
+
+[url "git@gitlab.com:"]
+    insteadOf = gl:
+
+[url "git@bitbucket.org:"]
+    insteadOf = bb:
+
+# =============================================================================
+# Tools
+# =============================================================================
+
+[difftool]
+    prompt = false
+
+[mergetool]
+    prompt = false
+    keepBackup = false
+
+[difftool "vimdiff"]
+    cmd = vim -d "$LOCAL" "$REMOTE"
+
+[mergetool "vimdiff"]
+    cmd = vim -d "$LOCAL" "$MERGED" "$REMOTE"
+
+# =============================================================================
+# Delta (if available)
+# =============================================================================
+
+[pager]
+    diff = "command -v delta >/dev/null && delta || less -FRX"
+    log = "command -v delta >/dev/null && delta || less -FRX"
+    reflog = "command -v delta >/dev/null && delta || less -FRX"
+    show = "command -v delta >/dev/null && delta || less -FRX"
+
+[delta]
+    navigate = true
+    line-numbers = true
+    side-by-side = false
+    syntax-theme = base16
+
+[interactive]
+    diffFilter = "command -v delta >/dev/null && delta --color-only || cat"
+
+# =============================================================================
+# Maintenance
+# =============================================================================
+
+[gc]
+    auto = 256
+    autoDetach = true
+
+[pack]
+    threads = 0
+
+# =============================================================================
+# Local Overrides
+# =============================================================================
+
+[include]
+    path = ~/.gitconfig.local
+[filter "lfs"]
+	clean = git-lfs clean -- %f
+	smudge = git-lfs smudge -- %f
+	process = git-lfs filter-process
+	required = true
+[lfs]
+	fetchinclude = *

@@ -1,0 +1,492 @@
+#!/usr/bin/env bash
+# shellcheck shell=bash
+# ipmi - IPMI remote management interface wrapper
+#
+# Simplifies common IPMI operations, especially fan control for homelab servers.
+# Wraps ipmitool with sensible defaults and credential management.
+#
+# Usage: ipmi [options] <command> [args...]
+
+set -euo pipefail
+
+# =============================================================================
+# Configuration
+# =============================================================================
+
+readonly SCRIPT_NAME="${0##*/}"
+readonly SCRIPT_VERSION="1.0.0"
+
+# IPMI connection settings (override via environment or config file)
+IPMI_HOST="${IPMI_HOST:-}"
+IPMI_USER="${IPMI_USER:-}"
+IPMI_PASS="${IPMI_PASS:-}"
+IPMI_CRED_FILE="${IPMI_CRED_FILE:-}"
+IPMI_INTERFACE="${IPMI_INTERFACE:-lanplus}"
+
+# Config file location
+readonly IPMI_CONFIG_FILE="${XDG_CONFIG_HOME:-${HOME}/.config}/ipmi/config"
+
+# Fan control constants (Dell PowerEdge specific)
+# These raw commands work on Dell R720, R730, etc.
+readonly RAW_DISABLE_AUTO_FAN="0x30 0x30 0x01 0x00"
+readonly RAW_ENABLE_AUTO_FAN="0x30 0x30 0x01 0x01"
+readonly RAW_SET_FAN_SPEED="0x30 0x30 0x02 0xff"
+
+# =============================================================================
+# Colors & Output
+# =============================================================================
+
+if [[ -t 1 ]] && [[ "${NO_COLOR:-}" != "1" ]]; then
+    readonly C_RESET='\033[0m'
+    readonly C_RED='\033[0;31m'
+    readonly C_GREEN='\033[0;32m'
+    readonly C_YELLOW='\033[0;33m'
+    readonly C_BLUE='\033[0;34m'
+    readonly C_CYAN='\033[0;36m'
+    readonly C_BOLD='\033[1m'
+    readonly C_DIM='\033[2m'
+else
+    readonly C_RESET='' C_RED='' C_GREEN='' C_YELLOW=''
+    # shellcheck disable=SC2034
+    readonly C_BLUE='' C_CYAN='' C_BOLD='' C_DIM=''
+fi
+
+# Output helpers - color variables are safe in format strings here
+die()     { printf "%s%serror:%s %s\n" "${C_RED}" "${C_BOLD}" "${C_RESET}" "$*" >&2; exit 1; }
+warn()    { printf "%s%swarn:%s %s\n" "${C_YELLOW}" "${C_BOLD}" "${C_RESET}" "$*" >&2; }
+success() { printf "%s%ssuccess:%s %s\n" "${C_GREEN}" "${C_BOLD}" "${C_RESET}" "$*"; }
+info()    { printf "%sinfo:%s %s\n" "${C_BLUE}" "${C_RESET}" "$*"; }
+debug()   { [[ "${IPMI_DEBUG:-0}" == "1" ]] && printf "%sdebug: %s%s\n" "${C_DIM}" "$*" "${C_RESET}" >&2 || true; }
+
+# =============================================================================
+# Help
+# =============================================================================
+
+show_help() {
+    cat << EOF
+${C_BOLD}ipmi${C_RESET} - IPMI remote management interface wrapper
+
+${C_BOLD}USAGE${C_RESET}
+    ${SCRIPT_NAME} [options] <command> [args...]
+    ${SCRIPT_NAME} fan <speed>
+    ${SCRIPT_NAME} sensors
+
+${C_BOLD}DESCRIPTION${C_RESET}
+    Wraps ipmitool for common server management tasks with simplified syntax
+    and sensible defaults. Particularly useful for homelab fan control on
+    Dell PowerEdge servers (R720, R730, etc.).
+
+${C_BOLD}COMMANDS${C_RESET}
+    fan <speed|auto>    Set fan speed (0-100 percent) or restore automatic
+    sensors             Show sensor readings (temperatures, voltages, fans)
+    power <on|off|cycle|status>
+                        Control server power state
+    sol                 Start Serial-over-LAN console
+    info                Show system information (FRU data)
+    raw <bytes...>      Send raw IPMI command
+    <ipmitool-cmd>      Any other ipmitool subcommand (passed through)
+
+${C_BOLD}OPTIONS${C_RESET}
+    -H, --host HOST     IPMI host address (or set IPMI_HOST)
+    -U, --user USER     IPMI username (or set IPMI_USER)
+    -P, --pass PASS     IPMI password (or set IPMI_PASS)
+    -f, --file FILE     Password file (or set IPMI_CRED_FILE)
+    -I, --interface IF  Interface type (default: lanplus)
+    -v, --verbose       Enable verbose output
+    -h, --help          Show this help message
+    --version           Show version information
+    --setup             Interactive setup wizard
+
+${C_BOLD}FAN CONTROL${C_RESET}
+    The fan command works on Dell PowerEdge servers with iDRAC. It:
+    1. Disables automatic fan control
+    2. Sets all fans to the specified percentage
+
+    Use '${SCRIPT_NAME} fan auto' to restore automatic control.
+
+    ${C_YELLOW}WARNING:${C_RESET} Setting fans too low can cause thermal throttling or damage.
+    Monitor temperatures when using manual fan control.
+
+${C_BOLD}EXAMPLES${C_RESET}
+    # Set fans to 20% (quiet mode for low load)
+    ${SCRIPT_NAME} fan 20
+
+    # Restore automatic fan control
+    ${SCRIPT_NAME} fan auto
+
+    # Check temperatures
+    ${SCRIPT_NAME} sensors | grep -i temp
+
+    # Power cycle server
+    ${SCRIPT_NAME} power cycle
+
+    # View system info
+    ${SCRIPT_NAME} info
+
+    # Connect to serial console
+    ${SCRIPT_NAME} sol
+
+    # Using explicit credentials
+    ${SCRIPT_NAME} -H 192.168.1.100 -U root -P password sensors
+
+${C_BOLD}CONFIGURATION${C_RESET}
+    Credentials can be set via:
+    1. Command-line options (-H, -U, -P, -f)
+    2. Environment variables (IPMI_HOST, IPMI_USER, IPMI_PASS, IPMI_CRED_FILE)
+    3. Config file: ${IPMI_CONFIG_FILE}
+
+    Config file format (shell):
+        IPMI_HOST=192.168.1.100
+        IPMI_USER=root
+        IPMI_CRED_FILE=~/.config/ipmi/password
+
+    ${C_YELLOW}TIP:${C_RESET} Use a password file instead of IPMI_PASS to avoid credentials
+    in environment/history. Create with: echo 'password' > ~/.config/ipmi/password
+
+${C_BOLD}ENVIRONMENT${C_RESET}
+    IPMI_HOST           IPMI/BMC host address
+    IPMI_USER           IPMI username
+    IPMI_PASS           IPMI password (prefer IPMI_CRED_FILE)
+    IPMI_CRED_FILE      Path to file containing password
+    IPMI_INTERFACE      Interface type (default: lanplus)
+    IPMI_DEBUG          Enable debug output (set to 1)
+    NO_COLOR            Disable colored output (set to 1)
+
+${C_BOLD}EXIT CODES${C_RESET}
+    0   Success
+    1   General error
+    2   Missing requirements (ipmitool, credentials)
+    3   Invalid arguments
+
+${C_BOLD}VERSION${C_RESET}
+    ${SCRIPT_VERSION}
+
+EOF
+}
+
+# =============================================================================
+# Utilities
+# =============================================================================
+
+# Load config file if it exists
+load_config() {
+    if [[ -f "${IPMI_CONFIG_FILE}" ]]; then
+        debug "Loading config from ${IPMI_CONFIG_FILE}"
+        # shellcheck source=/dev/null
+        source "${IPMI_CONFIG_FILE}"
+    fi
+}
+
+# Check requirements
+require_ipmitool() {
+    if ! command -v ipmitool &>/dev/null; then
+        die "ipmitool is required but not installed.\nInstall with: brew install ipmitool (macOS) or apt install ipmitool (Linux)"
+    fi
+}
+
+# Validate credentials are set
+require_credentials() {
+    if [[ -z "${IPMI_HOST}" ]]; then
+        die "IPMI_HOST not set. Use -H option, IPMI_HOST env var, or run: ${SCRIPT_NAME} --setup"
+    fi
+    if [[ -z "${IPMI_USER}" ]]; then
+        die "IPMI_USER not set. Use -U option, IPMI_USER env var, or run: ${SCRIPT_NAME} --setup"
+    fi
+    if [[ -z "${IPMI_PASS}" && -z "${IPMI_CRED_FILE}" ]]; then
+        die "IPMI password not set. Use -P/-f option, IPMI_PASS/IPMI_CRED_FILE env var, or run: ${SCRIPT_NAME} --setup"
+    fi
+    if [[ -n "${IPMI_CRED_FILE}" && ! -f "${IPMI_CRED_FILE}" ]]; then
+        die "Password file not found: ${IPMI_CRED_FILE}"
+    fi
+}
+
+# Build ipmitool command
+ipmi_cmd() {
+    local cmd=(ipmitool -I "${IPMI_INTERFACE}" -H "${IPMI_HOST}" -U "${IPMI_USER}")
+
+    if [[ -n "${IPMI_CRED_FILE}" ]]; then
+        cmd+=(-f "${IPMI_CRED_FILE}")
+    elif [[ -n "${IPMI_PASS}" ]]; then
+        cmd+=(-P "${IPMI_PASS}")
+    fi
+
+    debug "Running: ${cmd[*]} $*"
+    "${cmd[@]}" "$@"
+}
+
+# Interactive setup wizard
+setup_wizard() {
+    printf "%sIPMI Configuration Setup%s\n" "${C_BOLD}" "${C_RESET}"
+    printf "%s─────────────────────────%s\n\n" "${C_DIM}" "${C_RESET}"
+
+    local config_dir
+    config_dir="$(dirname "${IPMI_CONFIG_FILE}")"
+
+    # Get host
+    printf "IPMI/BMC Host address: "
+    read -r host
+    [[ -z "${host}" ]] && die "Host is required"
+
+    # Get username
+    printf "Username [root]: "
+    read -r user
+    user="${user:-root}"
+
+    # Get password method
+    printf "\nHow would you like to store the password?\n"
+    printf "  1) Password file (recommended)\n"
+    printf "  2) Environment variable in config\n"
+    printf "Choice [1]: "
+    read -r choice
+    choice="${choice:-1}"
+
+    local pass_config=""
+    if [[ "${choice}" == "1" ]]; then
+        local pass_file="${config_dir}/password"
+        printf "\nPassword file path [%s]: " "${pass_file}"
+        read -r custom_path
+        pass_file="${custom_path:-${pass_file}}"
+
+        printf "Enter password (will not echo): "
+        read -rs password
+        printf "\n"
+        [[ -z "${password}" ]] && die "Password is required"
+
+        mkdir -p "$(dirname "${pass_file}")"
+        printf '%s' "${password}" > "${pass_file}"
+        chmod 600 "${pass_file}"
+        success "Password saved to ${pass_file}"
+        pass_config="IPMI_CRED_FILE=\"${pass_file}\""
+    else
+        printf "Enter password (will be stored in config): "
+        read -rs password
+        printf "\n"
+        [[ -z "${password}" ]] && die "Password is required"
+        pass_config="IPMI_PASS=\"${password}\""
+    fi
+
+    # Create config directory
+    mkdir -p "${config_dir}"
+
+    # Write config
+    cat > "${IPMI_CONFIG_FILE}" << EOF
+# IPMI Configuration
+# Generated by: ${SCRIPT_NAME} --setup
+
+IPMI_HOST="${host}"
+IPMI_USER="${user}"
+${pass_config}
+IPMI_INTERFACE="lanplus"
+EOF
+
+    chmod 600 "${IPMI_CONFIG_FILE}"
+    success "Configuration saved to ${IPMI_CONFIG_FILE}"
+
+    # Test connection
+    printf "\nTesting connection..."
+    load_config
+    if ipmi_cmd power status &>/dev/null; then
+        success "Connection successful!"
+    else
+        warn "Connection test failed. Please verify credentials."
+    fi
+}
+
+# =============================================================================
+# Commands
+# =============================================================================
+
+# Fan control (Dell PowerEdge specific)
+cmd_fan() {
+    local speed="$1"
+
+    if [[ "${speed}" == "auto" ]]; then
+        info "Restoring automatic fan control..."
+        # shellcheck disable=SC2086
+        if ipmi_cmd raw ${RAW_ENABLE_AUTO_FAN}; then
+            success "Automatic fan control enabled"
+        else
+            die "Failed to enable automatic fan control"
+        fi
+        return 0
+    fi
+
+    # Validate speed is numeric and in range
+    if ! [[ "${speed}" =~ ^[0-9]+$ ]]; then
+        die "Fan speed must be a number (0-100) or 'auto'"
+    fi
+
+    if [[ "${speed}" -lt 0 || "${speed}" -gt 100 ]]; then
+        die "Fan speed must be between 0 and 100 percent"
+    fi
+
+    # Convert percentage to hex (0-255 scale internally, but Dell uses 0-100%)
+    # Dell actually uses percentage directly, but some systems use 0-255
+    local hex_speed
+    hex_speed=$(printf '%02x' "${speed}")
+
+    warn "Setting fans to ${speed}% - monitor temperatures!"
+    info "Disabling automatic fan control..."
+    # shellcheck disable=SC2086
+    ipmi_cmd raw ${RAW_DISABLE_AUTO_FAN} || die "Failed to disable auto fan"
+
+    info "Setting fan speed to ${speed}%..."
+    # shellcheck disable=SC2086
+    if ipmi_cmd raw ${RAW_SET_FAN_SPEED} "0x${hex_speed}"; then
+        success "Fan speed set to ${speed}%"
+        printf "\n%sTip: Use '%s sensors | grep -i fan' to verify%s\n" "${C_DIM}" "${SCRIPT_NAME}" "${C_RESET}"
+        printf "%sTip: Use '%s fan auto' to restore automatic control%s\n" "${C_DIM}" "${SCRIPT_NAME}" "${C_RESET}"
+    else
+        warn "Raw command may have failed - verifying..."
+        ipmi_cmd sdr type fan
+    fi
+}
+
+# Show sensors
+cmd_sensors() {
+    info "Fetching sensor data..."
+    ipmi_cmd sdr elist full
+}
+
+# Power control
+cmd_power() {
+    local action="${1:-status}"
+
+    case "${action}" in
+        on|off|cycle|reset|status)
+            ipmi_cmd power "${action}"
+            ;;
+        *)
+            die "Unknown power action: ${action} (valid: on, off, cycle, reset, status)"
+            ;;
+    esac
+}
+
+# Serial-over-LAN console
+cmd_sol() {
+    info "Starting Serial-over-LAN console..."
+    printf "%s(Use ~. to disconnect)%s\n" "${C_DIM}" "${C_RESET}"
+    ipmi_cmd sol activate
+}
+
+# System info
+cmd_info() {
+    info "System Information:"
+    printf "\n%sBMC Info:%s\n" "${C_BOLD}" "${C_RESET}"
+    ipmi_cmd bmc info 2>/dev/null || true
+    printf "\n%sFRU Info:%s\n" "${C_BOLD}" "${C_RESET}"
+    ipmi_cmd fru print 2>/dev/null || true
+}
+
+# =============================================================================
+# Main
+# =============================================================================
+
+main() {
+    local subcommand=""
+
+    # Load config file first (can be overridden by CLI args)
+    load_config
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -h|--help)
+                show_help
+                exit 0
+                ;;
+            --version)
+                printf "%s version %s\n" "${SCRIPT_NAME}" "${SCRIPT_VERSION}"
+                exit 0
+                ;;
+            --setup)
+                setup_wizard
+                exit 0
+                ;;
+            -H|--host)
+                [[ $# -lt 2 ]] && die "Option $1 requires an argument"
+                IPMI_HOST="$2"
+                shift 2
+                ;;
+            -U|--user)
+                [[ $# -lt 2 ]] && die "Option $1 requires an argument"
+                IPMI_USER="$2"
+                shift 2
+                ;;
+            -P|--pass)
+                [[ $# -lt 2 ]] && die "Option $1 requires an argument"
+                IPMI_PASS="$2"
+                shift 2
+                ;;
+            -f|--file)
+                [[ $# -lt 2 ]] && die "Option $1 requires an argument"
+                IPMI_CRED_FILE="$2"
+                shift 2
+                ;;
+            -I|--interface)
+                [[ $# -lt 2 ]] && die "Option $1 requires an argument"
+                IPMI_INTERFACE="$2"
+                shift 2
+                ;;
+            -v|--verbose)
+                IPMI_DEBUG=1
+                export IPMI_DEBUG
+                shift
+                ;;
+            -*)
+                die "Unknown option: $1 (use --help for usage)"
+                ;;
+            *)
+                subcommand="$1"
+                shift
+                break
+                ;;
+        esac
+    done
+
+    # Check requirements
+    require_ipmitool
+
+    # Handle no command
+    if [[ -z "${subcommand}" ]]; then
+        show_help
+        exit 0
+    fi
+
+    # Validate credentials for all commands
+    require_credentials
+
+    # Dispatch command
+    case "${subcommand}" in
+        fan)
+            [[ $# -lt 1 ]] && die "Usage: ${SCRIPT_NAME} fan <speed|auto>"
+            cmd_fan "$1"
+            ;;
+        sensors|sensor)
+            cmd_sensors
+            ;;
+        power)
+            cmd_power "${1:-status}"
+            ;;
+        sol|console)
+            cmd_sol
+            ;;
+        info|fru)
+            cmd_info
+            ;;
+        raw)
+            [[ $# -lt 1 ]] && die "Usage: ${SCRIPT_NAME} raw <bytes...>"
+            ipmi_cmd raw "$@"
+            ;;
+        *)
+            # Pass through to ipmitool
+            debug "Passing through to ipmitool: ${subcommand} $*"
+            ipmi_cmd "${subcommand}" "$@"
+            ;;
+    esac
+}
+
+# Handle interrupts
+trap 'printf "\n"; exit 130' INT TERM
+
+main "$@"

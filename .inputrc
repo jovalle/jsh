@@ -1,0 +1,153 @@
+# inputrc - Readline configuration
+# Used by bash, python, mysql, and other readline-based programs
+
+# =============================================================================
+# General Settings
+# =============================================================================
+
+# Vi editing mode
+set editing-mode vi
+
+# Show mode in prompt (insert/command)
+set show-mode-in-prompt on
+
+# Mode indicators (cursor shape changes)
+set vi-ins-mode-string \1\e[6 q\2
+set vi-cmd-mode-string \1\e[2 q\2
+
+# Completion settings
+set completion-ignore-case on
+set completion-map-case on
+set show-all-if-ambiguous on
+set show-all-if-unmodified on
+set menu-complete-display-prefix on
+set completion-prefix-display-length 2
+
+# Colored completion
+set colored-stats on
+set colored-completion-prefix on
+set visible-stats on
+
+# Mark symlinked directories
+set mark-symlinked-directories on
+
+# Paging
+set page-completions off
+
+# History
+set revert-all-at-newline on
+set history-preserve-point on
+
+# Disable bell
+set bell-style none
+
+# =============================================================================
+# Vi Insert Mode Bindings
+# =============================================================================
+
+set keymap vi-insert
+
+# jj to exit insert mode
+"jj": vi-movement-mode
+
+# Ctrl+L clears screen
+"\C-l": clear-screen
+
+# History navigation (prefix search)
+"\e[A": history-search-backward
+"\e[B": history-search-forward
+"\C-p": history-search-backward
+"\C-n": history-search-forward
+
+# Word navigation
+"\e[1;5D": backward-word
+"\e[1;5C": forward-word
+"\eb": backward-word
+"\ef": forward-word
+"\e[1;3D": backward-word
+"\e[1;3C": forward-word
+
+# Line navigation
+"\C-a": beginning-of-line
+"\C-e": end-of-line
+"\e[H": beginning-of-line
+"\e[F": end-of-line
+
+# Editing
+"\C-k": kill-line
+"\C-u": unix-line-discard
+"\C-w": unix-word-rubout
+"\C-y": yank
+"\C-d": delete-char
+
+# Home/End
+"\e[1~": beginning-of-line
+"\e[4~": end-of-line
+
+# Delete
+"\e[3~": delete-char
+
+# Edit in $EDITOR
+"\C-x\C-e": edit-and-execute-command
+
+# =============================================================================
+# Vi Command Mode Bindings
+# =============================================================================
+
+set keymap vi-command
+
+# Clear screen
+"\C-l": clear-screen
+
+# History navigation
+"\e[A": history-search-backward
+"\e[B": history-search-forward
+"k": history-search-backward
+"j": history-search-forward
+"\C-p": history-search-backward
+"\C-n": history-search-forward
+
+# Beginning/End of history
+"gg": beginning-of-history
+"G": end-of-history
+
+# Edit in $EDITOR
+"v": edit-and-execute-command
+"\C-x\C-e": edit-and-execute-command
+
+# Word navigation
+"\e[1;5D": backward-word
+"\e[1;5C": forward-word
+
+# =============================================================================
+# Emacs Mode Bindings (fallback)
+# =============================================================================
+
+set keymap emacs
+
+"\e[A": history-search-backward
+"\e[B": history-search-forward
+"\e[1;5D": backward-word
+"\e[1;5C": forward-word
+"\eb": backward-word
+"\ef": forward-word
+
+# =============================================================================
+# Application-Specific Settings
+# =============================================================================
+
+$if Bash
+    # Bash-specific: Magic space expands history
+    Space: magic-space
+$endif
+
+$if Python
+    # Python REPL settings
+    set editing-mode vi
+$endif
+
+# =============================================================================
+# Include Local Overrides
+# =============================================================================
+
+$include ~/.inputrc.local

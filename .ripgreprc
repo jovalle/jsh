@@ -1,0 +1,56 @@
+# Ripgrep configuration - Jsh
+# Applied globally via RIPGREP_CONFIG_PATH
+
+# Smart case (case-insensitive unless uppercase used)
+--smart-case
+
+# Follow symlinks
+--follow
+
+# Add line numbers
+--line-number
+
+# Show column numbers
+--column
+
+# Colors
+--color=auto
+--colors=path:fg:cyan
+--colors=line:fg:green
+--colors=column:fg:yellow
+--colors=match:fg:red
+--colors=match:style:bold
+
+# Context
+--context=2
+
+# Ignore common non-code directories
+--glob=!.git/
+--glob=!node_modules/
+--glob=!.venv/
+--glob=!venv/
+--glob=!__pycache__/
+--glob=!.cache/
+--glob=!dist/
+--glob=!build/
+--glob=!target/
+--glob=!.next/
+--glob=!.nuxt/
+--glob=!coverage/
+
+# Ignore common non-text files
+--glob=!*.min.js
+--glob=!*.min.css
+--glob=!*.map
+--glob=!package-lock.json
+--glob=!yarn.lock
+--glob=!pnpm-lock.yaml
+--glob=!bun.lockb
+--glob=!*.lock
+
+# Max columns (truncate long lines)
+--max-columns=200
+--max-columns-preview
+
+# Hidden files (respect .gitignore but show hidden)
+--hidden
