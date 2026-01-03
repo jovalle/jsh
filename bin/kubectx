@@ -210,22 +210,19 @@ unset_context() {
   $KUBECTL config unset current-context
 }
 
-# Helper functions for output messages
-info() {
-  echo -e "\033[0;34m[INFO]\033[0m $*" >&2
-}
-
-success() {
-  echo -e "\033[0;32m[SUCCESS]\033[0m $*" >&2
-}
-
-error() {
-  echo -e "\033[0;31m[ERROR]\033[0m $*" >&2
-}
-
-warn() {
-  echo -e "\033[0;33m[WARN]\033[0m $*" >&2
-}
+# Source shared library for output helpers
+# shellcheck source=../lib/common.sh
+if [[ -f "${0%/*}/../lib/common.sh" ]]; then
+  source "${0%/*}/../lib/common.sh"
+elif [[ -f "${JSH_DIR:-$HOME/.jsh}/lib/common.sh" ]]; then
+  source "${JSH_DIR:-$HOME/.jsh}/lib/common.sh"
+else
+  # Fallback definitions if common.sh not found
+  info()    { echo -e "\033[0;34m·\033[0m $*" >&2; }
+  success() { echo -e "\033[0;32m✓\033[0m $*" >&2; }
+  error()   { echo -e "\033[0;31m✗\033[0m $*" >&2; }
+  warn()    { echo -e "\033[0;33m!\033[0m $*" >&2; }
+fi
 
 # Add context from kubeconfig file (kctx+ functionality)
 add_context() {
