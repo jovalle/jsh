@@ -119,7 +119,7 @@ bind '"\e[F": end-of-line' 2>/dev/null
 bind '"\C-l": clear-screen' 2>/dev/null
 
 # =============================================================================
-# Prompt (Fallback - Bash doesn't get p10k)
+# Prompt (Fallback - uses built-in prompt instead of zsh theme)
 # =============================================================================
 
 _jsh_bash_prompt() {
@@ -215,37 +215,19 @@ export docs="${HOME}/Documents"
 export jsh="${JSH_DIR}"
 
 # =============================================================================
-# FZF Integration (if fzf is available)
+# FZF Key Bindings (shell-specific; config in tools.sh)
 # =============================================================================
 
-if has fzf; then
-    # FZF default options (VS Code Dark+ theme - matches zsh)
-    export FZF_DEFAULT_OPTS="--height 40% --layout=reverse --border --inline-info"
-    export FZF_DEFAULT_OPTS="${FZF_DEFAULT_OPTS} --color=bg+:#264F78,bg:#1E1E1E,spinner:#569CD6,hl:#DCDCAA"
-    export FZF_DEFAULT_OPTS="${FZF_DEFAULT_OPTS} --color=fg:#D4D4D4,header:#569CD6,info:#6A9955,pointer:#569CD6"
-    export FZF_DEFAULT_OPTS="${FZF_DEFAULT_OPTS} --color=marker:#569CD6,fg+:#FFFFFF,prompt:#DCDCAA,hl+:#DCDCAA"
-
-    # Use fd if available
-    if has fd; then
-        export FZF_DEFAULT_COMMAND='fd --type f --hidden --follow --exclude .git'
-        export FZF_CTRL_T_COMMAND="${FZF_DEFAULT_COMMAND}"
-        export FZF_ALT_C_COMMAND='fd --type d --hidden --follow --exclude .git'
+# Source fzf key-bindings and completion (bundled with jsh)
+if has fzf && [[ -f "${JSH_DIR}/src/fzf/key-bindings.bash" ]]; then
+    source "${JSH_DIR}/src/fzf/key-bindings.bash"
+    source "${JSH_DIR}/src/fzf/completion.bash"
+else
+    # Bash already has Ctrl+R via readline, just warn in SSH sessions
+    if [[ "${JSH_ENV:-}" == "ssh" ]] && [[ -z "${_JSH_FZF_WARNED:-}" ]]; then
+        export _JSH_FZF_WARNED=1
+        printf '%s\n' "${C_MUTED:-\033[2m}[jsh] fzf not found - using standard history search (Ctrl+R)${RST:-\033[0m}" >&2
     fi
-
-    # Source fzf key-bindings and completion (bundled with jsh)
-    if [[ -f "${JSH_DIR}/src/fzf/key-bindings.bash" ]]; then
-        source "${JSH_DIR}/src/fzf/key-bindings.bash"
-        source "${JSH_DIR}/src/fzf/completion.bash"
-    fi
-fi
-# Note: Bash already has Ctrl+R reverse-search enabled by default (readline)
-
-# =============================================================================
-# Direnv Integration
-# =============================================================================
-
-if has direnv; then
-    eval "$(direnv hook bash)"
 fi
 
 # =============================================================================
