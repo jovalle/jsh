@@ -1,0 +1,767 @@
+#!/usr/bin/env bash
+# jssh - SSH with portable Jsh environment
+# Brings your shell experience to any remote host
+# Usage: jssh [ssh-options] user@host
+
+set -euo pipefail
+
+# =============================================================================
+# Configuration
+# =============================================================================
+
+JSH_DIR="${JSH_DIR:-$HOME/.jsh}"
+JSSH_CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/jssh"
+JSSH_PAYLOAD_CACHE="${JSSH_CACHE_DIR}/payload.tar.gz"
+JSSH_PAYLOAD_HASH="${JSSH_CACHE_DIR}/payload.hash"
+JSSH_TTL=3600  # Rebuild payload if older than 1 hour
+
+# Remote settings - fixed prefix for safety
+JSSH_REMOTE_PREFIX="/tmp/.jsh-portable"
+JSSH_PREFER_ZSH="${JSSH_PREFER_ZSH:-1}"
+
+# =============================================================================
+# UI Helpers
+# =============================================================================
+
+# Colors (auto-detect terminal support)
+if [[ -t 2 ]] && [[ "${TERM:-}" != "dumb" ]]; then
+    C_RESET='\033[0m'
+    C_DIM='\033[2m'
+    C_BOLD='\033[1m'
+    C_GREEN='\033[32m'
+    C_YELLOW='\033[33m'
+    C_BLUE='\033[34m'
+    C_RED='\033[31m'
+    C_CYAN='\033[36m'
+else
+    C_RESET='' C_DIM='' C_BOLD='' C_GREEN='' C_YELLOW='' C_BLUE='' C_RED='' C_CYAN=''
+fi
+
+# Spinner state
+_SPINNER_PID=""
+
+die() {
+    printf "${C_RED}✗${C_RESET} %s\n" "$*" >&2
+    exit 1
+}
+
+debug() {
+    [[ "${JSSH_DEBUG:-0}" == "1" ]] && printf "${C_DIM}[debug] %s${C_RESET}\n" "$*" >&2
+    return 0
+}
+
+# Status message (always shown)
+status() {
+    printf "${C_BLUE}→${C_RESET} %s\n" "$*" >&2
+}
+
+# Success message
+success() {
+    printf "${C_GREEN}✓${C_RESET} %s\n" "$*" >&2
+}
+
+# Warning message
+warn() {
+    printf "${C_YELLOW}!${C_RESET} %s\n" "$*" >&2
+}
+
+# Start spinner with message
+spinner_start() {
+    local msg="$1"
+    # Only show spinner if stderr is a terminal
+    if [[ ! -t 2 ]]; then
+        printf "${C_DIM}%s...${C_RESET}\n" "$msg" >&2
+        return 0
+    fi
+
+    # Kill any existing spinner
+    spinner_stop 2>/dev/null || true
+
+    # Start spinner in background
+    (
+        local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+        local i=0
+        # Hide cursor
+        printf '\033[?25l' >&2
+        while true; do
+            printf "\r${C_CYAN}%s${C_RESET} %s" "${frames[$i]}" "$msg" >&2
+            i=$(( (i + 1) % ${#frames[@]} ))
+            sleep 0.08
+        done
+    ) &
+    _SPINNER_PID=$!
+    disown $_SPINNER_PID 2>/dev/null || true
+}
+
+# Stop spinner with optional status
+spinner_stop() {
+    local status="${1:-}"
+    local msg="${2:-}"
+
+    if [[ -n "$_SPINNER_PID" ]]; then
+        kill "$_SPINNER_PID" 2>/dev/null || true
+        wait "$_SPINNER_PID" 2>/dev/null || true
+        _SPINNER_PID=""
+    fi
+
+    # Only do terminal cleanup if stderr is a terminal
+    if [[ -t 2 ]]; then
+        # Show cursor, clear line
+        printf '\033[?25h\r\033[K' >&2
+    fi
+
+    # Print final status if provided
+    if [[ -n "$status" ]] && [[ -n "$msg" ]]; then
+        case "$status" in
+            ok)      success "$msg" ;;
+            fail)    printf "${C_RED}✗${C_RESET} %s\n" "$msg" >&2 ;;
+            warn)    warn "$msg" ;;
+        esac
+    fi
+}
+
+# Cleanup spinner on exit
+trap 'spinner_stop' EXIT
+
+# =============================================================================
+# Pre-flight Checks
+# =============================================================================
+
+_jssh_check_setup() {
+    # Validate jssh setup - returns 0 if OK, 1 if issues found
+    local errors=0 warnings=0
+
+    status "Checking jssh setup..."
+
+    # Check JSH_DIR exists
+    if [[ ! -d "${JSH_DIR}" ]]; then
+        printf "${C_RED}✗${C_RESET} JSH_DIR not found: %s\n" "${JSH_DIR}" >&2
+        return 1
+    fi
+    success "Jsh directory: ${JSH_DIR}"
+
+    # Check source files
+    if [[ ! -f "${JSH_DIR}/src/init.sh" ]]; then
+        printf "${C_RED}✗${C_RESET} Missing: src/init.sh\n" >&2
+        ((errors++))
+    else
+        local src_count
+        src_count=$(find "${JSH_DIR}/src" -name "*.sh" -type f | wc -l | tr -d ' ')
+        success "Shell configs: ${src_count} files"
+    fi
+
+    # Check FZF shell integration
+    if [[ ! -d "${JSH_DIR}/src/fzf" ]]; then
+        printf "${C_YELLOW}!${C_RESET} Missing: src/fzf/ (FZF shell integration)\n" >&2
+        ((warnings++))
+    else
+        success "FZF shell integration: present"
+    fi
+
+    # Check FZF binaries
+    local fzf_platforms=0
+    for platform in linux-amd64 darwin-arm64; do
+        if [[ -x "${JSH_DIR}/lib/bin/${platform}/fzf" ]]; then
+            ((fzf_platforms++))
+        fi
+    done
+
+    if [[ ${fzf_platforms} -eq 0 ]]; then
+        printf "${C_RED}✗${C_RESET} No fzf binaries found in lib/bin/\n" >&2
+        printf "  ${C_DIM}Run: make download-binaries${C_RESET}\n" >&2
+        ((errors++))
+    elif [[ ${fzf_platforms} -lt 2 ]]; then
+        printf "${C_YELLOW}!${C_RESET} Only ${fzf_platforms}/2 fzf platform binaries found\n" >&2
+        ((warnings++))
+    else
+        local fzf_version
+        fzf_version=$("${JSH_DIR}/lib/bin/darwin-arm64/fzf" --version 2>/dev/null | cut -d' ' -f1 || echo "unknown")
+        success "FZF binaries: ${fzf_platforms} platforms (v${fzf_version})"
+    fi
+
+    # Check config files
+    local configs_ok=0
+    [[ -f "${JSH_DIR}/.inputrc" ]] && ((configs_ok++))
+    [[ -f "${JSH_DIR}/.tmux.conf" ]] && ((configs_ok++))
+    success "Config files: ${configs_ok} found"
+
+    # Check payload cache
+    if [[ -f "${JSSH_PAYLOAD_CACHE}" ]]; then
+        local payload_size payload_age
+        payload_size=$(du -h "${JSSH_PAYLOAD_CACHE}" | cut -f1 | tr -d ' ')
+        payload_age=$(( ($(date +%s) - $(stat -f%m "${JSSH_PAYLOAD_CACHE}" 2>/dev/null || stat -c%Y "${JSSH_PAYLOAD_CACHE}" 2>/dev/null || echo 0)) / 60 ))
+        success "Cached payload: ${payload_size} (${payload_age}m old)"
+    else
+        printf "${C_DIM}  No cached payload (will build on first use)${C_RESET}\n" >&2
+    fi
+
+    # Summary
+    echo "" >&2
+    if [[ ${errors} -gt 0 ]]; then
+        printf "${C_RED}✗${C_RESET} Setup incomplete: %d error(s), %d warning(s)\n" "${errors}" "${warnings}" >&2
+        return 1
+    elif [[ ${warnings} -gt 0 ]]; then
+        printf "${C_YELLOW}!${C_RESET} Setup OK with %d warning(s)\n" "${warnings}" >&2
+        return 0
+    else
+        printf "${C_GREEN}✓${C_RESET} Setup complete - ready to use\n" >&2
+        return 0
+    fi
+}
+
+# =============================================================================
+# Payload Generation
+# =============================================================================
+
+_jssh_files_hash() {
+    # Generate hash of source files for cache invalidation
+    local hash_cmd=""
+    if command -v md5sum >/dev/null 2>&1; then
+        hash_cmd="md5sum"
+    elif command -v md5 >/dev/null 2>&1; then
+        hash_cmd="md5 -r"
+    elif command -v sha256sum >/dev/null 2>&1; then
+        hash_cmd="sha256sum"
+    elif command -v shasum >/dev/null 2>&1; then
+        hash_cmd="shasum"
+    else
+        # Fallback: use file modification times as "hash"
+        find "${JSH_DIR}/src" -type f -name "*.sh" 2>/dev/null | while read -r f; do
+            stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null
+        done | sort | tr '\n' '-'
+        return
+    fi
+
+    find "${JSH_DIR}/src" -type f -name "*.sh" 2>/dev/null | \
+        sort | xargs cat 2>/dev/null | $hash_cmd | cut -d' ' -f1
+}
+
+_jssh_payload_needs_rebuild() {
+    # Check if payload needs to be rebuilt
+    [[ ! -f "${JSSH_PAYLOAD_CACHE}" ]] && return 0
+    [[ ! -f "${JSSH_PAYLOAD_HASH}" ]] && return 0
+
+    # Check age
+    local age=$(($(date +%s) - $(stat -f%m "${JSSH_PAYLOAD_CACHE}" 2>/dev/null || stat -c%Y "${JSSH_PAYLOAD_CACHE}" 2>/dev/null || echo 0)))
+    [[ "${age}" -gt "${JSSH_TTL}" ]] && return 0
+
+    # Check hash
+    local current_hash stored_hash
+    current_hash="$(_jssh_files_hash)"
+    stored_hash="$(cat "${JSSH_PAYLOAD_HASH}" 2>/dev/null)"
+    [[ "${current_hash}" != "${stored_hash}" ]] && return 0
+
+    return 1
+}
+
+_jssh_build_payload() {
+    # Build the payload tarball
+    debug "Building payload..."
+
+    mkdir -p "${JSSH_CACHE_DIR}"
+
+    local tmpdir
+    tmpdir="$(mktemp -d)"
+    trap "rm -rf '${tmpdir}'" EXIT
+
+    local payload_dir="${tmpdir}/jsh"
+    mkdir -p "${payload_dir}"/{src,config,src/fzf,bin}
+
+    # Copy shell configs from src/
+    cp "${JSH_DIR}/src"/*.sh "${payload_dir}/src/" 2>/dev/null || true
+
+    # Copy essential configs from root
+    cp "${JSH_DIR}/.inputrc" "${payload_dir}/config/inputrc" 2>/dev/null || true
+    cp "${JSH_DIR}/.tmux.conf" "${payload_dir}/config/tmux.conf" 2>/dev/null || true
+
+    # Copy fzf shell scripts from src/fzf/
+    if [[ -d "${JSH_DIR}/src/fzf" ]]; then
+        cp "${JSH_DIR}/src/fzf"/*.zsh "${payload_dir}/src/fzf/" 2>/dev/null || true
+        cp "${JSH_DIR}/src/fzf"/*.bash "${payload_dir}/src/fzf/" 2>/dev/null || true
+    fi
+
+    # Copy fzf binaries for all platforms
+    local fzf_copied=0
+    for platform in linux-amd64 darwin-arm64; do
+        if [[ -x "${JSH_DIR}/lib/bin/${platform}/fzf" ]]; then
+            mkdir -p "${payload_dir}/bin/${platform}"
+            cp "${JSH_DIR}/lib/bin/${platform}/fzf" "${payload_dir}/bin/${platform}/"
+            chmod +x "${payload_dir}/bin/${platform}/fzf"
+            ((fzf_copied++))
+            debug "  Added fzf for ${platform}"
+        fi
+    done
+    [[ ${fzf_copied} -eq 0 ]] && warn "No fzf binaries found - remote hosts won't have fzf"
+
+    # Copy vim-config (vim-plug + plugins for full editing experience)
+    if [[ -d "${JSH_DIR}/lib/vim-config" ]]; then
+        mkdir -p "${payload_dir}/lib/vim-config"
+        # Copy vimrc and autoload (vim-plug)
+        cp "${JSH_DIR}/lib/vim-config/vimrc" "${payload_dir}/lib/vim-config/" 2>/dev/null || true
+        cp -r "${JSH_DIR}/lib/vim-config/autoload" "${payload_dir}/lib/vim-config/" 2>/dev/null || true
+        # Copy pre-bundled plugins (if they exist)
+        if [[ -d "${JSH_DIR}/lib/vim-config/plugged" ]]; then
+            if command -v rsync &>/dev/null; then
+                rsync -a --safe-links --exclude='.git*' \
+                    "${JSH_DIR}/lib/vim-config/plugged" "${payload_dir}/lib/vim-config/" 2>/dev/null
+            else
+                cp -r "${JSH_DIR}/lib/vim-config/plugged" "${payload_dir}/lib/vim-config/" 2>/dev/null || true
+                find "${payload_dir}/lib/vim-config/plugged" -name '.git*' -exec rm -rf {} + 2>/dev/null || true
+            fi
+        fi
+        debug "  Added vim-config with plugins"
+    else
+        # Fallback: create minimal vimrc if vim-config doesn't exist
+        mkdir -p "${payload_dir}/lib/vim-config"
+        cat > "${payload_dir}/lib/vim-config/vimrc" << 'VIMRC'
+" Minimal vimrc for SSH sessions (fallback)
+set nocompatible encoding=utf-8
+set number relativenumber
+set tabstop=2 shiftwidth=2 expandtab smartindent
+set ignorecase smartcase hlsearch incsearch
+set cursorline scrolloff=8 splitright splitbelow
+set clipboard=unnamedplus mouse=a background=dark
+syntax on
+let mapleader=" "
+nnoremap <leader>w :w<CR>
+nnoremap <leader>q :q<CR>
+nnoremap <Esc> :nohlsearch<CR>
+inoremap jj <Esc>
+inoremap jk <Esc>
+VIMRC
+        debug "  Added minimal vimrc (vim-config not found)"
+    fi
+
+    # Copy zsh plugins (entire directory for highlighters, etc.)
+    # Use rsync to handle broken symlinks gracefully, or tar to skip them
+    if [[ -d "${JSH_DIR}/lib/zsh-plugins" ]]; then
+        if command -v rsync &>/dev/null; then
+            rsync -a --safe-links "${JSH_DIR}/lib/zsh-plugins" "${payload_dir}/lib/" 2>/dev/null
+        else
+            # Fallback: tar to skip broken symlinks
+            (cd "${JSH_DIR}/lib" && tar cf - --exclude='*.md' --exclude='.git*' zsh-plugins 2>/dev/null) | \
+                tar xf - -C "${payload_dir}/lib/" 2>/dev/null || true
+        fi
+        # Remove broken symlinks and unnecessary files
+        find "${payload_dir}/lib/zsh-plugins" -xtype l -delete 2>/dev/null || true
+        find "${payload_dir}/lib/zsh-plugins" -name '.git*' -exec rm -rf {} + 2>/dev/null || true
+        find "${payload_dir}/lib/zsh-plugins" -name '*.md' -delete 2>/dev/null || true
+        debug "  Added zsh plugins"
+    fi
+
+    # Copy fzf-tab plugin (entire directory for lib/, modules/)
+    if [[ -d "${JSH_DIR}/lib/fzf-tab" ]]; then
+        if command -v rsync &>/dev/null; then
+            rsync -a --safe-links --exclude='.git*' --exclude='.github' --exclude='test' --exclude='*.md' \
+                "${JSH_DIR}/lib/fzf-tab" "${payload_dir}/lib/" 2>/dev/null
+        else
+            cp -r "${JSH_DIR}/lib/fzf-tab" "${payload_dir}/lib/" 2>/dev/null || true
+            rm -rf "${payload_dir}/lib/fzf-tab/.git"* 2>/dev/null || true
+            rm -rf "${payload_dir}/lib/fzf-tab/.github" 2>/dev/null || true
+            rm -rf "${payload_dir}/lib/fzf-tab/test" 2>/dev/null || true
+            find "${payload_dir}/lib/fzf-tab" -name '*.md' -delete 2>/dev/null || true
+        fi
+        # Remove broken symlinks
+        find "${payload_dir}/lib/fzf-tab" -xtype l -delete 2>/dev/null || true
+        debug "  Added fzf-tab plugin"
+    fi
+
+    # Create bootstrap script for remote
+    cat > "${payload_dir}/bootstrap.sh" << 'BOOTSTRAP'
+#!/bin/sh
+# Jsh Remote Bootstrap
+
+export JSH_DIR="${JSH_EPHEMERAL}"
+export JSH_EPHEMERAL="${JSH_EPHEMERAL}"
+export JSH_ENV="ssh"
+
+# =============================================================================
+# Terminal Configuration (critical for SSH sessions)
+# =============================================================================
+
+# Ensure TERM is set (default to xterm-256color for modern terminals)
+[ -z "${TERM}" ] && export TERM="xterm-256color"
+
+# Fix terminal settings for proper key handling
+# - erase: backspace key (^? or ^H depending on terminal)
+# - kill: line kill (^U)
+# - intr: interrupt (^C)
+if [ -t 0 ]; then
+    stty sane 2>/dev/null
+    stty erase '^?' 2>/dev/null  # DEL character for backspace
+    stty kill '^U' 2>/dev/null
+    stty intr '^C' 2>/dev/null
+fi
+
+# Use bundled inputrc for readline (bash)
+if [ -f "${JSH_DIR}/config/inputrc" ]; then
+    export INPUTRC="${JSH_DIR}/config/inputrc"
+fi
+
+# =============================================================================
+# Platform Detection & Binary Path
+# =============================================================================
+
+_jsh_platform() {
+    local os arch
+    os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+    arch="$(uname -m)"
+    case "${arch}" in
+        x86_64|amd64) arch="amd64" ;;
+        aarch64|arm64) arch="arm64" ;;
+    esac
+    echo "${os}-${arch}"
+}
+
+_JSH_PLATFORM="$(_jsh_platform)"
+if [ -d "${JSH_DIR}/bin/${_JSH_PLATFORM}" ]; then
+    export PATH="${JSH_DIR}/bin/${_JSH_PLATFORM}:${PATH}"
+fi
+
+# =============================================================================
+# Shell Detection & Init
+# =============================================================================
+
+# Detect shell
+if [ -n "${ZSH_VERSION:-}" ]; then
+    export JSH_SHELL="zsh"
+elif [ -n "${BASH_VERSION:-}" ]; then
+    export JSH_SHELL="bash"
+else
+    export JSH_SHELL="sh"
+fi
+
+# Source init
+if [ -f "${JSH_DIR}/src/init.sh" ]; then
+    . "${JSH_DIR}/src/init.sh"
+fi
+
+# Setup vim/tmux with bundled configs
+alias vim="vim -u ${JSH_DIR}/lib/vim-config/vimrc"
+alias tmux="tmux -f ${JSH_DIR}/config/tmux.conf"
+export VIMINIT="source ${JSH_DIR}/lib/vim-config/vimrc"
+BOOTSTRAP
+
+    # Create tarball (use --no-xattrs to avoid macOS extended attributes)
+    tar --no-xattrs -czf "${JSSH_PAYLOAD_CACHE}" -C "${tmpdir}" jsh 2>/dev/null || \
+        tar -czf "${JSSH_PAYLOAD_CACHE}" -C "${tmpdir}" jsh
+
+    # Save hash
+    _jssh_files_hash > "${JSSH_PAYLOAD_HASH}"
+
+    debug "Payload built: $(du -h "${JSSH_PAYLOAD_CACHE}" | cut -f1)"
+
+    trap - EXIT
+    rm -rf "${tmpdir}"
+}
+
+_jssh_get_payload() {
+    # Get payload (build if needed)
+    if _jssh_payload_needs_rebuild; then
+        _jssh_build_payload
+    fi
+    echo "${JSSH_PAYLOAD_CACHE}"
+}
+
+# =============================================================================
+# SSH Execution (Two-Stage Approach)
+# =============================================================================
+
+_jssh_transfer_script() {
+    # Script to receive and extract payload on remote
+    # This runs non-interactively to receive the tarball
+    cat << 'TRANSFER'
+set -e
+JSSH_SAFE_PREFIX="/tmp/.jsh-portable"
+
+# Generate unique session ID
+if [ -r /dev/urandom ]; then
+    JSSH_ID="$(head -c 8 /dev/urandom | od -An -tx1 2>/dev/null | tr -d ' \n')"
+else
+    JSSH_ID="$$-$(date +%s)"
+fi
+[ -z "${JSSH_ID}" ] && JSSH_ID="$$-$(date +%s)"
+
+JSH_TMP="${JSSH_SAFE_PREFIX}-${USER:-unknown}-${JSSH_ID}"
+mkdir -p "${JSH_TMP}"
+touch "${JSH_TMP}/.jssh-marker"
+
+# Extract payload from stdin
+tar -xzf - -C "${JSH_TMP}"
+
+# Verify and output the path for stage 2
+if [ -d "${JSH_TMP}/jsh" ] && [ -f "${JSH_TMP}/jsh/bootstrap.sh" ]; then
+    echo "${JSH_TMP}"
+else
+    rm -rf "${JSH_TMP}"
+    echo "FAILED" >&2
+    exit 1
+fi
+TRANSFER
+}
+
+_jssh_launch_script() {
+    # Script to launch interactive shell (stage 2)
+    # $1 = JSH_TMP path from stage 1
+    local jsh_tmp="$1"
+
+    cat << LAUNCH
+set -e
+JSH_TMP="${jsh_tmp}"
+export JSH_EPHEMERAL="\${JSH_TMP}/jsh"
+
+# Safety cleanup on exit
+_cleanup() {
+    local target="\${JSH_TMP}"
+    [ -z "\${target}" ] && return
+    case "\${target}" in /tmp/.jsh-portable-*) ;; *) return ;; esac
+    [ ! -d "\${target}" ] && return
+    [ ! -f "\${target}/.jssh-marker" ] && return
+    rm -rf "\${target}"
+}
+trap '_cleanup' EXIT INT TERM HUP
+
+# Verify environment exists
+if [ ! -d "\${JSH_EPHEMERAL}" ]; then
+    echo "jssh: environment not found at \${JSH_EPHEMERAL}" >&2
+    exit 1
+fi
+
+export JSH_DIR="\${JSH_EPHEMERAL}"
+export JSH_ENV="ssh"
+
+LAUNCH
+
+    # Shell selection with variable expansion
+    cat << SHELL_SELECT
+# Select shell
+if [ "${JSSH_PREFER_ZSH}" = "1" ] && command -v zsh >/dev/null 2>&1; then
+    REMOTE_SHELL="zsh"
+elif command -v bash >/dev/null 2>&1; then
+    REMOTE_SHELL="bash"
+else
+    REMOTE_SHELL="sh"
+fi
+SHELL_SELECT
+
+    # Shell launch (literal heredoc for outer, expanded for inner .zshrc)
+    cat << 'SHELL_LAUNCH'
+export JSH_SHELL="${REMOTE_SHELL}"
+
+if [ "${REMOTE_SHELL}" = "zsh" ]; then
+    export ZDOTDIR="${JSH_EPHEMERAL}"
+    # Bake the actual path into .zshrc using unquoted heredoc
+    # This expands ${JSH_EPHEMERAL} when the launch script runs on remote
+    cat > "${JSH_EPHEMERAL}/.zshrc" << ZSHRC
+export JSH_DIR="${JSH_EPHEMERAL}"
+export JSH_EPHEMERAL="${JSH_EPHEMERAL}"
+export JSH_ENV="ssh"
+
+# =============================================================================
+# Terminal Setup - MUST happen FIRST
+# =============================================================================
+
+# Ensure TERM has a valid terminfo on remote system
+# Many systems don't have ghostty/kitty/alacritty terminfo
+if [[ -n "\${TERM}" ]] && ! infocmp "\${TERM}" &>/dev/null; then
+    # Fallback chain: try xterm-256color, then xterm
+    if infocmp xterm-256color &>/dev/null; then
+        export TERM="xterm-256color"
+    else
+        export TERM="xterm"
+    fi
+fi
+export TERM="\${TERM:-xterm-256color}"
+
+# Reset terminal to sane state
+stty sane 2>/dev/null || true
+
+# Configure terminal driver for backspace
+# ^? (DEL, 0x7F) is most common, ^H (BS, 0x08) is legacy
+stty erase '^?' 2>/dev/null || true
+
+# Load zsh terminfo module for proper key detection
+zmodload zsh/terminfo 2>/dev/null || true
+
+# =============================================================================
+# Load Jsh Configuration
+# =============================================================================
+
+[[ -f "${JSH_EPHEMERAL}/bootstrap.sh" ]] && source "${JSH_EPHEMERAL}/bootstrap.sh"
+[[ -f "${JSH_EPHEMERAL}/src/init.sh" ]] && source "${JSH_EPHEMERAL}/src/init.sh"
+
+# =============================================================================
+# Backspace Fix - Applied LAST to override any conflicts
+# =============================================================================
+# This runs AFTER all plugins/configs to ensure backspace always works
+# Common issues: vi-mode rebinds keys, plugins override defaults, SSH PTY quirks
+
+# Function to apply backspace binding to all keymaps
+_jssh_fix_backspace() {
+    local keycode
+
+    # Primary: DEL character (0x7F, shown as ^?) - most modern terminals
+    bindkey '^?' backward-delete-char
+
+    # Secondary: BS character (0x08, shown as ^H) - some terminals/SSH
+    bindkey '^H' backward-delete-char
+
+    # Apply to vi keymaps (in case vi-mode is active)
+    for keymap in viins vicmd main emacs; do
+        bindkey -M "\$keymap" '^?' backward-delete-char 2>/dev/null
+        bindkey -M "\$keymap" '^H' backward-delete-char 2>/dev/null
+    done
+
+    # Use terminfo if available (most reliable for current terminal)
+    if (( \${+terminfo[kbs]} )) && [[ -n "\${terminfo[kbs]}" ]]; then
+        keycode="\${terminfo[kbs]}"
+        bindkey "\$keycode" backward-delete-char
+        for keymap in viins vicmd main emacs; do
+            bindkey -M "\$keymap" "\$keycode" backward-delete-char 2>/dev/null
+        done
+    fi
+}
+_jssh_fix_backspace
+unfunction _jssh_fix_backspace
+
+# Debug: uncomment to see what backspace sends
+# To test manually: cat -v (then press backspace)
+# echo "[jssh] Backspace bindings applied. If issues persist, run: bindkey | grep backward-delete"
+ZSHRC
+    exec zsh -i
+elif [ "${REMOTE_SHELL}" = "bash" ]; then
+    exec bash --rcfile "${JSH_EPHEMERAL}/bootstrap.sh" -i
+else
+    . "${JSH_EPHEMERAL}/bootstrap.sh"
+    exec sh -i
+fi
+SHELL_LAUNCH
+}
+
+# =============================================================================
+# Main
+# =============================================================================
+
+main() {
+    # Check for help
+    case "${1:-}" in
+        -h|--help)
+            cat << 'HELP'
+jssh - SSH with portable Jsh environment
+
+Usage: jssh [ssh-options] [user@]hostname
+       jssh --check    Validate setup and show status
+       jssh --rebuild  Force rebuild of payload cache
+
+Connects to a remote host via SSH and automatically sets up your
+Jsh shell environment. The environment is ephemeral - extracted
+to a temp directory and cleaned up when you disconnect.
+
+Transfer Method:
+  Uses a two-stage approach:
+  1. Non-interactive SSH to transfer and extract the payload
+  2. Interactive SSH session with your shell environment
+
+The payload includes:
+  - Shell configuration (aliases, functions, pure-shell prompt)
+  - FZF binary + shell integration (linux-amd64, darwin-arm64)
+  - Full vim-plug setup with 8 plugins (LazyVim keybindings)
+  - tmux configuration
+
+Safety Features:
+  - Cleanup only targets /tmp/.jsh-portable-* paths (hardcoded prefix)
+  - Marker file verification before any rm -rf operation
+  - Multiple validation guards prevent accidental deletions
+
+Environment Variables:
+  JSSH_DEBUG=1        Enable debug output
+  JSSH_PREFER_ZSH=0   Don't prefer zsh over bash on remote
+
+Examples:
+  jssh server.example.com
+  jssh -p 2222 user@server.example.com
+  jssh -i ~/.ssh/mykey server.example.com
+HELP
+            exit 0
+            ;;
+        --check|--status)
+            _jssh_check_setup
+            exit $?
+            ;;
+        --rebuild)
+            spinner_start "Rebuilding payload"
+            rm -f "${JSSH_PAYLOAD_CACHE}" "${JSSH_PAYLOAD_HASH}"
+            _jssh_build_payload
+            spinner_stop ok "Payload rebuilt ($(du -h "${JSSH_PAYLOAD_CACHE}" | cut -f1 | tr -d ' '))"
+            exit 0
+            ;;
+    esac
+
+    # Need at least a hostname
+    [[ $# -eq 0 ]] && die "Usage: jssh [ssh-options] [user@]hostname"
+
+    # Extract hostname for display (last argument, strip user@ if present)
+    local display_host="${*: -1}"
+    display_host="${display_host##*@}"
+
+    # Quick pre-flight check (silent unless there are errors)
+    if [[ ! -d "${JSH_DIR}/src" ]]; then
+        die "Jsh source directory not found. Run: jssh --check"
+    fi
+
+    # Check for fzf binaries (warn but don't fail)
+    local _fzf_ok=0
+    [[ -x "${JSH_DIR}/lib/bin/linux-amd64/fzf" ]] && ((_fzf_ok++))
+    [[ -x "${JSH_DIR}/lib/bin/darwin-arm64/fzf" ]] && ((_fzf_ok++))
+    if [[ ${_fzf_ok} -eq 0 ]]; then
+        warn "No fzf binaries found - run: jssh --check"
+    fi
+
+    # Ensure payload exists
+    local payload_path payload_size
+    if _jssh_payload_needs_rebuild; then
+        spinner_start "Building payload"
+        _jssh_build_payload
+        spinner_stop ok "Payload ready"
+    fi
+    payload_path="${JSSH_PAYLOAD_CACHE}"
+    payload_size="$(du -h "${payload_path}" | cut -f1 | tr -d ' ')"
+
+    if [[ ! -f "${payload_path}" ]]; then
+        die "Payload not found at ${payload_path}"
+    fi
+
+    debug "Payload: ${payload_path} (${payload_size})"
+
+    # Stage 1: Transfer payload (non-interactive)
+    spinner_start "Connecting to ${display_host}"
+    local transfer_script jsh_tmp
+    transfer_script="$(_jssh_transfer_script)"
+
+    if ! jsh_tmp=$(ssh "$@" "sh -c '$(printf '%s' "${transfer_script}" | sed "s/'/'\\\\''/g")'" < "${payload_path}" 2>/dev/null); then
+        spinner_stop fail "Connection failed"
+        exit 1
+    fi
+
+    if [[ -z "${jsh_tmp}" ]] || [[ "${jsh_tmp}" == "FAILED" ]]; then
+        spinner_stop fail "Failed to transfer payload"
+        exit 1
+    fi
+
+    spinner_stop ok "Environment deployed (${payload_size})"
+    debug "Remote path: ${jsh_tmp}"
+
+    # Stage 2: Launch interactive shell
+    status "Launching shell on ${display_host}"
+
+    local launch_script
+    launch_script="$(_jssh_launch_script "${jsh_tmp}")"
+
+    # Clear the status line before launching interactive session
+    ssh -t "$@" "sh -c '$(printf '%s' "${launch_script}" | sed "s/'/'\\\\''/g")'"
+
+    # Session ended
+    success "Disconnected from ${display_host}"
+}
+
+main "$@"
