@@ -63,6 +63,7 @@ _vimode_setup_zsh() {
 
     # Cursor shape hooks
     if [[ "${VIMODE_CURSOR}" == "1" ]]; then
+        # shellcheck disable=SC2329  # ZLE widget, invoked on keymap change
         zle-keymap-select() {
             case "${KEYMAP}" in
                 vicmd)      _cursor_normal ;;
@@ -71,12 +72,14 @@ _vimode_setup_zsh() {
         }
         zle -N zle-keymap-select
 
+        # shellcheck disable=SC2329  # ZLE widget, invoked on line init
         zle-line-init() {
             _cursor_insert
         }
         zle -N zle-line-init
 
         # Reset cursor on line finish
+        # shellcheck disable=SC2329  # ZLE widget, invoked on line finish
         zle-line-finish() {
             _cursor_normal
         }
@@ -144,7 +147,7 @@ _vimode_setup_zsh() {
     # Undo/redo
     bindkey -M vicmd 'u' undo
     # Ctrl+R: use redo only if fzf available (fzf overrides for history search)
-    # Otherwise, use history-beginning-search (works with complex prompts like p10k)
+    # Otherwise, use history-beginning-search (works with complex multi-line prompts)
     if has fzf; then
         bindkey -M vicmd '^R' redo
     else
@@ -162,6 +165,7 @@ _vimode_setup_zsh() {
 
     # Yank to system clipboard (if available)
     if has pbcopy || has xclip || has xsel; then
+        # shellcheck disable=SC2329  # ZLE widget, bound via bindkey
         _vimode_yank_clipboard() {
             zle vi-yank
             if has pbcopy; then
@@ -190,6 +194,7 @@ _vimode_setup_bash() {
     # Cursor shape hooks via PROMPT_COMMAND
     if [[ "${VIMODE_CURSOR}" == "1" ]]; then
         # Insert mode cursor on new prompt
+        # shellcheck disable=SC2329  # Used in PROMPT_COMMAND
         _vimode_prompt_hook() {
             _cursor_insert
         }

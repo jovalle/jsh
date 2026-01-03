@@ -72,12 +72,23 @@ SAVEHIST=50000
 # Add custom completions (jsh, make)
 [[ -d "${JSH_DIR}/src/completions" ]] && fpath=("${JSH_DIR}/src/completions" $fpath)
 
+# Add zsh-completions (submodule preferred, core fallback for offline)
+if [[ -d "${JSH_DIR}/lib/zsh-completions/src" ]]; then
+    # Full zsh-completions submodule available
+    fpath=("${JSH_DIR}/lib/zsh-completions/src" $fpath)
+elif [[ -d "${JSH_DIR}/lib/zsh-plugins/completions-core" ]]; then
+    # Fallback to minimal core completions (offline/no submodule)
+    fpath=("${JSH_DIR}/lib/zsh-plugins/completions-core" $fpath)
+fi
+
 autoload -Uz compinit
 
 # Only regenerate completion dump once a day
 _zsh_compdump="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/zcompdump-${ZSH_VERSION}"
-mkdir -p "$(dirname "${_zsh_compdump}")"
+# Use absolute paths - PATH may not be fully set during early init
+/bin/mkdir -p "$(/usr/bin/dirname "${_zsh_compdump}" 2>/dev/null || dirname "${_zsh_compdump}")" 2>/dev/null || mkdir -p "$(dirname "${_zsh_compdump}")"
 
+# shellcheck disable=SC1009,SC1036,SC1072,SC1073
 if [[ -n "${_zsh_compdump}"(#qN.mh+24) ]]; then
     compinit -i -d "${_zsh_compdump}"
 else
@@ -113,7 +124,8 @@ zstyle ':completion:*:*:kill:*:processes' list-colors '=(#b) #([0-9]#)*=0=01;31'
 zstyle ':completion:*:kill:*' command 'ps -u $USER -o pid,%cpu,tty,cputime,cmd'
 
 # SSH/SCP completion from known_hosts
-zstyle ':completion:*:(ssh|scp|sftp|rsync):*' hosts ${(f)"$(cat ~/.ssh/known_hosts 2>/dev/null | cut -f1 -d' ' | tr ',' '\n' | grep -v '^#' | grep -v '^\[')"}
+# Use absolute paths for pipeline commands - PATH may not be fully set during early init
+zstyle ':completion:*:(ssh|scp|sftp|rsync):*' hosts ${(f)"$(/bin/cat ~/.ssh/known_hosts 2>/dev/null | /usr/bin/cut -f1 -d' ' | /usr/bin/tr ',' '\n' | /usr/bin/grep -v '^#' | /usr/bin/grep -v '^\[')"}
 
 # =============================================================================
 # Key Bindings (Zsh-specific)
@@ -135,9 +147,10 @@ bindkey '^[[F' end-of-line
 bindkey '^[[1~' beginning-of-line
 bindkey '^[[4~' end-of-line
 
-# Delete
+# Delete/Backspace (handle both DEL and ^H for compatibility)
 bindkey '^[[3~' delete-char
-bindkey '^?' backward-delete-char
+bindkey '^?' backward-delete-char   # DEL (0x7F) - most modern terminals
+bindkey '^H' backward-delete-char   # BS (0x08) - some terminals/SSH
 
 # Word navigation
 bindkey '^[[1;5D' backward-word  # Ctrl+Left
@@ -176,41 +189,93 @@ _jsh_set_title() {
 add-zsh-hook precmd _jsh_set_title
 
 # =============================================================================
-# FZF Integration (if fzf is available)
+# FZF Key Bindings (shell-specific; config in tools.sh)
 # =============================================================================
 
-if has fzf; then
-    # FZF default options (VS Code Dark+ theme)
-    export FZF_DEFAULT_OPTS="--height 40% --layout=reverse --border --inline-info"
-    export FZF_DEFAULT_OPTS="${FZF_DEFAULT_OPTS} --color=bg+:#264F78,bg:#1E1E1E,spinner:#569CD6,hl:#DCDCAA"
-    export FZF_DEFAULT_OPTS="${FZF_DEFAULT_OPTS} --color=fg:#D4D4D4,header:#569CD6,info:#6A9955,pointer:#569CD6"
-    export FZF_DEFAULT_OPTS="${FZF_DEFAULT_OPTS} --color=marker:#569CD6,fg+:#FFFFFF,prompt:#DCDCAA,hl+:#DCDCAA"
-
-    # Use fd if available
-    if has fd; then
-        export FZF_DEFAULT_COMMAND='fd --type f --hidden --follow --exclude .git'
-        export FZF_CTRL_T_COMMAND="${FZF_DEFAULT_COMMAND}"
-        export FZF_ALT_C_COMMAND='fd --type d --hidden --follow --exclude .git'
-    fi
-
-    # Source fzf key-bindings and completion (bundled with jsh)
-    if [[ -f "${JSH_DIR}/src/fzf/key-bindings.zsh" ]]; then
-        source "${JSH_DIR}/src/fzf/key-bindings.zsh"
-        source "${JSH_DIR}/src/fzf/completion.zsh"
-    fi
+# Source fzf key-bindings and completion (embedded in src/fzf/)
+if has fzf && [[ -f "${JSH_DIR}/src/fzf/key-bindings.zsh" ]]; then
+    source "${JSH_DIR}/src/fzf/key-bindings.zsh"
+    source "${JSH_DIR}/src/fzf/completion.zsh"
 else
-    # Bind Ctrl+R to history search (compatible with multi-line prompts like p10k)
-    # Note: vi-mode.sh also sets these; this covers emacs mode
-    bindkey '^R' history-beginning-search-backward
-    bindkey '^S' history-beginning-search-forward
+    # Fallback: Standard zsh incremental history search
+    # Use history-incremental-search (searches anywhere in command, not just prefix)
+    bindkey '^R' history-incremental-search-backward
+    bindkey '^S' history-incremental-search-forward
+
+    # One-time warning in SSH sessions
+    if [[ "${JSH_ENV:-}" == "ssh" ]] && [[ -z "${_JSH_FZF_WARNED:-}" ]]; then
+        export _JSH_FZF_WARNED=1
+        printf '%s\n' "${C_MUTED:-\033[2m}[jsh] fzf not found - using standard history search (Ctrl+R)${RST:-\033[0m}" >&2
+    fi
 fi
 
 # =============================================================================
-# Direnv Integration
+# Prompt - Lightning-fast native prompt with git caching
 # =============================================================================
 
-if has direnv; then
-    eval "$(direnv hook zsh)"
+if [[ -f "${JSH_DIR}/src/prompt.sh" ]]; then
+    source "${JSH_DIR}/src/prompt.sh"
+    prompt_init
+fi
+
+# =============================================================================
+# Zsh Plugins (embedded in lib/zsh-plugins/)
+# =============================================================================
+
+# fzf-tab - FZF-powered completion menu (submodule)
+# NOTE: Must be sourced AFTER compinit and BEFORE autosuggestions
+if [[ -f "${JSH_DIR}/lib/fzf-tab/fzf-tab.plugin.zsh" ]]; then
+    source "${JSH_DIR}/lib/fzf-tab/fzf-tab.plugin.zsh"
+    # Preview directory contents
+    zstyle ':fzf-tab:complete:cd:*' fzf-preview 'ls -1 --color=always $realpath'
+    # Disable sort for git checkout
+    zstyle ':completion:*:git-checkout:*' sort false
+    # Use tmux popup if in tmux
+    zstyle ':fzf-tab:*' fzf-command ftb-tmux-popup
+fi
+
+# zsh-autosuggestions - Fish-like autosuggestions
+if [[ -f "${JSH_DIR}/lib/zsh-plugins/zsh-autosuggestions.zsh" ]]; then
+    source "${JSH_DIR}/lib/zsh-plugins/zsh-autosuggestions.zsh"
+    # Configuration
+    ZSH_AUTOSUGGEST_STRATEGY=(history completion)
+    ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE=20
+    ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE="fg=244"
+    # Accept suggestion with right arrow or end key
+    bindkey '^[[C' forward-char  # Right arrow accepts char
+    bindkey '^[f' forward-word   # Alt+f accepts word
+fi
+
+# zsh-syntax-highlighting - Fish-like syntax highlighting
+# NOTE: Must be sourced AFTER all other plugins and before history-substring-search
+if [[ -f "${JSH_DIR}/lib/zsh-plugins/zsh-syntax-highlighting.zsh" ]]; then
+    source "${JSH_DIR}/lib/zsh-plugins/zsh-syntax-highlighting.zsh"
+    # Optional: customize highlighter styles
+    ZSH_HIGHLIGHT_HIGHLIGHTERS=(main brackets pattern)
+    # Customize colors (optional)
+    typeset -A ZSH_HIGHLIGHT_STYLES
+    ZSH_HIGHLIGHT_STYLES[command]='fg=green,bold'
+    ZSH_HIGHLIGHT_STYLES[alias]='fg=green,bold'
+    ZSH_HIGHLIGHT_STYLES[builtin]='fg=green,bold'
+    ZSH_HIGHLIGHT_STYLES[function]='fg=green,bold'
+    ZSH_HIGHLIGHT_STYLES[path]='fg=cyan,underline'
+    ZSH_HIGHLIGHT_STYLES[globbing]='fg=magenta'
+fi
+
+# zsh-history-substring-search - Fish-like history search
+# NOTE: Must be sourced AFTER zsh-syntax-highlighting
+if [[ -f "${JSH_DIR}/lib/zsh-plugins/zsh-history-substring-search.zsh" ]]; then
+    source "${JSH_DIR}/lib/zsh-plugins/zsh-history-substring-search.zsh"
+    # Bind up/down arrows to substring search
+    bindkey '^[[A' history-substring-search-up
+    bindkey '^[[B' history-substring-search-down
+    # Bind in vi mode as well
+    bindkey -M vicmd 'k' history-substring-search-up
+    bindkey -M vicmd 'j' history-substring-search-down
+    # Configuration
+    HISTORY_SUBSTRING_SEARCH_HIGHLIGHT_FOUND='fg=green,bold,underline'
+    HISTORY_SUBSTRING_SEARCH_HIGHLIGHT_NOT_FOUND='fg=red,bold,underline'
+    HISTORY_SUBSTRING_SEARCH_FUZZY=1
 fi
 
 # =============================================================================
