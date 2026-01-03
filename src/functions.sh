@@ -1,6 +1,7 @@
 # functions.sh - Utility functions
 # Pure shell, portable across bash/zsh
-# shellcheck disable=SC2034
+# shellcheck disable=SC2034,SC2001,SC2004,SC2016
+# SC2001: sed preferred for complex patterns; SC2004/SC2016: Style preferences
 
 [[ -n "${_JSH_FUNCTIONS_LOADED:-}" ]] && return 0
 _JSH_FUNCTIONS_LOADED=1
@@ -10,10 +11,11 @@ _JSH_FUNCTIONS_LOADED=1
 # =============================================================================
 
 # Enhanced cd: creates directory if it doesn't exist
+# shellcheck disable=SC2164  # cd failures are intentional for error propagation
 cd() {
     # Handle no args (go home) and special cases like cd -
     if [[ $# -eq 0 ]] || [[ "$1" == "-" ]]; then
-        builtin cd "$@"
+        builtin cd "$@" || return
         return
     fi
 
@@ -25,35 +27,35 @@ cd() {
     # If target doesn't exist and isn't a special arg, create and cd
     if [[ ! -e "$1" ]]; then
         echo "Creating directory: $1"
-        mkdir -p "$1" && builtin cd "$1"
+        mkdir -p "$1" && builtin cd "$1" || return
     else
         # Exists but cd failed (permission denied, not a directory, etc.)
-        builtin cd "$@"
+        builtin cd "$@" || return
     fi
 }
 
 # Go up N directories
 up() {
     local count="${1:-1}"
-    local path=""
+    local _dir=""
     for ((i = 0; i < count; i++)); do
-        path="../${path}"
+        _dir="../${_dir}"
     done
-    cd "${path:-.}" || return 1
+    cd "${_dir:-.}" || return 1
 }
 
 # Quick cd to parent with matching name
 # Usage: bd foo -> cd to nearest parent containing "foo"
 bd() {
     local target="$1"
-    local path="${PWD}"
+    local _dir="${PWD}"
 
-    while [[ "${path}" != "/" ]]; do
-        if [[ "$(basename "${path}")" == *"${target}"* ]]; then
-            cd "${path}" || return 1
+    while [[ "${_dir}" != "/" ]]; do
+        if [[ "$(basename "${_dir}")" == *"${target}"* ]]; then
+            cd "${_dir}" || return 1
             return 0
         fi
-        path="$(dirname "${path}")"
+        _dir="$(dirname "${_dir}")"
     done
 
     echo "No parent directory matching '${target}'" >&2
@@ -674,12 +676,12 @@ jump() {
         return 0
     fi
 
-    local path
+    local _target_dir
     # Use awk for safe string matching (handles special chars in name)
-    path=$(awk -F: -v name="${name}" '$1 == name {print $2}' "${marks_file}")
+    _target_dir=$(awk -F: -v name="${name}" '$1 == name {print $2}' "${marks_file}")
 
-    if [[ -n "${path}" ]]; then
-        cd "${path}" || return 1
+    if [[ -n "${_target_dir}" ]]; then
+        cd "${_target_dir}" || return 1
     else
         echo "Bookmark not found: ${name}" >&2
         return 1
