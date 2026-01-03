@@ -2,15 +2,27 @@
 # Pure shell, no external dependencies
 # shellcheck disable=SC2034
 
-[[ -n "${_JSH_CORE_LOADED:-}" ]] && return 0
-_JSH_CORE_LOADED=1
+# Shell detection (always run - shell can change between invocations)
+_jsh_detect_shell() {
+    if [[ -n "${ZSH_VERSION:-}" ]]; then echo "zsh"
+    elif [[ -n "${BASH_VERSION:-}" ]]; then echo "bash"
+    else echo "sh"; fi
+}
+JSH_SHELL="$(_jsh_detect_shell)"
+export JSH_SHELL
+
+# Shell-specific load guard
+_JSH_CORE_GUARD="_JSH_CORE_LOADED_${JSH_SHELL}"
+eval "[[ -n \"\${${_JSH_CORE_GUARD}:-}\" ]]" && return 0
+eval "${_JSH_CORE_GUARD}=1"
 
 # =============================================================================
 # Platform Detection
 # =============================================================================
 
 _jsh_detect_os() {
-    case "$(uname -s)" in
+    # Use absolute path for uname - PATH may not be set during early init
+    case "$(/usr/bin/uname -s 2>/dev/null || uname -s)" in
         Darwin)  echo "macos" ;;
         Linux)   echo "linux" ;;
         FreeBSD) echo "freebsd" ;;
@@ -19,22 +31,13 @@ _jsh_detect_os() {
 }
 
 _jsh_detect_arch() {
-    case "$(uname -m)" in
+    # Use absolute path for uname - PATH may not be set during early init
+    case "$(/usr/bin/uname -m 2>/dev/null || uname -m)" in
         x86_64|amd64)  echo "x64" ;;
         arm64|aarch64) echo "arm64" ;;
         armv7l)        echo "armv7" ;;
         *)             echo "unknown" ;;
     esac
-}
-
-_jsh_detect_shell() {
-    if [[ -n "${ZSH_VERSION:-}" ]]; then
-        echo "zsh"
-    elif [[ -n "${BASH_VERSION:-}" ]]; then
-        echo "bash"
-    else
-        echo "sh"
-    fi
 }
 
 _jsh_detect_env() {
@@ -50,11 +53,12 @@ _jsh_detect_env() {
     fi
 }
 
-# Cache platform info (computed once)
+# Cache platform info (computed once, exported for subshells)
+# Note: JSH_SHELL is detected before the load guard (see top of file)
 JSH_OS="${JSH_OS:-$(_jsh_detect_os)}"
 JSH_ARCH="${JSH_ARCH:-$(_jsh_detect_arch)}"
-JSH_SHELL="${JSH_SHELL:-$(_jsh_detect_shell)}"
 JSH_ENV="${JSH_ENV:-$(_jsh_detect_env)}"
+export JSH_OS JSH_ARCH JSH_SHELL JSH_ENV
 
 # Platform string for binary selection (e.g., "darwin-arm64", "linux-amd64")
 _jsh_platform_string() {
@@ -72,9 +76,11 @@ _jsh_platform_string() {
     echo "${os}-${arch}"
 }
 JSH_PLATFORM="${JSH_PLATFORM:-$(_jsh_platform_string)}"
+export JSH_PLATFORM
 
 # Add bundled binaries to PATH (platform-specific, takes precedence over system)
 JSH_BIN_DIR="${JSH_DIR}/lib/bin/${JSH_PLATFORM}"
+export JSH_BIN_DIR
 [[ -d "${JSH_BIN_DIR}" ]] && PATH="${JSH_BIN_DIR}:${PATH}"
 
 # =============================================================================
@@ -101,19 +107,9 @@ _jsh_color_count() {
     fi
 }
 
-_jsh_has_unicode() {
-    # Check if terminal supports unicode
-    local lang="${LANG:-}${LC_ALL:-}${LC_CTYPE:-}"
-    # Use tr for lowercase conversion (portable across bash/zsh)
-    local lang_lower
-    lang_lower="$(printf '%s' "${lang}" | tr '[:upper:]' '[:lower:]')"
-    [[ "${lang_lower}" == *utf-8* ]] || [[ "${lang_lower}" == *utf8* ]]
-}
-
 # Cache terminal capabilities
 JSH_HAS_COLOR="$(_jsh_has_color && echo 1 || echo 0)"
 JSH_COLOR_COUNT="$(_jsh_color_count)"
-JSH_HAS_UNICODE="$(_jsh_has_unicode && echo 1 || echo 0)"
 
 # =============================================================================
 # Color Definitions
@@ -187,6 +183,26 @@ if [[ "${JSH_HAS_COLOR}" == "1" ]]; then
         C_MUTED="${BBLK}"
         C_ACCENT="${MAG}"
     fi
+
+    # Semantic color aliases
+    C_SUCCESS="${C_OK}"
+    C_WARNING="${C_WARN}"
+    C_ERROR="${C_ERR}"
+    # C_INFO already defined above
+    # C_MUTED already defined above
+    C_GIT_CLEAN="${GRN}"
+    C_GIT_DIRTY="${YLW}"
+    C_GIT_STAGED="${CYN}"
+    C_GIT_UNTRACKED="${RED}"
+    C_GIT_CONFLICT="${RED}"
+    C_GIT_STASH="${MAG}"
+    C_GIT_AHEAD="${GRN}"
+    C_GIT_BEHIND="${GRN}"
+
+    # Prompt-specific semantic colors
+    C_DURATION="${C_MUTED}"
+    C_PYTHON="${YLW}"
+    C_KUBE="${BLU}"
 else
     # No colors
     RST="" BLK="" RED="" GRN="" YLW="" BLU="" MAG="" CYN="" WHT=""
@@ -195,6 +211,9 @@ else
     BG_BLK="" BG_RED="" BG_GRN="" BG_YLW="" BG_BLU="" BG_MAG="" BG_CYN="" BG_WHT=""
     C_DIR="" C_FILE="" C_EXEC="" C_LINK="" C_GIT="" C_ERR="" C_WARN=""
     C_OK="" C_INFO="" C_MUTED="" C_ACCENT=""
+    C_SUCCESS="" C_WARNING="" C_ERROR="" C_GIT_CLEAN="" C_GIT_DIRTY="" C_GIT_STAGED="" C_GIT_UNTRACKED=""
+    C_GIT_CONFLICT="" C_GIT_STASH="" C_GIT_AHEAD="" C_GIT_BEHIND=""
+    C_DURATION="" C_PYTHON="" C_KUBE=""
 fi
 
 # =============================================================================
@@ -237,11 +256,11 @@ _log() {
     printf "%b%s%b %s\n" "${color}" "${prefix}" "${RST}" "$*" >&2
 }
 
-info()    { _log 1 "info:" "${C_INFO}" "$@"; }
-success() { _log 1 "ok:" "${C_OK}" "$@"; }
-warn()    { _log 1 "warn:" "${C_WARN}" "$@"; }
-error()   { _log 1 "error:" "${C_ERR}" "$@"; }
-debug()   { _log 3 "debug:" "${C_MUTED}" "$@"; }
+info()    { _log 1 "·" "${C_INFO}" "$@"; }
+success() { _log 1 "✓" "${C_OK}" "$@"; }
+warn()    { _log 1 "!" "${C_WARN}" "$@"; }
+error()   { _log 1 "✗" "${C_ERR}" "$@"; }
+debug()   { _log 3 "?" "${C_MUTED}" "$@"; }
 
 die() {
     error "$@"
@@ -276,12 +295,14 @@ has() {
 # Safe source (only if file exists and is readable)
 source_if() {
     [[ -r "$1" ]] && source "$1"
+    return 0
 }
 
 # Execute only if command exists
 try_eval() {
     local cmd="$1"
     shift
+    # shellcheck disable=SC2294
     has "${cmd}" && eval "$@"
 }
 
@@ -373,11 +394,9 @@ export JSH_DIR="${JSH_DIR:-$HOME/.jsh}"
 export JSH_CACHE_DIR="${XDG_CACHE_HOME}/jsh"
 ensure_dir "${JSH_CACHE_DIR}"
 
-# Editor preference
+# Editor preference (vim preferred, portable across SSH sessions)
 if [[ -z "${EDITOR:-}" ]]; then
-    if has nvim; then
-        export EDITOR="nvim"
-    elif has vim; then
+    if has vim; then
         export EDITOR="vim"
     elif has vi; then
         export EDITOR="vi"
@@ -400,5 +419,5 @@ export LC_ALL="${LC_ALL:-$LANG}"
 if [[ "${JSH_DEBUG:-0}" == "1" ]]; then
     JSH_LOG_LEVEL=3
     debug "JSH_OS=${JSH_OS} JSH_ARCH=${JSH_ARCH} JSH_SHELL=${JSH_SHELL} JSH_ENV=${JSH_ENV}"
-    debug "JSH_HAS_COLOR=${JSH_HAS_COLOR} JSH_COLOR_COUNT=${JSH_COLOR_COUNT} JSH_HAS_UNICODE=${JSH_HAS_UNICODE}"
+    debug "JSH_HAS_COLOR=${JSH_HAS_COLOR} JSH_COLOR_COUNT=${JSH_COLOR_COUNT}"
 fi
