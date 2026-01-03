@@ -2,8 +2,29 @@
 # Sourced by .bashrc/.zshrc to initialize the jsh shell environment
 # shellcheck disable=SC1090,SC2034
 
-[[ -n "${_JSH_INIT_LOADED:-}" ]] && return 0
-_JSH_INIT_LOADED=1
+# Detect current shell FIRST (before any guards)
+# This is critical because running `bash` from zsh inherits exported variables
+_jsh_current_shell() {
+    if [[ -n "${ZSH_VERSION:-}" ]]; then echo "zsh"
+    elif [[ -n "${BASH_VERSION:-}" ]]; then echo "bash"
+    else echo "sh"; fi
+}
+_JSH_THIS_SHELL="$(_jsh_current_shell)"
+
+# Shell-specific load guard (allows reloading when switching shells)
+_JSH_GUARD_VAR="_JSH_INIT_LOADED_${_JSH_THIS_SHELL}"
+eval "[[ -n \"\${${_JSH_GUARD_VAR}:-}\" ]]" && return 0
+eval "${_JSH_GUARD_VAR}=1"
+
+# =============================================================================
+# PATH Safety Bootstrap (must be first!)
+# =============================================================================
+# Ensure minimal system PATH exists before any commands run
+# This is critical because modules use commands like uname, mktemp, dirname, etc.
+# Note: .zshrc and .zshenv also have bootstraps, but this is a final safety net
+if [[ -z "${PATH:-}" ]] || [[ ":${PATH}:" != *":/usr/bin:"* ]]; then
+    export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin${PATH:+:$PATH}"
+fi
 
 # =============================================================================
 # Bootstrap
@@ -11,6 +32,7 @@ _JSH_INIT_LOADED=1
 
 # Detect Jsh directory (where this script lives)
 if [[ -n "${ZSH_VERSION:-}" ]]; then
+    # shellcheck disable=SC2296,SC2298
     JSH_DIR="${JSH_DIR:-${${(%):-%x}:A:h:h}}"
 else
     JSH_DIR="${JSH_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
@@ -32,46 +54,82 @@ if [[ "${JSH_DEBUG:-0}" == "1" ]]; then
 fi
 
 # =============================================================================
+# Module Loading Helper
+# =============================================================================
+
+# Source a module with error handling
+_source_module() {
+    local module="$1"
+    # IMPORTANT: In zsh, many lowercase variable names are special arrays tied
+    # to uppercase counterparts (path↔PATH, fpath↔FPATH, module_path↔MODULE_PATH).
+    # Even 'local var=' corrupts the global binding within this function's scope.
+    # Use underscore-prefixed names to avoid all zsh special variables.
+    local _src_file="${JSH_DIR}/src/${module}"
+
+    if [[ -f "${_src_file}" ]]; then
+        [[ "${JSH_DEBUG:-0}" == "1" ]] && echo "Jsh: Loading module: ${module}" >&2
+        source "${_src_file}"
+    else
+        echo "Jsh: Warning - module not found: ${module}" >&2
+        return 1
+    fi
+}
+
+# =============================================================================
 # Load Order
 # =============================================================================
 
 # 1. Core utilities (colors, logging, platform detection)
-source "${JSH_DIR}/src/core.sh"
+_source_module "core.sh"
+
+# 1b. Dependency management (optional, requires jq for full functionality)
+source_if "${JSH_DIR}/src/deps.sh"
 
 # 2. Vi-mode configuration (before shell-specific, affects keybindings)
-source "${JSH_DIR}/src/vi-mode.sh"
+_source_module "vi-mode.sh"
 
 # 3. Aliases (tiered system)
-source "${JSH_DIR}/src/aliases.sh"
+_source_module "aliases.sh"
 
 # 4. Functions
-source "${JSH_DIR}/src/functions.sh"
+_source_module "functions.sh"
 
-# 5. Git status functions (for prompt)
-source "${JSH_DIR}/src/git.sh"
+# 5-6. Lazy-load project navigation and git profiles (1,526 lines total)
+# These modules are loaded on-demand when project command is first used
+project() {
+    unset -f project 2>/dev/null
+    _source_module "profiles.sh"
+    _source_module "projects.sh"
+    project "$@"
+}
 
-# 6. Shell-specific configuration (zsh.sh or bash.sh)
+# 7. Git status functions (for prompt)
+_source_module "git.sh"
+
+# 8. Tool integrations (FZF, direnv - shell-agnostic)
+_source_module "tools.sh"
+
+# 9. Shell-specific configuration (zsh.sh or bash.sh)
 if [[ "${JSH_SHELL}" == "zsh" ]]; then
-    source "${JSH_DIR}/src/zsh.sh"
+    _source_module "zsh.sh"
 else
-    source "${JSH_DIR}/src/bash.sh"
+    _source_module "bash.sh"
 fi
 
-# 7. Initialize vi-mode
+# 10. Initialize vi-mode
 vimode_init
 
-# 8. Prompt configuration
-# Use lightweight prompt as fallback when p10k isn't available
-# (p10k is loaded by zsh.sh if present; prompt.sh is fallback for bash/sh or missing p10k)
-if [[ -z "${POWERLEVEL9K_LEFT_PROMPT_ELEMENTS:-}" ]]; then
-    # P10k not loaded, use lightweight prompt
-    source "${JSH_DIR}/src/prompt.sh"
+# 11. Prompt configuration (zsh.sh handles this for zsh, bash needs it here)
+if [[ "${JSH_SHELL}" == "bash" ]]; then
+    _source_module "prompt.sh"
     prompt_init
 fi
 
 # =============================================================================
 # PATH Setup
 # =============================================================================
+# Note: Platform detection is handled in core.sh (already sourced above)
+# JSH_PLATFORM is already set by core.sh
 
 # Jsh binaries and tools
 path_prepend "${JSH_DIR}/bin"                           # Bundled utilities
@@ -90,17 +148,14 @@ path_prepend "${HOME}/.npm-global/bin"  # Node global
 # Tool Configuration
 # =============================================================================
 
-# Neovim as default editor (if available)
-if has nvim; then
-    export EDITOR="nvim"
-    export VISUAL="nvim"
-elif has vim; then
+# Vim as default editor (portable across SSH sessions)
+if has vim; then
     export EDITOR="vim"
     export VISUAL="vim"
 fi
 
 # Less configuration
-export LESS="-R -F -X -i -M -S"
+export LESS="-R -F -i -M -S"
 export LESSHISTFILE="${XDG_CACHE_HOME:-$HOME/.cache}/less/history"
 ensure_dir "$(dirname "${LESSHISTFILE}")"
 
@@ -114,23 +169,28 @@ if has bat; then
 fi
 
 # GPG TTY (for signing)
-export GPG_TTY=$(tty)
+export GPG_TTY
+GPG_TTY=$(tty)
 
 # =============================================================================
 # SSH Environment Detection
 # =============================================================================
 
-# Mark if this is an ephemeral SSH session (jssh)
-if [[ -n "${JSH_EPHEMERAL:-}" ]]; then
-    # Running in jssh portable mode
-    debug "Jsh ephemeral mode: ${JSH_EPHEMERAL}"
+# Detect jssh session mode
+if [[ "${JSH_ENV:-}" == "ssh" ]]; then
+    debug "Jsh SSH mode: ${JSH_MODE:-unknown}"
+    debug "  Payload: ${JSSH_PAYLOAD_DIR:-$JSH_DIR}"
+    debug "  Session: ${JSH_SESSION:-none}"
 
-    # Cleanup function for session end
-    _jsh_ephemeral_cleanup() {
-        # Use command to bypass rm alias (rm -I would prompt)
-        [[ -d "${JSH_EPHEMERAL}" ]] && command rm -rf "${JSH_EPHEMERAL}"
-    }
-    trap '_jsh_ephemeral_cleanup' EXIT
+    # In shared mode, session cleanup is handled by the parent shell script
+    # In ephemeral mode (legacy), we still clean up on exit
+    if [[ "${JSH_MODE:-}" == "ephemeral" && -n "${JSH_SESSION:-}" ]]; then
+        _jsh_ephemeral_cleanup() {
+            # Use command to bypass rm alias (rm -I would prompt)
+            [[ -d "${JSH_SESSION}" ]] && command rm -rf "${JSH_SESSION}"
+        }
+        trap '_jsh_ephemeral_cleanup' EXIT
+    fi
 fi
 
 # =============================================================================
@@ -159,22 +219,18 @@ _jsh_welcome() {
 
 if [[ "${JSH_DEBUG:-0}" == "1" ]] && [[ -n "${_jsh_startup_start}" ]]; then
     if [[ -n "${EPOCHREALTIME:-}" ]]; then
-        local duration
-        duration=$(echo "${EPOCHREALTIME} - ${_jsh_startup_start}" | bc)
-        debug "Jsh startup time: ${duration}s"
+        _jsh_duration=$(awk "BEGIN {print ${EPOCHREALTIME} - ${_jsh_startup_start}}")
+        debug "Jsh startup time: ${_jsh_duration}s"
+        unset _jsh_duration
     fi
 fi
 unset _jsh_startup_start
 
 # =============================================================================
-# Local Overrides (Machine-Specific)
+# Local Overrides (machine-specific)
 # =============================================================================
 
 # Source local config if it exists (not tracked in git)
-# Options (in order of complexity):
-#   1. local/.jshrc   - Simple env vars and exports (within jsh)
-#   2. ~/.jshrc.local - Simple overrides (outside jsh)
-#   3. local/init.sh  - Complex multi-file setups (within jsh)
+# Options (in reverse order of precedence):
 source_if "${JSH_DIR}/local/.jshrc"
 source_if "${HOME}/.jshrc.local"
-source_if "${JSH_DIR}/local/init.sh"
