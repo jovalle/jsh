@@ -5,15 +5,20 @@
 set -eou pipefail
 IFS=$'\n\t'
 
+# Source shared library
+source "${0%/*}/../lib/common.sh" 2>/dev/null || source "${JSH_DIR:-$HOME/.jsh}/lib/common.sh" 2>/dev/null || {
+  # Fallback if common.sh not found
+  error() { echo -e "\033[31m✗\033[0m $*" >&2; }
+  warn() { echo -e "\033[33m!\033[0m $*" >&2; }
+  success() { echo -e "\033[32m✓\033[0m $*"; }
+  info() { echo -e "\033[34m·\033[0m $*"; }
+}
+
 abort() {
-  echo
-  echo "\033[31m$*\033[0m" 1>&2
+  error "$*"
   exit 1
 }
-error() { echo -e "\033[31m$*\033[0m"; }
-warn() { echo -e "\033[33m$*\033[0m"; }
-success() { echo -e "\033[32m$*\033[0m"; }
-info() { echo -e "\033[34m$*\033[0m"; }
+
 usage() {
   error "Usage: git update|<git_command>"
   exit 1
