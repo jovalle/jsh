@@ -33,8 +33,9 @@ GIT_PROMPT_TIMEOUT="${GIT_PROMPT_TIMEOUT:-2000}"
 
 # Async update file (secure temp file creation)
 # Guard to avoid re-creating on re-source; mktemp prevents TOCTOU race conditions
+# Use absolute path for mktemp - PATH may not be fully set during early init
 if [[ -z "${_GIT_ASYNC_FILE:-}" ]]; then
-  _GIT_ASYNC_FILE=$(mktemp "${JSH_CACHE_DIR:-${TMPDIR:-/tmp}}/.jsh_git_async.XXXXXX")
+  _GIT_ASYNC_FILE=$(/usr/bin/mktemp "${JSH_CACHE_DIR:-${TMPDIR:-/tmp}}/.jsh_git_async.XXXXXX" 2>/dev/null || mktemp "${JSH_CACHE_DIR:-${TMPDIR:-/tmp}}/.jsh_git_async.XXXXXX")
 fi
 
 # =============================================================================
@@ -169,15 +170,28 @@ git_status_fast() {
         case "${status_line:0:2}" in
             "##")
                 # Parse ahead/behind from branch line
-                if [[ "${status_line}" =~ \[ahead\ ([0-9]+)\] ]]; then
-                    ahead="${BASH_REMATCH[1]}"
-                fi
-                if [[ "${status_line}" =~ \[behind\ ([0-9]+)\] ]]; then
-                    behind="${BASH_REMATCH[1]}"
-                fi
-                if [[ "${status_line}" =~ \[ahead\ ([0-9]+),\ behind\ ([0-9]+)\] ]]; then
-                    ahead="${BASH_REMATCH[1]}"
-                    behind="${BASH_REMATCH[2]}"
+                # Works in both bash (BASH_REMATCH) and zsh (match)
+                if [[ -n "${ZSH_VERSION:-}" ]]; then
+                    # Zsh: use $match array (quotes required for zsh regex)
+                    # shellcheck disable=SC2076
+                    if [[ "${status_line}" =~ '\[ahead ([0-9]+), behind ([0-9]+)\]' ]]; then
+                        ahead="${match[1]}"
+                        behind="${match[2]}"
+                    elif [[ "${status_line}" =~ '\[ahead ([0-9]+)\]' ]]; then
+                        ahead="${match[1]}"
+                    elif [[ "${status_line}" =~ '\[behind ([0-9]+)\]' ]]; then
+                        behind="${match[1]}"
+                    fi
+                else
+                    # Bash: use BASH_REMATCH
+                    if [[ "${status_line}" =~ \[ahead\ ([0-9]+),\ behind\ ([0-9]+)\] ]]; then
+                        ahead="${BASH_REMATCH[1]}"
+                        behind="${BASH_REMATCH[2]}"
+                    elif [[ "${status_line}" =~ \[ahead\ ([0-9]+)\] ]]; then
+                        ahead="${BASH_REMATCH[1]}"
+                    elif [[ "${status_line}" =~ \[behind\ ([0-9]+)\] ]]; then
+                        behind="${BASH_REMATCH[1]}"
+                    fi
                 fi
                 ;;
             "??") ((untracked++)) ;;
@@ -203,7 +217,9 @@ git_status_fast() {
 # =============================================================================
 
 _git_use_unicode() {
-    [[ "${JSH_HAS_UNICODE:-1}" == "1" ]] && [[ "${GIT_PROMPT_ASCII:-0}" != "1" ]]
+    # Unicode is always available (LANG=en_US.UTF-8 set in .zshrc)
+    # This only checks if user explicitly requested ASCII mode
+    [[ "${GIT_PROMPT_ASCII:-0}" != "1" ]]
 }
 
 git_prompt_info() {

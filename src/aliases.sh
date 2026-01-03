@@ -1,6 +1,7 @@
 # aliases.sh - Tiered alias system
 # Core aliases always load, extended aliases load if tools detected
-# shellcheck disable=SC2139,SC2034,SC2142
+# shellcheck disable=SC2139,SC2034,SC2142,SC2262,SC2263
+# SC2262/SC2263: Defining and checking aliases in same file is standard for shell configs
 
 [[ -n "${_JSH_ALIASES_LOADED:-}" ]] && return 0
 _JSH_ALIASES_LOADED=1
@@ -99,14 +100,13 @@ alias week='date +%V'
 alias reload='exec "${SHELL}"'
 alias rl='exec "${SHELL}"'
 
+alias j='jsh'
+alias p='project'
+
 # -----------------------------------------------------------------------------
 # Editors
 # -----------------------------------------------------------------------------
-if has nvim; then
-  alias vim='nvim'
-  alias vi='nvim'
-  alias v='nvim'
-elif has vim; then
+if has vim; then
   alias vi='vim'
   alias v='vim'
 fi
