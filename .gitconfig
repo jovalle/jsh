@@ -2,7 +2,7 @@
 # Include local config with: git config --global include.path ~/.gitconfig
 
 [core]
-    editor = vim
+	editor = vim
     pager = less -FRX
     autocrlf = input
     safecrlf = warn

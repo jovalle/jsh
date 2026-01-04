@@ -1,0 +1,247 @@
+# .jshrc - Local Jsh Configuration
+#
+# This file is for machine-specific customizations like:
+#   - Custom aliases and functions
+#   - Machine-specific environment variables
+#   - Local tool configurations
+#   - Development environment setup
+#
+# Copy this file to ~/.jshrc and customize for your local machine.
+# It will NOT be committed to version control (see .gitignore).
+# It's sourced AFTER jsh core modules, so you can override defaults.
+#
+# Note: This file is sourced in both bash and zsh, so keep it portable!
+
+# =============================================================================
+# Machine-Specific Environment Variables
+# =============================================================================
+
+# Example: Set up development directories
+# export DEV_HOME="$HOME/dev"
+# export PROJECTS_DIR="$DEV_HOME/projects"
+# export WORK_DIR="$DEV_HOME/work"
+
+# Example: Configure tools
+# export FZF_DEFAULT_OPTS="--height 40% --reverse --border"
+# export BAT_THEME="Monokai Extended"
+# export EDITOR="vim"
+
+# =============================================================================
+# Local Aliases
+# =============================================================================
+
+# Example: Project shortcuts
+# alias proj='cd $PROJECTS_DIR'
+# alias work='cd $WORK_DIR'
+# alias dotfiles='cd ~/.dotfiles'
+
+# Example: Development commands
+# alias serve='python3 -m http.server 8000'
+# alias json='jq .'
+# alias ports='lsof -i -P -n | grep LISTEN'
+
+# Example: Git shortcuts (personal workflow)
+# alias ga='git add'
+# alias gb='git branch'
+# alias gc='git commit -m'
+# alias gco='git checkout'
+# alias gf='git fetch'
+# alias gp='git push'
+# alias gpl='git pull'
+# alias gs='git status'
+# alias gd='git diff'
+# alias gl='git log --oneline -10'
+
+# Example: Docker shortcuts
+# alias dps='docker ps'
+# alias dpl='docker ps -l'
+# alias dpsa='docker ps -a'
+# alias dkill='docker kill'
+# alias dprune='docker system prune -f'
+
+# =============================================================================
+# Local Functions
+# =============================================================================
+
+# Example: Quick project setup
+# function setup_project() {
+#     local project_name="${1:?Project name required}"
+#     mkdir -p "$PROJECTS_DIR/$project_name"
+#     cd "$PROJECTS_DIR/$project_name"
+#     git init
+#     echo "Project $project_name initialized"
+# }
+
+# Example: Find process by name and show details
+# function psgrep() {
+#     ps aux | grep -E "${1:?Pattern required}" | grep -v grep
+# }
+
+# Example: Quick server on specific port
+# function serve_port() {
+#     local port="${1:-8000}"
+#     echo "Starting server on port $port..."
+#     python3 -m http.server "$port"
+# }
+
+# Example: Git commit with timestamp
+# function gct() {
+#     local message="${1:-update}"
+#     git commit -m "$message - $(date +%Y-%m-%d\ %H:%M:%S)"
+# }
+
+# Example: Backup a file with timestamp
+# function backup() {
+#     local file="${1:?File required}"
+#     cp "$file" "$file.backup.$(date +%s)"
+#     echo "Backed up to $file.backup.$(date +%s)"
+# }
+
+# Example: Extract archive files intelligently
+# function extract() {
+#     local file="$1"
+#     case "$file" in
+#         *.tar.bz2) tar xjf "$file" ;;
+#         *.tar.gz) tar xzf "$file" ;;
+#         *.tar) tar xf "$file" ;;
+#         *.zip) unzip "$file" ;;
+#         *.gz) gunzip "$file" ;;
+#         *) echo "Unsupported format" ;;
+#     esac
+# }
+
+# =============================================================================
+# Shell-Specific Configuration
+# =============================================================================
+
+# Zsh-specific settings
+if [[ -n "${ZSH_VERSION:-}" ]]; then
+    # Example: Custom zsh options
+    # setopt HIST_IGNORE_ALL_DUPS
+    # setopt HIST_FIND_NO_DUPS
+
+    # Example: Customize prompt additions (after jsh prompt already loaded)
+    # PROMPT="%F{cyan}[local]%f $PROMPT"
+fi
+
+# Bash-specific settings
+if [[ -n "${BASH_VERSION:-}" ]]; then
+    # Example: Custom bash options
+    # shopt -s globstar  # ** glob pattern support
+    # shopt -s dirspell  # Correct spelling in directory names
+fi
+
+# =============================================================================
+# PATH Extensions
+# =============================================================================
+
+# Example: Add custom directories to PATH
+# export PATH="$HOME/.local/bin:$PATH"
+# export PATH="$HOME/.cargo/bin:$PATH"
+# export PATH="/usr/local/opt/gnu-sed/libexec/gnubin:$PATH"
+
+# =============================================================================
+# Tool-Specific Configuration
+# =============================================================================
+
+# Example: Node.js version management
+# if [[ -f "$HOME/.nvm/nvm.sh" ]]; then
+#     source "$HOME/.nvm/nvm.sh"
+# fi
+
+# Example: Python virtual environment
+# export VIRTUAL_ENV_DISABLE_PROMPT=1
+# if [[ -f "$HOME/.venv/bin/activate" ]]; then
+#     source "$HOME/.venv/bin/activate"
+# fi
+
+# Example: Ruby version management
+# if [[ -f "$HOME/.rbenv/bin/rbenv" ]]; then
+#     eval "$(rbenv init -)"
+# fi
+
+# Example: Java environment
+# export JAVA_HOME=$(/usr/libexec/java_home -v 17)
+
+# =============================================================================
+# Local Secrets & Credentials (NEVER commit these!)
+# =============================================================================
+
+# Example: API keys and tokens (use this cautiously!)
+# export GITHUB_TOKEN="your-token-here"
+# export API_KEY="your-api-key-here"
+
+# Example: Load credentials from a separate file
+# if [[ -f "$HOME/.local/secrets" ]]; then
+#     source "$HOME/.local/secrets"
+# fi
+
+# =============================================================================
+# Development Workflow
+# =============================================================================
+
+# Example: Docker development environment quick start
+# function docker_dev() {
+#     docker compose up -d
+#     echo "Development environment started"
+# }
+
+# Example: Database connection helpers
+# function db_connect() {
+#     local env="${1:-dev}"
+#     # Add your database connection logic here
+# }
+
+# Example: Run tests with custom options
+# function test_watch() {
+#     local pattern="${1:-.}"
+#     npm test -- --watch "$pattern"
+# }
+
+# =============================================================================
+# Local Overrides (if needed)
+# =============================================================================
+
+# Example: Override a jsh alias for your machine
+# unalias ll
+# alias ll='ls -lAhF'
+
+# Example: Override a jsh function
+# Old function can't be unset, but you can define a wrapper
+# my_grep() {
+#     grep --color=auto --exclude-dir=node_modules --exclude-dir=.git "$@"
+# }
+
+# =============================================================================
+# Terminal Customization
+# =============================================================================
+
+# Example: Set terminal title in tmux
+# function tmux_title() {
+#     tmux rename-window "$1"
+# }
+
+# Example: Custom greeting message
+# echo "Welcome back! You have $(ls ~/Downloads | wc -l) files in Downloads."
+
+# Example: Show git status of common directories on shell load
+# if [[ -d "$PROJECTS_DIR" ]]; then
+#     # Add startup logic here
+# fi
+
+# =============================================================================
+# Debugging & Development Tools
+# =============================================================================
+
+# Example: Enable debug mode for jsh
+# export JSH_DEBUG=1
+
+# Example: Function to show all jsh environment variables
+# function jsh_env() {
+#     env | grep -i jsh
+# }
+
+# Example: Profile shell startup time
+# function profile_shell() {
+#     time (exec zsh -i -c exit)
+# }

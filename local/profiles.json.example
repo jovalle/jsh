@@ -1,0 +1,21 @@
+{
+  "_comment": "Git profiles for jsh projects",
+  "_note": "Copy to local/profiles.json and customize for your needs",
+  "profiles": {
+    "personal": {
+      "name": "Your Name",
+      "email": "personal@example.com",
+      "user": "yourusername",
+    },
+    "work": {
+      "name": "Your Name",
+      "email": "work@company.com",
+      "user": "workusername",
+    },
+    "opensource": {
+      "name": "Your Name",
+      "email": "opensource@example.com",
+      "user": "ossusername",
+    }
+  }
+}

@@ -32,7 +32,7 @@ $RECYCLE.BIN/
 # Editors & IDEs
 # =============================================================================
 
-# Vim/Neovim
+# Vim
 *.swp
 *.swo
 *.swn
@@ -209,22 +209,27 @@ kubeconfig
 # Jsh-Specific (only applies to this repo)
 # =============================================================================
 
+# Zsh plugin test files (not needed for runtime)
+lib/zsh-plugins/highlighters/*/test-data/
+
 # Local machine-specific config (not tracked)
 jsh.yaml
 .jshrc
 *.local
+local/*
+!local/*.example
 
 # Keep example files
 !*.example
 
 # Lib build artifacts
-lib/bin/*/nvim-share/
 lib/mason-packages/
-lib/nvim-data/
-lib/nvim-share/
 
-# Force-track treesitter parsers
-!lib/bin/*/nvim-lib/**/*.so
+# Vim plugins (downloaded on setup)
+lib/vim-config/plugged/
+
+# Keep nvim config but don't track (user may want it locally)
+.config/nvim/
 
 # Archive
 archive/
