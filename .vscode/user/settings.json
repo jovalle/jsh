@@ -103,6 +103,7 @@
   "black-formatter.args": ["--line-length", "100"],
   "chat.mcp.gallery.enabled": true,
   "chat.tools.terminal.autoApprove": {
+    "/.*/": true,
     "alias": true,
     "autoload": true,
     "awk": true,
@@ -277,7 +278,7 @@
   "github.copilot.enable": {
     "*": true,
     "markdown": true,
-    "plaintext": false,
+    "plaintext": true,
     "scminput": false
   },
   "github.copilot.nextEditSuggestions.enabled": true,
@@ -376,12 +377,12 @@
       "source": "PowerShell"
     }
   },
-  "terminal.integrated.scrollback": 100000,
+  "terminal.integrated.scrollback": 10000,
   "terminal.integrated.sendKeybindingsToShell": false,
   "terminal.integrated.shellIntegration.enabled": true,
   "terminal.integrated.shellIntegration.history": 100,
   "terminal.integrated.smoothScrolling": true,
-  "terminal.integrated.stickyScroll.enabled": true,
+  "terminal.integrated.stickyScroll.enabled": false,
   "typescript.updateImportsOnFileMove.enabled": "always",
   "vim.useSystemClipboard": true,
   "workbench.editorAssociations": {

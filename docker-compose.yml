@@ -1,0 +1,106 @@
+# =============================================================================
+# Jsh Docker Compose Configuration
+# =============================================================================
+#
+# Services:
+#   dev  - Interactive development environment (zsh shell)
+#   ci   - Run full CI pipeline and exit
+#   test-bash - Run tests in bash
+#   test-zsh  - Run tests in zsh
+#
+# Usage:
+#   docker compose up -d dev      # Start dev container in background
+#   docker compose exec dev zsh   # Attach to running container
+#   docker compose run --rm ci    # Run CI pipeline once
+#   docker compose down           # Stop and remove containers
+#
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Development Environment
+  # Interactive shell with full jsh setup mounted
+  # ---------------------------------------------------------------------------
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    image: jsh-dev:latest
+    container_name: jsh-dev
+    hostname: jsh-dev
+    volumes:
+      # Mount the entire jsh project
+      - .:/home/jsh/.jsh:cached
+      # Persist shell history between sessions
+      - jsh-history:/home/jsh/.local/share
+      # Cache directory for tests and builds
+      - jsh-cache:/home/jsh/.cache
+    environment:
+      - TERM=xterm-256color
+      - JSH_ENV=container
+      # Disable themes that might not work in container
+      - JSH_SIMPLE_PROMPT=1
+    working_dir: /home/jsh/.jsh
+    stdin_open: true
+    tty: true
+    command: /bin/zsh
+
+  # ---------------------------------------------------------------------------
+  # CI Runner
+  # Runs full CI pipeline (lint + test) and exits
+  # ---------------------------------------------------------------------------
+  ci:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: jsh-dev:ci
+    volumes:
+      # Mount read-only for CI (no modifications)
+      - .:/home/jsh/.jsh:ro
+    environment:
+      - CI=true
+      - TERM=dumb
+    working_dir: /home/jsh/.jsh
+    command: make ci
+
+  # ---------------------------------------------------------------------------
+  # Test Runners
+  # Run tests in specific shells
+  # ---------------------------------------------------------------------------
+  test-bash:
+    extends:
+      service: dev
+    container_name: jsh-test-bash
+    command: bash -c "make test-bash"
+
+  test-zsh:
+    extends:
+      service: dev
+    container_name: jsh-test-zsh
+    command: zsh -c "make test-zsh"
+
+  # ---------------------------------------------------------------------------
+  # Lint Runner
+  # Run linting checks only
+  # ---------------------------------------------------------------------------
+  lint:
+    extends:
+      service: ci
+    container_name: jsh-lint
+    command: make lint
+
+# =============================================================================
+# Named Volumes
+# =============================================================================
+
+volumes:
+  # Persist shell history (zsh_history, bash_history)
+  jsh-history:
+    name: jsh-history
+
+  # Cache for test artifacts and builds
+  jsh-cache:
+    name: jsh-cache
