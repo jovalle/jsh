@@ -982,7 +982,7 @@ cmd_status() {
         echo "  ${YELLOW}⚠${RST} Unknown platform, cannot check bundled binaries"
     elif [[ ! -d "${bin_dir}" ]]; then
         echo "  ${YELLOW}⚠${RST} No bundled binaries for ${platform}"
-        prefix_info "Run: ${CYAN}${JSH_DIR}/scripts/setup-plugins.sh${RST} to download"
+        prefix_info "Run: ${CYAN}${JSH_DIR}/src/deps.sh${RST} to download"
     else
         local key_deps=("fzf" "jq")
         for dep in "${key_deps[@]}"; do
@@ -1271,7 +1271,7 @@ cmd_upgrade() {
         echo ""
         prefix_info "To manually update binaries:"
         echo "  1. Edit lib/bin/versions.json with new versions"
-        echo "  2. Run: ${JSH_DIR}/scripts/setup-plugins.sh"
+        echo "  2. Run: ${JSH_DIR}/src/deps.sh"
         echo ""
 
         if [[ "${check_only}" == false ]]; then
@@ -1289,7 +1289,7 @@ cmd_upgrade() {
             if [[ ${#missing[@]} -gt 0 ]]; then
                 prefix_warn "Missing binaries for ${platform}: ${missing[*]}"
                 echo ""
-                prefix_info "Run to download: ${JSH_DIR}/scripts/setup-plugins.sh"
+                prefix_info "Run to download: ${JSH_DIR}/src/deps.sh"
             else
                 prefix_success "All binaries present for ${platform}"
             fi
@@ -1376,7 +1376,7 @@ cmd_deps_refresh() {
         prefix_info "This will re-run the setup script to download/update all binaries"
         echo ""
 
-        local setup_script="${JSH_DIR}/scripts/setup-plugins.sh"
+        local setup_script="${JSH_DIR}/src/deps.sh"
         if [[ -x "${setup_script}" ]]; then
             "${setup_script}"
         else
