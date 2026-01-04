@@ -292,7 +292,7 @@ _jsh_edit() {
                     line = $0
                     gsub(/^[[:space:]]+/, "", line)
                     gsub(/\).*/, "", line)
-                    # Handle alternatives like "zsh|zshrc" or "p10k|prompt"
+                    # Handle alternatives like "zsh|zshrc" or "git|gitconfig"
                     split(line, parts, "|")
                     for (i in parts) {
                         cmd = parts[i]
@@ -314,10 +314,10 @@ _jsh_edit() {
             bash|bashrc)     config_descs+=("${cfg}:Edit bash configuration") ;;
             aliases)         config_descs+=("${cfg}:Edit shell aliases") ;;
             functions)       config_descs+=("${cfg}:Edit shell functions") ;;
-            p10k|prompt)     config_descs+=("${cfg}:Edit powerlevel10k config") ;;
+            prompt)          config_descs+=("${cfg}:Edit prompt configuration") ;;
             tmux)            config_descs+=("${cfg}:Edit tmux configuration") ;;
             git|gitconfig)   config_descs+=("${cfg}:Edit git configuration") ;;
-            nvim|neovim)     config_descs+=("${cfg}:Edit neovim configuration") ;;
+            vim)             config_descs+=("${cfg}:Edit vim configuration") ;;
             vscode|code)     config_descs+=("${cfg}:Edit VSCode settings") ;;
             local)           config_descs+=("${cfg}:Edit local overrides") ;;
             *)               config_descs+=("${cfg}:Edit ${cfg} configuration") ;;

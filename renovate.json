@@ -1,0 +1,62 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "schedule": ["before 5am on sunday"],
+  "timezone": "America/New_York",
+  "labels": ["dependencies"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "fileMatch": ["^lib/bin/versions\\.json$"],
+      "matchStrings": ["\"fzf\":\\s*\"(?<currentValue>[^\"]+)\""],
+      "depNameTemplate": "junegunn/fzf",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v?(?<version>.*)$"
+    },
+    {
+      "customType": "regex",
+      "fileMatch": ["^lib/bin/versions\\.json$"],
+      "matchStrings": ["\"zsh-autosuggestions\":\\s*\"(?<currentValue>[^\"]+)\""],
+      "depNameTemplate": "zsh-users/zsh-autosuggestions",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v?(?<version>.*)$"
+    },
+    {
+      "customType": "regex",
+      "fileMatch": ["^lib/bin/versions\\.json$"],
+      "matchStrings": ["\"zsh-syntax-highlighting\":\\s*\"(?<currentValue>[^\"]+)\""],
+      "depNameTemplate": "zsh-users/zsh-syntax-highlighting",
+      "datasourceTemplate": "github-tags",
+      "extractVersionTemplate": "^(?<version>.*)$"
+    },
+    {
+      "customType": "regex",
+      "fileMatch": ["^lib/bin/versions\\.json$"],
+      "matchStrings": ["\"zsh-history-substring-search\":\\s*\"(?<currentValue>[^\"]+)\""],
+      "depNameTemplate": "zsh-users/zsh-history-substring-search",
+      "datasourceTemplate": "github-releases",
+      "extractVersionTemplate": "^v?(?<version>.*)$"
+    }
+  ],
+  "packageRules": [
+    {
+      "matchPackageNames": ["junegunn/fzf"],
+      "groupName": "jsh binaries",
+      "commitMessagePrefix": "chore(deps):",
+      "automerge": false
+    },
+    {
+      "matchPackageNames": [
+        "zsh-users/zsh-autosuggestions",
+        "zsh-users/zsh-syntax-highlighting",
+        "zsh-users/zsh-history-substring-search"
+      ],
+      "groupName": "jsh zsh plugins",
+      "commitMessagePrefix": "chore(deps):",
+      "automerge": false
+    }
+  ],
+  "git-submodules": {
+    "enabled": true
+  }
+}

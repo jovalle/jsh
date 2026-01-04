@@ -171,7 +171,7 @@ _jsh_edit_completion() {
 
     # Fallback
     if [[ -z "$configs" ]]; then
-        configs="zsh bash aliases functions p10k tmux git nvim vscode local"
+        configs="zsh bash aliases functions prompt tmux git vim vscode local"
     fi
 
     COMPREPLY=($(compgen -W "$configs" -- "$cur"))
