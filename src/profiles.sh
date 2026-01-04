@@ -61,7 +61,7 @@ _profiles_exists() {
 _profiles_apply() {
   local profile_name="$1"
   local dir="${2:-.}"
-  local profile_data name email username host
+  local profile_data name email username ssh_host host
 
   profile_data="$(_profiles_get "$profile_name")"
   if [[ -z "$profile_data" ]]; then
@@ -78,7 +78,13 @@ _profiles_apply() {
   name=$(printf '%s' "$profile_data" | jq -r '.name // empty')
   email=$(printf '%s' "$profile_data" | jq -r '.email // empty')
   username=$(printf '%s' "$profile_data" | jq -r '.user // empty')
+  ssh_host=$(printf '%s' "$profile_data" | jq -r '.ssh_host // empty')
   host=$(printf '%s' "$profile_data" | jq -r '.host // empty')
+
+  # Note: host and ssh_host are kept separate intentionally
+  # - ssh_host: SSH alias from ~/.ssh/config (e.g., github-jovalle)
+  # - host: actual hostname for HTTPS (e.g., github.com)
+  # They should NOT be merged - SSH aliases don't work for HTTPS
 
   if [[ -n "$name" ]]; then
     git -C "$dir" config user.name "$name"
@@ -92,10 +98,16 @@ _profiles_apply() {
     git -C "$dir" config github.user "$username"
   fi
 
+  # Store profile's ssh_host in git config for SSH checking
+  if [[ -n "$ssh_host" ]]; then
+    git -C "$dir" config jsh.ssh-host "$ssh_host"
+  fi
+
   # Update origin remote to point to user's fork
   if [[ -n "$username" ]]; then
     local origin_url repo_name new_origin_url
-    local url_host url_protocol
+    local url_host url_protocol target_host target_protocol
+    local C_CYAN=$'\033[36m' C_YELLOW=$'\033[33m' C_DIM=$'\033[2m' C_RESET=$'\033[0m'
     origin_url=$(git -C "$dir" remote get-url origin 2>/dev/null)
 
     if [[ -n "$origin_url" ]]; then
@@ -124,20 +136,52 @@ _profiles_apply() {
         return 0
       fi
 
-      # Use profile host if specified, otherwise keep existing host
-      [[ -z "$host" ]] && host="$url_host"
+      # Determine target protocol based on profile config vs current URL
+      target_protocol="$url_protocol"
+
+      # Check for protocol mismatch and prompt user
+      if [[ -n "$ssh_host" ]] && [[ "$url_protocol" == "https" ]]; then
+        # Profile has ssh_host but remote is HTTPS - offer to convert to SSH
+        printf '%b\n' "${C_YELLOW}Note:${C_RESET} Profile has ${C_CYAN}ssh_host${C_RESET} configured but remote uses HTTPS"
+        printf '%b\n' "  Current: ${C_DIM}${origin_url}${C_RESET}"
+        printf '%b\n' "  SSH would be: ${C_CYAN}git@${ssh_host}:${username}/${repo_name}.git${C_RESET}"
+        printf '%s' "Convert to SSH? [y/N] "
+        read -r response
+        if [[ "$response" =~ ^[Yy]$ ]]; then
+          target_protocol="ssh"
+        fi
+      elif [[ -z "$ssh_host" ]] && [[ "$url_protocol" == "ssh" || "$url_protocol" == "ssh-alt" ]]; then
+        # Profile has no ssh_host but remote is SSH - offer to convert to HTTPS
+        printf '%b\n' "${C_YELLOW}Note:${C_RESET} Profile has no ${C_CYAN}ssh_host${C_RESET} configured but remote uses SSH"
+        printf '%b\n' "  Current: ${C_DIM}${origin_url}${C_RESET}"
+        printf '%b\n' "  HTTPS would be: ${C_CYAN}https://${host:-$url_host}/${username}/${repo_name}.git${C_RESET}"
+        printf '%s' "Convert to HTTPS? [y/N] "
+        read -r response
+        if [[ "$response" =~ ^[Yy]$ ]]; then
+          target_protocol="https"
+        fi
+      fi
+
+      # Determine target host based on final protocol
+      case "$target_protocol" in
+        https)
+          # For HTTPS, only use explicit 'host' setting, never ssh_host
+          target_host="${host:-$url_host}"
+          ;;
+        ssh|ssh-alt)
+          # For SSH, prefer ssh_host (the alias), fallback to host, then original
+          target_host="${ssh_host:-${host:-$url_host}}"
+          ;;
+      esac
 
       if [[ -n "$repo_name" ]]; then
-        # Build new URL preserving the original protocol
-        case "$url_protocol" in
+        # Build new URL with appropriate host for protocol
+        case "$target_protocol" in
           https)
-            new_origin_url="https://${host}/${username}/${repo_name}.git"
+            new_origin_url="https://${target_host}/${username}/${repo_name}.git"
             ;;
-          ssh)
-            new_origin_url="git@${host}:${username}/${repo_name}.git"
-            ;;
-          ssh-alt)
-            new_origin_url="ssh://git@${host}/${username}/${repo_name}.git"
+          ssh|ssh-alt)
+            new_origin_url="git@${target_host}:${username}/${repo_name}.git"
             ;;
         esac
 
@@ -195,6 +239,189 @@ _profiles_detect() {
 }
 
 # =============================================================================
+# SSH Configuration Helpers
+# =============================================================================
+
+# Extract SSH host from a git remote URL
+# Arguments:
+#   $1 - Git remote URL
+# Output: SSH host (e.g., "github.com" or "github-personal")
+_profiles_extract_ssh_host() {
+  local url="$1"
+
+  case "$url" in
+    git@*:*)
+      # SSH format: git@host:user/repo.git
+      local host="${url#git@}"
+      printf '%s\n' "${host%%:*}"
+      ;;
+    ssh://git@*)
+      # SSH alternate: ssh://git@host/user/repo.git
+      local host="${url#ssh://git@}"
+      printf '%s\n' "${host%%/*}"
+      ;;
+    *)
+      # HTTPS or other - no SSH host
+      return 1
+      ;;
+  esac
+}
+
+# Check SSH config for a specific host
+# Arguments:
+#   $1 - SSH host to check
+# Output: IdentityFile path if configured, empty otherwise
+_profiles_get_ssh_identity() {
+  local host="$1"
+  local ssh_config="${HOME}/.ssh/config"
+
+  [[ -f "$ssh_config" ]] || return 1
+
+  # Parse SSH config to find IdentityFile for this host
+  # This is a simplified parser - handles common formats
+  local in_host_block=false
+  local identity_file=""
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    # Trim leading/trailing whitespace
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+
+    # Skip comments and empty lines
+    [[ -z "$line" || "$line" == \#* ]] && continue
+
+    # Check for Host directive
+    if [[ "$line" == Host\ * || "$line" == Host$'\t'* ]]; then
+      local host_pattern="${line#Host}"
+      host_pattern="${host_pattern#"${host_pattern%%[![:space:]]*}"}"
+
+      # Check if this host block matches our target
+      if [[ "$host_pattern" == "$host" || "$host_pattern" == *"$host"* ]]; then
+        in_host_block=true
+      else
+        in_host_block=false
+      fi
+      continue
+    fi
+
+    # If in matching host block, look for IdentityFile
+    if [[ "$in_host_block" == true ]]; then
+      if [[ "$line" == IdentityFile\ * || "$line" == IdentityFile$'\t'* ]]; then
+        identity_file="${line#IdentityFile}"
+        identity_file="${identity_file#"${identity_file%%[![:space:]]*}"}"
+        # Expand ~ to $HOME
+        identity_file="${identity_file/#\~/$HOME}"
+        printf '%s\n' "$identity_file"
+        return 0
+      fi
+    fi
+  done < "$ssh_config"
+
+  return 1
+}
+
+# Check if SSH is properly configured for the current repo's profile
+# Arguments:
+#   $1 - Directory (optional, defaults to PWD)
+# Output: Status message about SSH configuration
+# Returns: 0 if OK, 1 if warning, 2 if not applicable
+_profiles_check_ssh() {
+  local dir="${1:-.}"
+  local C_GREEN=$'\033[32m' C_YELLOW=$'\033[33m' C_RED=$'\033[31m' C_DIM=$'\033[2m' C_CYAN=$'\033[36m' C_RESET=$'\033[0m'
+
+  # Get origin URL
+  local origin_url
+  origin_url=$(git -C "$dir" remote get-url origin 2>/dev/null)
+  [[ -z "$origin_url" ]] && return 2
+
+  # Extract SSH host from current URL
+  local current_ssh_host
+  current_ssh_host="$(_profiles_extract_ssh_host "$origin_url")"
+  [[ -z "$current_ssh_host" ]] && return 2  # Not using SSH
+
+  # Get expected SSH host from profile config (stored when profile was applied)
+  local expected_ssh_host
+  expected_ssh_host=$(git -C "$dir" config jsh.ssh-host 2>/dev/null)
+
+  # Also check the detected profile's ssh_host setting
+  local detected_profile profile_ssh_host
+  detected_profile="$(_profiles_detect "$dir" 2>/dev/null)"
+  if [[ -n "$detected_profile" ]]; then
+    local profile_data
+    profile_data="$(_profiles_get "$detected_profile")"
+    if [[ -n "$profile_data" ]]; then
+      profile_ssh_host=$(printf '%s' "$profile_data" | jq -r '.ssh_host // empty')
+    fi
+  fi
+
+  # Use profile's ssh_host if jsh.ssh-host not set
+  [[ -z "$expected_ssh_host" ]] && expected_ssh_host="$profile_ssh_host"
+
+  # Check if using an SSH alias (not a real domain)
+  local is_alias=false
+  if [[ "$current_ssh_host" != *.* ]]; then
+    is_alias=true
+  fi
+
+  # Get identity file from SSH config for current host
+  local identity_file
+  identity_file="$(_profiles_get_ssh_identity "$current_ssh_host")"
+
+  # Check for mismatch between current and expected SSH host
+  if [[ -n "$expected_ssh_host" ]] && [[ "$current_ssh_host" != "$expected_ssh_host" ]]; then
+    printf '%b⚠ SSH host mismatch:%b\n' "$C_YELLOW" "$C_RESET"
+    printf '%b  Current:  %s%b\n' "$C_RED" "$current_ssh_host" "$C_RESET"
+    printf '%b  Expected: %s (from profile)%b\n' "$C_GREEN" "$expected_ssh_host" "$C_RESET"
+    printf '%b  Run: project profile %s  to update remote URL%b\n' "$C_DIM" "${detected_profile:-<profile>}" "$C_RESET"
+    return 1
+  fi
+
+  if [[ "$is_alias" == true ]]; then
+    # Using SSH alias - good practice for multi-account setups
+    if [[ -n "$identity_file" ]]; then
+      if [[ -f "$identity_file" ]]; then
+        printf '%b✓ SSH: %s → %s%b\n' "$C_GREEN" "$current_ssh_host" "$identity_file" "$C_RESET"
+        return 0
+      else
+        printf '%b⚠ SSH key not found: %s%b\n' "$C_YELLOW" "$identity_file" "$C_RESET"
+        return 1
+      fi
+    else
+      printf '%b⚠ SSH alias "%s" not found in ~/.ssh/config%b\n' "$C_YELLOW" "$current_ssh_host" "$C_RESET"
+      return 1
+    fi
+  else
+    # Using direct hostname (e.g., github.com)
+    # Check if there are multiple profiles - if so, warn about potential issues
+    local profile_count
+    profile_count=$(_profiles_list 2>/dev/null | wc -l | tr -d ' ')
+
+    if [[ "$profile_count" -gt 1 ]]; then
+      # Check if the current profile has ssh_host configured
+      if [[ -n "$profile_ssh_host" ]]; then
+        printf '%b⚠ Profile has ssh_host "%s" but remote uses "%s"%b\n' "$C_YELLOW" "$profile_ssh_host" "$current_ssh_host" "$C_RESET"
+        printf '%b  Run: project profile %s  to update remote URL%b\n' "$C_DIM" "$detected_profile" "$C_RESET"
+        return 1
+      elif [[ -n "$identity_file" ]]; then
+        printf '%b✓ SSH key: %s%b\n' "$C_DIM" "$identity_file" "$C_RESET"
+        return 0
+      else
+        printf '%b⚠ Using %s with %s profiles but no explicit SSH key%b\n' "$C_YELLOW" "$current_ssh_host" "$profile_count" "$C_RESET"
+        printf '%b  Consider adding ssh_host to your profile config%b\n' "$C_DIM" "$C_RESET"
+        printf '%b  Run: project profile docs%b\n' "$C_DIM" "$C_RESET"
+        return 1
+      fi
+    else
+      # Single profile - no warning needed
+      if [[ -n "$identity_file" ]]; then
+        printf '%bSSH: %s%b\n' "$C_DIM" "$identity_file" "$C_RESET"
+      fi
+      return 0
+    fi
+  fi
+}
+
+# =============================================================================
 # Profile Subcommand Handlers
 # =============================================================================
 
@@ -212,6 +439,8 @@ _profile_cmd_status() {
   detected_profile="$(_profiles_detect)"
   origin_url=$(git remote get-url origin 2>/dev/null)
   github_user=$(git config github.user 2>/dev/null)
+  local jsh_ssh_host
+  jsh_ssh_host=$(git config jsh.ssh-host 2>/dev/null)
 
   local current_name="${current_config%|*}"
   local current_email="${current_config#*|}"
@@ -241,15 +470,37 @@ _profile_cmd_status() {
   printf '%s\n' ""
   if [[ -n "$detected_profile" ]]; then
     printf 'Profile: %b%s%b\n' "$C_GREEN" "$detected_profile" "$C_RESET"
+
+    # Show profile's SSH host configuration
+    local profile_data profile_ssh_host
+    profile_data="$(_profiles_get "$detected_profile")"
+    if [[ -n "$profile_data" ]]; then
+      profile_ssh_host=$(printf '%s' "$profile_data" | jq -r '.ssh_host // empty')
+      if [[ -n "$profile_ssh_host" ]]; then
+        printf '  ssh_host: %b%s%b\n' "$C_CYAN" "$profile_ssh_host" "$C_RESET"
+      fi
+    fi
   else
     printf 'Profile: %b(none)%b\n' "$C_DIM" "$C_RESET"
   fi
+
+  # Check SSH configuration for potential push issues
+  printf '%s\n' ""
+  local ssh_check_result
+  _profiles_check_ssh
+  ssh_check_result=$?
+
+  # Only propagate actual warnings (1), not "not applicable" (2)
+  if [[ $ssh_check_result -eq 1 ]]; then
+    return 1
+  fi
+  return 0
 }
 
 # List all profiles
 _profile_cmd_list() {
-  local C_CYAN=$'\033[36m' C_GREEN=$'\033[32m' C_DIM=$'\033[2m' C_RESET=$'\033[0m'
-  local profile_name profile_data name email current_profile
+  local C_CYAN=$'\033[36m' C_GREEN=$'\033[32m' C_DIM=$'\033[2m' C_YELLOW=$'\033[33m' C_RESET=$'\033[0m'
+  local profile_name profile_data name email ssh_host current_profile marker ssh_display
 
   if [[ ! -f "$_PROFILES_CONFIG" ]]; then
     printf '%s\n' "No profiles configured."
@@ -259,23 +510,31 @@ _profile_cmd_list() {
 
   current_profile="$(_profiles_detect 2>/dev/null)"
 
-  printf '%b%-15s %-30s %s%b\n' "$C_DIM" "PROFILE" "EMAIL" "NAME" "$C_RESET"
-  printf '%s\n' "$(printf '%60s' '' | tr ' ' '-')"
+  printf '%b%-12s %-25s %-20s %s%b\n' "$C_DIM" "PROFILE" "EMAIL" "SSH_HOST" "NAME" "$C_RESET"
+  printf '%s\n' "$(printf '%80s' '' | tr ' ' '-')"
 
   while IFS= read -r profile_name; do
     [[ -z "$profile_name" ]] && continue
     profile_data="$(_profiles_get "$profile_name")"
     name=$(printf '%s' "$profile_data" | jq -r '.name // empty')
     email=$(printf '%s' "$profile_data" | jq -r '.email // empty')
+    ssh_host=$(printf '%s' "$profile_data" | jq -r '.ssh_host // empty')
 
-    local marker=""
+    marker=""
     if [[ "$profile_name" == "$current_profile" ]]; then
       marker="${C_GREEN}* ${C_RESET}"
     else
       marker="  "
     fi
 
-    printf '%s%b%-15s%b %-30s %s\n' "$marker" "$C_CYAN" "$profile_name" "$C_RESET" "$email" "$name"
+    # Show ssh_host or indicate if not configured
+    if [[ -n "$ssh_host" ]]; then
+      ssh_display="${C_CYAN}${ssh_host}${C_RESET}"
+    else
+      ssh_display="${C_DIM}-${C_RESET}"
+    fi
+
+    printf '%s%b%-12s%b %-25s %-20b %s\n' "$marker" "$C_CYAN" "$profile_name" "$C_RESET" "$email" "$ssh_display" "$name"
   done < <(_profiles_list)
 }
 
@@ -335,15 +594,8 @@ _profile_cmd_docs() {
 # SSH Config for Git Profiles
 # ===========================
 #
-# To use different SSH keys per profile, configure ~/.ssh/config:
-#
-# Example for work profile (GitHub Enterprise):
-#
-#   Host github-work
-#       HostName github.company.com
-#       User git
-#       IdentityFile ~/.ssh/id_work
-#       IdentitiesOnly yes
+# STEP 1: Configure SSH host aliases in ~/.ssh/config
+# ---------------------------------------------------
 #
 # Example for personal profile (GitHub.com):
 #
@@ -353,14 +605,58 @@ _profile_cmd_docs() {
 #       IdentityFile ~/.ssh/id_personal
 #       IdentitiesOnly yes
 #
-# Then clone using the host alias:
-#   git clone github-work:org/repo.git      # Uses work key
-#   git clone github-personal:user/repo.git # Uses personal key
+# Example for work profile (GitHub Enterprise):
 #
-# For existing repos, update the remote:
-#   git remote set-url origin github-work:org/repo.git
+#   Host github-work
+#       HostName github.company.com
+#       User git
+#       IdentityFile ~/.ssh/id_work
+#       IdentitiesOnly yes
 #
-# Profile config location: ~/.jsh/config/profiles.json
+# STEP 2: Add ssh_host to your profile config
+# -------------------------------------------
+#
+# In ~/.jsh/local/profiles.json:
+#
+#   {
+#     "profiles": {
+#       "personal": {
+#         "name": "Your Name",
+#         "email": "personal@example.com",
+#         "user": "yourusername",
+#         "ssh_host": "github-personal"
+#       },
+#       "work": {
+#         "name": "Your Name",
+#         "email": "work@company.com",
+#         "user": "workusername",
+#         "ssh_host": "github-work",
+#         "host": "github.company.com"
+#       }
+#     }
+#   }
+#
+# Profile Schema:
+#   name      - Git user.name
+#   email     - Git user.email
+#   user      - GitHub/GitLab username (updates origin URL)
+#   ssh_host  - SSH host alias from ~/.ssh/config (for SSH remotes)
+#   host      - Actual hostname for HTTPS (defaults to ssh_host)
+#
+# STEP 3: Apply profile to update remote URL
+# ------------------------------------------
+#
+#   project profile personal
+#
+# This sets:
+#   - git user.name and user.email
+#   - Updates origin to: git@github-personal:yourusername/repo.git
+#   - SSH will use the correct key automatically
+#
+# The `project profile` command will warn you if:
+#   - The SSH host alias is not in ~/.ssh/config
+#   - The remote URL doesn't match the profile's expected ssh_host
+#   - You have multiple profiles but no ssh_host configured
 EOF
 }
 

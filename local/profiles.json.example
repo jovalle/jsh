@@ -1,21 +1,30 @@
 {
   "_comment": "Git profiles for jsh projects",
   "_note": "Copy to local/profiles.json and customize for your needs",
+  "_schema": {
+    "name": "Git user.name",
+    "email": "Git user.email",
+    "user": "GitHub/GitLab username (for origin URL)",
+    "ssh_host": "SSH host alias from ~/.ssh/config (e.g., github-personal)",
+    "host": "Actual hostname for HTTPS (defaults to ssh_host if not set)"
+  },
   "profiles": {
     "personal": {
       "name": "Your Name",
       "email": "personal@example.com",
       "user": "yourusername",
+      "ssh_host": "github-personal"
     },
     "work": {
       "name": "Your Name",
       "email": "work@company.com",
       "user": "workusername",
+      "host": "github.company.com"
     },
     "opensource": {
       "name": "Your Name",
       "email": "opensource@example.com",
-      "user": "ossusername",
+      "user": "ossusername"
     }
   }
 }
