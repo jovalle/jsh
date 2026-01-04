@@ -87,6 +87,10 @@ set keymap vi-insert
 # Delete
 "\e[3~": delete-char
 
+# Backspace (handle both DEL and BS)
+"\C-?": backward-delete-char
+"\C-h": backward-delete-char
+
 # Edit in $EDITOR
 "\C-x\C-e": edit-and-execute-command
 
