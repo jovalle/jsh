@@ -723,7 +723,25 @@ cmd_setup() {
     # Initialize submodules
     if [[ -d "${JSH_DIR}/.git" ]]; then
         info "Initializing submodules..."
-        git -C "${JSH_DIR}" submodule update --init --depth 1 2>/dev/null || warn "Failed to init submodules"
+        if git -C "${JSH_DIR}" submodule update --init --depth 1 2>/dev/null; then
+            # Show submodule status
+            local gitmodules="${JSH_DIR}/.gitmodules"
+            if [[ -f "${gitmodules}" ]]; then
+                while IFS= read -r line; do
+                    if [[ "${line}" =~ path\ =\ (.+) ]]; then
+                        local submod_path="${BASH_REMATCH[1]}"
+                        local full_path="${JSH_DIR}/${submod_path}"
+                        if [[ -d "${full_path}" ]] && [[ -n "$(ls -A "${full_path}" 2>/dev/null)" ]]; then
+                            local sub_commit
+                            sub_commit=$(git -C "${full_path}" rev-parse --short HEAD 2>/dev/null || echo "?")
+                            prefix_success "${submod_path} ${DIM}(${sub_commit})${RST}"
+                        fi
+                    fi
+                done < "${gitmodules}"
+            fi
+        else
+            warn "Failed to init submodules"
+        fi
     fi
 
     # Create symlinks
@@ -901,11 +919,16 @@ _check_bundled_binary() {
 
 cmd_status() {
     local fix_issues=false
+    local verbose=false
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --fix|-f)
                 fix_issues=true
+                shift
+                ;;
+            --verbose|-v)
+                verbose=true
                 shift
                 ;;
             *)
@@ -922,67 +945,100 @@ cmd_status() {
     echo "  Version:   ${VERSION}"
 
     if [[ -d "${JSH_DIR}/.git" ]]; then
-        local branch commit
+        local branch commit remote_status
         branch=$(git -C "${JSH_DIR}" branch --show-current 2>/dev/null || echo "unknown")
         commit=$(git -C "${JSH_DIR}" rev-parse --short HEAD 2>/dev/null || echo "unknown")
         echo "  Branch:    ${branch}"
         echo "  Commit:    ${commit}"
+
+        # Check if ahead/behind remote
+        local ahead behind
+        ahead=$(git -C "${JSH_DIR}" rev-list --count @{u}..HEAD 2>/dev/null || echo "0")
+        behind=$(git -C "${JSH_DIR}" rev-list --count HEAD..@{u} 2>/dev/null || echo "0")
+        if [[ "${ahead}" -gt 0 ]] || [[ "${behind}" -gt 0 ]]; then
+            remote_status=""
+            [[ "${ahead}" -gt 0 ]] && remote_status+="${GREEN}↑${ahead}${RST}"
+            [[ "${behind}" -gt 0 ]] && remote_status+="${RED}↓${behind}${RST}"
+            echo "  Remote:    ${remote_status}"
+        fi
     fi
+
+    # Platform info
+    echo ""
+    echo "${CYAN}Platform:${RST}"
+    local platform="${JSH_PLATFORM:-unknown}"
+    echo "  OS:        ${JSH_OS:-$(uname -s | tr '[:upper:]' '[:lower:]')}"
+    echo "  Arch:      ${JSH_ARCH:-$(uname -m)}"
+    echo "  Platform:  ${platform}"
+    echo "  Shell:     ${SHELL##*/} (${JSH_SHELL:-unknown})"
+    echo "  EDITOR:    ${EDITOR:-not set}"
 
     # Detailed symlink status
     echo ""
     echo "${CYAN}Symlinks:${RST}"
     _process_symlink_rules "" "status"
 
-    # Shell info
+    # Tool checks - Requirements
     echo ""
-    echo "${CYAN}Shell:${RST}"
-    echo "  Current:   ${SHELL}"
-    echo "  EDITOR:    ${EDITOR:-not set}"
-
-    # Tool checks
-    echo ""
-    echo "${CYAN}Required tools:${RST}"
+    echo "${CYAN}Requirements:${RST}"
     local issues=0
+
+    # Required tools with versions
+    echo "  ${DIM}Required:${RST}"
     local required=("git" "curl")
     for tool in "${required[@]}"; do
         if has "${tool}"; then
-            echo "  ${GREEN}✔${RST} ${tool}"
+            local ver=""
+            case "${tool}" in
+                git)  ver=$(git --version 2>/dev/null | cut -d' ' -f3) ;;
+                curl) ver=$(curl --version 2>/dev/null | head -1 | cut -d' ' -f2) ;;
+            esac
+            echo "    ${GREEN}✔${RST} ${tool} ${DIM}${ver}${RST}"
         else
-            echo "  ${RED}✘${RST} ${tool} (required)"
+            echo "    ${RED}✘${RST} ${tool} ${DIM}(required)${RST}"
             ((issues++))
         fi
     done
 
     if has zsh; then
-        echo "  ${GREEN}✔${RST} zsh"
+        local zsh_ver
+        zsh_ver=$(zsh --version 2>/dev/null | cut -d' ' -f2)
+        echo "    ${GREEN}✔${RST} zsh ${DIM}${zsh_ver}${RST}"
     else
-        echo "  ${YELLOW}⚠${RST} zsh (recommended)"
+        echo "    ${YELLOW}⚠${RST} zsh ${DIM}(recommended)${RST}"
     fi
 
-    echo ""
-    echo "${CYAN}Optional tools:${RST}"
-    local recommended=("fzf" "fd" "rg" "bat" "eza" "tmux")
+    # Optional tools
+    echo "  ${DIM}Optional:${RST}"
+    local recommended=("fzf" "fd" "rg" "bat" "eza" "tmux" "jq")
     for tool in "${recommended[@]}"; do
         if has "${tool}"; then
-            echo "  ${GREEN}✔${RST} ${tool}"
+            local ver=""
+            case "${tool}" in
+                fzf)  ver=$("${tool}" --version 2>/dev/null | head -1) ;;
+                fd)   ver=$("${tool}" --version 2>/dev/null | cut -d' ' -f2) ;;
+                rg)   ver=$("${tool}" --version 2>/dev/null | head -1 | cut -d' ' -f2) ;;
+                bat)  ver=$("${tool}" --version 2>/dev/null | cut -d' ' -f2) ;;
+                eza)  ver=$("${tool}" --version 2>/dev/null | sed -n '2s/^v\([^ ]*\).*/\1/p') ;;
+                tmux) ver=$("${tool}" -V 2>/dev/null | cut -d' ' -f2) ;;
+                jq)   ver=$("${tool}" --version 2>/dev/null) ;;
+            esac
+            echo "    ${GREEN}✔${RST} ${tool} ${DIM}${ver}${RST}"
         else
-            echo "  ${DIM}-${RST} ${tool}"
+            echo "    ${DIM}-${RST} ${tool}"
         fi
     done
 
-    # Key dependencies health check (bundled binaries)
+    # Bundled binaries
     echo ""
-    echo "${CYAN}Key dependencies:${RST}"
-    local platform bin_dir
-    platform="${JSH_PLATFORM:-unknown}"
-    bin_dir="${JSH_DIR}/lib/bin/${platform}"
+    echo "${CYAN}Bundled Binaries:${RST}"
+    local bin_dir="${JSH_DIR}/lib/bin/${platform}"
 
     if [[ "${platform}" == "unknown" ]]; then
         echo "  ${YELLOW}⚠${RST} Unknown platform, cannot check bundled binaries"
     elif [[ ! -d "${bin_dir}" ]]; then
         echo "  ${YELLOW}⚠${RST} No bundled binaries for ${platform}"
-        prefix_info "Run: ${CYAN}${JSH_DIR}/src/deps.sh${RST} to download"
+        echo "  ${DIM}Run: ${JSH_DIR}/src/deps.sh${RST}"
     else
         local key_deps=("fzf" "jq")
         for dep in "${key_deps[@]}"; do
@@ -1015,6 +1071,70 @@ cmd_status() {
                     ;;
             esac
         done
+    fi
+
+    # ZSH Plugins
+    echo ""
+    echo "${CYAN}ZSH Plugins:${RST}"
+    local plugins_dir="${JSH_DIR}/lib/zsh-plugins"
+    local plugins=("zsh-autosuggestions" "zsh-syntax-highlighting" "zsh-history-substring-search")
+    for plugin in "${plugins[@]}"; do
+        local plugin_file="${plugins_dir}/${plugin}.zsh"
+        if [[ -f "${plugin_file}" ]]; then
+            echo "  ${GREEN}✔${RST} ${plugin}"
+        else
+            echo "  ${YELLOW}⚠${RST} ${plugin} ${DIM}(not installed)${RST}"
+        fi
+    done
+
+    # Check highlighters directory for syntax highlighting
+    if [[ -d "${plugins_dir}/highlighters" ]]; then
+        local highlighter_count
+        highlighter_count=$(find "${plugins_dir}/highlighters" -name "*.zsh" 2>/dev/null | wc -l | tr -d ' ')
+        echo "  ${GREEN}✔${RST} highlighters ${DIM}(${highlighter_count} files)${RST}"
+    fi
+
+    # Submodules
+    echo ""
+    echo "${CYAN}Submodules:${RST}"
+    local gitmodules="${JSH_DIR}/.gitmodules"
+    if [[ -f "${gitmodules}" ]]; then
+        while IFS= read -r line; do
+            if [[ "${line}" =~ path\ =\ (.+) ]]; then
+                local submod_path="${BASH_REMATCH[1]}"
+                local full_path="${JSH_DIR}/${submod_path}"
+
+                if [[ ! -d "${full_path}" ]]; then
+                    echo "  ${RED}✘${RST} ${submod_path} ${DIM}(not cloned)${RST}"
+                    ((issues++))
+                elif [[ -z "$(ls -A "${full_path}" 2>/dev/null)" ]]; then
+                    echo "  ${YELLOW}○${RST} ${submod_path} ${DIM}(not initialized)${RST}"
+                else
+                    local sub_commit
+                    sub_commit=$(git -C "${full_path}" rev-parse --short HEAD 2>/dev/null || echo "?")
+                    echo "  ${GREEN}✔${RST} ${submod_path} ${DIM}(${sub_commit})${RST}"
+                fi
+            fi
+        done < "${gitmodules}"
+    else
+        echo "  ${DIM}No submodules configured${RST}"
+    fi
+
+    # Dependency versions (from versions.json)
+    local versions_file="${JSH_DIR}/lib/bin/versions.json"
+    if [[ -f "${versions_file}" ]]; then
+        echo ""
+        echo "${CYAN}Configured Versions:${RST}"
+        if has jq; then
+            jq -r 'to_entries[] | "  \(.key): v\(.value)"' "${versions_file}" 2>/dev/null
+        else
+            # Fallback without jq
+            while IFS= read -r line; do
+                if [[ "${line}" =~ \"([^\"]+)\":\ *\"([^\"]+)\" ]]; then
+                    echo "  ${BASH_REMATCH[1]}: v${BASH_REMATCH[2]}"
+                fi
+            done < "${versions_file}"
+        fi
     fi
 
     # Broken symlinks check
