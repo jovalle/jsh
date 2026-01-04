@@ -115,8 +115,8 @@ set keymap vi-command
 "gg": beginning-of-history
 "G": end-of-history
 
-# Edit in $EDITOR
-"v": edit-and-execute-command
+# Edit in $EDITOR (V to edit, v remains visual mode)
+"V": edit-and-execute-command
 "\C-x\C-e": edit-and-execute-command
 
 # Word navigation
