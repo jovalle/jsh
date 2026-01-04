@@ -134,10 +134,10 @@ _vimode_setup_zsh() {
     bindkey -M viins '^[[1;5D' backward-word       # Ctrl+Left
     bindkey -M viins '^[[1;5C' forward-word        # Ctrl+Right
 
-    # Edit command in $EDITOR
+    # Edit command in $EDITOR (V to edit, v remains visual mode)
     autoload -Uz edit-command-line
     zle -N edit-command-line
-    bindkey -M vicmd 'v' edit-command-line
+    bindkey -M vicmd 'V' edit-command-line
     bindkey -M viins '^X^E' edit-command-line
 
     # Clear screen
