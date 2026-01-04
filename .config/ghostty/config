@@ -1,0 +1,375 @@
+# ==============================================================================
+# Ghostty Terminal Configuration
+# ==============================================================================
+# Ghostty is a fast, feature-rich, cross-platform terminal emulator that uses
+# platform-native UI and GPU acceleration.
+#
+# Merged from popular GitHub dotfiles and Ghostty community:
+# - linkarzu/dotfiles-latest (comprehensive configuration)
+# - happyjake/ghostty-dotfiles (theme configurations)
+# - jlfguthrie/ghostty-terminal-dotfiles (2025 optimizations)
+# - Ghostty official documentation (ghostty.org/docs/config)
+#
+# Organization:
+#   1. Update & Security - Auto-update behavior
+#   2. Window & Display - Window appearance and behavior
+#   3. Font Configuration - Typography settings
+#   4. Colors & Theme - Color palette and appearance
+#   5. Cursor - Cursor appearance and behavior
+#   6. Scrollback & Performance - Memory and GPU settings
+#   7. Selection & Clipboard - Copy/paste behavior
+#   8. Keyboard & Input - Key mappings and modifiers
+#   9. Shell Integration - Terminal/shell communication
+#  10. Quick Terminal - Dropdown/quake-style terminal
+#  11. Splits & Tabs - Multiple terminal management
+#  12. Advanced - Mouse, links, notifications
+# ==============================================================================
+
+# ==============================================================================
+# 1. UPDATE & SECURITY
+# ==============================================================================
+
+# Automatic update behavior
+# Options: off, check, download (default)
+# 'download' downloads but prompts before installing
+auto-update = download
+
+# Update channel for releases
+# Options: stable, tip (bleeding edge)
+auto-update-channel = stable
+
+# Disable reading default configuration files from system paths
+# Ensures only this config is loaded for reproducibility
+config-default-files = false
+
+# ==============================================================================
+# 2. WINDOW & DISPLAY
+# ==============================================================================
+
+# Initial window dimensions (in characters/lines)
+# Set to comfortable size for most displays
+window-width = 120
+window-height = 35
+
+# Window theme - inherit from system or force dark/light
+# Options: auto, system, light, dark, ghostty (custom)
+window-theme = dark
+
+# macOS-specific titlebar styling
+# Options: native, transparent, tabs (show tabs in titlebar), hidden
+# 'tabs' provides Chrome-like tab integration in titlebar
+macos-titlebar-style = tabs
+
+# macOS icon style in dock
+# Options: official, custom-style, glass, template, retro, xray, ghosty-screen
+macos-icon = retro
+
+# Window padding - space between content and window edges (in points)
+# Format: horizontal (left,right) or single value for both
+window-padding-x = 4
+
+# Format: vertical (top,bottom) or single value for both
+window-padding-y = 6,2
+
+# Confirm before closing a terminal with running processes
+# Prevents accidental data loss
+confirm-close-surface = false
+
+# Quit application when last window closes (macOS behavior)
+quit-after-last-window-closed = true
+
+# Focus follows mouse for split panes
+# When true, hovering over a pane focuses it
+focus-follows-mouse = false
+
+# ==============================================================================
+# 3. FONT CONFIGURATION
+# ==============================================================================
+
+# Primary font family - must be a monospace font
+# JetBrains Mono Nerd Font recommended for ligatures and icon support
+# Fallback fonts are tried in order if primary is unavailable
+font-family = JetBrainsMono Nerd Font
+
+# Alternative fonts to try:
+# font-family = FiraCode Nerd Font
+# font-family = Hack Nerd Font
+# font-family = SF Mono
+# font-family = Menlo
+
+# Font size in points
+font-size = 14
+
+# Enable font thickening (makes fonts appear bolder)
+# Useful for light fonts on dark backgrounds
+font-thicken = true
+
+# Adjust line spacing (1.0 = normal)
+# Slightly increased for readability
+# adjust-cell-height = 5%
+
+# Enable font features (ligatures, etc.)
+# Common ligatures: == != >= <= => -> <!-- --> etc.
+font-feature = calt
+font-feature = liga
+
+# Font rendering options
+# freetype-load-flags = no-hinting  # Disable hinting for smoother rendering
+
+# ==============================================================================
+# 4. COLORS & THEME
+# ==============================================================================
+
+# External theme file (optional)
+# config-file = ~/.config/ghostty/themes/tokyonight
+
+# Background and foreground colors
+background = #1e1e1e
+foreground = #e0e0e0
+
+# Background opacity for transparency effect (0.0 = transparent, 1.0 = opaque)
+# Requires compositing window manager
+# background-opacity = 0.95
+
+# Background blur when using transparency (macOS/Wayland)
+# Provides frosted glass effect
+# background-blur = true
+
+# Selection colors
+selection-background = #3a3d41
+selection-foreground = #e0e0e0
+
+# Cursor colors
+cursor-color = #f0c674
+cursor-text = #1e1e1e
+
+# 16-color palette (standard ANSI colors)
+# Format: palette = index=#rrggbb or palette = index=rrggbb
+
+# Normal colors (0-7)
+palette = 0=#000000
+palette = 1=#cd3131
+palette = 2=#0dbc79
+palette = 3=#e5e510
+palette = 4=#2472c8
+palette = 5=#bc3fbc
+palette = 6=#11a8cd
+palette = 7=#e5e5e5
+
+# Bright colors (8-15)
+palette = 8=#666666
+palette = 9=#f14c4c
+palette = 10=#23d18b
+palette = 11=#f5f543
+palette = 12=#3b8eea
+palette = 13=#d670d6
+palette = 14=#29b8db
+palette = 15=#e5e5e5
+
+# Bold text color (use bright colors, or specific color)
+# bold-is-bright = true
+
+# ==============================================================================
+# 5. CURSOR
+# ==============================================================================
+
+# Cursor style
+# Options: block, bar, underline (each can have _blinking variant)
+cursor-style = block
+
+# Cursor blinking behavior
+# Options: true, false, on (always), off (never)
+cursor-style-blink = true
+
+# Cursor color inverts text underneath
+cursor-invert-fg-bg = false
+
+# ==============================================================================
+# 6. SCROLLBACK & PERFORMANCE
+# ==============================================================================
+
+# Scrollback buffer size in lines
+# Higher values use more memory but preserve more history
+scrollback-limit = 100000
+
+# GPU acceleration for rendering
+# Options: on, off, auto (default)
+# Using Metal on macOS, Vulkan/OpenGL on Linux
+# gtk-use-hardware-accel = true
+
+# VSync for smooth rendering without tearing
+# window-vsync = true
+
+# Custom shaders for visual effects (advanced)
+# custom-shader = path/to/shader.glsl
+# custom-shader-animation = true
+
+# ==============================================================================
+# 7. SELECTION & CLIPBOARD
+# ==============================================================================
+
+# Automatically copy selection to clipboard
+# Options: none, clipboard, primary, clipboard-and-primary
+copy-on-select = clipboard
+
+# Allow programs to read from clipboard (OSC 52)
+# Options: allow, deny, ask (prompt each time)
+clipboard-read = allow
+
+# Allow programs to write to clipboard (OSC 52)
+# Enables copying from vim, tmux, etc. to system clipboard
+clipboard-write = allow
+
+# Trim trailing whitespace from selections
+clipboard-trim-trailing-spaces = true
+
+# Double-click word selection includes these characters
+# Useful for selecting URLs, file paths, etc.
+# word-delimiter-chars = ,│`|:"' ()[]{}<>
+
+# ==============================================================================
+# 8. KEYBOARD & INPUT
+# ==============================================================================
+
+# macOS: Use Option key as Alt for terminal applications
+# Options: left, right, both, false
+# 'right' uses Right-Option as Alt, Left-Option for Unicode input
+macos-option-as-alt = right
+
+# Allow terminal to capture all keys (including system shortcuts)
+# macos-non-native-fullscreen = true
+
+# Key bindings - Format: keybind = key-combo=action
+# Use 'super' for Cmd on macOS, 'ctrl' for Control
+
+# Tab management
+keybind = super+t=new_tab
+keybind = super+w=close_surface
+keybind = super+shift+]=next_tab
+keybind = super+shift+[=previous_tab
+
+# Split panes
+keybind = super+d=new_split:right
+keybind = super+shift+d=new_split:down
+
+# Navigate between splits
+keybind = super+alt+left=goto_split:left
+keybind = super+alt+right=goto_split:right
+keybind = super+alt+up=goto_split:top
+keybind = super+alt+down=goto_split:bottom
+
+# Resize splits
+keybind = super+ctrl+left=resize_split:left,10
+keybind = super+ctrl+right=resize_split:right,10
+keybind = super+ctrl+up=resize_split:up,10
+keybind = super+ctrl+down=resize_split:down,10
+
+# Equalize split sizes
+keybind = super+shift+e=equalize_splits
+
+# Font size adjustments
+keybind = super+plus=increase_font_size:1
+keybind = super+minus=decrease_font_size:1
+keybind = super+0=reset_font_size
+
+# Scrolling
+keybind = super+up=scroll_page_up
+keybind = super+down=scroll_page_down
+keybind = super+home=scroll_to_top
+keybind = super+end=scroll_to_bottom
+
+# Quick terminal toggle (dropdown/quake style)
+keybind = global:super+`=toggle_quick_terminal
+
+# Send literal newline with Shift+Enter (for multiline input)
+keybind = shift+enter=text:\x0a
+
+# Clear scrollback and screen
+keybind = super+k=clear_screen
+
+# Inspector (for debugging)
+keybind = super+shift+i=inspector:toggle
+
+# ==============================================================================
+# 9. SHELL INTEGRATION
+# ==============================================================================
+
+# Enable shell integration features
+# Provides: current directory tracking, command completion, etc.
+# Options: none, detect, bash, fish, zsh, elvish
+# Use 'detect' to automatically detect shell type (important for bash compatibility!)
+shell-integration = detect
+
+# Show mark for command output in scrollback
+# Allows jumping between commands
+shell-integration-features = cursor,sudo,title
+
+# Wait for shell to complete before showing prompt
+# shell-integration-features = report-exit-code
+
+# ==============================================================================
+# 10. QUICK TERMINAL (Dropdown/Quake Style)
+# ==============================================================================
+
+# Position of quick terminal
+# Options: top, bottom, left, right, center
+quick-terminal-position = top
+
+# Size of quick terminal (percentage of screen)
+quick-terminal-screen = main
+
+# Animation duration in seconds
+quick-terminal-animation-duration = 0.1
+
+# Auto-hide when focus is lost
+quick-terminal-autohide = true
+
+# ==============================================================================
+# 11. SPLITS & TABS
+# ==============================================================================
+
+# Opacity of unfocused split panes (dims inactive panes)
+# Range: 0.0 (transparent) to 1.0 (opaque)
+unfocused-split-opacity = 0.8
+
+# Fill color for unfocused split (alternative to opacity)
+# unfocused-split-fill = #1e1e1e
+
+# Minimum size of splits in cells
+# minimum-split-size = 4
+
+# ==============================================================================
+# 12. ADVANCED
+# ==============================================================================
+
+# Mouse behavior
+mouse-hide-while-typing = true
+
+# Clickable links in terminal output
+# Options: true, false
+link-url = true
+
+# Desktop notifications from terminal
+# Options: true, false
+desktop-notifications = true
+
+# Working directory for new windows/tabs
+# Options: cwd (inherit), home, specific path
+# working-directory = inherit
+
+# Command to run in new terminals (default: user's shell)
+# command = /bin/zsh --login
+
+# Terminal standard
+term = xterm-256color
+
+# Environment variables to set
+# env = TERM_PROGRAM=ghostty
+# env = COLORTERM=truecolor
+
+# ==============================================================================
+# LOCAL OVERRIDES
+# ==============================================================================
+# Create ~/.config/ghostty/config.local for machine-specific settings
+
+# config-file = ~/.config/ghostty/config.local
