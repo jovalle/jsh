@@ -20,7 +20,7 @@ git clone --depth 1 https://github.com/jovalle/jsh ~/.jsh
 
 ## Credits
 
-Greatly enhanced with [fzf](https://github.com/junegunn/fzf), [Powerlevel10k](https://github.com/romkatv/powerlevel10k), and modern CLI tools when available.
+Greatly enhanced with [fzf](https://github.com/junegunn/fzf) and an assortment of Zsh plugins.
 
 ## License
 
