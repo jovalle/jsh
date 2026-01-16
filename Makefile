@@ -12,7 +12,8 @@
 # Run 'make help' for available targets
 # =============================================================================
 
-SHELL := /bin/bash
+# Use bash from PATH (requires bash 4+ - install via brew on macOS)
+SHELL := bash
 .DEFAULT_GOAL := help
 
 # =============================================================================
@@ -119,7 +120,7 @@ endif
 # =============================================================================
 
 .PHONY: help all clean clean-all
-.PHONY: lint lint-shell lint-syntax lint-yaml lint-format format
+.PHONY: lint lint-shell lint-syntax lint-compat lint-yaml lint-format format
 .PHONY: test test-verbose test-tap test-bash test-zsh
 .PHONY: deps deps-check deps-download deps-download-all deps-verify deps-force
 .PHONY: deps-plugins deps-plugins-force
@@ -167,7 +168,7 @@ clean-all: clean docker-clean ## Clean everything including Docker images
 # Linting
 # =============================================================================
 
-lint: lint-shell lint-yaml ## Run all linters
+lint: lint-shell lint-compat lint-yaml ## Run all linters
 
 lint-shell: ## Run ShellCheck on all shell scripts
 	@printf "$(BLUE)==>$(RESET) Running ShellCheck...\n"
@@ -193,6 +194,28 @@ lint-syntax: ## Quick syntax check (bash -n) for all scripts
 	done
 	@bash -n $(JSH_DIR)/jsh
 	@printf "$(GREEN)✔$(RESET) Syntax check passed\n"
+
+lint-compat: ## Verify bash 4+ is available (required for jsh)
+	@printf "$(BLUE)==>$(RESET) Checking bash version requirement...\n"
+	@# jsh requires bash 4+ for modern features (associative arrays, etc.)
+	@# Check common locations for modern bash
+	@found_bash=""; \
+	for bash_path in /opt/homebrew/bin/bash /usr/local/bin/bash $$(which bash 2>/dev/null); do \
+		if [ -x "$$bash_path" ]; then \
+			ver=$$($$bash_path --version 2>/dev/null | head -1 | sed 's/.*version \([0-9]*\).*/\1/'); \
+			if [ "$$ver" -ge 4 ] 2>/dev/null; then \
+				found_bash="$$bash_path (v$$ver)"; \
+				break; \
+			fi; \
+		fi; \
+	done; \
+	if [ -z "$$found_bash" ]; then \
+		printf "$(RED)✘$(RESET) No bash 4+ found\n"; \
+		printf "  On macOS: brew install bash\n"; \
+		printf "  Then ensure Homebrew is in PATH, or run: jsh deps fix-bash\n"; \
+		exit 1; \
+	fi; \
+	printf "$(GREEN)✔$(RESET) Bash 4+ available: $$found_bash\n"
 
 lint-yaml: ## Run yamllint on YAML files
 	@printf "$(BLUE)==>$(RESET) Running yamllint...\n"
@@ -538,6 +561,7 @@ ci-lint: ## CI lint stage
 	@printf "$(BLUE)==>$(RESET) CI: Linting...\n"
 	@$(MAKE) --no-print-directory lint-shell
 	@$(MAKE) --no-print-directory lint-syntax
+	@$(MAKE) --no-print-directory lint-compat
 	@$(MAKE) --no-print-directory lint-yaml
 
 ci-test: ## CI test stage
