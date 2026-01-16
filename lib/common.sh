@@ -6,15 +6,15 @@
 # Colors (auto-detect terminal support)
 # =============================================================================
 
-if [[ -t 1 ]] && [[ "${NO_COLOR:-}" != "1" ]]; then
-    C_RESET='\033[0m'
-    C_RED='\033[0;31m'
-    C_GREEN='\033[0;32m'
-    C_YELLOW='\033[0;33m'
-    C_BLUE='\033[0;34m'
-    C_CYAN='\033[0;36m'
-    C_BOLD='\033[1m'
-    C_DIM='\033[2m'
+if [[ -t 1 ]] && [[ "${NO_COLOR:-}" != "1" ]] && [[ "${TERM:-}" != "dumb" ]]; then
+    C_RESET=$'\033[0m'
+    C_RED=$'\033[0;31m'
+    C_GREEN=$'\033[0;32m'
+    C_YELLOW=$'\033[0;33m'
+    C_BLUE=$'\033[0;34m'
+    C_CYAN=$'\033[0;36m'
+    C_BOLD=$'\033[1m'
+    C_DIM=$'\033[2m'
 else
     C_RESET='' C_RED='' C_GREEN='' C_YELLOW=''
     C_BLUE='' C_CYAN='' C_BOLD='' C_DIM=''
@@ -29,33 +29,33 @@ export C_RESET C_RED C_GREEN C_YELLOW C_BLUE C_CYAN C_BOLD C_DIM
 
 # Fatal error - print message and exit
 die() {
-    printf "%s%serror:%s %s\n" "${C_RED}" "${C_BOLD}" "${C_RESET}" "$*" >&2
+    printf "%s%s×%s %s\n" "${C_RED}" "${C_BOLD}" "${C_RESET}" "$*" >&2
     exit 1
 }
 
 # Warning message
 warn() {
-    printf "%s%swarn:%s %s\n" "${C_YELLOW}" "${C_BOLD}" "${C_RESET}" "$*" >&2
+    printf "%s%s!%s %s\n" "${C_YELLOW}" "${C_BOLD}" "${C_RESET}" "$*" >&2
 }
 
 # Success message
 success() {
-    printf "%s%ssuccess:%s %s\n" "${C_GREEN}" "${C_BOLD}" "${C_RESET}" "$*"
+    printf "%s%s✓%s %s\n" "${C_GREEN}" "${C_BOLD}" "${C_RESET}" "$*"
 }
 
 # Info message
 info() {
-    printf "%sinfo:%s %s\n" "${C_BLUE}" "${C_RESET}" "$*"
+    printf "%s•%s %s\n" "${C_BLUE}" "${C_RESET}" "$*"
 }
 
 # Error message (no exit)
 error() {
-    printf "%s%serror:%s %s\n" "${C_RED}" "${C_BOLD}" "${C_RESET}" "$*" >&2
+    printf "%s%s×%s %s\n" "${C_RED}" "${C_BOLD}" "${C_RESET}" "$*" >&2
 }
 
 # Debug message (internal, override with script-specific env var)
 _debug() {
-    printf "%sdebug: %s%s\n" "${C_DIM}" "$*" "${C_RESET}" >&2
+    printf "%s• %s%s\n" "${C_DIM}" "$*" "${C_RESET}" >&2
 }
 
 # =============================================================================
