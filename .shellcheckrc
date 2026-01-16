@@ -3,6 +3,13 @@
 shell=bash
 
 # =============================================================================
+# Bash 4+ Required
+# =============================================================================
+# jsh requires bash 4+ for modern features (associative arrays, etc.)
+# On macOS, run 'jsh deps fix-bash' to install/configure Homebrew bash.
+# =============================================================================
+
+# =============================================================================
 # Disabled checks (intentional patterns in shell configuration)
 # =============================================================================
 
@@ -53,6 +60,10 @@ disable=SC2029
 # SC2012: Use find instead of ls
 #   - Simple file counting where filenames are controlled
 disable=SC2012
+
+# SC1083: This { is literal
+#   - Git refspec syntax @{u} (upstream) uses literal braces intentionally
+disable=SC1083
 
 # =============================================================================
 # Optional: Severity levels for CI
