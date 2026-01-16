@@ -120,51 +120,54 @@ font-feature = liga
 # 4. COLORS & THEME
 # ==============================================================================
 
+# Internal color scheme
+theme = Catppuccin Mocha
+
 # External theme file (optional)
 # config-file = ~/.config/ghostty/themes/tokyonight
 
-# Background and foreground colors
-background = #1e1e1e
-foreground = #e0e0e0
+# # Background and foreground colors
+# background = #1e1e1e
+# foreground = #e0e0e0
 
-# Background opacity for transparency effect (0.0 = transparent, 1.0 = opaque)
-# Requires compositing window manager
-# background-opacity = 0.95
+# # Background opacity for transparency effect (0.0 = transparent, 1.0 = opaque)
+# # Requires compositing window manager
+# # background-opacity = 0.95
 
-# Background blur when using transparency (macOS/Wayland)
-# Provides frosted glass effect
-# background-blur = true
+# # Background blur when using transparency (macOS/Wayland)
+# # Provides frosted glass effect
+# # background-blur = true
 
-# Selection colors
-selection-background = #3a3d41
-selection-foreground = #e0e0e0
+# # Selection colors
+# selection-background = #3a3d41
+# selection-foreground = #e0e0e0
 
-# Cursor colors
-cursor-color = #f0c674
-cursor-text = #1e1e1e
+# # Cursor colors
+# cursor-color = #f0c674
+# cursor-text = #1e1e1e
 
-# 16-color palette (standard ANSI colors)
-# Format: palette = index=#rrggbb or palette = index=rrggbb
+# # 16-color palette (standard ANSI colors)
+# # Format: palette = index=#rrggbb or palette = index=rrggbb
 
-# Normal colors (0-7)
-palette = 0=#000000
-palette = 1=#cd3131
-palette = 2=#0dbc79
-palette = 3=#e5e510
-palette = 4=#2472c8
-palette = 5=#bc3fbc
-palette = 6=#11a8cd
-palette = 7=#e5e5e5
+# # Normal colors (0-7)
+# palette = 0=#000000
+# palette = 1=#cd3131
+# palette = 2=#0dbc79
+# palette = 3=#e5e510
+# palette = 4=#2472c8
+# palette = 5=#bc3fbc
+# palette = 6=#11a8cd
+# palette = 7=#e5e5e5
 
-# Bright colors (8-15)
-palette = 8=#666666
-palette = 9=#f14c4c
-palette = 10=#23d18b
-palette = 11=#f5f543
-palette = 12=#3b8eea
-palette = 13=#d670d6
-palette = 14=#29b8db
-palette = 15=#e5e5e5
+# # Bright colors (8-15)
+# palette = 8=#666666
+# palette = 9=#f14c4c
+# palette = 10=#23d18b
+# palette = 11=#f5f543
+# palette = 12=#3b8eea
+# palette = 13=#d670d6
+# palette = 14=#29b8db
+# palette = 15=#e5e5e5
 
 # Bold text color (use bright colors, or specific color)
 # bold-is-bright = true
