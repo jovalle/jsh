@@ -10,26 +10,62 @@ _JSH_FUNCTIONS_LOADED=1
 # Directory Navigation
 # =============================================================================
 
-# Enhanced cd: creates directory if it doesn't exist
+# Enhanced cd: creates directory if it doesn't exist, auto-cleans empty dirs on leave
 # shellcheck disable=SC2164  # cd failures are intentional for error propagation
+#
+# Auto-cleanup behavior:
+#   When cd auto-creates a directory and you later cd out of it,
+#   the empty directory is automatically removed (via rmdir, which is safe).
+#   If you create any files/subdirs, the directory is kept.
+#
+# Variable: _JSH_AUTOCREATED_DIR - tracks the last auto-created directory
+
 cd() {
+    local prev_dir="${PWD}"
+
+    # Helper: attempt cleanup of auto-created dir if we're leaving it
+    _jsh_cleanup_autocreated() {
+        if [[ -n "${_JSH_AUTOCREATED_DIR:-}" ]]; then
+            # Only cleanup if we're leaving the auto-created dir
+            if [[ "${prev_dir}" == "${_JSH_AUTOCREATED_DIR}" ]]; then
+                # rmdir only removes empty dirs - safe to always try
+                if rmdir "${_JSH_AUTOCREATED_DIR}" 2>/dev/null; then
+                    echo "Removed empty directory: ${_JSH_AUTOCREATED_DIR}"
+                fi
+                # Clear tracking regardless (we're done with this dir)
+                unset _JSH_AUTOCREATED_DIR
+            fi
+        fi
+    }
+
     # Handle no args (go home) and special cases like cd -
     if [[ $# -eq 0 ]] || [[ "$1" == "-" ]]; then
+        _jsh_cleanup_autocreated
         builtin cd "$@" || return
         return
     fi
 
     # Try normal cd first
     if builtin cd "$@" 2>/dev/null; then
+        _jsh_cleanup_autocreated
         return 0
     fi
 
     # If target doesn't exist and isn't a special arg, create and cd
     if [[ ! -e "$1" ]]; then
+        # Cleanup before creating new auto-dir (in case nested typos)
+        _jsh_cleanup_autocreated
+
         echo "Creating directory: $1"
-        mkdir -p "$1" && builtin cd "$1" || return
+        if mkdir -p "$1" && builtin cd "$1"; then
+            # Track this as auto-created for potential cleanup
+            _JSH_AUTOCREATED_DIR="${PWD}"
+        else
+            return 1
+        fi
     else
         # Exists but cd failed (permission denied, not a directory, etc.)
+        _jsh_cleanup_autocreated
         builtin cd "$@" || return
     fi
 }
@@ -645,53 +681,130 @@ else
 fi
 
 # =============================================================================
-# Directory Bookmarks
+# Project Navigation (thin wrapper around bin/jgit)
 # =============================================================================
 
-# Bookmark current directory
-mark() {
-    local name="${1:-$(basename "${PWD}")}"
-    local marks_file="${HOME}/.marks"
-
-    # Remove existing bookmark with same name (using awk for safe string matching)
-    if [[ -f "${marks_file}" ]]; then
-        awk -F: -v name="${name}" '$1 != name' "${marks_file}" > "${marks_file}.tmp"
-        mv "${marks_file}.tmp" "${marks_file}" 2>/dev/null
-    fi
-
-    echo "${name}:${PWD}" >> "${marks_file}"
-    echo "Marked: ${name} -> ${PWD}"
-}
-
-# Jump to bookmark
-jump() {
-    local name="$1"
-    local marks_file="${HOME}/.marks"
-
-    [[ -f "${marks_file}" ]] || { echo "No bookmarks set" >&2; return 1; }
-
-    if [[ -z "${name}" ]]; then
-        # List bookmarks
-        cat "${marks_file}"
+# project - Navigate to project directories and manage git projects
+# This is a shell wrapper around jgit that handles:
+#   - cd operations (which jgit as an external script cannot do)
+#   - Extracting CD: lines from jgit output for add/create commands
+#
+# Usage: project <name>           Navigate to project
+#        project -l [-v]          List projects
+#        project add <url> [name] Clone repository (then cd)
+#        project create <name>    Create project (then cd)
+#        project profile [cmd]    Profile management
+project() {
+    # No arguments - show help
+    if [[ $# -eq 0 ]]; then
+        jgit --help
         return 0
     fi
 
-    local _target_dir
-    # Use awk for safe string matching (handles special chars in name)
-    _target_dir=$(awk -F: -v name="${name}" '$1 == name {print $2}' "${marks_file}")
+    local cmd="$1"
 
-    if [[ -n "${_target_dir}" ]]; then
-        cd "${_target_dir}" || return 1
+    case "${cmd}" in
+        # Commands that need cd handling after jgit completes
+        # Uses temp file for CD path to allow interactive prompts to display
+        add|create)
+            local cd_file
+            cd_file=$(mktemp "${TMPDIR:-/tmp}/jgit-cd.XXXXXX")
+
+            # Run jgit with temp file for CD path communication
+            # This allows interactive prompts (like profile selection) to display
+            JSH_WRAPPER=1 JSH_CD_FILE="${cd_file}" jgit "$@"
+            local ret=$?
+
+            # If successful, cd to the directory from temp file
+            if [[ $ret -eq 0 && -f "${cd_file}" ]]; then
+                local target_dir
+                target_dir=$(cat "${cd_file}")
+                if [[ -n "${target_dir}" && -d "${target_dir}" ]]; then
+                    cd "${target_dir}" || ret=1
+                fi
+            fi
+
+            rm -f "${cd_file}"
+            return $ret
+            ;;
+
+        # Pass-through commands (no cd needed)
+        -l|--list|list)
+            jgit list "${@:2}"
+            ;;
+
+        profile)
+            jgit profile "${@:2}"
+            ;;
+
+        update)
+            jgit update "${@:2}"
+            ;;
+
+        -h|--help|help)
+            jgit --help
+            ;;
+
+        -*)
+            # Handle flags like -v passed after -l
+            jgit "$@"
+            ;;
+
+        # Default: navigate to project by name
+        *)
+            local target_path
+            target_path=$(jgit path "$@" 2>&1)
+
+            if [[ $? -eq 0 && -n "${target_path}" && -d "${target_path}" ]]; then
+                cd "${target_path}" || return 1
+                # Show current location with color
+                echo "${C_GIT:-\033[36m}$(_projects_display_path "${target_path}")${RST:-\033[0m}"
+            else
+                # jgit path already printed error, just propagate exit code
+                return 1
+            fi
+            ;;
+    esac
+}
+
+# Helper to display path with ~ for $HOME
+_projects_display_path() {
+    local _dir="$1"
+    if [[ "${_dir}" == "${HOME}"* ]]; then
+        echo "~${_dir#"$HOME"}"
     else
-        echo "Bookmark not found: ${name}" >&2
-        return 1
+        echo "${_dir}"
     fi
 }
 
-# Aliases for marks
-alias j='jump'
-alias m='mark'
-alias marks='jump'
+# Aliases
+alias p='project'
+alias pp='project profile'
+alias projects='project -l -v'
+
+# Bash completion for project command
+if [[ -n "${BASH_VERSION:-}" ]]; then
+    _project_completions() {
+        local cur="${COMP_WORDS[COMP_CWORD]}"
+        local first="${COMP_WORDS[1]:-}"
+
+        # Get completions from jgit
+        local completions=""
+
+        if [[ ${COMP_CWORD} -eq 1 ]]; then
+            # First arg: subcommands + project names
+            completions="add create profile -l --list"
+            completions+=" $(jgit list 2>/dev/null | awk '{print $1}' | tr '\n' ' ')"
+        elif [[ "${first}" == "profile" ]]; then
+            completions="list check docs $(jgit profile list 2>/dev/null | awk 'NR>2 {print $1}' | tr '\n' ' ')"
+        fi
+
+        # shellcheck disable=SC2207
+        COMPREPLY=($(compgen -W "${completions}" -- "${cur}"))
+    }
+    complete -F _project_completions project
+    complete -F _project_completions p
+fi
 
 # =============================================================================
 # Reload Function
@@ -699,7 +812,7 @@ alias marks='jump'
 
 reload_jsh() {
     # Unset load guards
-    unset _JSH_CORE_LOADED _JSH_GIT_LOADED _JSH_PROMPT_LOADED
+    unset _JSH_CORE_LOADED _JSH_GITSTATUS_LOADED _JSH_PROMPT_LOADED
     unset _JSH_VIMODE_LOADED _JSH_ALIASES_LOADED _JSH_FUNCTIONS_LOADED
     unset _JSH_ZSH_LOADED _JSH_BASH_LOADED _JSH_INIT_LOADED
 

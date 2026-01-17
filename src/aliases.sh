@@ -100,7 +100,7 @@ alias week='date +%V'
 alias reload='exec "${SHELL}"'
 alias rl='exec "${SHELL}"'
 
-alias j='jsh'
+# Note: 'j' is defined as a function in j.sh (smart directory jumping)
 alias p='project'
 
 # -----------------------------------------------------------------------------
