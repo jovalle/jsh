@@ -553,14 +553,6 @@ show_next_steps() {
 }
 
 # =============================================================================
-# Load Project Management
-# =============================================================================
-
-# Source project management functions
-# shellcheck disable=SC1091
-source "${JSH_DIR}/src/projects.sh"
-
-# =============================================================================
 # Load Dependency Management
 # =============================================================================
 
@@ -570,6 +562,12 @@ if [[ -f "${JSH_DIR}/src/deps.sh" ]]; then
     # Load core first for platform detection
     source "${JSH_DIR}/src/core.sh"
     source "${JSH_DIR}/src/deps.sh"
+    # Load command modules
+    source_if "${JSH_DIR}/src/tools.sh"
+    source_if "${JSH_DIR}/src/clean.sh"
+    source_if "${JSH_DIR}/src/install.sh"
+    source_if "${JSH_DIR}/src/sync.sh"
+    source_if "${JSH_DIR}/src/configure.sh"
 fi
 
 # =============================================================================
@@ -603,6 +601,15 @@ ${BOLD}INFO COMMANDS:${RST}
 ${BOLD}PROJECT COMMANDS:${RST}
     ${CYAN}project${RST}     Manage projects (sync, status, navigate, profiles)
     ${CYAN}profiles${RST}    Manage git profiles (shortcut for 'projects profile')
+
+${BOLD}PACKAGE & TOOLS:${RST}
+    ${CYAN}install${RST}     Install packages (brew, npm, pip, cargo)
+    ${CYAN}clean${RST}       Clean caches and temporary files
+    ${CYAN}tools${RST}       Discover and manage development tools
+
+${BOLD}CONFIGURATION:${RST}
+    ${CYAN}sync${RST}        Sync git repo with remote (safe bidirectional)
+    ${CYAN}configure${RST}   Configure system settings and applications
 
 ${BOLD}DEPENDENCY COMMANDS:${RST}
     ${CYAN}deps${RST}        Manage dependencies (status, check, refresh, doctor)
@@ -1000,6 +1007,17 @@ cmd_status() {
         fi
     done
 
+    # Check bash version (require 4.0+ for modern features)
+    local bash_ver bash_major
+    bash_ver="${BASH_VERSION:-$(bash --version 2>/dev/null | head -1 | sed 's/.*version \([0-9.]*\).*/\1/')}"
+    bash_major="${bash_ver%%.*}"
+    if [[ "${bash_major}" -ge 4 ]]; then
+        echo "    ${GREEN}✔${RST} bash ${DIM}${bash_ver}${RST}"
+    else
+        echo "    ${RED}✘${RST} bash ${DIM}${bash_ver} (need 4.0+, run: jsh deps fix-bash)${RST}"
+        ((issues++))
+    fi
+
     if has zsh; then
         local zsh_ver
         zsh_ver=$(zsh --version 2>/dev/null | cut -d' ' -f2)
@@ -1329,91 +1347,190 @@ cmd_reload() {
 # =============================================================================
 
 cmd_upgrade() {
-    info "Jsh Upgrade - Check for upstream updates"
-    echo ""
-
     local check_only=false
-    local component=""
+    local skip_brew=false
+    local skip_submodules=false
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --check|-c) check_only=true; shift ;;
-            plugins|binaries|all) component="$1"; shift ;;
+            --no-brew) skip_brew=true; shift ;;
+            --no-submodules) skip_submodules=true; shift ;;
+            -h|--help)
+                echo "${BOLD}jsh upgrade${RST} - Update jsh to latest version"
+                echo ""
+                echo "${BOLD}USAGE:${RST}"
+                echo "    jsh upgrade [options]"
+                echo ""
+                echo "${BOLD}OPTIONS:${RST}"
+                echo "    ${CYAN}-c, --check${RST}       Dry run - show what would be done"
+                echo "    ${CYAN}--no-brew${RST}         Skip brew upgrade"
+                echo "    ${CYAN}--no-submodules${RST}   Skip submodule update"
+                echo ""
+                echo "${BOLD}BEHAVIOR:${RST}"
+                echo "    1. Stash any local changes (preserved safely)"
+                echo "    2. Fetch and rebase onto upstream"
+                echo "    3. Update git submodules"
+                echo "    4. Upgrade Homebrew dependencies (macOS)"
+                echo "    5. Restore local changes from stash"
+                return 0
+                ;;
             *) shift ;;
         esac
     done
 
-    [[ -z "${component}" ]] && component="all"
+    info "Jsh Upgrade"
+    echo ""
 
-    # Plugin upstream repos for reference
-    declare -A PLUGIN_REPOS=(
-        ["zsh-autosuggestions"]="https://github.com/zsh-users/zsh-autosuggestions"
-        ["zsh-syntax-highlighting"]="https://github.com/zsh-users/zsh-syntax-highlighting"
-        ["zsh-history-substring-search"]="https://github.com/zsh-users/zsh-history-substring-search"
-        ["zsh-completions"]="https://github.com/zsh-users/zsh-completions"
-    )
+    cd "${JSH_DIR}" || { error "Cannot cd to ${JSH_DIR}"; return 1; }
 
-    if [[ "${component}" == "plugins" ]] || [[ "${component}" == "all" ]]; then
-        info "Plugin Update Status"
-        echo ""
-        prefix_info "Embedded plugins are static snapshots. To check for upstream changes:"
-        echo ""
-        for plugin in "${!PLUGIN_REPOS[@]}"; do
-            echo "  ${CYAN}${plugin}${RST}: ${PLUGIN_REPOS[$plugin]}"
-        done
-        echo ""
-        prefix_info "To absorb updates manually:"
-        echo "  1. Clone the upstream repo to a temp directory"
-        echo "  2. Copy relevant .zsh files to lib/zsh-plugins/"
-        echo "  3. Test and commit the changes"
+    # Check current state
+    local current_branch current_commit has_changes stash_created=false
+    current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+    current_commit=$(git rev-parse --short HEAD 2>/dev/null)
+
+    prefix_info "Current: ${current_branch} @ ${current_commit}"
+
+    # Check for local changes (staged, unstaged, untracked)
+    if ! git diff --quiet HEAD 2>/dev/null || [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
+        has_changes=true
+        local staged unstaged untracked
+        staged=$(git diff --cached --name-only | wc -l | tr -d ' ')
+        unstaged=$(git diff --name-only | wc -l | tr -d ' ')
+        untracked=$(git ls-files --others --exclude-standard | wc -l | tr -d ' ')
+        prefix_warn "Local changes detected: ${staged} staged, ${unstaged} modified, ${untracked} untracked"
+    else
+        has_changes=false
+        prefix_success "Working tree is clean"
+    fi
+    echo ""
+
+    # Fetch upstream
+    info "Fetching upstream..."
+    if [[ "${check_only}" == true ]]; then
+        prefix_info "[dry-run] Would fetch from origin"
+    else
+        if git fetch origin 2>/dev/null; then
+            prefix_success "Fetched latest from origin"
+        else
+            prefix_warn "Failed to fetch (offline or no remote?)"
+        fi
+    fi
+
+    # Check if we're behind
+    local behind=0
+    behind=$(git rev-list --count "HEAD..origin/${current_branch}" 2>/dev/null || echo "0")
+    if [[ "${behind}" -gt 0 ]]; then
+        prefix_info "${behind} commit(s) behind origin/${current_branch}"
+    else
+        prefix_success "Already up to date with origin/${current_branch}"
+    fi
+    echo ""
+
+    # Stash local changes if needed
+    if [[ "${has_changes}" == true ]] && [[ "${behind}" -gt 0 ]]; then
+        info "Preserving local changes..."
+        if [[ "${check_only}" == true ]]; then
+            prefix_info "[dry-run] Would stash changes"
+        else
+            local stash_msg="jsh-upgrade-$(date +%Y%m%d-%H%M%S)"
+            if git stash push -u -m "${stash_msg}" 2>/dev/null; then
+                stash_created=true
+                prefix_success "Stashed as: ${stash_msg}"
+            else
+                error "Failed to stash changes - aborting"
+                return 1
+            fi
+        fi
         echo ""
     fi
 
-    if [[ "${component}" == "binaries" ]] || [[ "${component}" == "all" ]]; then
-        info "Binary Update Status"
-        echo ""
-
-        local versions_file="${JSH_DIR}/lib/bin/versions.json"
-        if [[ -f "${versions_file}" ]]; then
-            prefix_info "Current versions (from ${versions_file}):"
-            echo ""
-            if has jq; then
-                jq -r 'to_entries[] | "  \(.key): v\(.value)"' "${versions_file}"
+    # Rebase onto upstream
+    if [[ "${behind}" -gt 0 ]]; then
+        info "Updating to latest..."
+        if [[ "${check_only}" == true ]]; then
+            prefix_info "[dry-run] Would rebase onto origin/${current_branch}"
+        else
+            if git rebase "origin/${current_branch}" 2>/dev/null; then
+                local new_commit
+                new_commit=$(git rev-parse --short HEAD 2>/dev/null)
+                prefix_success "Updated: ${current_commit} → ${new_commit}"
             else
-                cat "${versions_file}"
-            fi
-            echo ""
-        fi
-
-        prefix_info "Binaries are managed via Renovate + GitHub Actions"
-        echo "  - Renovate creates PRs when new versions are available"
-        echo "  - GitHub Actions downloads binaries for all platforms on merge"
-        echo ""
-        prefix_info "To manually update binaries:"
-        echo "  1. Edit lib/bin/versions.json with new versions"
-        echo "  2. Run: ${JSH_DIR}/src/deps.sh"
-        echo ""
-
-        if [[ "${check_only}" == false ]]; then
-            prefix_info "Checking for missing binaries..."
-            local platform="${JSH_PLATFORM:-unknown}"
-
-            local binaries=("fzf" "jq")
-            local missing=()
-            for bin in "${binaries[@]}"; do
-                if [[ ! -x "${JSH_DIR}/lib/bin/${platform}/${bin}" ]]; then
-                    missing+=("${bin}")
+                error "Rebase failed - restoring state"
+                git rebase --abort 2>/dev/null
+                if [[ "${stash_created}" == true ]]; then
+                    git stash pop 2>/dev/null
                 fi
-            done
-
-            if [[ ${#missing[@]} -gt 0 ]]; then
-                prefix_warn "Missing binaries for ${platform}: ${missing[*]}"
-                echo ""
-                prefix_info "Run to download: ${JSH_DIR}/src/deps.sh"
-            else
-                prefix_success "All binaries present for ${platform}"
+                return 1
             fi
         fi
+        echo ""
+    fi
+
+    # Update submodules
+    if [[ "${skip_submodules}" != true ]]; then
+        info "Updating submodules..."
+        if [[ "${check_only}" == true ]]; then
+            prefix_info "[dry-run] Would update submodules"
+        else
+            if git submodule update --init --recursive 2>/dev/null; then
+                prefix_success "Submodules updated"
+            else
+                prefix_warn "Submodule update had issues (may be OK)"
+            fi
+        fi
+        echo ""
+    fi
+
+    # Homebrew upgrades (macOS only)
+    if [[ "${skip_brew}" != true ]] && [[ "$(uname)" == "Darwin" ]] && has brew; then
+        info "Checking Homebrew dependencies..."
+
+        local brew_deps=("bash" "fzf" "jq" "fd" "ripgrep" "bat" "eza")
+        local outdated=()
+
+        for dep in "${brew_deps[@]}"; do
+            if brew list "${dep}" &>/dev/null; then
+                if brew outdated "${dep}" &>/dev/null; then
+                    outdated+=("${dep}")
+                fi
+            fi
+        done
+
+        if [[ ${#outdated[@]} -gt 0 ]]; then
+            prefix_info "Outdated: ${outdated[*]}"
+            if [[ "${check_only}" == true ]]; then
+                prefix_info "[dry-run] Would run: brew upgrade ${outdated[*]}"
+            else
+                if brew upgrade "${outdated[@]}" 2>/dev/null; then
+                    prefix_success "Upgraded: ${outdated[*]}"
+                else
+                    prefix_warn "Some upgrades may have failed"
+                fi
+            fi
+        else
+            prefix_success "All Homebrew dependencies up to date"
+        fi
+        echo ""
+    fi
+
+    # Restore stashed changes
+    if [[ "${stash_created}" == true ]]; then
+        info "Restoring local changes..."
+        if git stash pop 2>/dev/null; then
+            prefix_success "Local changes restored"
+        else
+            prefix_warn "Stash pop had conflicts - resolve manually"
+            prefix_info "Your changes are in: git stash list"
+        fi
+        echo ""
+    fi
+
+    # Summary
+    if [[ "${check_only}" == true ]]; then
+        success "Dry run complete - no changes made"
+    else
+        success "Upgrade complete!"
     fi
 }
 
@@ -1448,6 +1565,9 @@ cmd_deps() {
         capabilities|cap)
             _jsh_capability_status
             ;;
+        fix-bash)
+            cmd_deps_fix_bash "$@"
+            ;;
         *)
             echo "${BOLD}jsh deps${RST} - Dependency management"
             echo ""
@@ -1460,6 +1580,7 @@ cmd_deps() {
             echo "    ${CYAN}refresh${RST}       Force re-download/rebuild dependencies"
             echo "    ${CYAN}doctor${RST}        Diagnose dependency issues"
             echo "    ${CYAN}capabilities${RST}  Show build capability profiles"
+            echo "    ${CYAN}fix-bash${RST}      Install/configure bash 4+ (macOS)"
             ;;
     esac
 }
@@ -1601,6 +1722,123 @@ cmd_deps_doctor() {
         prefix_success "No issues found"
     else
         prefix_warn "${issues} issue(s) found"
+    fi
+}
+
+cmd_deps_fix_bash() {
+    info "Bash Version Check and Fix"
+    echo ""
+
+    # Get current bash version
+    local current_bash_ver current_bash_major
+    current_bash_ver="${BASH_VERSION:-$(bash --version 2>/dev/null | head -1 | sed 's/.*version \([0-9.]*\).*/\1/')}"
+    current_bash_major="${current_bash_ver%%.*}"
+
+    prefix_info "Current bash version: ${current_bash_ver}"
+
+    # Check if we're running on macOS
+    if [[ "$(uname)" != "Darwin" ]]; then
+        if [[ "${current_bash_major}" -ge 4 ]]; then
+            prefix_success "Bash ${current_bash_ver} meets requirements (4.0+)"
+        else
+            prefix_warn "Bash is older than 4.0, but not on macOS"
+            prefix_info "Install bash 4+ via your package manager (apt, dnf, pacman, etc.)"
+        fi
+        return 0
+    fi
+
+    echo ""
+    info "macOS Bash Setup"
+
+    # Check for Homebrew
+    local brew_prefix=""
+    if [[ -x "/opt/homebrew/bin/brew" ]]; then
+        brew_prefix="/opt/homebrew"
+    elif [[ -x "/usr/local/bin/brew" ]]; then
+        brew_prefix="/usr/local"
+    fi
+
+    if [[ -z "${brew_prefix}" ]]; then
+        error "Homebrew not found"
+        echo ""
+        prefix_info "Install Homebrew first:"
+        echo "    /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+        return 1
+    fi
+
+    prefix_success "Homebrew found at ${brew_prefix}"
+
+    # Check if modern bash is installed via brew
+    local brew_bash="${brew_prefix}/bin/bash"
+    if [[ -x "${brew_bash}" ]]; then
+        local brew_bash_ver
+        brew_bash_ver=$("${brew_bash}" --version 2>/dev/null | head -1 | sed 's/.*version \([0-9.]*\).*/\1/')
+        prefix_success "Homebrew bash installed: ${brew_bash_ver}"
+    else
+        prefix_warn "Homebrew bash not installed"
+        echo ""
+        info "Installing bash via Homebrew..."
+        if brew install bash; then
+            prefix_success "Bash installed successfully"
+            brew_bash_ver=$("${brew_bash}" --version 2>/dev/null | head -1 | sed 's/.*version \([0-9.]*\).*/\1/')
+        else
+            error "Failed to install bash"
+            return 1
+        fi
+    fi
+
+    # Check if brew paths are in shell config
+    echo ""
+    info "Checking PATH configuration..."
+
+    local shell_rc=""
+    if [[ -n "${ZSH_VERSION:-}" ]] || [[ "${SHELL}" == *zsh ]]; then
+        shell_rc="${HOME}/.zshrc"
+    else
+        shell_rc="${HOME}/.bashrc"
+    fi
+
+    # Check if brew bash comes before system bash
+    local first_bash
+    first_bash=$(which bash 2>/dev/null)
+
+    if [[ "${first_bash}" == "${brew_bash}" ]]; then
+        prefix_success "Homebrew bash is first in PATH"
+    else
+        prefix_warn "System bash (/bin/bash) comes before Homebrew bash"
+        echo ""
+        prefix_info "Your shell rc (${shell_rc}) should have Homebrew paths early."
+        prefix_info "Jsh's managed .zshrc/.bashrc already handles this."
+
+        if [[ -L "${HOME}/.zshrc" ]] && [[ "$(readlink "${HOME}/.zshrc")" == *jsh* ]]; then
+            prefix_success "Using jsh-managed .zshrc"
+            prefix_info "Start a new shell to pick up the correct PATH"
+        else
+            echo ""
+            prefix_info "Add this to the TOP of ${shell_rc}:"
+            echo ""
+            echo "    # Homebrew (must be early in rc file)"
+            echo "    eval \"\$(${brew_prefix}/bin/brew shellenv)\""
+            echo ""
+        fi
+    fi
+
+    # Final status
+    echo ""
+    info "Verification"
+    local env_bash
+    # shellcheck disable=SC2016  # Intentional: $BASH_VERSION is evaluated in subshell
+    env_bash=$(/usr/bin/env bash -c 'echo $BASH_VERSION' 2>/dev/null)
+    local env_bash_major="${env_bash%%.*}"
+
+    if [[ "${env_bash_major}" -ge 4 ]]; then
+        prefix_success "/usr/bin/env bash resolves to: bash ${env_bash}"
+        echo ""
+        success "Bash is properly configured!"
+    else
+        prefix_warn "/usr/bin/env bash still resolves to: bash ${env_bash}"
+        echo ""
+        warn "Start a new shell or source your rc file to apply PATH changes"
     fi
 }
 
@@ -1843,6 +2081,9 @@ main() {
         status)
             cmd_status "$@"
             ;;
+        doctor|check)
+            cmd_status --verbose "$@"
+            ;;
         link)
             cmd_link "$@"
             ;;
@@ -1875,6 +2116,23 @@ main() {
             ;;
         host|hosts)
             cmd_host "$@"
+            ;;
+        # Package & Tools commands
+        install)
+            cmd_install "$@"
+            ;;
+        clean)
+            cmd_clean "$@"
+            ;;
+        tools)
+            cmd_tools "$@"
+            ;;
+        # Configuration commands
+        sync)
+            cmd_sync "$@"
+            ;;
+        configure|config)
+            cmd_configure "$@"
             ;;
         *)
             error "Unknown command: ${cmd}"

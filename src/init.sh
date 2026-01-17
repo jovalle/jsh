@@ -43,6 +43,23 @@ export JSH_DIR
 [[ $- != *i* ]] && return 0
 
 # =============================================================================
+# Profiler (optional, zero overhead when disabled)
+# =============================================================================
+
+# Source profiler first for timing (defines no-op stubs when JSH_PROFILE!=1)
+[[ -f "${JSH_DIR}/src/profiler.sh" ]] && source "${JSH_DIR}/src/profiler.sh"
+
+# =============================================================================
+# Homebrew Environment (cached for performance)
+# =============================================================================
+
+# Source brew.sh early to set up PATH before other modules
+# This caches `brew shellenv` output for 20-40ms savings per shell
+_profile_start "brew.sh"
+[[ -f "${JSH_DIR}/src/brew.sh" ]] && source "${JSH_DIR}/src/brew.sh"
+_profile_end "brew.sh"
+
+# =============================================================================
 # Performance Timing (Debug Mode)
 # =============================================================================
 
@@ -57,7 +74,7 @@ fi
 # Module Loading Helper
 # =============================================================================
 
-# Source a module with error handling
+# Source a module with error handling and profiling
 _source_module() {
     local module="$1"
     # IMPORTANT: In zsh, many lowercase variable names are special arrays tied
@@ -68,7 +85,9 @@ _source_module() {
 
     if [[ -f "${_src_file}" ]]; then
         [[ "${JSH_DEBUG:-0}" == "1" ]] && echo "Jsh: Loading module: ${module}" >&2
+        _profile_start "${module}"
         source "${_src_file}"
+        _profile_end "${module}"
     else
         echo "Jsh: Warning - module not found: ${module}" >&2
         return 1
@@ -91,35 +110,32 @@ _source_module "vi-mode.sh"
 # 3. Aliases (tiered system)
 _source_module "aliases.sh"
 
-# 4. Functions
+# 4. Functions (includes project() wrapper for jgit)
 _source_module "functions.sh"
 
-# 5-6. Lazy-load project navigation and git profiles (1,526 lines total)
-# These modules are loaded on-demand when project command is first used
-project() {
-    unset -f project 2>/dev/null
-    _source_module "profiles.sh"
-    _source_module "projects.sh"
-    project "$@"
-}
+# Note: project/profile management now lives in bin/jgit
+# The project() function in functions.sh is a thin wrapper that handles cd
 
-# 7. Git status functions (for prompt)
-_source_module "git.sh"
+# 4b. Smart directory jumping (j command - zoxide-like frecency)
+_source_module "j.sh"
 
-# 8. Tool integrations (FZF, direnv - shell-agnostic)
+# 5. Git status functions (for prompt)
+_source_module "gitstatus.sh"
+
+# 6. Tool integrations (FZF, direnv - shell-agnostic)
 _source_module "tools.sh"
 
-# 9. Shell-specific configuration (zsh.sh or bash.sh)
+# 7. Shell-specific configuration (zsh.sh or bash.sh)
 if [[ "${JSH_SHELL}" == "zsh" ]]; then
     _source_module "zsh.sh"
 else
     _source_module "bash.sh"
 fi
 
-# 10. Initialize vi-mode
+# 8. Initialize vi-mode
 vimode_init
 
-# 11. Prompt configuration (zsh.sh handles this for zsh, bash needs it here)
+# 9. Prompt configuration (zsh.sh handles this for zsh, bash needs it here)
 if [[ "${JSH_SHELL}" == "bash" ]]; then
     _source_module "prompt.sh"
     prompt_init
@@ -234,3 +250,10 @@ unset _jsh_startup_start
 # Options (in reverse order of precedence):
 source_if "${JSH_DIR}/local/.jshrc"
 source_if "${HOME}/.jshrc.local"
+
+# =============================================================================
+# Profiler Report (when JSH_PROFILE=1)
+# =============================================================================
+
+# Show startup profile if requested
+[[ "${JSH_PROFILE:-0}" == "1" ]] && _profile_report
