@@ -1,9 +1,9 @@
-# git.sh - Git status functions for prompt (with async support)
+# gitstatus.sh - Git status functions for prompt (with async support)
 # Pure shell, no external dependencies
 # shellcheck disable=SC2034
 
-[[ -n "${_JSH_GIT_LOADED:-}" ]] && return 0
-_JSH_GIT_LOADED=1
+[[ -n "${_JSH_GITSTATUS_LOADED:-}" ]] && return 0
+_JSH_GITSTATUS_LOADED=1
 
 # =============================================================================
 # Configuration
