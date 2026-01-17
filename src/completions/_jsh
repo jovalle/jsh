@@ -34,26 +34,51 @@ _jsh() {
             ;;
         args)
             case $words[1] in
-                install)
-                    _jsh_install
-                    ;;
-                uninstall)
-                    _jsh_uninstall
-                    ;;
-                dotfiles|dots)
-                    _jsh_dotfiles
-                    ;;
-                edit)
-                    _jsh_edit
-                    ;;
-                doctor|check)
-                    _jsh_doctor
+                setup|init)
+                    _jsh_setup
                     ;;
                 teardown|deinit)
                     _jsh_teardown
                     ;;
-                ssh)
-                    _ssh_hosts
+                status)
+                    _jsh_status
+                    ;;
+                doctor|check)
+                    _jsh_doctor
+                    ;;
+                unlink)
+                    _jsh_unlink
+                    ;;
+                upgrade|update)
+                    _jsh_upgrade
+                    ;;
+                project|proj|p)
+                    _jsh_project
+                    ;;
+                profile)
+                    _jsh_profile
+                    ;;
+                deps|dependencies)
+                    _jsh_deps
+                    ;;
+                host|hosts)
+                    _jsh_host
+                    ;;
+                # New commands
+                tools)
+                    _jsh_tools
+                    ;;
+                clean)
+                    _jsh_clean
+                    ;;
+                install)
+                    _jsh_install
+                    ;;
+                sync)
+                    _jsh_sync
+                    ;;
+                configure|config)
+                    _jsh_configure
                     ;;
                 *)
                     ;;
@@ -69,12 +94,14 @@ _jsh_commands() {
 
     if [[ -x "$jsh_path" ]]; then
         # Extract commands from help output - parse command sections
+        # Pattern matches any "WORD COMMANDS:" section header dynamically
+        # Uses BSD awk compatible syntax (index() instead of !~)
         commands=(${(f)"$(
             "$jsh_path" help 2>/dev/null | \
             perl -pe 's/\e\[[0-9;]*m//g' | \
             awk '
-                /^(SETUP|PACKAGE|INFO) COMMANDS:/ || /^SSH:/ { in_section=1; next }
-                /^[A-Z]/ { in_section=0 }
+                /^[A-Z]+ COMMANDS:/ { in_section=1; next }
+                /^[A-Z]/ { if (index($0, "COMMANDS:") == 0) in_section=0 }
                 in_section && /^    [a-z]/ {
                     # Extract command and description
                     line = $0
@@ -86,177 +113,40 @@ _jsh_commands() {
                 }
             '
         )"})
-
-        # Also add global options
-        commands+=(
-            '-h:Show help'
-            '--help:Show help'
-            '-v:Show version'
-            '--version:Show version'
-            '-r:Reload shell configuration'
-            '--reload:Reload shell configuration'
-        )
     fi
 
     _describe -t commands 'jsh commands' commands
 }
 
-# Dynamically extract install options from jsh script
-_jsh_install() {
-    local -a pm_flags
-    local jsh_path="${JSH_DIR:-${HOME}/.jsh}/jsh"
-
-    # Extract package manager flags from cmd_install function
-    if [[ -f "$jsh_path" ]]; then
-        pm_flags=(${(f)"$(
-            awk '
-                /^cmd_install\(\)/ { in_func=1 }
-                in_func && /^}$/ { in_func=0 }
-                in_func && /--[a-z]+\)/ {
-                    match($0, /--[a-z]+/)
-                    flag = substr($0, RSTART, RLENGTH)
-                    if (flag && flag != "--save" && flag != "--all") {
-                        gsub(/--/, "", flag)
-                        print flag
-                    }
-                }
-            ' "$jsh_path" | sort -u
-        )"})
-    fi
-
-    # Build arguments dynamically
-    local -a args
-    args=(
-        '(-a --all)'{-a,--all}'[Install all packages from config]'
-        '(-s --save)'{-s,--save}'[Save package to config after install]'
-    )
-
-    # Add package manager flags
-    for pm in "${pm_flags[@]}"; do
-        [[ -z "$pm" ]] && continue
-        args+=("--${pm}[Use ${pm}]")
-    done
-
-    args+=('*:package name:')
-
-    _arguments "${args[@]}"
+# Setup command options
+_jsh_setup() {
+    _arguments \
+        '(-i --interactive)'{-i,--interactive}'[Run interactive setup wizard]'
 }
 
-# Dynamically extract uninstall options from jsh script
-_jsh_uninstall() {
-    local -a pm_flags packages
-    local jsh_path="${JSH_DIR:-${HOME}/.jsh}/jsh"
-
-    # Extract package manager flags from cmd_uninstall function
-    if [[ -f "$jsh_path" ]]; then
-        pm_flags=(${(f)"$(
-            awk '
-                /^cmd_uninstall\(\)/ { in_func=1 }
-                in_func && /^}$/ { in_func=0 }
-                in_func && /--[a-z]+\)/ {
-                    match($0, /--[a-z]+/)
-                    flag = substr($0, RSTART, RLENGTH)
-                    if (flag && flag != "--remove") {
-                        gsub(/--/, "", flag)
-                        print flag
-                    }
-                }
-            ' "$jsh_path" | sort -u
-        )"})
-    fi
-
-    # Get installed packages for completion
-    if command -v brew &>/dev/null; then
-        packages=(
-            ${(f)"$(brew list --formula 2>/dev/null)"}
-            ${(f)"$(brew list --cask 2>/dev/null)"}
-        )
-    fi
-
-    # Build arguments dynamically
-    local -a args
-    args=(
-        '(-r --remove)'{-r,--remove}'[Remove package from config after uninstall]'
-    )
-
-    # Add package manager flags
-    for pm in "${pm_flags[@]}"; do
-        [[ -z "$pm" ]] && continue
-        args+=("--${pm}[Use ${pm}]")
-    done
-
-    if [[ ${#packages[@]} -gt 0 ]]; then
-        args+=("*:package:($packages)")
-    else
-        args+=('*:package name:')
-    fi
-
-    _arguments "${args[@]}"
+# Teardown command options
+_jsh_teardown() {
+    _arguments \
+        '--full[Remove entire Jsh directory]' \
+        '(-r --restore)'{-r,--restore}'[Restore backed up dotfiles]' \
+        '(-y --yes)'{-y,--yes}'[Skip confirmation prompt]'
 }
 
-# Dynamically extract dotfiles subcommands from jsh script
-_jsh_dotfiles() {
-    local -a subcommands
-    local jsh_path="${JSH_DIR:-${HOME}/.jsh}/jsh"
-
-    # Extract subcommands from cmd_dotfiles function
-    if [[ -f "$jsh_path" ]]; then
-        subcommands=(${(f)"$(
-            awk '
-                /^cmd_dotfiles\(\)/ { in_func=1 }
-                in_func && /^}$/ { in_func=0 }
-                in_func && /case.*action/ { in_case=1 }
-                in_case && /esac/ { in_case=0 }
-                in_case && /^[[:space:]]+[a-z|]+\)/ {
-                    line = $0
-                    gsub(/^[[:space:]]+/, "", line)
-                    gsub(/\).*/, "", line)
-                    # Handle alternatives like "status|*"
-                    split(line, parts, "|")
-                    for (i in parts) {
-                        cmd = parts[i]
-                        gsub(/\*/, "", cmd)
-                        if (cmd && cmd !~ /^\*?$/) print cmd
-                    }
-                }
-            ' "$jsh_path" | sort -u
-        )"})
-    fi
-
-    # Build description array
-    local -a subcmd_descs
-    for cmd in "${subcommands[@]}"; do
-        case "$cmd" in
-            link)    subcmd_descs+=("link:Create symlinks for managed dotfiles") ;;
-            unlink)  subcmd_descs+=("unlink:Remove symlinks") ;;
-            restore) subcmd_descs+=("restore:Restore from backup") ;;
-            status)  subcmd_descs+=("status:Show status of dotfile symlinks") ;;
-            *)       subcmd_descs+=("${cmd}:${cmd} subcommand") ;;
-        esac
-    done
-
-    local curcontext="$curcontext" state line
-    typeset -A opt_args
-
-    _arguments -C \
-        '1: :->subcmd' \
-        '*:: :->args'
-
-    case $state in
-        subcmd)
-            _describe -t subcommands 'dotfiles subcommand' subcmd_descs
-            ;;
-        args)
-            case $line[1] in
-                restore)
-                    _jsh_dotfiles_restore
-                    ;;
-            esac
-            ;;
-    esac
+# Status command options
+_jsh_status() {
+    _arguments \
+        '(-f --fix)'{-f,--fix}'[Fix issues (remove broken symlinks)]' \
+        '(-v --verbose)'{-v,--verbose}'[Show verbose output]'
 }
 
-_jsh_dotfiles_restore() {
+# Doctor command options
+_jsh_doctor() {
+    _arguments \
+        '(-f --fix)'{-f,--fix}'[Fix issues (remove broken symlinks)]'
+}
+
+# Unlink command options
+_jsh_unlink() {
     local backup_dir="${HOME}/.jsh_backup"
     local -a backups
 
@@ -272,73 +162,249 @@ _jsh_dotfiles_restore() {
         done
     fi
 
-    _describe -t backups 'available backups' backups
+    _arguments \
+        '--restore=-[Restore from backup]::backup:->backups' \
+        '--restore[Restore from latest backup]'
+
+    if [[ $state == backups ]]; then
+        _describe -t backups 'available backups' backups
+    fi
 }
 
-# Dynamically extract edit targets from jsh script
-_jsh_edit() {
-    local -a configs
-    local jsh_path="${JSH_DIR:-${HOME}/.jsh}/jsh"
+# Upgrade command options
+_jsh_upgrade() {
+    _arguments \
+        '(-c --check)'{-c,--check}'[Dry run - show what would be done]' \
+        '--no-brew[Skip brew upgrade]' \
+        '--no-submodules[Skip submodule update]'
+}
 
-    # Extract edit targets from cmd_edit function's case statement
-    if [[ -f "$jsh_path" ]]; then
-        configs=(${(f)"$(
-            awk '
-                /^cmd_edit\(\)/ { in_func=1 }
-                in_func && /^}$/ { exit }
-                in_func && /case.*file/ { in_case=1 }
-                in_case && /esac/ { in_case=0 }
-                in_case && /^[[:space:]]+[a-z0-9|]+\)/ {
-                    line = $0
-                    gsub(/^[[:space:]]+/, "", line)
-                    gsub(/\).*/, "", line)
-                    # Handle alternatives like "zsh|zshrc" or "git|gitconfig"
-                    split(line, parts, "|")
-                    for (i in parts) {
-                        cmd = parts[i]
-                        # Skip empty, wildcards, and quoted strings
-                        if (cmd && cmd !~ /^[\"\*]/ && cmd !~ /^\*?$/) {
-                            print cmd
-                        }
-                    }
-                }
-            ' "$jsh_path" | sort -u
-        )"})
+# Project command and subcommands
+_jsh_project() {
+    local -a subcommands
+    subcommands=(
+        'sync:Sync all projects'
+        'status:Show project status'
+        'list:List all projects'
+        'profile:Manage git profiles'
+        'cd:Navigate to project'
+    )
+
+    local curcontext="$curcontext" state line
+    typeset -A opt_args
+
+    _arguments -C \
+        '(-l --list)'{-l,--list}'[List projects]' \
+        '(-v --verbose)'{-v,--verbose}'[Verbose output]' \
+        '1: :->subcmd' \
+        '*:: :->args'
+
+    case $state in
+        subcmd)
+            _describe -t subcommands 'project subcommand' subcommands
+            ;;
+        args)
+            case $line[1] in
+                profile)
+                    _jsh_profile
+                    ;;
+            esac
+            ;;
+    esac
+}
+
+# Profile command and subcommands
+_jsh_profile() {
+    local -a subcommands
+    subcommands=(
+        'list:List all profiles'
+        'add:Add a new profile'
+        'remove:Remove a profile'
+        'show:Show profile details'
+        'apply:Apply profile to a directory'
+    )
+
+    _arguments -C \
+        '1: :->subcmd' \
+        '*:: :->args'
+
+    case $state in
+        subcmd)
+            _describe -t subcommands 'profile subcommand' subcommands
+            ;;
+    esac
+}
+
+# Deps command and subcommands
+_jsh_deps() {
+    local -a subcommands
+    subcommands=(
+        'status:Show all dependencies and resolved strategies'
+        'check:Re-run preflight checks'
+        'refresh:Force re-download/rebuild dependencies'
+        'doctor:Diagnose dependency issues'
+        'capabilities:Show build capability profiles'
+        'fix-bash:Install/configure bash 4+ (macOS)'
+    )
+
+    _arguments -C \
+        '1: :->subcmd' \
+        '*:: :->args'
+
+    case $state in
+        subcmd)
+            _describe -t subcommands 'deps subcommand' subcommands
+            ;;
+    esac
+}
+
+# Host command and subcommands
+_jsh_host() {
+    local -a subcommands
+    subcommands=(
+        'list:List known remote hosts'
+        'status:Show host capabilities and decisions'
+        'refresh:Re-run remote preflight for a host'
+        'reset:Clear cached decisions for a host'
+    )
+
+    local curcontext="$curcontext" state line
+    typeset -A opt_args
+
+    _arguments -C \
+        '1: :->subcmd' \
+        '*:: :->args'
+
+    case $state in
+        subcmd)
+            _describe -t subcommands 'host subcommand' subcommands
+            ;;
+        args)
+            case $line[1] in
+                status|refresh|reset)
+                    _jsh_host_names
+                    ;;
+            esac
+            ;;
+    esac
+}
+
+# Complete host names from local/hosts directory
+_jsh_host_names() {
+    local hosts_dir="${JSH_DIR:-${HOME}/.jsh}/local/hosts"
+    local -a hosts
+
+    if [[ -d "$hosts_dir" ]]; then
+        hosts=(${(f)"$(find "$hosts_dir" -maxdepth 1 -name '*.json' 2>/dev/null | xargs -I {} basename {} .json)"})
     fi
 
-    # Build description array with intelligent descriptions
-    local -a config_descs
-    for cfg in "${configs[@]}"; do
-        case "$cfg" in
-            zsh|zshrc)       config_descs+=("${cfg}:Edit zsh configuration") ;;
-            bash|bashrc)     config_descs+=("${cfg}:Edit bash configuration") ;;
-            aliases)         config_descs+=("${cfg}:Edit shell aliases") ;;
-            functions)       config_descs+=("${cfg}:Edit shell functions") ;;
-            prompt)          config_descs+=("${cfg}:Edit prompt configuration") ;;
-            tmux)            config_descs+=("${cfg}:Edit tmux configuration") ;;
-            git|gitconfig)   config_descs+=("${cfg}:Edit git configuration") ;;
-            vim)             config_descs+=("${cfg}:Edit vim configuration") ;;
-            vscode|code)     config_descs+=("${cfg}:Edit VSCode settings") ;;
-            local)           config_descs+=("${cfg}:Edit local overrides") ;;
-            *)               config_descs+=("${cfg}:Edit ${cfg} configuration") ;;
-        esac
-    done
-
-    _describe -t configs 'config file' config_descs
+    if [[ ${#hosts[@]} -gt 0 ]]; then
+        _describe -t hosts 'remote hosts' hosts
+    fi
 }
 
-# Doctor command options
-_jsh_doctor() {
-    _arguments \
-        '(-f --fix)'{-f,--fix}'[Fix issues (remove broken symlinks)]'
+# Tools command and subcommands
+_jsh_tools() {
+    local -a subcommands
+    subcommands=(
+        'list:List all tools with install status'
+        'check:Verify installed tools work correctly'
+        'install:Install recommended tools'
+        'recommend:Show personalized recommendations'
+    )
+
+    local -a categories
+    categories=(
+        'shell:Shell & Terminal'
+        'editor:Editors & IDEs'
+        'dev:Development Tools'
+        'container:Container Tools'
+        'k8s:Kubernetes Tools'
+        'cloud:Cloud & Infrastructure'
+        'git:Git Tools'
+        'network:Network Tools'
+    )
+
+    local curcontext="$curcontext" state line
+    typeset -A opt_args
+
+    _arguments -C \
+        '1: :->subcmd' \
+        '*:: :->args'
+
+    case $state in
+        subcmd)
+            _describe -t subcommands 'tools subcommand' subcommands
+            ;;
+        args)
+            case $line[1] in
+                list)
+                    _arguments \
+                        '(-c --category)'{-c,--category}'[Filter by category]:category:->categories' \
+                        '--missing[Show only missing tools]' \
+                        '--installed[Show only installed tools]'
+                    if [[ $state == categories ]]; then
+                        _describe -t categories 'tool category' categories
+                    fi
+                    ;;
+            esac
+            ;;
+    esac
 }
 
-# Teardown command options
-_jsh_teardown() {
+# Clean command options
+_jsh_clean() {
     _arguments \
-        '--full[Remove entire Jsh directory]' \
-        '(-r --restore)'{-r,--restore}'[Restore backed up dotfiles]' \
-        '(-y --yes)'{-y,--yes}'[Skip confirmation prompt]'
+        '(-n --dry-run)'{-n,--dry-run}'[Show what would be cleaned]' \
+        '(-y --yes)'{-y,--yes}'[Skip confirmation prompts]'
+}
+
+# Install command options
+_jsh_install() {
+    _arguments \
+        '--brew[Force installation via Homebrew]' \
+        '--npm[Force installation via npm]' \
+        '--pip[Force installation via pip]' \
+        '--cargo[Force installation via cargo]' \
+        '*:package name:'
+}
+
+# Sync command options
+_jsh_sync() {
+    _arguments \
+        '--pull[Pull only (rebase)]' \
+        '--push[Push only]' \
+        '(-c --check)'{-c,--check}'[Dry run - show sync status]' \
+        '(-f --force)'{-f,--force}'[Force sync (requires confirmation)]' \
+        '--no-stash[Fail if local changes exist]'
+}
+
+# Configure command and subcommands
+_jsh_configure() {
+    local -a subcommands
+    subcommands=(
+        'all:Run all applicable configurations'
+        'macos:macOS system defaults'
+        'dock:macOS Dock settings'
+        'apps:Application configs (VS Code)'
+        'linux:Linux system settings'
+        'list:Show available configurations'
+    )
+
+    local curcontext="$curcontext" state line
+    typeset -A opt_args
+
+    _arguments -C \
+        '(-n --check --dry-run)'{-n,--check,--dry-run}'[Dry run - show what would change]' \
+        '(-y --yes)'{-y,--yes}'[Skip confirmation prompts]' \
+        '1: :->subcmd' \
+        '*:: :->args'
+
+    case $state in
+        subcmd)
+            _describe -t subcommands 'configure subcommand' subcommands
+            ;;
+    esac
 }
 
 _jsh "$@"
