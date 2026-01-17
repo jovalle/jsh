@@ -25,14 +25,18 @@ load_jsh_core() {
     source "${JSH_DIR}/src/core.sh"
 }
 
-load_jsh_git() {
+load_jsh_gitstatus() {
     load_jsh_core
-    source "${JSH_DIR}/src/git.sh"
+    source "${JSH_DIR}/src/gitstatus.sh"
 }
 
-load_jsh_projects() {
+# Alias for backwards compatibility
+load_jsh_git() { load_jsh_gitstatus; }
+
+# Note: project() function is now in functions.sh, calling bin/jgit
+load_jsh_functions() {
     load_jsh_core
-    source "${JSH_DIR}/src/projects.sh"
+    source "${JSH_DIR}/src/functions.sh"
 }
 
 load_jsh() {
