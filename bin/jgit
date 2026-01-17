@@ -1,0 +1,1349 @@
+#!/usr/bin/env bash
+# jgit - Git project and repository management (jsh flavor)
+#
+# USAGE:
+#   jgit                      In repo: detailed view | Not in repo: list all
+#   jgit update               Safe pull: stash → rebase → apply
+#   jgit profile              Show current repo's profile
+#   jgit profile list         List all available profiles
+#   jgit profile <name>       Apply profile to current repo
+#   jgit add <url> [name]     Clone with smart SSH fallback
+#   jgit create <name>        Create project (interactive profile selection)
+#   jgit list [-v]            List all projects with status
+#   jgit path <name>          Output path for shell cd wrapper
+#   jgit <unknown>            Passthrough to git (e.g., jgit clone → git clone)
+
+[[ -n $DEBUG ]] && set -x
+
+set -eou pipefail
+IFS=$'\n\t'
+
+# =============================================================================
+# Configuration
+# =============================================================================
+
+JSH_DIR="${JSH_DIR:-${HOME}/.jsh}"
+JSH_PROFILES="${JSH_PROFILES:-${JSH_DIR}/local/profiles.json}"
+_PROJECTS_DEFAULT_PATHS="${HOME}/.jsh,${HOME}/projects/*"
+
+# =============================================================================
+# Source lib/common.sh (for output helpers)
+# =============================================================================
+
+if [[ -f "${JSH_DIR}/lib/common.sh" ]]; then
+    source "${JSH_DIR}/lib/common.sh"
+else
+    error() { printf 'error: %s\n' "$*" >&2; }
+    warn() { printf 'warn: %s\n' "$*" >&2; }
+    success() { printf 'success: %s\n' "$*"; }
+    info() { printf 'info: %s\n' "$*"; }
+fi
+
+# =============================================================================
+# Colors (defined AFTER sourcing lib/common.sh to override its literal strings)
+# =============================================================================
+# lib/common.sh uses '\033[...' (literal) - we need $'\033[...' (escape char)
+
+if [[ -t 1 ]] && [[ "${NO_COLOR:-}" != "1" ]] && [[ "${TERM:-}" != "dumb" ]]; then
+    C_CYAN=$'\033[36m'
+    C_GREEN=$'\033[32m'
+    C_YELLOW=$'\033[33m'
+    C_RED=$'\033[31m'
+    C_BLUE=$'\033[34m'
+    C_BOLD=$'\033[1m'
+    C_DIM=$'\033[2m'
+    C_RESET=$'\033[0m'
+else
+    C_CYAN='' C_GREEN='' C_YELLOW='' C_RED=''
+    C_BLUE='' C_BOLD='' C_DIM='' C_RESET=''
+fi
+
+abort() {
+    error "$*"
+    exit 1
+}
+
+# Portable lowercase conversion
+_lowercase() {
+    printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+}
+
+# =============================================================================
+# Profile Helpers (reads from local/profiles.json)
+# =============================================================================
+
+# Get profile data by name
+_profiles_get() {
+    local name="$1"
+    [[ -f "$JSH_PROFILES" ]] || return 1
+
+    # Use jq for JSON, yq for YAML
+    if [[ "$JSH_PROFILES" == *.json ]] && command -v jq &>/dev/null; then
+        jq -r --arg name "$name" '.profiles[$name] // empty' "$JSH_PROFILES" 2>/dev/null
+    elif command -v yq &>/dev/null; then
+        # shellcheck disable=SC2016 # $name is yq variable substitution, not bash
+        yq -r --arg name "$name" '.profiles[$name] // empty' "$JSH_PROFILES" 2>/dev/null
+    else
+        return 1
+    fi
+}
+
+# List all profile names
+_profiles_list() {
+    [[ -f "$JSH_PROFILES" ]] || return 0
+
+    # Use jq for JSON, yq for YAML
+    if [[ "$JSH_PROFILES" == *.json ]] && command -v jq &>/dev/null; then
+        jq -r '.profiles | keys[]' "$JSH_PROFILES" 2>/dev/null
+    elif command -v yq &>/dev/null; then
+        yq -r '.profiles | keys | .[]' "$JSH_PROFILES" 2>/dev/null
+    fi
+}
+
+# Check if profile exists
+_profiles_exists() {
+    local name="$1"
+    local result
+    result="$(_profiles_get "$name")"
+    [[ -n "$result" ]]
+}
+
+# Parse profile field from JSON data
+_profile_field() {
+    local data="$1"
+    local field="$2"
+
+    # Data comes from _profiles_get which returns JSON
+    if command -v jq &>/dev/null; then
+        printf '%s' "$data" | jq -r ".${field} // empty"
+    elif command -v yq &>/dev/null; then
+        printf '%s' "$data" | yq -r ".${field} // empty"
+    fi
+}
+
+# =============================================================================
+# SSH Helpers
+# =============================================================================
+
+# Check if an SSH host alias exists in ~/.ssh/config
+_ssh_host_exists() {
+    local host="$1"
+    local ssh_config="${HOME}/.ssh/config"
+
+    [[ -f "$ssh_config" ]] || return 1
+    grep -qiE "^[[:space:]]*Host[[:space:]]+(.*[[:space:]])?${host}([[:space:]]|$)" "$ssh_config"
+}
+
+# Derive SSH host alias from platform host and user
+# Convention: <platform>-<user>
+_ssh_derive_host() {
+    local platform_host="$1"
+    local user="$2"
+
+    local platform
+    platform="${platform_host%.com}"
+    platform="${platform%.org}"
+    platform="${platform%.io}"
+    platform="${platform//./-}"
+
+    printf '%s-%s' "$platform" "$user"
+}
+
+# Parse a git URL and extract components
+# Output: platform|owner|repo (pipe-separated)
+_git_parse_url() {
+    local url="$1"
+    local platform="" owner="" repo=""
+
+    if [[ "$url" == git@* ]]; then
+        local host_part="${url#git@}"
+        host_part="${host_part%%:*}"
+        local path_part="${url#*:}"
+
+        if [[ "$host_part" == *.* ]]; then
+            platform="$host_part"
+        else
+            platform="$host_part"
+        fi
+
+        owner="${path_part%%/*}"
+        repo="${path_part#*/}"
+        repo="${repo%.git}"
+
+    elif [[ "$url" == https://* ]]; then
+        local host_part="${url#https://}"
+        platform="${host_part%%/*}"
+        local path_part="${host_part#*/}"
+        owner="${path_part%%/*}"
+        repo="${path_part#*/}"
+        repo="${repo%.git}"
+
+    elif [[ "$url" == ssh://* ]]; then
+        local host_part="${url#ssh://git@}"
+        platform="${host_part%%/*}"
+        local path_part="${host_part#*/}"
+        owner="${path_part%%/*}"
+        repo="${path_part#*/}"
+        repo="${repo%.git}"
+    fi
+
+    printf '%s|%s|%s' "$platform" "$owner" "$repo"
+}
+
+# Find profile matching a git URL owner
+_profile_find_by_user() {
+    local target_user="$1"
+
+    while IFS= read -r profile_name; do
+        [[ -z "$profile_name" ]] && continue
+        local profile_data profile_user
+        profile_data="$(_profiles_get "$profile_name")"
+        profile_user=$(_profile_field "$profile_data" "user")
+
+        if [[ "$profile_user" == "$target_user" ]]; then
+            printf '%s\n' "$profile_name"
+            return 0
+        fi
+    done < <(_profiles_list)
+
+    return 1
+}
+
+# Get SSH host for a profile (explicit or derived)
+_profile_ssh_host() {
+    local profile_name="$1"
+    local fallback_platform="${2:-github.com}"
+
+    local profile_data ssh_host host user
+    profile_data="$(_profiles_get "$profile_name")"
+    ssh_host=$(_profile_field "$profile_data" "ssh_host")
+    host=$(_profile_field "$profile_data" "host")
+    user=$(_profile_field "$profile_data" "user")
+
+    if [[ -n "$ssh_host" ]]; then
+        printf '%s' "$ssh_host"
+        return 0
+    fi
+
+    local platform="${host:-$fallback_platform}"
+    if [[ -n "$user" ]]; then
+        _ssh_derive_host "$platform" "$user"
+        return 0
+    fi
+
+    return 1
+}
+
+# =============================================================================
+# Path Helpers
+# =============================================================================
+
+# Expand a path pattern to actual directories
+_expand_path() {
+    local pattern="$1"
+    pattern="${pattern/#\~/${HOME}}"
+
+    if [[ "${pattern}" == *"*"* ]]; then
+        # Enable globbing (may be disabled by caller) and nullglob for expansion
+        set +f
+        shopt -s nullglob
+        for expanded in ${pattern}; do
+            [[ -d "${expanded}" ]] && printf '%s\n' "${expanded}"
+        done
+        shopt -u nullglob
+    else
+        [[ -d "${pattern}" ]] && printf '%s\n' "${pattern}"
+    fi
+}
+
+# Get all project directories
+_projects_get_all() {
+    local paths="${JSH_PROJECTS:-${_PROJECTS_DEFAULT_PATHS}}"
+    local IFS=','
+
+    # Disable glob expansion so patterns aren't expanded before _expand_path
+    set -f
+    for entry in ${paths}; do
+        entry="${entry#"${entry%%[![:space:]]*}"}"
+        entry="${entry%"${entry##*[![:space:]]}"}"
+
+        while IFS= read -r dir; do
+            [[ -n "$dir" ]] && printf '%s\n' "${dir}"
+        done < <(_expand_path "${entry}")
+    done
+    set +f
+}
+
+# Get display name for a project (shortened path)
+_projects_display_name() {
+    local path="$1"
+    if [[ "${path}" == "${HOME}"* ]]; then
+        printf '%s\n' "~${path#"$HOME"}"
+    else
+        printf '%s\n' "${path}"
+    fi
+}
+
+# Get default projects directory for new projects
+# Note: JSH_DIR is excluded - it's the config directory, not for user projects
+_projects_default_dir() {
+    local paths="${JSH_PROJECTS:-${_PROJECTS_DEFAULT_PATHS}}"
+    local IFS=','
+    local fallback=""
+    local jsh_dir="${JSH_DIR:-${HOME}/.jsh}"
+
+    # Disable glob expansion so ~/projects/* doesn't expand prematurely
+    set -f
+    for entry in ${paths}; do
+        entry="${entry#"${entry%%[![:space:]]*}"}"
+        entry="${entry%"${entry##*[![:space:]]}"}"
+        entry="${entry/#\~/${HOME}}"
+
+        # Skip JSH_DIR - it's for jsh config, not user projects
+        [[ "${entry}" == "${jsh_dir}" ]] && continue
+
+        if [[ "${entry}" == *"*"* ]]; then
+            entry="${entry%/\*}"
+            entry="${entry%\*}"
+            if [[ -d "${entry}" ]]; then
+                printf '%s\n' "${entry}"
+                return 0
+            fi
+        elif [[ -z "${fallback}" ]] && [[ -d "${entry}" ]]; then
+            fallback="${entry}"
+        fi
+    done
+
+    set +f  # Re-enable glob expansion
+
+    if [[ -n "${fallback}" ]]; then
+        printf '%s\n' "${fallback}"
+    else
+        printf '%s\n' "${HOME}/projects"
+    fi
+}
+
+# Extract project name from git URL
+_projects_name_from_url() {
+    local url="$1"
+    local name
+    name="${url%.git}"
+    name="${name##*/}"
+    name="${name##*:}"
+    name="${name##*/}"
+    printf '%s\n' "${name}"
+}
+
+# =============================================================================
+# Git Helpers
+# =============================================================================
+
+# Get git status summary (compact format)
+_git_status_summary() {
+    local dir="${1:-.}"
+    local staged unstaged untracked parts=()
+
+    staged=$(git -C "$dir" diff --cached --numstat 2>/dev/null | wc -l | tr -d ' ')
+    unstaged=$(git -C "$dir" diff --numstat 2>/dev/null | wc -l | tr -d ' ')
+    untracked=$(git -C "$dir" ls-files --others --exclude-standard 2>/dev/null | wc -l | tr -d ' ')
+
+    [[ "$staged" -gt 0 ]] && parts+=("${C_GREEN}+${staged}${C_RESET} staged")
+    [[ "$unstaged" -gt 0 ]] && parts+=("${C_YELLOW}*${unstaged}${C_RESET} modified")
+    [[ "$untracked" -gt 0 ]] && parts+=("${C_RED}?${untracked}${C_RESET} untracked")
+
+    if [[ ${#parts[@]} -eq 0 ]]; then
+        printf '%s\n' "${C_DIM}clean${C_RESET}"
+    else
+        local IFS=', '
+        printf '%s\n' "${parts[*]}"
+    fi
+}
+
+# Get last commit info
+_git_last_commit() {
+    local dir="${1:-.}"
+    local format="${2:-%cr · %s}"
+    git -C "$dir" log -1 --format="$format" 2>/dev/null
+}
+
+# Get submodule status
+_git_submodules() {
+    local dir="${1:-.}"
+    git -C "$dir" submodule status 2>/dev/null | while read -r line; do
+        local status="${line:0:1}"
+        local sha="${line:1:7}"
+        local path="${line#* }"
+        path="${path%% *}"
+
+        case "$status" in
+            '-') printf '  %s%s%s @ %s (not initialized)\n' "$C_DIM" "$path" "$C_RESET" "$sha" ;;
+            '+') printf '  %s%s%s @ %s (dirty)\n' "$C_YELLOW" "$path" "$C_RESET" "$sha" ;;
+            'U') printf '  %s%s%s @ %s (conflict)\n' "$C_RED" "$path" "$C_RESET" "$sha" ;;
+            *)   printf '  %s @ %s\n' "$path" "$sha" ;;
+        esac
+    done
+}
+
+# Get upstream status (ahead/behind)
+_git_upstream_status() {
+    local dir="${1:-.}"
+    # shellcheck disable=SC1083
+    local upstream
+    upstream=$(git -C "$dir" rev-parse --abbrev-ref '@{u}' 2>/dev/null) || return 0
+
+    local ahead behind
+    ahead=$(git -C "$dir" rev-list --count '@{u}..HEAD' 2>/dev/null)
+    behind=$(git -C "$dir" rev-list --count 'HEAD..@{u}' 2>/dev/null)
+
+    local status=""
+    [[ "$ahead" -gt 0 ]] && status+="↑${ahead} ahead"
+    [[ "$behind" -gt 0 ]] && { [[ -n "$status" ]] && status+=", "; status+="↓${behind} behind"; }
+
+    [[ -n "$status" ]] && printf '%s\n' "$status"
+}
+
+# =============================================================================
+# Profile Commands
+# =============================================================================
+
+# Apply a profile to a git repository
+_profiles_apply() {
+    local profile_name="$1"
+    local dir="${2:-.}"
+    local profile_data p_name email user host ssh_host
+
+    profile_data="$(_profiles_get "$profile_name")"
+    if [[ -z "$profile_data" ]]; then
+        error "Profile not found: $profile_name"
+        return 1
+    fi
+
+    if ! git -C "$dir" rev-parse --git-dir &>/dev/null; then
+        error "Not a git repository: $dir"
+        return 1
+    fi
+
+    p_name=$(_profile_field "$profile_data" "name")
+    email=$(_profile_field "$profile_data" "email")
+    user=$(_profile_field "$profile_data" "user")
+    host=$(_profile_field "$profile_data" "host")
+    ssh_host=$(_profile_field "$profile_data" "ssh_host")
+
+    [[ -n "$p_name" ]] && git -C "$dir" config user.name "$p_name"
+    [[ -n "$email" ]] && git -C "$dir" config user.email "$email"
+
+    # Update origin remote to use correct SSH host
+    if [[ -n "$user" ]]; then
+        local origin_url repo_name
+        origin_url=$(git -C "$dir" remote get-url origin 2>/dev/null)
+
+        if [[ -n "$origin_url" ]]; then
+            local parsed url_host
+            parsed="$(_git_parse_url "$origin_url")"
+            url_host="${parsed%%|*}"
+            repo_name="${parsed##*|}"
+
+            local target_ssh_host
+            if [[ -n "$ssh_host" ]]; then
+                target_ssh_host="$ssh_host"
+            elif [[ -n "$host" ]]; then
+                target_ssh_host="$(_ssh_derive_host "$host" "$user")"
+            elif [[ -n "$url_host" ]] && [[ "$url_host" == *.* ]]; then
+                target_ssh_host="$(_ssh_derive_host "$url_host" "$user")"
+            fi
+
+            if [[ -n "$target_ssh_host" ]] && _ssh_host_exists "$target_ssh_host"; then
+                local new_origin_url="git@${target_ssh_host}:${user}/${repo_name}.git"
+                git -C "$dir" remote set-url origin "$new_origin_url"
+                info "Remote updated to use SSH host: $target_ssh_host"
+            fi
+        fi
+    fi
+
+    return 0
+}
+
+# Detect which profile matches a git repo's config
+_profiles_detect() {
+    local dir="${1:-.}"
+    local current_email profile_name profile_data p_email
+
+    current_email=$(git -C "$dir" config user.email 2>/dev/null)
+    [[ -z "$current_email" ]] && return 1
+
+    while IFS= read -r profile_name; do
+        [[ -z "$profile_name" ]] && continue
+        profile_data="$(_profiles_get "$profile_name")"
+        p_email=$(_profile_field "$profile_data" "email")
+
+        if [[ "$p_email" == "$current_email" ]]; then
+            printf '%s\n' "$profile_name"
+            return 0
+        fi
+    done < <(_profiles_list)
+
+    return 1
+}
+
+# Show current profile status
+cmd_profile_status() {
+    if ! git rev-parse --git-dir &>/dev/null; then
+        error "Not in a git repository"
+        return 1
+    fi
+
+    local detected_profile origin_url
+    local current_name current_email
+    current_name=$(git config user.name 2>/dev/null)
+    current_email=$(git config user.email 2>/dev/null)
+    detected_profile="$(_profiles_detect 2>/dev/null)"
+    origin_url=$(git remote get-url origin 2>/dev/null)
+
+    printf '%s\n' "Current git user:"
+    printf '  Name:   %s\n' "${current_name:-${C_DIM}(not set)${C_RESET}}"
+    printf '  Email:  %s\n' "${current_email:-${C_DIM}(not set)${C_RESET}}"
+    printf '  Origin: %b%s%b\n' "$C_CYAN" "${origin_url:-${C_DIM}(not set)${C_RESET}}" "$C_RESET"
+    printf '\n'
+
+    if [[ -n "$detected_profile" ]]; then
+        printf 'Profile: %b%s%b\n' "$C_GREEN" "$detected_profile" "$C_RESET"
+    else
+        printf 'Profile: %b(none)%b\n' "$C_DIM" "$C_RESET"
+    fi
+}
+
+# List all profiles
+cmd_profile_list() {
+    if [[ ! -f "$JSH_PROFILES" ]]; then
+        printf '%s\n' "No profiles configured."
+        printf '%s\n' "Create config at: $JSH_PROFILES"
+        return 0
+    fi
+
+    local current_profile
+    current_profile="$(_profiles_detect 2>/dev/null)" || true
+
+    printf '%b%-15s %-30s %s%b\n' "$C_DIM" "PROFILE" "EMAIL" "NAME" "$C_RESET"
+    printf '%s\n' "$(printf '%60s' '' | tr ' ' '-')"
+
+    while IFS= read -r profile_name; do
+        [[ -z "$profile_name" ]] && continue
+        local profile_data name email marker
+        profile_data="$(_profiles_get "$profile_name")"
+        name=$(_profile_field "$profile_data" "name")
+        email=$(_profile_field "$profile_data" "email")
+
+        if [[ "$profile_name" == "$current_profile" ]]; then
+            marker="${C_GREEN}* ${C_RESET}"
+        else
+            marker="  "
+        fi
+
+        printf '%s%b%-15s%b %-30s %s\n' "$marker" "$C_CYAN" "$profile_name" "$C_RESET" "$email" "$name"
+    done < <(_profiles_list)
+}
+
+# Apply a profile to the current repo
+cmd_profile_apply() {
+    local profile_name="$1"
+
+    if [[ -z "$profile_name" ]]; then
+        printf '%s\n' "Usage: jgit profile <name>" >&2
+        printf '\n%s\n' "Available profiles:" >&2
+        _profiles_list | while read -r p; do printf '%s\n' "  $p" >&2; done
+        return 1
+    fi
+
+    if ! git rev-parse --git-dir &>/dev/null; then
+        error "Not in a git repository"
+        return 1
+    fi
+
+    if _profiles_apply "$profile_name"; then
+        printf '%b\n' "${C_GREEN}Applied profile:${C_RESET} ${C_CYAN}${profile_name}${C_RESET}"
+        printf '\n'
+        cmd_profile_status
+    fi
+}
+
+# Profile command dispatcher
+cmd_profile() {
+    local subcmd="${1:-}"
+
+    case "$subcmd" in
+        ""|status)     cmd_profile_status ;;
+        list|ls)       cmd_profile_list ;;
+        -h|--help|help)
+            cat << EOF
+Usage: jgit profile [command] [args]
+
+Commands:
+  (none)        Show current profile for this repo
+  list          List all configured profiles
+  <name>        Apply profile to current repo
+
+Config: $JSH_PROFILES
+EOF
+            ;;
+        *)
+            if _profiles_exists "$subcmd" 2>/dev/null; then
+                cmd_profile_apply "$subcmd"
+            else
+                error "Unknown profile: $subcmd"
+                printf '%s\n' "Use 'jgit profile list' to see available profiles." >&2
+                return 1
+            fi
+            ;;
+    esac
+}
+
+# =============================================================================
+# Default & Update Commands
+# =============================================================================
+
+# Generate ASCII art banner for project name
+# Uses figlet if available, otherwise creates a styled box header
+_banner() {
+    local name="$1"
+    local profile="${2:-}"
+
+    # Try figlet with "small" font (most legible)
+    if command -v figlet &>/dev/null; then
+        local banner
+        banner=$(figlet -f small "$name" 2>/dev/null)
+        if [[ -n "$banner" ]]; then
+            printf '%b' "$C_BOLD$C_CYAN"
+            while IFS= read -r line; do
+                printf '  %s\n' "$line"
+            done <<< "$banner"
+            printf '%b' "$C_RESET"
+            if [[ -n "$profile" ]]; then
+                printf '%b  profile: %s%b\n' "$C_DIM" "$profile" "$C_RESET"
+            fi
+            return 0
+        fi
+    fi
+
+    # Fallback: styled box header
+    local name_len=${#name}
+    local box_width=$((name_len + 6))
+    [[ $box_width -lt 40 ]] && box_width=40
+
+    local top_border bottom_border padding
+    top_border="╭$(printf '─%.0s' $(seq 1 $((box_width - 2))))╮"
+    bottom_border="╰$(printf '─%.0s' $(seq 1 $((box_width - 2))))╯"
+    padding=$(( (box_width - 2 - name_len) / 2 ))
+
+    printf '%b%s%b\n' "$C_DIM" "$top_border" "$C_RESET"
+    printf '%b│%b%*s%b%s%b%*s%b│%b\n' \
+        "$C_DIM" "$C_RESET" \
+        "$padding" "" \
+        "$C_BOLD$C_CYAN" "$name" "$C_RESET" \
+        "$((box_width - 2 - name_len - padding))" "" \
+        "$C_DIM" "$C_RESET"
+    printf '%b%s%b\n' "$C_DIM" "$bottom_border" "$C_RESET"
+
+    if [[ -n "$profile" ]]; then
+        printf '%b  profile: %s%b\n' "$C_DIM" "$profile" "$C_RESET"
+    fi
+}
+
+# Section header helper
+_section() {
+    local title="$1"
+    printf '\n%b┌─ %s %b%s%b\n' "$C_DIM" "$title" "$C_DIM" "$(printf '─%.0s' $(seq 1 $((50 - ${#title}))))" "$C_RESET"
+}
+
+# Row helper with label and value
+_row() {
+    local label="$1"
+    local value="$2"
+    printf '%b│%b  %-12s %s\n' "$C_DIM" "$C_RESET" "$label" "$value"
+}
+
+# Detailed repo info (when in a git repo)
+cmd_repo_info() {
+    local repo_name branch origin_url detected_profile repo_root
+
+    repo_root=$(git rev-parse --show-toplevel)
+    repo_name=$(basename "$repo_root")
+    branch=$(git branch --show-current 2>/dev/null)
+    [[ -z "$branch" ]] && branch=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    origin_url=$(git remote get-url origin 2>/dev/null)
+    detected_profile="$(_profiles_detect 2>/dev/null)" || true
+
+    # Banner
+    printf '\n'
+    _banner "$repo_name" "$detected_profile"
+
+    # ─────────────────────────────────────────────────────────────────
+    # Repository Section
+    # ─────────────────────────────────────────────────────────────────
+    _section "Repository"
+
+    # Branch with indicator
+    local branch_display
+    case "$branch" in
+        main|master) branch_display="${C_GREEN}${branch}${C_RESET}" ;;
+        develop|dev) branch_display="${C_CYAN}${branch}${C_RESET}" ;;
+        feature/*|feat/*) branch_display="${C_BLUE}${branch}${C_RESET}" ;;
+        bugfix/*|fix/*|hotfix/*) branch_display="${C_RED}${branch}${C_RESET}" ;;
+        *) branch_display="${C_YELLOW}${branch}${C_RESET}" ;;
+    esac
+    _row "Branch" "$branch_display"
+
+    # Remote
+    if [[ -n "$origin_url" ]]; then
+        _row "Remote" "${C_DIM}origin →${C_RESET} $origin_url"
+    fi
+
+    # Upstream status
+    local upstream ahead behind
+    # shellcheck disable=SC1083
+    upstream=$(git rev-parse --abbrev-ref '@{u}' 2>/dev/null) || true
+    if [[ -n "$upstream" ]]; then
+        ahead=$(git rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0)
+        behind=$(git rev-list --count 'HEAD..@{u}' 2>/dev/null || echo 0)
+
+        local sync_status=""
+        if [[ "$ahead" -gt 0 ]] && [[ "$behind" -gt 0 ]]; then
+            sync_status="${C_YELLOW}↑${ahead} ↓${behind}${C_RESET} diverged from ${C_DIM}${upstream}${C_RESET}"
+        elif [[ "$ahead" -gt 0 ]]; then
+            sync_status="${C_GREEN}↑${ahead}${C_RESET} ahead of ${C_DIM}${upstream}${C_RESET}"
+        elif [[ "$behind" -gt 0 ]]; then
+            sync_status="${C_RED}↓${behind}${C_RESET} behind ${C_DIM}${upstream}${C_RESET}"
+        else
+            sync_status="${C_GREEN}✓${C_RESET} in sync with ${C_DIM}${upstream}${C_RESET}"
+        fi
+        _row "Upstream" "$sync_status"
+    fi
+
+    # Tags pointing at HEAD
+    local tags
+    tags=$(git tag --points-at HEAD 2>/dev/null | tr '\n' ' ')
+    if [[ -n "$tags" ]]; then
+        _row "Tags" "${C_CYAN}${tags}${C_RESET}"
+    fi
+
+    # ─────────────────────────────────────────────────────────────────
+    # Working Tree Section
+    # ─────────────────────────────────────────────────────────────────
+    _section "Working Tree"
+
+    local staged unstaged untracked stash_count
+    staged=$(git diff --cached --numstat 2>/dev/null | wc -l | tr -d ' ')
+    unstaged=$(git diff --numstat 2>/dev/null | wc -l | tr -d ' ')
+    untracked=$(git ls-files --others --exclude-standard 2>/dev/null | wc -l | tr -d ' ')
+    stash_count=$(git stash list 2>/dev/null | wc -l | tr -d ' ')
+
+    if [[ "$staged" -eq 0 ]] && [[ "$unstaged" -eq 0 ]] && [[ "$untracked" -eq 0 ]]; then
+        _row "Status" "${C_GREEN}✓ Clean working tree${C_RESET}"
+    else
+        [[ "$staged" -gt 0 ]] && _row "Staged" "${C_GREEN}+${staged}${C_RESET} files ready to commit"
+        [[ "$unstaged" -gt 0 ]] && _row "Modified" "${C_YELLOW}*${unstaged}${C_RESET} files with changes"
+        [[ "$untracked" -gt 0 ]] && _row "Untracked" "${C_RED}?${untracked}${C_RESET} new files"
+    fi
+
+    [[ "$stash_count" -gt 0 ]] && _row "Stashed" "${C_BLUE}${stash_count}${C_RESET} $([ "$stash_count" -eq 1 ] && echo "entry" || echo "entries")"
+
+    # ─────────────────────────────────────────────────────────────────
+    # Recent Activity Section
+    # ─────────────────────────────────────────────────────────────────
+    _section "Recent Activity"
+
+    # Last 3 commits
+    local commit_hash commit_msg commit_time
+    while IFS='|' read -r commit_hash commit_msg commit_time; do
+        [[ -z "$commit_hash" ]] && continue
+        printf '%b│%b    %b%s%b %s %b(%s)%b\n' \
+            "$C_DIM" "$C_RESET" \
+            "$C_DIM" "$commit_hash" "$C_RESET" \
+            "$commit_msg" \
+            "$C_DIM" "$commit_time" "$C_RESET"
+    done < <(git log -3 --format="%h|%s|%cr" 2>/dev/null)
+
+    # ─────────────────────────────────────────────────────────────────
+    # Submodules Section (if any)
+    # ─────────────────────────────────────────────────────────────────
+    local submodule_output
+    submodule_output=$(git submodule status 2>/dev/null)
+    if [[ -n "$submodule_output" ]]; then
+        _section "Submodules"
+        while read -r line; do
+            [[ -z "$line" ]] && continue
+            # Format: [status]<sha> <path> (<description>)
+            # Status: space=clean, +=modified, -=not init, U=conflict
+            local status="${line:0:1}"
+            local rest="${line:1}"
+
+            # Handle space as status (clean)
+            if [[ "$status" == " " ]]; then
+                status=""
+            fi
+
+            # Extract SHA (40 chars) and path
+            local sha path desc
+            sha="${rest:0:7}"
+            rest="${rest:41}"  # Skip full SHA + space
+            path="${rest%% *}"
+            desc="${rest#* }"
+            desc="${desc#(}"
+            desc="${desc%)}"
+
+            local indicator
+            case "$status" in
+                '-') indicator="${C_DIM}○${C_RESET} ${path} ${C_DIM}@ ${sha}${C_RESET} ${C_DIM}(not initialized)${C_RESET}" ;;
+                '+') indicator="${C_YELLOW}●${C_RESET} ${path} ${C_DIM}@ ${sha}${C_RESET} ${C_YELLOW}(modified)${C_RESET}" ;;
+                'U') indicator="${C_RED}●${C_RESET} ${path} ${C_DIM}@ ${sha}${C_RESET} ${C_RED}(conflict)${C_RESET}" ;;
+                *)   indicator="${C_GREEN}●${C_RESET} ${path} ${C_DIM}@ ${sha}${C_RESET}" ;;
+            esac
+            printf '%b│%b    %s\n' "$C_DIM" "$C_RESET" "$indicator"
+        done <<< "$submodule_output"
+    fi
+
+    # Footer
+    printf '%b└%b\n\n' "$C_DIM" "$C_RESET"
+}
+
+# Default command (context-aware)
+cmd_default() {
+    if git rev-parse --git-dir &>/dev/null; then
+        cmd_repo_info
+    else
+        cmd_list
+    fi
+}
+
+# Safe update: stash → fetch → rebase → pop
+cmd_update() {
+    if ! git rev-parse --git-dir &>/dev/null; then
+        error "Not in a git repository"
+        return 1
+    fi
+
+    local stash_name="" has_changes=false
+
+    # Check for uncommitted changes
+    if ! git diff --quiet || ! git diff --cached --quiet || [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
+        has_changes=true
+        stash_name="jgit-update-$(date +%Y%m%d-%H%M%S)"
+        info "Stashing changes as: $stash_name"
+        git stash push -u -m "$stash_name" || abort "Failed to stash changes"
+    fi
+
+    # Fetch from origin
+    info "Fetching from origin..."
+    git fetch origin || abort "Failed to fetch"
+
+    # Identify default branch (main > master > develop)
+    local default_branch=""
+    for b in main master develop; do
+        if git show-ref --verify --quiet "refs/remotes/origin/$b"; then
+            default_branch="$b"
+            break
+        fi
+    done
+
+    if [[ -z "$default_branch" ]]; then
+        warn "No default branch found (main/master/develop)"
+        [[ "$has_changes" == true ]] && git stash pop
+        return 1
+    fi
+
+    # Rebase current branch onto origin/default
+    local current_branch
+    current_branch=$(git branch --show-current)
+    info "Rebasing ${current_branch:-HEAD} onto origin/${default_branch}..."
+
+    if ! git rebase "origin/${default_branch}"; then
+        warn "Rebase conflicts detected"
+        if [[ "$has_changes" == true ]]; then
+            warn "Your stashed changes are preserved as: $stash_name"
+            warn "After resolving conflicts, run: git stash pop"
+        fi
+        return 1
+    fi
+
+    # Pop stash if created
+    if [[ "$has_changes" == true ]]; then
+        info "Restoring stashed changes..."
+        if ! git stash pop; then
+            warn "Conflicts when restoring stash"
+            warn "Your changes are still in stash. Resolve conflicts and run: git stash pop"
+            return 1
+        fi
+    fi
+
+    success "Update complete"
+}
+
+# =============================================================================
+# Project Commands
+# =============================================================================
+
+# Output project path (for shell wrapper to cd)
+cmd_path() {
+    local name="$1"
+    local name_lower matches=()
+
+    if [[ -z "$name" ]]; then
+        error "Usage: jgit path <name>"
+        return 1
+    fi
+
+    name_lower="$(_lowercase "$name")"
+
+    while IFS= read -r dir; do
+        [[ -z "$dir" ]] && continue
+        local basename
+        basename="${dir##*/}"
+
+        if [[ "$(_lowercase "$basename")" == "$name_lower" ]] || \
+           [[ "$(_lowercase "${basename#.}")" == "$name_lower" ]]; then
+            matches+=("$dir")
+        fi
+    done < <(_projects_get_all)
+
+    case ${#matches[@]} in
+        0)
+            error "No project found: $name"
+            return 1
+            ;;
+        1)
+            printf '%s\n' "${matches[0]}"
+            ;;
+        *)
+            warn "Multiple matches for '$name', using first:"
+            for dir in "${matches[@]}"; do
+                printf '%s\n' "  $(_projects_display_name "$dir")" >&2
+            done
+            printf '%s\n' "${matches[0]}"
+            ;;
+    esac
+}
+
+# List all projects with git status
+cmd_list() {
+    local verbose=false
+    [[ "${1:-}" == "-v" || "${1:-}" == "--verbose" ]] && verbose=true
+
+    local all_dirs=()
+    while IFS= read -r dir; do
+        [[ -n "$dir" ]] && all_dirs+=("$dir")
+    done < <(_projects_get_all)
+
+    local total=${#all_dirs[@]}
+    if [[ ${total} -eq 0 ]]; then
+        printf '%s\n' "No projects found."
+        printf '%s\n' "Configure paths with \$JSH_PROJECTS (comma-separated)."
+        return 0
+    fi
+
+    # Header
+    printf '%b%-30s %-15s %s%b\n' "$C_DIM" "PROJECT" "STATUS" "PROFILE" "$C_RESET"
+    printf '%s\n' "$(printf '%60s' '' | tr ' ' '─')"
+
+    # Projects
+    for dir in "${all_dirs[@]}"; do
+        # Validate it's actually a valid git repository (not just having a .git dir)
+        git -C "$dir" rev-parse --git-dir &>/dev/null || continue
+
+        local display_name branch status_str profile_name=""
+        display_name="$(_projects_display_name "$dir")"
+
+        branch=$(git -C "$dir" branch --show-current 2>/dev/null)
+        [[ -z "$branch" ]] && branch=$(git -C "$dir" rev-parse --short HEAD 2>/dev/null || echo "-")
+
+        # Compact status
+        local staged unstaged untracked status_parts=""
+        staged=$(git -C "$dir" diff --cached --numstat 2>/dev/null | wc -l | tr -d ' ')
+        unstaged=$(git -C "$dir" diff --numstat 2>/dev/null | wc -l | tr -d ' ')
+        untracked=$(git -C "$dir" ls-files --others --exclude-standard 2>/dev/null | wc -l | tr -d ' ')
+
+        [[ "$staged" -gt 0 ]] && status_parts+="${C_GREEN}+${staged}${C_RESET} "
+        [[ "$unstaged" -gt 0 ]] && status_parts+="${C_YELLOW}*${unstaged}${C_RESET} "
+        [[ "$untracked" -gt 0 ]] && status_parts+="${C_RED}?${untracked}${C_RESET}"
+
+        if [[ -z "$status_parts" ]]; then
+            status_str="${C_CYAN}${branch}${C_RESET} ${C_DIM}clean${C_RESET}"
+        else
+            status_str="${C_CYAN}${branch}${C_RESET} ${status_parts}"
+        fi
+
+        if [[ "$verbose" == true ]]; then
+            profile_name="$(_profiles_detect "$dir" 2>/dev/null)" || true
+            [[ -z "$profile_name" ]] && profile_name="${C_DIM}-${C_RESET}"
+        fi
+
+        if [[ "$verbose" == true ]]; then
+            printf '%-30s %-15b %s\n' "$display_name" "$status_str" "$profile_name"
+        else
+            printf '%-30s %b\n' "$display_name" "$status_str"
+        fi
+    done
+
+    # Footer
+    printf '%s\n' "$(printf '%60s' '' | tr ' ' '─')"
+    printf '%b%d projects%b\n' "$C_DIM" "$total" "$C_RESET"
+}
+
+# Clone with smart SSH fallback
+# Called via: project add <url> [name]
+cmd_add() {
+    local url="$1"
+    local name="${2:-}"
+
+    if [[ -z "$url" ]]; then
+        cat << 'EOF' >&2
+Usage: project add <git-url> [name]
+
+Clone a git repository with smart SSH key selection.
+Automatically selects SSH key based on repo owner matching profile user.
+
+Examples:
+  project add git@github.com:user/repo.git
+  project add https://github.com/user/repo.git
+  project add git@github.com:user/repo.git myrepo
+EOF
+        return 1
+    fi
+
+    [[ -z "$name" ]] && name="$(_projects_name_from_url "$url")"
+
+    if [[ -z "$name" ]]; then
+        error "Could not determine project name from URL: $url"
+        return 1
+    fi
+
+    local target_dir
+    target_dir="$(_projects_default_dir)/${name}"
+
+    if [[ -d "$target_dir" ]]; then
+        error "Directory already exists: $target_dir"
+        return 1
+    fi
+
+    # Create parent directory
+    mkdir -p "$(dirname "$target_dir")" || abort "Failed to create directory"
+
+    # Parse URL
+    local parsed platform owner repo
+    parsed="$(_git_parse_url "$url")"
+    platform="${parsed%%|*}"
+    owner="${parsed#*|}"
+    owner="${owner%%|*}"
+    repo="${parsed##*|}"
+
+    # Try to find matching profile for SSH host
+    local clone_url="$url"
+    local matched_profile ssh_host
+
+    if matched_profile="$(_profile_find_by_user "$owner")"; then
+        ssh_host="$(_profile_ssh_host "$matched_profile" "$platform")"
+
+        if [[ -n "$ssh_host" ]] && _ssh_host_exists "$ssh_host"; then
+            clone_url="git@${ssh_host}:${owner}/${repo}.git"
+            info "Using SSH key for profile: ${C_CYAN}${matched_profile}${C_RESET}"
+        fi
+    fi
+
+    printf '%b\n' "Cloning ${C_CYAN}${name}${C_RESET}..."
+
+    # Helper to output cd info
+    _output_cd_info() {
+        if [[ -n "${JSH_CD_FILE:-}" ]]; then
+            # Write to temp file for shell wrapper to read
+            printf '%s' "$target_dir" > "${JSH_CD_FILE}"
+        elif [[ -n "${JSH_WRAPPER:-}" ]]; then
+            printf 'CD:%s\n' "$target_dir"
+        else
+            printf '\n  %s→%s cd %s\n' "$C_CYAN" "$C_RESET" "$(_projects_display_name "$target_dir")"
+        fi
+    }
+
+    # Try smart SSH URL first
+    if git clone "$clone_url" "$target_dir" 2>/dev/null; then
+        success "cloned to: $(_projects_display_name "$target_dir")"
+        _output_cd_info
+        return 0
+    fi
+
+    # Fallback to original URL
+    if [[ "$clone_url" != "$url" ]]; then
+        warn "SSH clone failed, trying original URL..."
+        if git clone "$url" "$target_dir" 2>/dev/null; then
+            success "cloned to: $(_projects_display_name "$target_dir")"
+            _output_cd_info
+            return 0
+        fi
+    fi
+
+    # Final fallback: HTTPS
+    if [[ "$url" != https://* ]] && [[ -n "$platform" ]] && [[ "$platform" == *.* ]]; then
+        local https_url="https://${platform}/${owner}/${repo}.git"
+        warn "Trying HTTPS fallback..."
+        if git clone "$https_url" "$target_dir"; then
+            success "cloned to: $(_projects_display_name "$target_dir")"
+            warn "Cloned via HTTPS. Run 'jgit profile <name>' to set up SSH."
+            _output_cd_info
+            return 0
+        fi
+    fi
+
+    error "Failed to clone repository"
+    return 1
+}
+
+# Create new project with profile selection
+# Called via: project create <name>
+cmd_create() {
+    local name="${1:-}"
+
+    if [[ -z "$name" ]]; then
+        error "Usage: project create <name>"
+        return 1
+    fi
+
+    local target_dir
+    target_dir="$(_projects_default_dir)/${name}"
+
+    if [[ -d "$target_dir" ]]; then
+        error "Directory already exists: $target_dir"
+        return 1
+    fi
+
+    # Interactive profile selection
+    local profiles=() profile_info=() selected_profile=""
+    while IFS= read -r p; do
+        [[ -z "$p" ]] && continue
+        profiles+=("$p")
+        local info pname pemail
+        info="$(_profiles_get "$p")"
+        pname=$(_profile_field "$info" "name")
+        pemail=$(_profile_field "$info" "email")
+        profile_info+=("$pname <$pemail>")
+    done < <(_profiles_list)
+
+    if [[ ${#profiles[@]} -gt 0 ]]; then
+        # Interactive selection only if stdin is a tty
+        if [[ -t 0 ]]; then
+            printf '\nSelect a profile for this project:\n'
+            local i=1
+            for idx in "${!profiles[@]}"; do
+                printf '  %s%d)%s %s - %s\n' "$C_CYAN" "$i" "$C_RESET" "${profiles[$idx]}" "${profile_info[$idx]}"
+                ((i++))
+            done
+            printf '  %ss)%s Skip (no profile)\n' "$C_DIM" "$C_RESET"
+            printf '\n'
+
+            local choice
+            read -rp "Choice [1]: " choice
+            choice="${choice:-1}"
+
+            if [[ "$choice" != "s" ]] && [[ "$choice" =~ ^[0-9]+$ ]]; then
+                local idx=$((choice - 1))
+                if [[ $idx -ge 0 ]] && [[ $idx -lt ${#profiles[@]} ]]; then
+                    selected_profile="${profiles[$idx]}"
+                fi
+            fi
+        else
+            # Non-interactive: use first profile
+            selected_profile="${profiles[0]}"
+            info "using profile: ${selected_profile}"
+        fi
+    else
+        info "no profiles configured (add to $JSH_PROFILES)"
+    fi
+
+    # Create project directory and initialize git
+    mkdir -p "$target_dir" || abort "Failed to create directory"
+    cd "$target_dir" || return 1
+    git init -q || abort "Failed to initialize git repository"
+
+    # Build origin URL from profile
+    local origin_url=""
+    if [[ -n "$selected_profile" ]]; then
+        local profile_data pname pemail puser phost pssh_host
+        profile_data="$(_profiles_get "$selected_profile")"
+        pname=$(_profile_field "$profile_data" "name")
+        pemail=$(_profile_field "$profile_data" "email")
+        puser=$(_profile_field "$profile_data" "user")
+        phost=$(_profile_field "$profile_data" "host")
+        pssh_host=$(_profile_field "$profile_data" "ssh_host")
+
+        # Set git user config
+        [[ -n "$pname" ]] && git config user.name "$pname"
+        [[ -n "$pemail" ]] && git config user.email "$pemail"
+
+        # Construct origin URL
+        if [[ -n "$puser" ]]; then
+            local ssh_target
+            if [[ -n "$pssh_host" ]]; then
+                ssh_target="$pssh_host"
+            elif [[ -n "$phost" ]]; then
+                ssh_target="$(_ssh_derive_host "$phost" "$puser")"
+            else
+                ssh_target="$(_ssh_derive_host "github.com" "$puser")"
+            fi
+            origin_url="git@${ssh_target}:${puser}/${name}.git"
+            git remote add origin "$origin_url"
+        fi
+    fi
+
+    # Create README.md
+    cat > README.md << EOF
+# ${name}
+
+## Description
+
+A brief description of this project.
+
+## Getting Started
+
+\`\`\`bash
+# Installation instructions
+\`\`\`
+
+## License
+
+MIT
+EOF
+
+    # Create .gitignore
+    cat > .gitignore << 'EOF'
+# Dependencies
+node_modules/
+vendor/
+.venv/
+__pycache__/
+
+# Build outputs
+dist/
+build/
+*.o
+*.a
+*.so
+*.dylib
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+*.local
+
+# Logs
+*.log
+logs/
+
+# Coverage
+coverage/
+.nyc_output/
+EOF
+
+    git add -A
+    git commit -q -m "Initial commit"
+
+    # Output in requested order
+    printf '\n'
+    printf '  %s✓%s %s\n' "$C_GREEN" "$C_RESET" "$(_projects_display_name "$target_dir")"
+    printf '  %s✓%s README.md\n' "$C_GREEN" "$C_RESET"
+    printf '  %s✓%s .gitignore\n' "$C_GREEN" "$C_RESET"
+    if [[ -n "$origin_url" ]]; then
+        printf '  %s✓%s .git initialized %s→%s %s\n' "$C_GREEN" "$C_RESET" "$C_DIM" "$C_RESET" "$origin_url"
+    else
+        printf '  %s✓%s .git initialized\n' "$C_GREEN" "$C_RESET"
+    fi
+    printf '\n'
+
+    # Output directory for cd handling
+    # JSH_CD_FILE is temp file from project() wrapper for cd path communication
+    if [[ -n "${JSH_CD_FILE:-}" ]]; then
+        printf '%s' "$target_dir" > "${JSH_CD_FILE}"
+    elif [[ -n "${JSH_WRAPPER:-}" ]]; then
+        printf 'CD:%s\n' "$target_dir"
+    fi
+}
+
+# =============================================================================
+# Usage & Main
+# =============================================================================
+
+usage() {
+    cat << 'EOF'
+Usage: jgit [command] [args]
+
+COMMANDS:
+  (none)                In repo: detailed view | Not in repo: list all
+  update                Safe pull: stash → rebase → apply
+  profile               Show current repo's profile
+  profile list          List all available profiles
+  profile <name>        Apply profile to current repo
+  list [-v]             List all projects with status
+  path <name>           Output path (used by project wrapper)
+  <unknown>             Passthrough to git (e.g., jgit status → git status)
+
+Use 'project' command for operations that change directory:
+  project <name>        Navigate to project
+  project add <url>     Clone repo and cd into it
+  project create <name> Create project and cd into it
+
+OPTIONS:
+  -h, --help            Show this help
+
+EXAMPLES:
+  jgit                  Show repo info or list projects
+  jgit update           Safe pull with stash and rebase
+  jgit profile work     Apply work profile to current repo
+  project add git@github.com:user/repo.git
+  project create my-project
+  jgit log --oneline    Passthrough to git log
+EOF
+    exit 0
+}
+
+# Handle help
+[[ "${1:-}" == "-h" || "${1:-}" == "--help" ]] && usage
+
+case "${1:-}" in
+    # Project commands
+    path)      shift; cmd_path "$@" ;;
+    list|-l)   shift; cmd_list "$@" ;;
+
+    # Commands that require the project wrapper for cd
+    add)
+        if [[ -z "${JSH_WRAPPER:-}" ]]; then
+            error "Use 'project add <url>' instead (enables auto-cd)"
+            exit 1
+        fi
+        shift; cmd_add "$@"
+        ;;
+    create)
+        if [[ -z "${JSH_WRAPPER:-}" ]]; then
+            error "Use 'project create <name>' instead (enables auto-cd)"
+            exit 1
+        fi
+        shift; cmd_create "$@"
+        ;;
+
+    # Profile commands
+    profile)   shift; cmd_profile "$@" ;;
+
+    # Update command
+    update)    cmd_update ;;
+
+    # No command - context-aware default
+    "")        cmd_default ;;
+
+    # Pass through to git (unknown commands)
+    *)         exec git "$@" ;;
+esac
