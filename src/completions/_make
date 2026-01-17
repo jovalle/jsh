@@ -1,0 +1,119 @@
+#compdef make gmake
+# shellcheck shell=bash
+# shellcheck disable=SC2207,SC2296,SC2034,SC2154,SC2206,SC2155,SC2128,SC1087
+# Zsh completion for make with dynamic target extraction and descriptions
+
+# ============================================================================
+# make - Zsh Completion (Dynamic)
+# ============================================================================
+# Tab completion for make that dynamically extracts targets from Makefiles
+# Supports the self-documenting pattern: target: ## Description
+# ============================================================================
+
+_make() {
+    local curcontext="$curcontext" state line
+    typeset -A opt_args
+
+    # Standard make options
+    _arguments -C \
+        '-B[Unconditionally make all targets]' \
+        '-C[Change directory before reading makefiles]:directory:_directories' \
+        '-d[Print debugging information]' \
+        '-e[Environment variables override makefiles]' \
+        '-f[Read FILE as a makefile]:makefile:_files' \
+        '-i[Ignore errors from commands]' \
+        '-I[Search directory for included makefiles]:directory:_directories' \
+        '-j[Allow N jobs at once]:jobs:' \
+        '-k[Keep going when some targets cannot be made]' \
+        '-l[Do not start multiple jobs unless load < N]:load:' \
+        '-n[Print commands but do not execute]' \
+        '-o[Consider FILE to be very old]:file:_files' \
+        '-p[Print database of rules and variables]' \
+        '-q[Run no commands; exit status says if up to date]' \
+        '-r[Disable built-in implicit rules]' \
+        '-R[Disable built-in variable settings]' \
+        '-s[Silent mode]' \
+        '-S[Turns off -k]' \
+        '-t[Touch targets instead of remaking them]' \
+        '-v[Print version]' \
+        '-w[Print working directory]' \
+        '-W[Consider FILE to be infinitely new]:file:_files' \
+        '--help[Display help]' \
+        '*:target:->targets'
+
+    case $state in
+        targets)
+            _make_targets
+            ;;
+    esac
+}
+
+_make_targets() {
+    local -a targets
+    local makefile=""
+    local makedir="."
+
+    # Check for -f or -C options
+    if [[ -n "${opt_args[-f]}" ]]; then
+        makefile="${opt_args[-f]}"
+    fi
+    if [[ -n "${opt_args[-C]}" ]]; then
+        makedir="${opt_args[-C]}"
+    fi
+
+    # Find the Makefile if not specified
+    if [[ -z "$makefile" ]]; then
+        for f in GNUmakefile makefile Makefile; do
+            if [[ -f "${makedir}/${f}" ]]; then
+                makefile="${makedir}/${f}"
+                break
+            fi
+        done
+    fi
+
+    # No Makefile found
+    [[ -f "$makefile" ]] || return 1
+
+    # Extract targets with descriptions dynamically
+    # Uses the ## comment pattern for self-documenting Makefiles
+    # BSD awk compatible syntax (avoids !~ operator in conditionals)
+    targets=(${(f)"$(
+        awk '
+            # Skip lines starting with tab (recipes)
+            /^\t/ { next }
+            # Skip variable assignments
+            /^[A-Za-z_][A-Za-z0-9_]*[[:space:]]*[:?+]?=/ { next }
+            # Skip .PHONY and other special targets
+            /^\./ { next }
+            # Skip internal targets (starting with _)
+            /^_/ { next }
+            # Match target with ## description
+            /^[a-zA-Z][a-zA-Z0-9_-]*:.*## / {
+                # Extract target and description
+                match($0, /^[a-zA-Z][a-zA-Z0-9_-]*/)
+                target = substr($0, RSTART, RLENGTH)
+                # Get description after ##
+                desc_pos = index($0, "## ")
+                if (desc_pos > 0) {
+                    desc = substr($0, desc_pos + 3)
+                    gsub(/^[[:space:]]+|[[:space:]]+$/, "", desc)
+                    print target ":" desc
+                }
+                next
+            }
+            # Match target without description
+            /^[a-zA-Z][a-zA-Z0-9_-]*:/ {
+                match($0, /^[a-zA-Z][a-zA-Z0-9_-]*/)
+                target = substr($0, RSTART, RLENGTH)
+                # BSD awk: use positive match instead of !~
+                if (target ~ /^[a-zA-Z]/) {
+                    print target ":Make target"
+                }
+            }
+        ' "$makefile" | sort -u
+    )"})
+
+    _describe -t targets 'make targets' targets
+}
+
+_make "$@"
