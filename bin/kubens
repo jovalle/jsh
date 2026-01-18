@@ -1,7 +1,18 @@
 #!/usr/bin/env bash
+# @name kubens
+# @version 1.0.0
+# @desc Switch between Kubernetes namespaces
+# @usage kubens [options] [NAME]
+#
+# @option -c,--current  Show the current namespace
+# @option -h,--help     Show this help message
+#
+# @example kubens
+# @example kubens kube-system
+# @example kubens -
 #
 # kubens(1) is a utility to switch between Kubernetes namespaces.
-
+#
 # Copyright 2017 Google Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");

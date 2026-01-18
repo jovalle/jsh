@@ -1,9 +1,33 @@
 #!/usr/bin/env bash
-# jssh - SSH with portable Jsh environment
-# Brings your shell experience to any remote host
-# Usage: jssh [ssh-options] user@host
+# @name jssh
+# @version 1.0.0
+# @desc SSH with portable Jsh environment
+# @usage jssh [ssh-options] [user@]hostname
+#
+# @cmd --check    Validate setup and show status
+# @cmd --rebuild  Force rebuild of payload cache
+#
+# @option -h,--help  Show this help message
+#
+# @example jssh server.example.com
+# @example jssh -p 2222 user@server.example.com
+# @example jssh -i ~/.ssh/mykey server
+# @example jssh --check
+#
+# shellcheck shell=bash
+#
+# Connects to a remote host via SSH and automatically deploys your
+# Jsh shell environment. The environment is ephemeral - extracted
+# to a temp directory and cleaned up on disconnect.
 
 set -euo pipefail
+
+# =============================================================================
+# Dependencies
+# =============================================================================
+
+# Source CLI framework (for help/version generation - keeps custom UI helpers below)
+source "${0%/*}/../lib/cli.sh" 2>/dev/null || source "${JSH_DIR:-$HOME/.jsh}/lib/cli.sh"
 
 # =============================================================================
 # Configuration
@@ -643,45 +667,14 @@ SHELL_LAUNCH
 # =============================================================================
 
 main() {
-    # Check for help
+    # Check for help/version
     case "${1:-}" in
         -h|--help)
-            cat << 'HELP'
-jssh - SSH with portable Jsh environment
-
-Usage: jssh [ssh-options] [user@]hostname
-       jssh --check    Validate setup and show status
-       jssh --rebuild  Force rebuild of payload cache
-
-Connects to a remote host via SSH and automatically sets up your
-Jsh shell environment. The environment is ephemeral - extracted
-to a temp directory and cleaned up when you disconnect.
-
-Transfer Method:
-  Uses a two-stage approach:
-  1. Non-interactive SSH to transfer and extract the payload
-  2. Interactive SSH session with your shell environment
-
-The payload includes:
-  - Shell configuration (aliases, functions, pure-shell prompt)
-  - FZF binary + shell integration (linux-amd64, darwin-arm64)
-  - Full vim-plug setup with 8 plugins (LazyVim keybindings)
-  - tmux configuration
-
-Safety Features:
-  - Cleanup only targets /tmp/.jsh-portable-* paths (hardcoded prefix)
-  - Marker file verification before any rm -rf operation
-  - Multiple validation guards prevent accidental deletions
-
-Environment Variables:
-  JSSH_DEBUG=1        Enable debug output
-  JSSH_PREFER_ZSH=0   Don't prefer zsh over bash on remote
-
-Examples:
-  jssh server.example.com
-  jssh -p 2222 user@server.example.com
-  jssh -i ~/.ssh/mykey server.example.com
-HELP
+            cli_help
+            exit 0
+            ;;
+        --version)
+            cli_version
             exit 0
             ;;
         --check|--status)
