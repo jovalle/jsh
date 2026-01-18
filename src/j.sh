@@ -61,9 +61,9 @@ _J_PREV_DIR=""
 _J_SHELL="bash"
 [[ -n "${ZSH_VERSION:-}" ]] && _J_SHELL="zsh"
 
-# Portable lowercase function
+# Lowercase using bash 4+ parameter expansion
 _j_lowercase() {
-    printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+    printf '%s' "${1,,}"
 }
 
 # =============================================================================
