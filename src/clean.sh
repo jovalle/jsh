@@ -7,13 +7,6 @@
 _JSH_CLEAN_LOADED=1
 
 # =============================================================================
-# Cleanup Targets
-# =============================================================================
-# Format: CLEAN_TARGETS[name]="description|check_func|size_func|clean_func"
-
-declare -A CLEAN_TARGETS
-
-# =============================================================================
 # Helper Functions
 # =============================================================================
 
@@ -187,31 +180,13 @@ _clean_run_docker() {
     docker system prune -f 2>/dev/null
 }
 
-# macOS system caches
-_clean_check_macos() {
-    [[ "$(uname -s)" == "Darwin" ]] && [[ -d "${HOME}/Library/Caches" ]]
-}
-
-_clean_size_macos() {
-    _clean_dir_size "${HOME}/Library/Caches"
-}
-
-_clean_run_macos() {
-    # Only clean specific safe caches, not all of Library/Caches
-    local safe_caches=(
-        "com.apple.dt.Xcode"
-        "com.apple.Safari"
-        "Homebrew"
-    )
-    for cache in "${safe_caches[@]}"; do
-        rm -rf "${HOME}/Library/Caches/${cache}" 2>/dev/null
-    done
-}
-
 # =============================================================================
 # Main Command
 # =============================================================================
 
+# @jsh-cmd clean Clean caches and temporary files
+# @jsh-opt -n,--dry-run Show what would be cleaned without doing it
+# @jsh-opt -y,--yes Skip confirmation prompts
 cmd_clean() {
     local dry_run=false
     local skip_confirm=false
@@ -273,7 +248,6 @@ cmd_clean() {
     )
 
     local -a available_targets=()
-    local total_savings=0
 
     # Check which targets are available
     echo "${CYAN}Scanning for cleanup targets...${RST}"
