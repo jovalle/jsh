@@ -1,17 +1,39 @@
 #!/usr/bin/env bash
-# jgit - Git project and repository management (jsh flavor)
+# @name jgit
+# @version 1.0.0
+# @desc Git project and repository management (jsh flavor)
+# @usage jgit [command] [args...]
 #
-# USAGE:
-#   jgit                      In repo: detailed view | Not in repo: list all
-#   jgit update               Safe pull: stash → rebase → apply
-#   jgit profile              Show current repo's profile
-#   jgit profile list         List all available profiles
-#   jgit profile <name>       Apply profile to current repo
-#   jgit add <url> [name]     Clone with smart SSH fallback
-#   jgit create <name>        Create project (interactive profile selection)
-#   jgit list [-v]            List all projects with status
-#   jgit path <name>          Output path for shell cd wrapper
-#   jgit <unknown>            Passthrough to git (e.g., jgit clone → git clone)
+# @cmd (none)              In repo: detailed view | Not in repo: list all
+# @cmd update              Safe pull: stash → rebase → apply
+# @cmd profile             Show/apply git identity profiles
+# @cmd list                List all projects with status
+# @cmd path <name>         Output path for shell cd wrapper
+# @cmd commit              Create commit (use -i for interactive)
+# @cmd push                Push commits (use -i for interactive)
+# @cmd backup              Manage jgit backup refs
+# @cmd <other>             Passthrough to git
+#
+# @sub profile:list        List all available profiles
+# @sub profile:<name>      Apply profile to current repo
+# @sub backup:list         List backup refs
+# @sub backup:restore      Restore from backup ref
+#
+# @option -i,--interactive  Enable interactive mode (commit, push)
+# @option -v,--verbose      Verbose output (for list command)
+# @option -h,--help         Show this help message
+#
+# @example jgit
+# @example jgit update
+# @example jgit profile work
+# @example jgit list -v
+# @example jgit commit -i
+#
+# shellcheck shell=bash
+#
+# Note: Use 'project' wrapper for add/create commands (enables auto-cd):
+#   project add <url>       Clone repo and cd into it
+#   project create <name>   Create project and cd into it
 
 [[ -n $DEBUG ]] && set -x
 
@@ -27,22 +49,16 @@ JSH_PROFILES="${JSH_PROFILES:-${JSH_DIR}/local/profiles.json}"
 _PROJECTS_DEFAULT_PATHS="${HOME}/.jsh,${HOME}/projects/*"
 
 # =============================================================================
-# Source lib/common.sh (for output helpers)
+# Dependencies
 # =============================================================================
 
-if [[ -f "${JSH_DIR}/lib/common.sh" ]]; then
-    source "${JSH_DIR}/lib/common.sh"
-else
-    error() { printf 'error: %s\n' "$*" >&2; }
-    warn() { printf 'warn: %s\n' "$*" >&2; }
-    success() { printf 'success: %s\n' "$*"; }
-    info() { printf 'info: %s\n' "$*"; }
-fi
+# Source CLI framework (provides help generation and colors)
+source "${0%/*}/../lib/cli.sh" 2>/dev/null || source "${JSH_DIR:-$HOME/.jsh}/lib/cli.sh"
 
 # =============================================================================
-# Colors (defined AFTER sourcing lib/common.sh to override its literal strings)
+# Colors (override cli.sh with proper ANSI escapes for this script)
 # =============================================================================
-# lib/common.sh uses '\033[...' (literal) - we need $'\033[...' (escape char)
+# cli.sh provides colors but we need $'\033[...' escape sequences for printf
 
 if [[ -t 1 ]] && [[ "${NO_COLOR:-}" != "1" ]] && [[ "${TERM:-}" != "dumb" ]]; then
     C_CYAN=$'\033[36m'
@@ -1275,44 +1291,110 @@ EOF
 }
 
 # =============================================================================
+# Interactive Mode Support
+# =============================================================================
+
+# Source interactive library (lazy load)
+_source_interactive() {
+    if [[ -z "${_UI_RESET:-}" ]]; then
+        if [[ -f "${JSH_DIR}/lib/jgit-interactive.sh" ]]; then
+            source "${JSH_DIR}/lib/jgit-interactive.sh"
+        else
+            abort "Interactive library not found: ${JSH_DIR}/lib/jgit-interactive.sh"
+        fi
+    fi
+}
+
+# Check if -i or --interactive is in args
+_has_interactive_flag() {
+    for arg in "$@"; do
+        case "$arg" in
+            -i|--interactive) return 0 ;;
+        esac
+    done
+    return 1
+}
+
+# Remove -i/--interactive from args and echo the rest
+_strip_interactive_flag() {
+    for arg in "$@"; do
+        case "$arg" in
+            -i|--interactive) ;;
+            *) printf '%s\n' "$arg" ;;
+        esac
+    done
+}
+
+# =============================================================================
+# Commit Command
+# =============================================================================
+
+cmd_commit() {
+    if _has_interactive_flag "$@"; then
+        _source_interactive
+        local -a args=()
+        while IFS= read -r arg; do
+            [[ -n "$arg" ]] && args+=("$arg")
+        done < <(_strip_interactive_flag "$@")
+        cmd_commit_interactive "${args[@]}"
+    else
+        exec git commit "$@"
+    fi
+}
+
+# =============================================================================
+# Push Command
+# =============================================================================
+
+cmd_push() {
+    if _has_interactive_flag "$@"; then
+        _source_interactive
+        local -a args=()
+        while IFS= read -r arg; do
+            [[ -n "$arg" ]] && args+=("$arg")
+        done < <(_strip_interactive_flag "$@")
+        cmd_push_interactive "${args[@]}"
+    else
+        exec git push "$@"
+    fi
+}
+
+# =============================================================================
+# Backup Command (utility)
+# =============================================================================
+
+cmd_backup() {
+    local subcmd="${1:-list}"
+    shift 2>/dev/null || true
+
+    case "$subcmd" in
+        list|ls)
+            _source_interactive
+            _backup_list
+            ;;
+        restore)
+            if [[ -z "${1:-}" ]]; then
+                error "Usage: jgit backup restore <ref>"
+                return 1
+            fi
+            _source_interactive
+            _backup_restore "$1"
+            ;;
+        *)
+            error "Unknown backup command: $subcmd"
+            printf '%s\n' "Usage: jgit backup [list|restore <ref>]"
+            return 1
+            ;;
+    esac
+}
+
+# =============================================================================
 # Usage & Main
 # =============================================================================
 
-usage() {
-    cat << 'EOF'
-Usage: jgit [command] [args]
-
-COMMANDS:
-  (none)                In repo: detailed view | Not in repo: list all
-  update                Safe pull: stash → rebase → apply
-  profile               Show current repo's profile
-  profile list          List all available profiles
-  profile <name>        Apply profile to current repo
-  list [-v]             List all projects with status
-  path <name>           Output path (used by project wrapper)
-  <unknown>             Passthrough to git (e.g., jgit status → git status)
-
-Use 'project' command for operations that change directory:
-  project <name>        Navigate to project
-  project add <url>     Clone repo and cd into it
-  project create <name> Create project and cd into it
-
-OPTIONS:
-  -h, --help            Show this help
-
-EXAMPLES:
-  jgit                  Show repo info or list projects
-  jgit update           Safe pull with stash and rebase
-  jgit profile work     Apply work profile to current repo
-  project add git@github.com:user/repo.git
-  project create my-project
-  jgit log --oneline    Passthrough to git log
-EOF
-    exit 0
-}
-
-# Handle help
-[[ "${1:-}" == "-h" || "${1:-}" == "--help" ]] && usage
+# Handle help/version
+[[ "${1:-}" == "-h" || "${1:-}" == "--help" ]] && { cli_help; exit 0; }
+[[ "${1:-}" == "--version" ]] && { cli_version; exit 0; }
 
 case "${1:-}" in
     # Project commands
@@ -1340,6 +1422,13 @@ case "${1:-}" in
 
     # Update command
     update)    cmd_update ;;
+
+    # Interactive-enabled commands
+    commit)    shift; cmd_commit "$@" ;;
+    push)      shift; cmd_push "$@" ;;
+
+    # Backup management
+    backup)    shift; cmd_backup "$@" ;;
 
     # No command - context-aware default
     "")        cmd_default ;;
