@@ -63,10 +63,10 @@ auto-save-list
 tramp
 
 # AI Tools
-.claude/
-.gemini/
-CLAUDE.md
-GEMINI.md
+*[Cc][Ll][Aa][Uu][Dd][Ee]*
+*[Gg][Ee][Mm][Ii][Nn][Ii]*
+.github/prompts/
+.planning/
 
 # =============================================================================
 # Environment & Secrets
@@ -236,3 +236,5 @@ archive/
 
 # Local copies
 * copy.*
+docs/
+.commit-strategy.sh
