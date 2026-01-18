@@ -12,15 +12,11 @@ _JSH_TOOLS_LOADED=1
 # Format: TOOLS[name]="category|description|check_cmd|install_cmd"
 # Categories: shell, editor, dev, k8s, git, container, cloud, network
 
-declare -A TOOLS
+declare -gA TOOLS
 
 # Shell Tools
-TOOLS[bash]="shell|Modern bash shell (4.0+)|bash --version|brew install bash"
-TOOLS[zsh]="shell|Z Shell with plugins|zsh --version|brew install zsh"
-TOOLS[fish]="shell|Friendly interactive shell|fish --version|brew install fish"
 TOOLS[tmux]="shell|Terminal multiplexer|tmux -V|brew install tmux"
 TOOLS[direnv]="shell|Directory-based env vars|direnv version|brew install direnv"
-TOOLS[starship]="shell|Cross-shell prompt|starship --version|brew install starship"
 
 # Editor Tools
 TOOLS[vim]="editor|Vi Improved|vim --version|brew install vim"
@@ -78,13 +74,13 @@ TOOLS[tig]="git|Text-mode git interface|tig --version|brew install tig"
 # Network Tools
 TOOLS[nmap]="network|Network scanner|nmap --version|brew install nmap"
 TOOLS[mtr]="network|Network diagnostic|mtr --version|brew install mtr"
-TOOLS[ssh-copy-id]="network|SSH key installer|ssh-copy-id -h|brew install ssh-copy-id"
+TOOLS[ssh-copy-id]="network|SSH key installer|command -v ssh-copy-id|brew install ssh-copy-id"
 
 # =============================================================================
 # Tool Categories
 # =============================================================================
 
-declare -A TOOL_CATEGORIES
+declare -gA TOOL_CATEGORIES
 TOOL_CATEGORIES[shell]="Shell & Terminal"
 TOOL_CATEGORIES[editor]="Editors & IDEs"
 TOOL_CATEGORIES[dev]="Development Tools"
@@ -146,9 +142,7 @@ _tools_get_version() {
 
 # List all tools with install status
 # Usage: cmd_tools_list [options]
-#   -c, --category <cat>  Filter by category
-#   --missing             Show only missing tools
-#   --installed           Show only installed tools
+# Options for 'jsh tools list' are defined with the main cmd_tools metadata
 cmd_tools_list() {
     local filter_category=""
     local filter_missing=false
@@ -199,7 +193,7 @@ cmd_tools_list() {
         # Check install status
         if _tools_is_installed "${name}"; then
             installed=true
-            version=$(_tools_get_version "${name}")
+            version=$(_tools_get_version "${name}" || true)
         else
             installed=false
             version=""
@@ -249,11 +243,11 @@ cmd_tools_check() {
             # Try to run the check command
             if eval "${_TOOL_CHECK}" >/dev/null 2>&1; then
                 local version
-                version=$(_tools_get_version "${name}")
+                version=$(_tools_get_version "${name}" || true)
                 results+=("${GRN}✔${RST} ${name} ${DIM}(${version})${RST}")
             else
                 results+=("${RED}✘${RST} ${name}: check command failed")
-                ((errors++))
+                ((errors++)) || true  # Avoid exit when errors=0 with set -e
             fi
         fi
     done
@@ -354,6 +348,16 @@ cmd_tools_recommend() {
 # Main Command Handler
 # =============================================================================
 
+# @jsh-cmd tools Discover and manage development tools
+# @jsh-sub list List all tools with install status
+# @jsh-sub check Verify installed tools work correctly
+# @jsh-sub install Install recommended tools
+# @jsh-sub recommend Show personalized recommendations
+# Options for 'jsh tools list':
+# @jsh-opt -c,--category Filter by category
+# @jsh-opt --missing Show only missing tools
+# @jsh-opt --installed Show only installed tools
+# @jsh-arg enum shell,editor,dev,container,k8s,cloud,git,network
 cmd_tools() {
     local subcmd="${1:-list}"
     shift 2>/dev/null || true
