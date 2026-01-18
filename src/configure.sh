@@ -17,7 +17,7 @@ JSH_SCRIPTS_DIR="${JSH_DIR:-${HOME}/.jsh}/scripts"
 # =============================================================================
 
 # List of available configuration modules
-declare -A CONFIG_MODULES
+declare -gA CONFIG_MODULES
 
 CONFIG_MODULES[macos]="macOS system defaults|darwin|macos/defaults.sh"
 CONFIG_MODULES[dock]="macOS Dock settings|darwin|macos/dock.sh"
@@ -327,6 +327,16 @@ cmd_configure_all() {
 # Main Command
 # =============================================================================
 
+# @jsh-cmd configure Configure system settings and applications
+# @jsh-sub all Run all applicable configurations
+# @jsh-sub macos macOS system defaults
+# @jsh-sub dock macOS Dock settings
+# @jsh-sub finder macOS Finder settings
+# @jsh-sub apps Application configs (VS Code)
+# @jsh-sub linux Linux system settings
+# @jsh-sub list Show available configurations
+# @jsh-opt -n,--check Dry run - show what would change
+# @jsh-opt -y,--yes Skip confirmation prompts
 cmd_configure() {
     local subcmd="${1:-all}"
     shift 2>/dev/null || true

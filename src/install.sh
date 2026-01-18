@@ -187,7 +187,7 @@ _install_from_config() {
 # Install all packages from configs directory
 _install_all_from_configs() {
     local os_type
-    os_type=$(uname -s | tr '[:upper:]' '[:lower:]')
+    os_type=$(uname -s); os_type=${os_type,,}
     [[ "${os_type}" == "darwin" ]] && os_type="macos"
 
     echo ""
@@ -242,9 +242,16 @@ _install_all_from_configs() {
 # Main Command
 # =============================================================================
 
+# @jsh-cmd install Install packages (brew, npm, pip, cargo)
+# @jsh-opt --brew Force installation via Homebrew
+# @jsh-opt --npm Force installation via npm
+# @jsh-opt --pip Force installation via pip
+# @jsh-opt --cargo Force installation via cargo
+# @jsh-opt --track Add package to pkg config after installation
 cmd_install() {
     local package=""
     local force_pm=""
+    local track=false
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -264,6 +271,10 @@ cmd_install() {
                 force_pm="cargo"
                 shift
                 ;;
+            --track|-t)
+                track=true
+                shift
+                ;;
             -h|--help)
                 echo "${BOLD}jsh install${RST} - Multi-package manager installer"
                 echo ""
@@ -276,6 +287,7 @@ cmd_install() {
                 echo "    --npm       Force installation via npm"
                 echo "    --pip       Force installation via pip"
                 echo "    --cargo     Force installation via cargo"
+                echo "    --track     Add package to pkg config after installation"
                 echo ""
                 echo "${BOLD}CONFIG FILES:${RST}"
                 echo "    ${JSH_CONFIGS_DIR}/npm.json"
@@ -330,16 +342,28 @@ cmd_install() {
     fi
 
     # Install package
+    local install_result=0
     case "${pm}" in
-        brew)   _install_brew "${package}" ;;
-        npm)    _install_npm "${package}" ;;
-        pip)    _install_pip "${package}" ;;
-        cargo)  _install_cargo "${package}" ;;
-        apt)    _install_apt "${package}" ;;
-        dnf)    _install_dnf "${package}" ;;
+        brew)   _install_brew "${package}" || install_result=$? ;;
+        npm)    _install_npm "${package}" || install_result=$? ;;
+        pip)    _install_pip "${package}" || install_result=$? ;;
+        cargo)  _install_cargo "${package}" || install_result=$? ;;
+        apt)    _install_apt "${package}" || install_result=$? ;;
+        dnf)    _install_dnf "${package}" || install_result=$? ;;
         *)
             error "No suitable package manager found"
             return 1
             ;;
     esac
+
+    # Track package in config if --track was specified and install succeeded
+    if [[ "${track}" == true ]] && [[ ${install_result} -eq 0 ]]; then
+        if declare -f _pkg_add_to_config >/dev/null 2>&1; then
+            _pkg_add_to_config "${pm}" "${package}"
+        else
+            warn "Package tracking not available (pkg.sh not loaded)"
+        fi
+    fi
+
+    return ${install_result}
 }

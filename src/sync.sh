@@ -155,9 +155,25 @@ _sync_pull() {
     # Stash all changes
     stash_msg=$(_sync_stash_all) && prefix_info "Stashed local changes"
 
+    # Track configs before pull to detect changes
+    local configs_before=""
+    if [[ -d "configs/packages" ]]; then
+        configs_before=$(git log -1 --format=%H -- configs/packages 2>/dev/null || true)
+    fi
+
     # Pull with rebase
     if git pull --rebase --quiet 2>/dev/null; then
         prefix_success "Pulled and rebased successfully"
+
+        # Check if package configs changed
+        if [[ -d "configs/packages" ]]; then
+            local configs_after
+            configs_after=$(git log -1 --format=%H -- configs/packages 2>/dev/null || true)
+            if [[ -n "${configs_before}" ]] && [[ "${configs_before}" != "${configs_after}" ]]; then
+                echo ""
+                info "Package configs changed. Run '${CYN}jsh pkg sync${RST}' to install new packages."
+            fi
+        fi
 
         # Restore stash if we created one
         [[ -n "${stash_msg}" ]] && _sync_stash_pop "${stash_msg}"
@@ -324,9 +340,17 @@ _sync_force() {
 # Main Command
 # =============================================================================
 
+# @jsh-cmd sync Sync git repo with remote (safe bidirectional)
+# @jsh-opt --pull Pull only (rebase)
+# @jsh-opt --push Push only
+# @jsh-opt -c,--check Dry run - show sync status
+# @jsh-opt -f,--force Force sync (requires confirmation)
+# @jsh-opt --no-stash Fail if local changes exist
+# @jsh-opt --with-packages Auto-sync packages after pull
 cmd_sync() {
     local mode="full"
     local no_stash=false
+    local with_packages=false
     local repo_dir=""
 
     while [[ $# -gt 0 ]]; do
@@ -351,6 +375,10 @@ cmd_sync() {
                 no_stash=true
                 shift
                 ;;
+            --with-packages|-p)
+                with_packages=true
+                shift
+                ;;
             -h|--help)
                 echo "${BOLD}jsh sync${RST} - Safe bidirectional git sync"
                 echo ""
@@ -358,11 +386,12 @@ cmd_sync() {
                 echo "    jsh sync [options]"
                 echo ""
                 echo "${BOLD}OPTIONS:${RST}"
-                echo "    --pull        Pull only (rebase)"
-                echo "    --push        Push only"
-                echo "    --check, -c   Dry run - show sync status"
-                echo "    --force, -f   Force sync (requires confirmation)"
-                echo "    --no-stash    Fail if local changes exist"
+                echo "    --pull            Pull only (rebase)"
+                echo "    --push            Push only"
+                echo "    --check, -c       Dry run - show sync status"
+                echo "    --force, -f       Force sync (requires confirmation)"
+                echo "    --no-stash        Fail if local changes exist"
+                echo "    --with-packages   Auto-sync packages after pull"
                 echo ""
                 echo "${BOLD}SAFETY:${RST}"
                 echo "    • All local changes are auto-stashed before operations"
@@ -403,11 +432,27 @@ cmd_sync() {
     fi
 
     # Execute sync mode
+    local sync_result=0
     case "${mode}" in
         check)  _sync_check "${repo_dir}" ;;
-        pull)   _sync_pull "${repo_dir}" ;;
-        push)   _sync_push "${repo_dir}" ;;
-        force)  _sync_force "${repo_dir}" ;;
-        full)   _sync_full "${repo_dir}" ;;
+        pull)   _sync_pull "${repo_dir}" || sync_result=$? ;;
+        push)   _sync_push "${repo_dir}" || sync_result=$? ;;
+        force)  _sync_force "${repo_dir}" || sync_result=$? ;;
+        full)   _sync_full "${repo_dir}" || sync_result=$? ;;
     esac
+
+    # Auto-sync packages if requested and sync succeeded
+    if [[ "${with_packages}" == true ]] && [[ ${sync_result} -eq 0 ]]; then
+        if [[ "${mode}" == "pull" || "${mode}" == "full" ]]; then
+            if declare -f _pkg_sync >/dev/null 2>&1; then
+                echo ""
+                info "Syncing packages..."
+                _pkg_sync
+            else
+                warn "Package sync not available (pkg.sh not loaded)"
+            fi
+        fi
+    fi
+
+    return ${sync_result}
 }
