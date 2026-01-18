@@ -114,7 +114,7 @@ zstyle ':completion:*' use-cache yes
 zstyle ':completion:*' cache-path "${XDG_CACHE_HOME:-$HOME/.cache}/zsh/zcompcache"
 
 # Group formatting
-zstyle ':completion:*:descriptions' format '%F{yellow}-- %d --%f'
+zstyle ':completion:*:descriptions' format '[%d]'
 zstyle ':completion:*:corrections' format '%F{green}-- %d (errors: %e) --%f'
 zstyle ':completion:*:messages' format '%F{purple}-- %d --%f'
 zstyle ':completion:*:warnings' format '%F{red}-- no matches found --%f'
@@ -232,6 +232,10 @@ if [[ -f "${JSH_DIR}/lib/fzf-tab/fzf-tab.plugin.zsh" ]]; then
     zstyle ':completion:*:git-checkout:*' sort false
     # Use tmux popup if in tmux
     zstyle ':fzf-tab:*' fzf-command ftb-tmux-popup
+    # Disable group headers (Homebrew's "internal commands" categorization is confusing)
+    zstyle ':fzf-tab:*' show-group none
+    # Remove redundant dot prefix on completion items
+    zstyle ':fzf-tab:*' prefix ''
 fi
 
 # zsh-autosuggestions - Fish-like autosuggestions
