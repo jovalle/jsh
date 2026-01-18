@@ -32,6 +32,13 @@ fi
 # Profiler Implementation (only loaded when JSH_PROFILE=1)
 # =============================================================================
 
+# Shell portability: zsh arrays are 1-indexed, bash arrays are 0-indexed
+if [[ -n "${ZSH_VERSION:-}" ]]; then
+    _PROFILE_IDX_START=1
+else
+    _PROFILE_IDX_START=0
+fi
+
 # Storage for timing data
 declare -a _PROFILE_NAMES=()
 declare -a _PROFILE_STARTS=()
@@ -81,8 +88,9 @@ _profile_end() {
     now=$(_profile_now)
 
     # Find the section and record end time
+    # Use C-style loop for bash/zsh portability (${!array[@]} is bash-only)
     local i
-    for i in "${!_PROFILE_NAMES[@]}"; do
+    for ((i=_PROFILE_IDX_START; i<${#_PROFILE_NAMES[@]}+_PROFILE_IDX_START; i++)); do
         if [[ "${_PROFILE_NAMES[i]}" == "${name}" ]] && [[ -z "${_PROFILE_ENDS[i]}" ]]; then
             _PROFILE_ENDS[i]="${now}"
             return 0
@@ -141,15 +149,15 @@ _profile_report_table() {
 
     echo ""
     echo "┌─────────────────────────────────────────────────────────────┐"
-    echo "│                    jsh Startup Profile                      │"
+    echo "│                     jsh Startup Profile                     │"
     echo "├─────────────────────────────────────────────────────────────┤"
-    printf "│ %-35s %20s │\n" "Total startup time:" "${total_time}ms"
+    printf "│ %-37s %21s │\n" "Total startup time:" "${total_time}ms"
     echo "├─────────────────────────────────────────────────────────────┤"
-    printf "│ %-35s %10s %8s │\n" "Section" "Duration" "%"
+    printf "│ %-37s %12s %8s │\n" "Section" "Duration" "%"
     echo "├─────────────────────────────────────────────────────────────┤"
 
     local i duration pct
-    for i in "${!_PROFILE_NAMES[@]}"; do
+    for ((i=_PROFILE_IDX_START; i<${#_PROFILE_NAMES[@]}+_PROFILE_IDX_START; i++)); do
         local name="${_PROFILE_NAMES[$i]}"
         local start="${_PROFILE_STARTS[$i]}"
         local end="${_PROFILE_ENDS[$i]}"
@@ -161,14 +169,14 @@ _profile_report_table() {
             else
                 pct="?"
             fi
-            printf "│ %-35s %8sms %7s%% │\n" "${name}" "${duration}" "${pct}"
+            printf "│ %-37s %12s %8s │\n" "${name}" "${duration}ms" "${pct}%"
         fi
     done
 
     # Print marks
     if [[ ${#_PROFILE_MARKS[@]} -gt 0 ]]; then
         echo "├─────────────────────────────────────────────────────────────┤"
-        printf "│ %-35s %20s │\n" "Marks" "Offset"
+        printf "│ %-37s %21s │\n" "Marks" "Offset"
         echo "├─────────────────────────────────────────────────────────────┤"
         for mark in "${_PROFILE_MARKS[@]}"; do
             local mark_name="${mark%%:*}"
@@ -179,7 +187,7 @@ _profile_report_table() {
             else
                 offset="?"
             fi
-            printf "│ %-35s %18sms │\n" "${mark_name}" "${offset}"
+            printf "│ %-37s %21s │\n" "${mark_name}" "${offset}ms"
         done
     fi
 
@@ -195,7 +203,7 @@ _profile_report_json() {
     echo "  \"sections\": ["
 
     local i duration first=true
-    for i in "${!_PROFILE_NAMES[@]}"; do
+    for ((i=_PROFILE_IDX_START; i<${#_PROFILE_NAMES[@]}+_PROFILE_IDX_START; i++)); do
         local name="${_PROFILE_NAMES[$i]}"
         local start="${_PROFILE_STARTS[$i]}"
         local end="${_PROFILE_ENDS[$i]}"
