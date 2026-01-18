@@ -10,7 +10,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     set -euo pipefail
 fi
 
-VERSION="1.1.0"
+VERSION="0.2.0"
 JSH_REPO="${JSH_REPO:-https://github.com/jovalle/jsh.git}"
 JSH_BRANCH="${JSH_BRANCH:-main}"
 JSH_DIR="${JSH_DIR:-${HOME}/.jsh}"
@@ -283,7 +283,7 @@ _process_symlink_rules() {
                 case "${action}" in
                     link)   _link_file "${source}" "${dest}" "${backup_dir}" ;;
                     unlink) _unlink_single "${source}" "${dest}" ;;
-                    status) _status_single "  ${source}" "${dest}" ;;
+                    status) _status_single "${source}" "${dest}" ;;
                 esac
                 ;;
 
@@ -294,7 +294,7 @@ _process_symlink_rules() {
                 case "${action}" in
                     link)   _link_directory "${source}" "${dest}" "${backup_dir}" ;;
                     unlink) _unlink_single "${source}" "${dest}" ;;
-                    status) _status_single "  ${source}" "${dest}" ;;
+                    status) _status_single "${source}" "${dest}" ;;
                 esac
                 ;;
 
@@ -405,14 +405,14 @@ _status_single() {
         link_target=$(readlink "${dest}")
         resolved=$(readlink -f "${dest}" 2>/dev/null || readlink "${dest}")
         if [[ "${resolved}" == "${JSH_DIR}/"* ]] || [[ "${resolved}" == "${JSH_DIR}" ]]; then
-            echo "${GREEN}✔${RST} ${display_name} -> ${link_target}"
+            echo "  ${GREEN}✔${RST} ${display_name} -> ${link_target}"
         else
-            echo "${YELLOW}~${RST} ${display_name} -> ${link_target}"
+            echo "  ${YELLOW}~${RST} ${display_name} -> ${link_target}"
         fi
     elif [[ -e "${dest}" ]]; then
-        echo "${YELLOW}~${RST} ${display_name} (exists, not linked)"
+        echo "  ${YELLOW}~${RST} ${display_name} (exists, not linked)"
     else
-        echo "${DIM}-${RST} ${display_name}"
+        echo "  ${DIM}-${RST} ${display_name}"
     fi
 }
 
@@ -506,7 +506,7 @@ _status_directory_children() {
         local child_name
         child_name=$(basename "${child}")
         local child_dest="${dest_dir}/${child_name}"
-        _status_single "  ${src_rel}/${child_name}" "${child_dest}"
+        _status_single "${src_rel}/${child_name}" "${child_dest}"
     done
 }
 
@@ -568,6 +568,7 @@ if [[ -f "${JSH_DIR}/src/deps.sh" ]]; then
     source_if "${JSH_DIR}/src/install.sh"
     source_if "${JSH_DIR}/src/sync.sh"
     source_if "${JSH_DIR}/src/configure.sh"
+    source_if "${JSH_DIR}/src/pkg.sh"
 fi
 
 # =============================================================================
@@ -603,9 +604,11 @@ ${BOLD}PROJECT COMMANDS:${RST}
     ${CYAN}profiles${RST}    Manage git profiles (shortcut for 'projects profile')
 
 ${BOLD}PACKAGE & TOOLS:${RST}
+    ${CYAN}pkg${RST}         Manage packages (add, remove, list, sync, bundle, service)
     ${CYAN}install${RST}     Install packages (brew, npm, pip, cargo)
     ${CYAN}clean${RST}       Clean caches and temporary files
     ${CYAN}tools${RST}       Discover and manage development tools
+    ${CYAN}cli${RST}         CLI helper for script discovery and completions
 
 ${BOLD}CONFIGURATION:${RST}
     ${CYAN}sync${RST}        Sync git repo with remote (safe bidirectional)
@@ -707,6 +710,8 @@ EOF
     show_next_steps
 }
 
+# @jsh-cmd setup Setup jsh (link dotfiles)
+# @jsh-opt -i,--interactive Run interactive setup wizard
 cmd_setup() {
     local interactive=false
 
@@ -764,6 +769,10 @@ cmd_setup() {
     show_next_steps
 }
 
+# @jsh-cmd teardown Remove jsh symlinks and optionally the entire installation
+# @jsh-opt --full Remove entire Jsh directory
+# @jsh-opt -r,--restore Restore backed up dotfiles
+# @jsh-opt -y,--yes Skip confirmation prompt
 cmd_teardown() {
     local full_teardown=false
     local restore_backup=false
@@ -884,7 +893,7 @@ _check_bundled_binary() {
             version_output=$("${bundled}" --version 2>&1)
             exit_code=$?
             if [[ ${exit_code} -eq 0 ]]; then
-                echo "healthy:fzf ${version_output}"
+                echo "healthy:${version_output}"
                 return 0
             fi
             ;;
@@ -892,7 +901,8 @@ _check_bundled_binary() {
             version_output=$("${bundled}" --version 2>&1)
             exit_code=$?
             if [[ ${exit_code} -eq 0 ]]; then
-                echo "healthy:jq ${version_output}"
+                # jq --version outputs "jq-X.Y.Z", strip the "jq-" prefix
+                echo "healthy:${version_output#jq-}"
                 return 0
             fi
             ;;
@@ -924,6 +934,9 @@ _check_bundled_binary() {
     return 4
 }
 
+# @jsh-cmd status Show installation status, symlinks, and check for issues
+# @jsh-opt -f,--fix Fix issues (remove broken symlinks)
+# @jsh-opt -v,--verbose Show verbose output
 cmd_status() {
     local fix_issues=false
     local verbose=false
@@ -1203,6 +1216,7 @@ cmd_status() {
     fi
 }
 
+# @jsh-cmd link Create symlinks for managed dotfiles
 cmd_link() {
     local backup_dir
     backup_dir="${HOME}/.jsh_backup/$(date +%Y%m%d_%H%M%S)"
@@ -1212,6 +1226,9 @@ cmd_link() {
     success "Symlinks created"
 }
 
+# @jsh-cmd unlink Remove symlinks (optionally restore backups)
+# @jsh-opt --restore Restore from latest backup after unlinking
+# @jsh-opt --restore=NAME Restore from a specific backup
 cmd_unlink() {
     local restore_backup=""
 
@@ -1346,6 +1363,10 @@ cmd_reload() {
 # Upgrade Command
 # =============================================================================
 
+# @jsh-cmd upgrade Check for plugin/binary updates and manage versions
+# @jsh-opt -c,--check Dry run - show what would be done
+# @jsh-opt --no-brew Skip brew upgrade
+# @jsh-opt --no-submodules Skip submodule update
 cmd_upgrade() {
     local check_only=false
     local skip_brew=false
@@ -1538,6 +1559,13 @@ cmd_upgrade() {
 # Dependency Commands
 # =============================================================================
 
+# @jsh-cmd deps Manage dependencies (status, check, refresh, doctor)
+# @jsh-sub status Show all dependencies and resolved strategies
+# @jsh-sub check Re-run preflight checks
+# @jsh-sub refresh Force re-download/rebuild dependencies
+# @jsh-sub doctor Diagnose dependency issues
+# @jsh-sub capabilities Show build capability profiles
+# @jsh-sub fix-bash Install/configure bash 4+ (macOS)
 cmd_deps() {
     local subcmd="${1:-status}"
     shift 2>/dev/null || true
@@ -1846,6 +1874,11 @@ cmd_deps_fix_bash() {
 # Host Commands
 # =============================================================================
 
+# @jsh-cmd host Manage remote host configurations for jssh
+# @jsh-sub list List known remote hosts
+# @jsh-sub status Show host capabilities and decisions
+# @jsh-sub refresh Re-run remote preflight for a host
+# @jsh-sub reset Clear cached decisions for a host
 cmd_host() {
     local subcmd="${1:-list}"
     shift 2>/dev/null || true
@@ -2017,6 +2050,7 @@ cmd_host_reset() {
     fi
 }
 
+# @jsh-cmd bootstrap Clone/update repo and setup (for fresh installs)
 cmd_bootstrap() {
     show_banner
     check_requirements
@@ -2127,12 +2161,20 @@ main() {
         tools)
             cmd_tools "$@"
             ;;
+        pkg|packages)
+            cmd_pkg "$@"
+            ;;
         # Configuration commands
         sync)
             cmd_sync "$@"
             ;;
         configure|config)
             cmd_configure "$@"
+            ;;
+        # CLI helper command
+        cli)
+            # shellcheck disable=SC1091
+            source "${JSH_DIR}/src/cli.sh" && cmd_cli "$@"
             ;;
         *)
             error "Unknown command: ${cmd}"
