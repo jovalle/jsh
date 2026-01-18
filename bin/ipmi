@@ -1,11 +1,35 @@
 #!/usr/bin/env bash
+# @name ipmi
+# @version 1.0.0
+# @desc IPMI remote management interface wrapper
+# @usage ipmi [options] <command> [args...]
+#
+# @cmd fan <speed|auto>   Set fan speed (0-100%) or restore automatic
+# @cmd sensors            Show sensor readings (temps, fans, voltages)
+# @cmd power <action>     Control power (on/off/cycle/reset/status)
+# @cmd sol                Start Serial-over-LAN console
+# @cmd info               Show system information (FRU data)
+# @cmd raw <bytes...>     Send raw IPMI command
+#
+# @option -H,--host <HOST>  IPMI host address (or set IPMI_HOST)
+# @option -U,--user <USER>  IPMI username (or set IPMI_USER)
+# @option -P,--pass <PASS>  IPMI password (or set IPMI_PASS)
+# @option -f,--file <FILE>  Password file (or set IPMI_CRED_FILE)
+# @option -I,--interface <IF>  Interface type (default: lanplus)
+# @option -v,--verbose      Enable verbose output
+# @option -h,--help         Show this help message
+# @option --version         Show version information
+# @option --setup           Interactive setup wizard
+#
+# @example ipmi fan 20
+# @example ipmi fan auto
+# @example ipmi sensors | grep -i temp
+# @example ipmi power cycle
+#
 # shellcheck shell=bash
-# ipmi - IPMI remote management interface wrapper
 #
 # Simplifies common IPMI operations, especially fan control for homelab servers.
 # Wraps ipmitool with sensible defaults and credential management.
-#
-# Usage: ipmi [options] <command> [args...]
 
 set -euo pipefail
 
@@ -14,7 +38,6 @@ set -euo pipefail
 # =============================================================================
 
 readonly SCRIPT_NAME="${0##*/}"
-readonly SCRIPT_VERSION="1.0.0"
 
 # IPMI connection settings (override via environment or config file)
 IPMI_HOST="${IPMI_HOST:-}"
@@ -33,120 +56,14 @@ readonly RAW_ENABLE_AUTO_FAN="0x30 0x30 0x01 0x01"
 readonly RAW_SET_FAN_SPEED="0x30 0x30 0x02 0xff"
 
 # =============================================================================
-# Colors & Output
+# Dependencies
 # =============================================================================
 
-# Source shared library
-source "${0%/*}/../lib/common.sh" 2>/dev/null || source "${JSH_DIR:-$HOME/.jsh}/lib/common.sh"
+# Source CLI framework (provides help generation and colors)
+source "${0%/*}/../lib/cli.sh" 2>/dev/null || source "${JSH_DIR:-$HOME/.jsh}/lib/cli.sh"
 
 # Override debug with script-specific env var
 debug() { [[ "${IPMI_DEBUG:-0}" == "1" ]] && _debug "$@" || true; }
-
-# =============================================================================
-# Help
-# =============================================================================
-
-show_help() {
-    cat << EOF
-${C_BOLD}ipmi${C_RESET} - IPMI remote management interface wrapper
-
-${C_BOLD}USAGE${C_RESET}
-    ${SCRIPT_NAME} [options] <command> [args...]
-    ${SCRIPT_NAME} fan <speed>
-    ${SCRIPT_NAME} sensors
-
-${C_BOLD}DESCRIPTION${C_RESET}
-    Wraps ipmitool for common server management tasks with simplified syntax
-    and sensible defaults. Particularly useful for homelab fan control on
-    Dell PowerEdge servers (R720, R730, etc.).
-
-${C_BOLD}COMMANDS${C_RESET}
-    fan <speed|auto>    Set fan speed (0-100 percent) or restore automatic
-    sensors             Show sensor readings (temperatures, voltages, fans)
-    power <on|off|cycle|status>
-                        Control server power state
-    sol                 Start Serial-over-LAN console
-    info                Show system information (FRU data)
-    raw <bytes...>      Send raw IPMI command
-    <ipmitool-cmd>      Any other ipmitool subcommand (passed through)
-
-${C_BOLD}OPTIONS${C_RESET}
-    -H, --host HOST     IPMI host address (or set IPMI_HOST)
-    -U, --user USER     IPMI username (or set IPMI_USER)
-    -P, --pass PASS     IPMI password (or set IPMI_PASS)
-    -f, --file FILE     Password file (or set IPMI_CRED_FILE)
-    -I, --interface IF  Interface type (default: lanplus)
-    -v, --verbose       Enable verbose output
-    -h, --help          Show this help message
-    --version           Show version information
-    --setup             Interactive setup wizard
-
-${C_BOLD}FAN CONTROL${C_RESET}
-    The fan command works on Dell PowerEdge servers with iDRAC. It:
-    1. Disables automatic fan control
-    2. Sets all fans to the specified percentage
-
-    Use '${SCRIPT_NAME} fan auto' to restore automatic control.
-
-    ${C_YELLOW}WARNING:${C_RESET} Setting fans too low can cause thermal throttling or damage.
-    Monitor temperatures when using manual fan control.
-
-${C_BOLD}EXAMPLES${C_RESET}
-    # Set fans to 20% (quiet mode for low load)
-    ${SCRIPT_NAME} fan 20
-
-    # Restore automatic fan control
-    ${SCRIPT_NAME} fan auto
-
-    # Check temperatures
-    ${SCRIPT_NAME} sensors | grep -i temp
-
-    # Power cycle server
-    ${SCRIPT_NAME} power cycle
-
-    # View system info
-    ${SCRIPT_NAME} info
-
-    # Connect to serial console
-    ${SCRIPT_NAME} sol
-
-    # Using explicit credentials
-    ${SCRIPT_NAME} -H 192.168.1.100 -U root -P password sensors
-
-${C_BOLD}CONFIGURATION${C_RESET}
-    Credentials can be set via:
-    1. Command-line options (-H, -U, -P, -f)
-    2. Environment variables (IPMI_HOST, IPMI_USER, IPMI_PASS, IPMI_CRED_FILE)
-    3. Config file: ${IPMI_CONFIG_FILE}
-
-    Config file format (shell):
-        IPMI_HOST=192.168.1.100
-        IPMI_USER=root
-        IPMI_CRED_FILE=~/.config/ipmi/password
-
-    ${C_YELLOW}TIP:${C_RESET} Use a password file instead of IPMI_PASS to avoid credentials
-    in environment/history. Create with: echo 'password' > ~/.config/ipmi/password
-
-${C_BOLD}ENVIRONMENT${C_RESET}
-    IPMI_HOST           IPMI/BMC host address
-    IPMI_USER           IPMI username
-    IPMI_PASS           IPMI password (prefer IPMI_CRED_FILE)
-    IPMI_CRED_FILE      Path to file containing password
-    IPMI_INTERFACE      Interface type (default: lanplus)
-    IPMI_DEBUG          Enable debug output (set to 1)
-    NO_COLOR            Disable colored output (set to 1)
-
-${C_BOLD}EXIT CODES${C_RESET}
-    0   Success
-    1   General error
-    2   Missing requirements (ipmitool, credentials)
-    3   Invalid arguments
-
-${C_BOLD}VERSION${C_RESET}
-    ${SCRIPT_VERSION}
-
-EOF
-}
 
 # =============================================================================
 # Utilities
@@ -376,11 +293,11 @@ main() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -h|--help)
-                show_help
+                cli_help
                 exit 0
                 ;;
             --version)
-                printf "%s version %s\n" "${SCRIPT_NAME}" "${SCRIPT_VERSION}"
+                cli_version
                 exit 0
                 ;;
             --setup)
@@ -433,7 +350,7 @@ main() {
 
     # Handle no command
     if [[ -z "${subcommand}" ]]; then
-        show_help
+        cli_help
         exit 0
     fi
 

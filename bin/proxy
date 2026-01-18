@@ -1,11 +1,29 @@
 #!/usr/bin/env bash
+# @name proxy
+# @version 1.0.0
+# @desc Execute commands with proxy environment configured
+# @usage proxy [options] <command> [args...]
+#
+# @option -p,--preset <NAME>  Use a preset proxy configuration
+# @option -u,--url <URL>      Use custom proxy URL
+# @option -s,--socks <URL>    Use SOCKS proxy (sets ALL_PROXY)
+# @option -n,--no-proxy <LIST>  Hosts to bypass proxy
+# @option --shell             Start interactive shell with proxy
+# @option --env               Print export commands (for eval)
+# @option --test              Test proxy connectivity
+# @option --list              List available presets
+# @option -v,--verbose        Show proxy configuration before running
+# @option -h,--help           Show this help message
+# @option --version           Show version information
+#
+# @example proxy -u http://127.0.0.1:8080 curl https://api.example.com
+# @example proxy -p mitmproxy curl -k https://httpbin.org/ip
+# @example proxy -p local --shell
+#
 # shellcheck shell=bash
-# proxy - Execute commands with proxy environment configured
 #
 # Wraps commands with HTTP/HTTPS proxy environment variables set.
 # Useful for tools that need proxy but don't use system settings.
-#
-# Usage: proxy [options] <command> [args...]
 
 set -euo pipefail
 
@@ -14,7 +32,6 @@ set -euo pipefail
 # =============================================================================
 
 readonly SCRIPT_NAME="${0##*/}"
-readonly SCRIPT_VERSION="1.0.0"
 
 # Default proxy settings (override via environment or config)
 PROXY_HTTP="${PROXY_HTTP:-${HTTP_PROXY:-}}"
@@ -40,121 +57,14 @@ declare -A PROXY_PRESETS=(
 )
 
 # =============================================================================
-# Colors & Output
+# Dependencies
 # =============================================================================
 
-# Source shared library
-source "${0%/*}/../lib/common.sh" 2>/dev/null || source "${JSH_DIR:-$HOME/.jsh}/lib/common.sh"
+# Source CLI framework (provides help generation and colors)
+source "${0%/*}/../lib/cli.sh" 2>/dev/null || source "${JSH_DIR:-$HOME/.jsh}/lib/cli.sh"
 
 # Override debug with script-specific env var
 debug() { [[ "${PROXY_DEBUG:-0}" == "1" ]] && _debug "$@" || true; }
-
-# =============================================================================
-# Help
-# =============================================================================
-
-show_help() {
-    cat << EOF
-${C_BOLD}proxy${C_RESET} - Execute commands with proxy environment configured
-
-${C_BOLD}USAGE${C_RESET}
-    ${SCRIPT_NAME} [options] <command> [args...]
-    ${SCRIPT_NAME} -p <preset> <command> [args...]
-    ${SCRIPT_NAME} --shell
-
-${C_BOLD}DESCRIPTION${C_RESET}
-    Executes a command with proxy environment variables (HTTP_PROXY, HTTPS_PROXY,
-    http_proxy, https_proxy, NO_PROXY, no_proxy, ALL_PROXY) configured. Both
-    uppercase and lowercase variants are set for maximum compatibility.
-
-    Useful for:
-    • Tools that don't respect system proxy settings
-    • Temporary proxy usage without modifying shell environment
-    • Testing through debugging proxies (mitmproxy, Burp, Charles)
-    • Routing traffic through SSH tunnels or Tor
-
-${C_BOLD}OPTIONS${C_RESET}
-    -p, --preset NAME   Use a preset proxy configuration
-    -u, --url URL       Use custom proxy URL
-    -s, --socks URL     Use SOCKS proxy (sets ALL_PROXY)
-    -n, --no-proxy LIST Comma-separated hosts to bypass (default: localhost,...)
-    --shell             Start interactive shell with proxy configured
-    --env               Print export commands (for eval)
-    --test              Test proxy connectivity
-    --list              List available presets
-    -v, --verbose       Show proxy configuration before running
-    -h, --help          Show this help message
-    --version           Show version information
-
-${C_BOLD}PRESETS${C_RESET}
-$(for preset in "${!PROXY_PRESETS[@]}"; do
-    printf "    %-15s %s\n" "${preset}" "${PROXY_PRESETS[${preset}]}"
-done | sort || true)
-
-${C_BOLD}EXAMPLES${C_RESET}
-    # Run curl through local proxy
-    ${SCRIPT_NAME} -u http://127.0.0.1:8080 curl https://api.example.com
-
-    # Use mitmproxy preset
-    ${SCRIPT_NAME} -p mitmproxy curl -k https://httpbin.org/ip
-
-    # Route git through corporate proxy
-    ${SCRIPT_NAME} -p corporate git clone https://github.com/user/repo
-
-    # Use SOCKS proxy (e.g., SSH tunnel)
-    ${SCRIPT_NAME} -s socks5://127.0.0.1:1080 wget https://example.com
-
-    # Start shell with proxy configured
-    ${SCRIPT_NAME} -p local --shell
-
-    # Export for current shell (use with eval)
-    eval "\$(${SCRIPT_NAME} -p local --env)"
-
-    # Test proxy connectivity
-    ${SCRIPT_NAME} -u http://127.0.0.1:8080 --test
-
-    # Bypass proxy for internal hosts
-    ${SCRIPT_NAME} -p corporate -n "*.internal.com,10.*" curl https://api.example.com
-
-${C_BOLD}CONFIGURATION${C_RESET}
-    Default proxy can be set via:
-    1. Command-line options (-u, -p)
-    2. Environment variables (PROXY_HTTP, PROXY_HTTPS, PROXY_SOCKS)
-    3. Config file: ${PROXY_CONFIG_FILE}
-
-    Config file format (shell):
-        PROXY_HTTP="http://proxy.example.com:8080"
-        PROXY_HTTPS="http://proxy.example.com:8080"
-        NO_PROXY_LIST="localhost,127.0.0.1,.internal.com"
-
-        # Custom presets (add to PROXY_PRESETS array)
-        PROXY_PRESETS[myproxy]="http://myproxy:3128"
-
-${C_BOLD}ENVIRONMENT${C_RESET}
-    PROXY_HTTP          Default HTTP proxy URL
-    PROXY_HTTPS         Default HTTPS proxy URL
-    PROXY_SOCKS         Default SOCKS proxy URL (sets ALL_PROXY)
-    NO_PROXY_LIST       Hosts to bypass proxy
-    PROXY_DEBUG         Enable debug output (set to 1)
-    NO_COLOR            Disable colored output (set to 1)
-
-${C_BOLD}NOTES${C_RESET}
-    • For HTTPS inspection, you may need to trust the proxy's CA certificate
-    • Use -k or --insecure with curl when using MITM proxies
-    • Some applications only check lowercase or uppercase variants
-    • SOCKS proxies require applications that support SOCKS or tools like proxychains
-
-${C_BOLD}EXIT CODES${C_RESET}
-    0   Success (or command's exit code in passthrough mode)
-    1   General error
-    2   Proxy not reachable (with --test)
-    3   Invalid preset or configuration
-
-${C_BOLD}VERSION${C_RESET}
-    ${SCRIPT_VERSION}
-
-EOF
-}
 
 # =============================================================================
 # Utilities
@@ -307,11 +217,11 @@ main() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -h|--help)
-                show_help
+                cli_help
                 exit 0
                 ;;
             --version)
-                printf "%s version %s\n" "${SCRIPT_NAME}" "${SCRIPT_VERSION}"
+                cli_version
                 exit 0
                 ;;
             --list)
@@ -387,7 +297,7 @@ main() {
         if [[ "${test_mode}" == "true" || "${env_mode}" == "true" || "${shell_mode}" == "true" || $# -gt 0 ]]; then
             die "No proxy specified. Use -u URL, -p PRESET, or configure PROXY_HTTP"
         fi
-        show_help
+        cli_help
         exit 0
     fi
 
