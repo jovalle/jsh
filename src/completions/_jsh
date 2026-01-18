@@ -1,152 +1,122 @@
 #compdef jsh
 # shellcheck shell=bash
 # shellcheck disable=SC2207,SC2296,SC2034,SC2154,SC2206,SC2155,SC2128,SC1087
-# SC2207: zsh array syntax differs from bash
-# SC2296: zsh parameter expansion syntax
-# SC2034: variables used by zsh completion system
-# SC2154: variables provided by zsh completion system
-# SC2206: word splitting is intentional for zsh arrays
-# SC2155: declare and assign separately - acceptable in completions
-# SC2128: zsh array subscripting syntax differs from bash
-# SC1087: zsh uses $var[idx] not ${var[idx]}
-
-# ============================================================================
-# jsh - Zsh Completion (Dynamic)
-# ============================================================================
-# Tab completion for the jsh CLI
-# All completions are dynamically extracted from the jsh script itself
-# to stay synchronized automatically
-# ============================================================================
+# Zsh completion for jsh - dynamically generated from @jsh-* metadata
 
 _jsh() {
     local curcontext="$curcontext" state line
     typeset -A opt_args
 
-    local jsh_path="${JSH_DIR:-${HOME}/.jsh}/jsh"
+    local jsh_complete="${JSH_DIR:-${HOME}/.jsh}/bin/jsh-complete"
 
     _arguments -C \
+        '(-h --help)'{-h,--help}'[Show help]' \
+        '(-v --version)'{-v,--version}'[Show version]' \
         '1: :->command' \
         '*::arg:->args'
 
     case $state in
         command)
-            _jsh_commands
+            local -a commands
+            if [[ -x "$jsh_complete" ]]; then
+                commands=(${(f)"$("$jsh_complete" commands 2>/dev/null)"})
+            fi
+            _describe -t commands 'jsh commands' commands
             ;;
         args)
-            case $words[1] in
-                setup|init)
-                    _jsh_setup
+            local cmd="${words[1]}"
+            local -a subcommands options
+
+            if [[ -x "$jsh_complete" ]]; then
+                # Get subcommands for this command
+                subcommands=(${(f)"$("$jsh_complete" subcommands "$cmd" 2>/dev/null)"})
+
+                # Get options for this command
+                local -a opts_raw
+                opts_raw=(${(f)"$("$jsh_complete" options "$cmd" 2>/dev/null)"})
+
+                # Convert options to zsh _arguments format
+                for opt_line in "${opts_raw[@]}"; do
+                    [[ -z "$opt_line" ]] && continue
+                    local opt_spec="${opt_line%%:*}"
+                    local opt_desc="${opt_line#*:}"
+
+                    if [[ "$opt_spec" == *","* ]]; then
+                        # Format: -s,--long
+                        local short="${opt_spec%%,*}"
+                        local long="${opt_spec#*,}"
+                        options+=("(${short} ${long})"{${short},${long}}"[${opt_desc}]")
+                    else
+                        # Format: --long only
+                        options+=("${opt_spec}[${opt_desc}]")
+                    fi
+                done
+            fi
+
+            # Determine completion context
+            if [[ ${#words[@]} -eq 2 ]]; then
+                # After command, completing first arg (subcommand or option)
+                if [[ ${#subcommands[@]} -gt 0 ]]; then
+                    _describe -t subcommands "${cmd} subcommands" subcommands
+                fi
+                if [[ ${#options[@]} -gt 0 ]]; then
+                    _arguments "${options[@]}"
+                fi
+            else
+                # After subcommand, completing options
+                if [[ ${#options[@]} -gt 0 ]]; then
+                    _arguments "${options[@]}"
+                fi
+            fi
+
+            # Handle special dynamic completions
+            case "$cmd" in
+                cli)
+                    # CLI helper subcommands
+                    if [[ ${#words[@]} -eq 2 ]]; then
+                        local -a cli_commands
+                        cli_commands=(
+                            'discover:Find all scripts with @name metadata'
+                            'completions:Generate shell completions for discovered scripts'
+                            'help:Show help for a specific script'
+                        )
+                        _describe -t cli-commands 'cli commands' cli_commands
+                    elif [[ ${#words[@]} -eq 3 ]] && [[ "${words[2]}" == "help" ]]; then
+                        # Complete script names for 'jsh cli help <name>'
+                        _jsh_cli_script_names
+                    fi
                     ;;
-                teardown|deinit)
-                    _jsh_teardown
-                    ;;
-                status)
-                    _jsh_status
-                    ;;
-                doctor|check)
-                    _jsh_doctor
+                host)
+                    if [[ "${words[2]}" =~ ^(status|refresh|reset)$ ]] && [[ ${#words[@]} -eq 3 ]]; then
+                        _jsh_host_names
+                    fi
                     ;;
                 unlink)
-                    _jsh_unlink
-                    ;;
-                upgrade|update)
-                    _jsh_upgrade
-                    ;;
-                project|proj|p)
-                    _jsh_project
-                    ;;
-                profile)
-                    _jsh_profile
-                    ;;
-                deps|dependencies)
-                    _jsh_deps
-                    ;;
-                host|hosts)
-                    _jsh_host
-                    ;;
-                # New commands
-                tools)
-                    _jsh_tools
-                    ;;
-                clean)
-                    _jsh_clean
-                    ;;
-                install)
-                    _jsh_install
-                    ;;
-                sync)
-                    _jsh_sync
-                    ;;
-                configure|config)
-                    _jsh_configure
-                    ;;
-                *)
+                    if [[ "${words[-1]}" == "--restore="* ]] || [[ "${words[-2]}" == "--restore" ]]; then
+                        _jsh_backup_names
+                    fi
                     ;;
             esac
             ;;
     esac
 }
 
-# Dynamically extract main commands from jsh help output
-_jsh_commands() {
-    local -a commands
-    local jsh_path="${JSH_DIR:-${HOME}/.jsh}/jsh"
+# Dynamic completion: remote host names
+_jsh_host_names() {
+    local hosts_dir="${JSH_DIR:-${HOME}/.jsh}/local/hosts"
+    local -a hosts
 
-    if [[ -x "$jsh_path" ]]; then
-        # Extract commands from help output - parse command sections
-        # Pattern matches any "WORD COMMANDS:" section header dynamically
-        # Uses BSD awk compatible syntax (index() instead of !~)
-        commands=(${(f)"$(
-            "$jsh_path" help 2>/dev/null | \
-            perl -pe 's/\e\[[0-9;]*m//g' | \
-            awk '
-                /^[A-Z]+ COMMANDS:/ { in_section=1; next }
-                /^[A-Z]/ { if (index($0, "COMMANDS:") == 0) in_section=0 }
-                in_section && /^    [a-z]/ {
-                    # Extract command and description
-                    line = $0
-                    gsub(/^[ \t]+/, "", line)
-                    cmd = $1
-                    desc = line
-                    sub(/^[^ \t]+[ \t]+/, "", desc)
-                    if (cmd && desc) print cmd ":" desc
-                }
-            '
-        )"})
+    if [[ -d "$hosts_dir" ]]; then
+        hosts=(${(f)"$(find "$hosts_dir" -maxdepth 1 -name '*.json' 2>/dev/null | xargs -I {} basename {} .json)"})
     fi
 
-    _describe -t commands 'jsh commands' commands
+    if [[ ${#hosts[@]} -gt 0 ]]; then
+        _describe -t hosts 'remote hosts' hosts
+    fi
 }
 
-# Setup command options
-_jsh_setup() {
-    _arguments \
-        '(-i --interactive)'{-i,--interactive}'[Run interactive setup wizard]'
-}
-
-# Teardown command options
-_jsh_teardown() {
-    _arguments \
-        '--full[Remove entire Jsh directory]' \
-        '(-r --restore)'{-r,--restore}'[Restore backed up dotfiles]' \
-        '(-y --yes)'{-y,--yes}'[Skip confirmation prompt]'
-}
-
-# Status command options
-_jsh_status() {
-    _arguments \
-        '(-f --fix)'{-f,--fix}'[Fix issues (remove broken symlinks)]' \
-        '(-v --verbose)'{-v,--verbose}'[Show verbose output]'
-}
-
-# Doctor command options
-_jsh_doctor() {
-    _arguments \
-        '(-f --fix)'{-f,--fix}'[Fix issues (remove broken symlinks)]'
-}
-
-# Unlink command options
-_jsh_unlink() {
+# Dynamic completion: backup names
+_jsh_backup_names() {
     local backup_dir="${HOME}/.jsh_backup"
     local -a backups
 
@@ -162,249 +132,32 @@ _jsh_unlink() {
         done
     fi
 
-    _arguments \
-        '--restore=-[Restore from backup]::backup:->backups' \
-        '--restore[Restore from latest backup]'
-
-    if [[ $state == backups ]]; then
-        _describe -t backups 'available backups' backups
-    fi
+    _describe -t backups 'available backups' backups
 }
 
-# Upgrade command options
-_jsh_upgrade() {
-    _arguments \
-        '(-c --check)'{-c,--check}'[Dry run - show what would be done]' \
-        '--no-brew[Skip brew upgrade]' \
-        '--no-submodules[Skip submodule update]'
-}
+# Dynamic completion: CLI script names (for jsh cli help)
+_jsh_cli_script_names() {
+    local jsh_dir="${JSH_DIR:-${HOME}/.jsh}"
+    local bin_dir="${jsh_dir}/bin"
+    local -a scripts
 
-# Project command and subcommands
-_jsh_project() {
-    local -a subcommands
-    subcommands=(
-        'sync:Sync all projects'
-        'status:Show project status'
-        'list:List all projects'
-        'profile:Manage git profiles'
-        'cd:Navigate to project'
-    )
-
-    local curcontext="$curcontext" state line
-    typeset -A opt_args
-
-    _arguments -C \
-        '(-l --list)'{-l,--list}'[List projects]' \
-        '(-v --verbose)'{-v,--verbose}'[Verbose output]' \
-        '1: :->subcmd' \
-        '*:: :->args'
-
-    case $state in
-        subcmd)
-            _describe -t subcommands 'project subcommand' subcommands
-            ;;
-        args)
-            case $line[1] in
-                profile)
-                    _jsh_profile
-                    ;;
-            esac
-            ;;
-    esac
-}
-
-# Profile command and subcommands
-_jsh_profile() {
-    local -a subcommands
-    subcommands=(
-        'list:List all profiles'
-        'add:Add a new profile'
-        'remove:Remove a profile'
-        'show:Show profile details'
-        'apply:Apply profile to a directory'
-    )
-
-    _arguments -C \
-        '1: :->subcmd' \
-        '*:: :->args'
-
-    case $state in
-        subcmd)
-            _describe -t subcommands 'profile subcommand' subcommands
-            ;;
-    esac
-}
-
-# Deps command and subcommands
-_jsh_deps() {
-    local -a subcommands
-    subcommands=(
-        'status:Show all dependencies and resolved strategies'
-        'check:Re-run preflight checks'
-        'refresh:Force re-download/rebuild dependencies'
-        'doctor:Diagnose dependency issues'
-        'capabilities:Show build capability profiles'
-        'fix-bash:Install/configure bash 4+ (macOS)'
-    )
-
-    _arguments -C \
-        '1: :->subcmd' \
-        '*:: :->args'
-
-    case $state in
-        subcmd)
-            _describe -t subcommands 'deps subcommand' subcommands
-            ;;
-    esac
-}
-
-# Host command and subcommands
-_jsh_host() {
-    local -a subcommands
-    subcommands=(
-        'list:List known remote hosts'
-        'status:Show host capabilities and decisions'
-        'refresh:Re-run remote preflight for a host'
-        'reset:Clear cached decisions for a host'
-    )
-
-    local curcontext="$curcontext" state line
-    typeset -A opt_args
-
-    _arguments -C \
-        '1: :->subcmd' \
-        '*:: :->args'
-
-    case $state in
-        subcmd)
-            _describe -t subcommands 'host subcommand' subcommands
-            ;;
-        args)
-            case $line[1] in
-                status|refresh|reset)
-                    _jsh_host_names
-                    ;;
-            esac
-            ;;
-    esac
-}
-
-# Complete host names from local/hosts directory
-_jsh_host_names() {
-    local hosts_dir="${JSH_DIR:-${HOME}/.jsh}/local/hosts"
-    local -a hosts
-
-    if [[ -d "$hosts_dir" ]]; then
-        hosts=(${(f)"$(find "$hosts_dir" -maxdepth 1 -name '*.json' 2>/dev/null | xargs -I {} basename {} .json)"})
+    if [[ -d "$bin_dir" ]]; then
+        # Find scripts with @name metadata
+        for script in "$bin_dir"/*; do
+            [[ -x "$script" ]] || continue
+            local name
+            name=$(head -50 "$script" 2>/dev/null | grep -m1 "^# @name " | sed 's/^# @name //')
+            if [[ -n "$name" ]]; then
+                local desc
+                desc=$(head -50 "$script" 2>/dev/null | grep -m1 "^# @desc " | sed 's/^# @desc //')
+                scripts+=("${name}:${desc:-No description}")
+            fi
+        done
     fi
 
-    if [[ ${#hosts[@]} -gt 0 ]]; then
-        _describe -t hosts 'remote hosts' hosts
+    if [[ ${#scripts[@]} -gt 0 ]]; then
+        _describe -t scripts 'available scripts' scripts
     fi
-}
-
-# Tools command and subcommands
-_jsh_tools() {
-    local -a subcommands
-    subcommands=(
-        'list:List all tools with install status'
-        'check:Verify installed tools work correctly'
-        'install:Install recommended tools'
-        'recommend:Show personalized recommendations'
-    )
-
-    local -a categories
-    categories=(
-        'shell:Shell & Terminal'
-        'editor:Editors & IDEs'
-        'dev:Development Tools'
-        'container:Container Tools'
-        'k8s:Kubernetes Tools'
-        'cloud:Cloud & Infrastructure'
-        'git:Git Tools'
-        'network:Network Tools'
-    )
-
-    local curcontext="$curcontext" state line
-    typeset -A opt_args
-
-    _arguments -C \
-        '1: :->subcmd' \
-        '*:: :->args'
-
-    case $state in
-        subcmd)
-            _describe -t subcommands 'tools subcommand' subcommands
-            ;;
-        args)
-            case $line[1] in
-                list)
-                    _arguments \
-                        '(-c --category)'{-c,--category}'[Filter by category]:category:->categories' \
-                        '--missing[Show only missing tools]' \
-                        '--installed[Show only installed tools]'
-                    if [[ $state == categories ]]; then
-                        _describe -t categories 'tool category' categories
-                    fi
-                    ;;
-            esac
-            ;;
-    esac
-}
-
-# Clean command options
-_jsh_clean() {
-    _arguments \
-        '(-n --dry-run)'{-n,--dry-run}'[Show what would be cleaned]' \
-        '(-y --yes)'{-y,--yes}'[Skip confirmation prompts]'
-}
-
-# Install command options
-_jsh_install() {
-    _arguments \
-        '--brew[Force installation via Homebrew]' \
-        '--npm[Force installation via npm]' \
-        '--pip[Force installation via pip]' \
-        '--cargo[Force installation via cargo]' \
-        '*:package name:'
-}
-
-# Sync command options
-_jsh_sync() {
-    _arguments \
-        '--pull[Pull only (rebase)]' \
-        '--push[Push only]' \
-        '(-c --check)'{-c,--check}'[Dry run - show sync status]' \
-        '(-f --force)'{-f,--force}'[Force sync (requires confirmation)]' \
-        '--no-stash[Fail if local changes exist]'
-}
-
-# Configure command and subcommands
-_jsh_configure() {
-    local -a subcommands
-    subcommands=(
-        'all:Run all applicable configurations'
-        'macos:macOS system defaults'
-        'dock:macOS Dock settings'
-        'apps:Application configs (VS Code)'
-        'linux:Linux system settings'
-        'list:Show available configurations'
-    )
-
-    local curcontext="$curcontext" state line
-    typeset -A opt_args
-
-    _arguments -C \
-        '(-n --check --dry-run)'{-n,--check,--dry-run}'[Dry run - show what would change]' \
-        '(-y --yes)'{-y,--yes}'[Skip confirmation prompts]' \
-        '1: :->subcmd' \
-        '*:: :->args'
-
-    case $state in
-        subcmd)
-            _describe -t subcommands 'configure subcommand' subcommands
-            ;;
-    esac
 }
 
 _jsh "$@"
