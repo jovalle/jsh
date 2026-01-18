@@ -80,7 +80,7 @@ has() { command -v "$1" >/dev/null 2>&1; }
 
 detect_platform() {
     local os arch
-    os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+    os="$(uname -s)"; os="${os,,}"
     arch="$(uname -m)"
 
     case "${arch}" in
