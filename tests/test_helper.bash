@@ -33,6 +33,10 @@ load_jsh_gitstatus() {
 # Alias for backwards compatibility
 load_jsh_git() { load_jsh_gitstatus; }
 
+load_jsh_cli() {
+    source "${JSH_DIR}/lib/cli.sh"
+}
+
 # Note: project() function is now in functions.sh, calling bin/jgit
 load_jsh_functions() {
     load_jsh_core
