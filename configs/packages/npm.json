@@ -1,0 +1,9 @@
+[
+  "@commitlint/cli",
+  "@commitlint/config-conventional",
+  "commitizen",
+  "cz-conventional-changelog",
+  "get-shit-done-cc",
+  "prettier",
+  "typescript"
+]

@@ -1,0 +1,13 @@
+[
+  "bat",
+  "curl",
+  "fd-find",
+  "fzf",
+  "git",
+  "jq",
+  "neovim",
+  "ripgrep",
+  "tmux",
+  "vim",
+  "zsh"
+]
