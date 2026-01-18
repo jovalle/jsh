@@ -1,10 +1,23 @@
 #!/bin/bash
-
+# @name colours
+# @version 1.0.0
+# @desc Print 256 terminal colors with their codes
+# @usage colours
+#
+# @option -h,--help  Show this help
+#
 # Tom Hale, 2016. MIT Licence.
 # Print out 256 colours, with each number printed in its corresponding colour
 # See http://askubuntu.com/questions/821157/print-a-256-color-test-pattern-in-the-terminal/821163#821163
 
 set -eu # Fail on errors or undeclared variables
+
+# Handle --help
+[[ "${1:-}" == "-h" || "${1:-}" == "--help" ]] && {
+    echo "colours - Print 256 terminal colors with their codes"
+    echo "Usage: colours"
+    exit 0
+}
 
 printable_colours=256
 
