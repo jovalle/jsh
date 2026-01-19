@@ -1,0 +1,30 @@
+# =============================================================================
+# Pre-commit Configuration for jsh
+# =============================================================================
+# Install: pip install pre-commit && pre-commit install --hook-type pre-commit --hook-type commit-msg
+# Manual run: pre-commit run --all-files
+# =============================================================================
+
+repos:
+  # ShellCheck - Shell script linting
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
+    hooks:
+      - id: shellcheck
+        args: ["--severity=warning"]
+        files: \.(sh|bash)$|^jsh$|^bin/[^.]+$
+
+  # Conventional commits
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.0.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args: [feat, fix, refactor, docs, test, chore, perf, ci, build, style]
+
+  # Gitleaks - Secret scanning
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.0
+    hooks:
+      - id: gitleaks
+        args: ["--config", ".gitleaks.toml"]
