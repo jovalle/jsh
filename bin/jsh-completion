@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# @name jsh-completion
+# @desc Dynamic completion helper for jsh - parses @jsh-* metadata comments
+#
+# This script extracts command metadata from jsh source files to provide
+# shell completion data. It implements Phase 2 of the dynamic completions plan.
+#
+# Usage:
+#   jsh-completion commands              # List all commands with descriptions
+#   jsh-completion subcommands <cmd>     # List subcommands for a command
+#   jsh-completion options <cmd>         # List options for a command
+
+set -euo pipefail
+
+JSH_DIR="${JSH_DIR:-${HOME}/.jsh}"
+
+# Get all source files that may contain metadata
+_source_files() {
+    echo "${JSH_DIR}/jsh"
+    for f in "${JSH_DIR}/src/"*.sh; do
+        [[ -f "$f" ]] && echo "$f"
+    done
+}
+
+# Extract all top-level commands from @jsh-cmd tags
+# Output format: "command:description" (for zsh _describe)
+cmd_commands() {
+    local files
+    files=$(_source_files)
+
+    # shellcheck disable=SC2086
+    grep -hE '^# @jsh-cmd [a-z]' $files 2>/dev/null | \
+        sed 's/^# @jsh-cmd //' | \
+        while read -r name desc; do
+            echo "${name}:${desc}"
+        done | sort -u
+}
+
+# Extract subcommands for a given command from @jsh-sub tags
+# The trick: @jsh-sub tags must follow the @jsh-cmd they belong to
+# Output format: "subcommand:description"
+cmd_subcommands() {
+    local cmd="$1"
+    local files in_cmd=false
+    files=$(_source_files)
+
+    # shellcheck disable=SC2086
+    grep -hE '^# @jsh-(cmd|sub) ' $files 2>/dev/null | \
+        while read -r line; do
+            if [[ "$line" =~ ^#\ @jsh-cmd\ ([a-z]+) ]]; then
+                if [[ "${BASH_REMATCH[1]}" == "$cmd" ]]; then
+                    in_cmd=true
+                else
+                    in_cmd=false
+                fi
+            elif [[ "$in_cmd" == true ]] && [[ "$line" =~ ^#\ @jsh-sub\ (.+) ]]; then
+                local rest="${BASH_REMATCH[1]}"
+                local name="${rest%% *}"
+                local desc="${rest#* }"
+                echo "${name}:${desc}"
+            fi
+        done
+}
+
+# Extract options for a given command from @jsh-opt tags
+# Options follow their @jsh-cmd and apply until the next @jsh-cmd
+# Output format: "-s,--long:description" or "--long:description"
+cmd_options() {
+    local cmd="$1"
+    local files in_cmd=false
+    files=$(_source_files)
+
+    # shellcheck disable=SC2086
+    grep -hE '^# @jsh-(cmd|opt) ' $files 2>/dev/null | \
+        while read -r line; do
+            if [[ "$line" =~ ^#\ @jsh-cmd\ ([a-z]+) ]]; then
+                if [[ "${BASH_REMATCH[1]}" == "$cmd" ]]; then
+                    in_cmd=true
+                else
+                    in_cmd=false
+                fi
+            elif [[ "$in_cmd" == true ]] && [[ "$line" =~ ^#\ @jsh-opt\ (.+) ]]; then
+                local rest="${BASH_REMATCH[1]}"
+                local opt="${rest%% *}"
+                local desc="${rest#* }"
+                echo "${opt}:${desc}"
+            fi
+        done
+}
+
+# Main dispatch
+case "${1:-}" in
+    commands)
+        cmd_commands
+        ;;
+    subcommands)
+        [[ -z "${2:-}" ]] && exit 0
+        cmd_subcommands "$2"
+        ;;
+    options)
+        [[ -z "${2:-}" ]] && exit 0
+        cmd_options "$2"
+        ;;
+    *)
+        echo "Usage: jsh-completion {commands|subcommands|options} [command]" >&2
+        exit 1
+        ;;
+esac

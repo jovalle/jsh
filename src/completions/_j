@@ -21,33 +21,19 @@ _j() {
     local curcontext="$curcontext" state line
     typeset -A opt_args
 
-    local -a commands
-    commands=(
-        '-c:Open in VS Code after jumping'
-        '--code:Open in VS Code after jumping'
-        '-r:Open remote project in VS Code'
-        '--remote:Open remote project in VS Code'
-        '--add:Add current directory to database'
-        '-a:Add current directory to database'
-        '--remove:Remove current directory from database'
-        '--list:List all directories with scores'
-        '-l:List all directories with scores'
-        '--clean:Remove non-existent directories'
-        '--help:Show help'
-        '-h:Show help'
-        '-:Jump to previous directory'
-    )
-
     _arguments -C \
         '1: :->first_arg' \
         '*: :->query'
 
     case $state in
         first_arg)
-            # Offer commands and directories
-            _describe -t commands 'j commands' commands
+            # After -r, complete with remote project names
+            if [[ "${words[1]}" == "-r" || "${words[1]}" == "--remote" ]]; then
+                _j_remote_projects
+                return
+            fi
 
-            # Add directory completions
+            # Only show directories/projects (no flags)
             _j_directories
             ;;
         query)
@@ -58,16 +44,19 @@ _j() {
                 return
             fi
 
-            # Additional query terms - offer directories only
+            # Additional query terms - directories only
             _j_directories
             ;;
     esac
 }
 
 # Complete directories from j database and projects
+# j uses fuzzy matching, so we complete with basenames (what users type)
+# and show full paths as descriptions (for context)
 _j_directories() {
     local j_data="${J_DATA:-${XDG_DATA_HOME:-${HOME}/.local/share}/jsh/j.db}"
     local -a dirs
+    local -A seen  # Track seen basenames to avoid duplicates
 
     # Load from j database
     if [[ -f "$j_data" ]]; then
@@ -75,10 +64,16 @@ _j_directories() {
         while IFS='|' read -r path score time; do
             [[ -z "$path" ]] && continue
             [[ ! -d "$path" ]] && continue
-            # Convert to display format (~/ prefix)
+
+            local basename="${path:t}"  # zsh :t modifier = basename
             local display_path="$path"
             [[ "$path" == "${HOME}"* ]] && display_path="~${path#$HOME}"
-            dirs+=("${display_path}:Frecency score ${score}")
+
+            # Skip if we've seen this basename (keep highest score)
+            [[ -n "${seen[$basename]}" ]] && continue
+            seen[$basename]=1
+
+            dirs+=("${basename}:${display_path}")
         done < "$j_data"
     fi
 
@@ -96,14 +91,25 @@ _j_directories() {
             local dir
             for dir in ${~entry}; do
                 [[ ! -d "$dir" ]] && continue
+
+                local basename="${dir:t}"
                 local display_path="$dir"
                 [[ "$dir" == "${HOME}"* ]] && display_path="~${dir#$HOME}"
-                dirs+=("${display_path}:Project")
+
+                [[ -n "${seen[$basename]}" ]] && continue
+                seen[$basename]=1
+
+                dirs+=("${basename}:${display_path}")
             done
         elif [[ -d "$entry" ]]; then
+            local basename="${entry:t}"
             local display_path="$entry"
             [[ "$entry" == "${HOME}"* ]] && display_path="~${entry#$HOME}"
-            dirs+=("${display_path}:Project")
+
+            [[ -n "${seen[$basename]}" ]] && continue
+            seen[$basename]=1
+
+            dirs+=("${basename}:${display_path}")
         fi
     done
 

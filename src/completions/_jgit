@@ -17,7 +17,6 @@ _jgit() {
     local jgit_path="${JSH_DIR:-${HOME}/.jsh}/bin/jgit"
 
     _arguments -C \
-        '(-h --help)'{-h,--help}'[Show help]' \
         '1: :->command' \
         '*::arg:->args'
 
@@ -121,10 +120,10 @@ _jgit_profile() {
     _describe -t subcommands 'profile subcommand' subcommands
 }
 
-# List command options
+# List command - no option completion (use --help)
 _jgit_list() {
-    _arguments \
-        '(-v --verbose)'{-v,--verbose}'[Show profile column]'
+    # Options available via: jgit list --help
+    return
 }
 
 # Add command - complete git URLs

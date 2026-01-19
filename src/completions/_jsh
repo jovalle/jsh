@@ -7,66 +7,32 @@ _jsh() {
     local curcontext="$curcontext" state line
     typeset -A opt_args
 
-    local jsh_complete="${JSH_DIR:-${HOME}/.jsh}/bin/jsh-complete"
+    local jsh_completion="${JSH_DIR:-${HOME}/.jsh}/bin/jsh-completion"
 
     _arguments -C \
-        '(-h --help)'{-h,--help}'[Show help]' \
-        '(-v --version)'{-v,--version}'[Show version]' \
         '1: :->command' \
         '*::arg:->args'
 
     case $state in
         command)
             local -a commands
-            if [[ -x "$jsh_complete" ]]; then
-                commands=(${(f)"$("$jsh_complete" commands 2>/dev/null)"})
+            if [[ -x "$jsh_completion" ]]; then
+                commands=(${(f)"$("$jsh_completion" commands 2>/dev/null)"})
             fi
             _describe -t commands 'jsh commands' commands
             ;;
         args)
             local cmd="${words[1]}"
-            local -a subcommands options
+            local -a subcommands
 
-            if [[ -x "$jsh_complete" ]]; then
-                # Get subcommands for this command
-                subcommands=(${(f)"$("$jsh_complete" subcommands "$cmd" 2>/dev/null)"})
-
-                # Get options for this command
-                local -a opts_raw
-                opts_raw=(${(f)"$("$jsh_complete" options "$cmd" 2>/dev/null)"})
-
-                # Convert options to zsh _arguments format
-                for opt_line in "${opts_raw[@]}"; do
-                    [[ -z "$opt_line" ]] && continue
-                    local opt_spec="${opt_line%%:*}"
-                    local opt_desc="${opt_line#*:}"
-
-                    if [[ "$opt_spec" == *","* ]]; then
-                        # Format: -s,--long
-                        local short="${opt_spec%%,*}"
-                        local long="${opt_spec#*,}"
-                        options+=("(${short} ${long})"{${short},${long}}"[${opt_desc}]")
-                    else
-                        # Format: --long only
-                        options+=("${opt_spec}[${opt_desc}]")
-                    fi
-                done
+            # Get subcommands for this command (options available via --help)
+            if [[ -x "$jsh_completion" ]]; then
+                subcommands=(${(f)"$("$jsh_completion" subcommands "$cmd" 2>/dev/null)"})
             fi
 
-            # Determine completion context
-            if [[ ${#words[@]} -eq 2 ]]; then
-                # After command, completing first arg (subcommand or option)
-                if [[ ${#subcommands[@]} -gt 0 ]]; then
-                    _describe -t subcommands "${cmd} subcommands" subcommands
-                fi
-                if [[ ${#options[@]} -gt 0 ]]; then
-                    _arguments "${options[@]}"
-                fi
-            else
-                # After subcommand, completing options
-                if [[ ${#options[@]} -gt 0 ]]; then
-                    _arguments "${options[@]}"
-                fi
+            # Complete subcommands
+            if [[ ${#words[@]} -eq 2 ]] && [[ ${#subcommands[@]} -gt 0 ]]; then
+                _describe -t subcommands "${cmd} subcommands" subcommands
             fi
 
             # Handle special dynamic completions
@@ -91,11 +57,6 @@ _jsh() {
                         _jsh_host_names
                     fi
                     ;;
-                unlink)
-                    if [[ "${words[-1]}" == "--restore="* ]] || [[ "${words[-2]}" == "--restore" ]]; then
-                        _jsh_backup_names
-                    fi
-                    ;;
             esac
             ;;
     esac
@@ -113,26 +74,6 @@ _jsh_host_names() {
     if [[ ${#hosts[@]} -gt 0 ]]; then
         _describe -t hosts 'remote hosts' hosts
     fi
-}
-
-# Dynamic completion: backup names
-_jsh_backup_names() {
-    local backup_dir="${HOME}/.jsh_backup"
-    local -a backups
-
-    backups=('latest:Restore from the most recent backup')
-
-    if [[ -d "$backup_dir" ]]; then
-        local -a backup_dirs
-        backup_dirs=(${(f)"$(find "$backup_dir" -maxdepth 1 -type d -name '[0-9]*' 2>/dev/null | sort -r)"})
-
-        for backup in "${backup_dirs[@]}"; do
-            local backup_name=$(basename "$backup")
-            backups+=("${backup_name}:Backup from ${backup_name}")
-        done
-    fi
-
-    _describe -t backups 'available backups' backups
 }
 
 # Dynamic completion: CLI script names (for jsh cli help)

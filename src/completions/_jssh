@@ -14,82 +14,24 @@
 # jssh - Zsh Completion
 # ============================================================================
 # Tab completion for jssh (SSH with portable Jsh environment)
-# Extends ssh completion with jssh-specific options
+# Completes hosts only - use --help for options
 # ============================================================================
 
 _jssh() {
     local curcontext="$curcontext" state line
     typeset -A opt_args
 
-    # Check if first argument is a jssh-specific flag
-    if [[ $CURRENT -eq 2 ]]; then
-        case "${words[2]}" in
-            -h|--help|--check|--status|--rebuild)
-                # These are terminal commands, no further completion
-                return 0
-                ;;
-        esac
-    fi
-
-    # jssh-specific options + ssh passthrough
     _arguments -C \
-        '(-h --help)'{-h,--help}'[Show help]' \
-        '(--check --status)'{--check,--status}'[Validate jssh setup and show status]' \
-        '--rebuild[Force rebuild of payload cache]' \
-        '*::ssh args:_jssh_ssh_passthrough'
-}
+        '*: :->hosts'
 
-# SSH passthrough completion - use ssh's completion for remaining args
-_jssh_ssh_passthrough() {
-    local curcontext="$curcontext"
-
-    # Check if we've already seen jssh-specific options
-    # If not, we're completing SSH arguments
-    local has_jssh_opt=0
-    for word in "${words[@]}"; do
-        case "$word" in
-            --check|--status|--rebuild|--help|-h)
-                has_jssh_opt=1
-                break
-                ;;
-        esac
-    done
-
-    # If a jssh-specific flag was given, no further completion needed
-    [[ $has_jssh_opt -eq 1 ]] && return 0
-
-    # Otherwise, complete SSH options and hosts
-    # Use _ssh_hosts for host completion, plus common SSH options
-    _alternative \
-        'hosts:remote host:_ssh_hosts' \
-        'users:user@host:_ssh_users_hosts' \
-        'options:ssh option:_jssh_ssh_options'
-}
-
-# Complete common SSH options (subset most relevant to jssh)
-_jssh_ssh_options() {
-    local -a ssh_opts
-    ssh_opts=(
-        '-p[Port to connect to]:port:_ports'
-        '-i[Identity file]:identity file:_files'
-        '-l[Login name]:login name:_ssh_users'
-        '-o[SSH option]:option:_ssh_options'
-        '-F[Config file]:config file:_files'
-        '-J[Jump host]:jump host:_ssh_hosts'
-        '-4[Force IPv4]'
-        '-6[Force IPv6]'
-        '-A[Enable agent forwarding]'
-        '-C[Enable compression]'
-        '-q[Quiet mode]'
-        '-v[Verbose mode]'
-        '-X[Enable X11 forwarding]'
-        '-Y[Enable trusted X11 forwarding]'
-        '-N[No remote command]'
-        '-T[Disable pseudo-terminal]'
-        '-t[Force pseudo-terminal]'
-    )
-
-    _arguments -s "${ssh_opts[@]}"
+    case $state in
+        hosts)
+            # Complete SSH hosts and user@host combinations
+            _alternative \
+                'hosts:remote host:_ssh_hosts' \
+                'users:user@host:_ssh_users_hosts'
+            ;;
+    esac
 }
 
 # Complete SSH hosts from known_hosts and ssh_config

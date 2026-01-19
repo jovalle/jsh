@@ -39,12 +39,7 @@ _make_completion() {
         done
     fi
 
-    # If completing options
-    if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "-B -C -d -e -f -i -I -j -k -l -n -o -p -q -r -R -s -S -t -v -w -W --always-make --directory --debug --environment-overrides --file --ignore-errors --include-dir --jobs --keep-going --load-average --just-print --old-file --print-data-base --question --no-builtin-rules --no-builtin-variables --silent --no-keep-going --touch --version --print-directory --no-print-directory --what-if --help" -- "$cur"))
-        return
-    fi
-
+    # Complete targets only - options available via --help
     # If we found a Makefile, extract targets dynamically
     if [[ -f "$makefile" ]]; then
         local targets
