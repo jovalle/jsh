@@ -1,5 +1,5 @@
-# lib/jgit-ui.sh - Claude-style tabbed interview UI framework
-# Sourced by lib/jgit-interactive.sh
+# lib/jgit/jgit-ui.sh - Claude-style tabbed interview UI framework
+# Sourced by lib/jgit/jgit-interactive.sh
 # shellcheck shell=bash
 
 # =============================================================================
@@ -513,7 +513,7 @@ _ui_timestamp_input() {
     local error_msg=""
 
     # Source timestamp library if not already
-    [[ -z "${_TS_PRESETS[irl]:-}" ]] && source "${JSH_DIR:-$HOME/.jsh}/lib/jgit-timestamp.sh"
+    [[ -z "${_TS_PRESETS[irl]:-}" ]] && source "${JSH_DIR:-$HOME/.jsh}/lib/jgit/jgit-timestamp.sh"
 
     _update_preview() {
         if [[ -z "$value" ]]; then
@@ -804,6 +804,7 @@ _ui_smart_singleselect() {
 # =============================================================================
 
 # Print a horizontal divider
+# shellcheck disable=SC2120  # $1 is optional with default value
 _ui_divider() {
     local char="${1:-─}"
     local width
