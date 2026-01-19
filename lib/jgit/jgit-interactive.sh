@@ -1,4 +1,4 @@
-# lib/jgit-interactive.sh - Interactive flows for commit and push
+# lib/jgit/jgit-interactive.sh - Interactive flows for commit and push
 # Main orchestration layer for jgit interactive mode
 # shellcheck shell=bash
 
@@ -9,10 +9,10 @@
 JSH_DIR="${JSH_DIR:-${HOME}/.jsh}"
 
 # Source libraries if not already loaded
-[[ -z "${_UI_RESET:-}" ]] && source "${JSH_DIR}/lib/jgit-ui.sh"
+[[ -z "${_UI_RESET:-}" ]] && source "${JSH_DIR}/lib/jgit/jgit-ui.sh"
 # Check if timestamp library is loaded (associative array exists and has entries)
 if ! declare -p _TS_PRESETS &>/dev/null; then
-    source "${JSH_DIR}/lib/jgit-timestamp.sh"
+    source "${JSH_DIR}/lib/jgit/jgit-timestamp.sh"
 fi
 
 # =============================================================================
@@ -311,8 +311,10 @@ _commit_interview() {
         return 1
     fi
 
+    # shellcheck disable=SC2178  # Not an array - retrieving string from associative array
     local selected="${_UI_ANSWERS[selected_options]}"
     local -a selected_arr
+    # shellcheck disable=SC2128  # $selected is a string, not an array
     IFS=' ' read -ra selected_arr <<< "$selected"
 
     # Build commit command
