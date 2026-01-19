@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # deps.sh - jsh dependency management
-# Downloads binaries and plugins for all target platforms
+# Downloads ZSH plugins and manages submodules
 # Can be executed standalone (bash) or sourced by jsh (bash/zsh)
 # shellcheck disable=SC2034
 
@@ -35,11 +35,7 @@ fi
 
 JSH_DIR="${JSH_DIR:-${_DEPS_SCRIPT_DIR%/*}}"
 LIB_DIR="${JSH_DIR}/lib"
-BIN_DIR="${LIB_DIR}/bin"
-VERSIONS_FILE="${BIN_DIR}/versions.json"
-
-# Target platforms for binary downloads
-TARGET_PLATFORMS=("darwin-arm64" "linux-amd64")
+VERSIONS_FILE="${LIB_DIR}/versions.json"
 
 # =============================================================================
 # Colors (auto-detect terminal support)
@@ -74,13 +70,49 @@ prefix_error()   { echo "  ${RED}✘${RST} $*" >&2; }
 
 has() { command -v "$1" >/dev/null 2>&1; }
 
+# Download a file using curl or wget (whichever is available)
+# Usage: download_file <url> <output_path>
+# Returns: 0 on success, 1 on failure
+download_file() {
+    local url="$1" output="$2"
+
+    if has curl; then
+        curl -fsSL "${url}" -o "${output}" 2>/dev/null
+    elif has wget; then
+        wget -q -O "${output}" "${url}" 2>/dev/null
+    else
+        return 1
+    fi
+}
+
+# Download and extract a tarball using curl or wget
+# Usage: download_tarball <url> <extract_dir>
+# Returns: 0 on success, 1 on failure
+download_tarball() {
+    local url="$1" extract_dir="$2"
+
+    if has curl; then
+        curl -fsSL "${url}" | tar xz -C "${extract_dir}" 2>/dev/null
+    elif has wget; then
+        wget -q -O- "${url}" | tar xz -C "${extract_dir}" 2>/dev/null
+    else
+        return 1
+    fi
+}
+
+# Check if we have a download tool available
+has_download_tool() {
+    has curl || has wget
+}
+
 # =============================================================================
 # Platform Detection
 # =============================================================================
 
 detect_platform() {
     local os arch
-    os="$(uname -s)"; os="${os,,}"
+    # Use tr for lowercase - works in both bash and zsh
+    os="$(uname -s | tr '[:upper:]' '[:lower:]')"
     arch="$(uname -m)"
 
     case "${arch}" in
@@ -102,81 +134,279 @@ get_version() {
 }
 
 # =============================================================================
-# Binary Downloads
+# Binary Tool Downloads (jq, fzf)
 # =============================================================================
+# Downloads essential tools to bin/<platform>/ directory
+# These are git-ignored - users can also install via package manager
+# Versions are defined in lib/versions.json (single source of truth)
 
-download_fzf() {
-    local platform="$1"
-    local version bin_path
-    version=$(get_version "fzf")
-    bin_path="${BIN_DIR}/${platform}/fzf"
+# Get download URL for a binary tool
+# Usage: get_binary_url <tool> <platform> <version>
+get_binary_url() {
+    local tool="$1" platform="$2" version="$3"
+    local os arch jq_os
 
-    if [[ -x "${bin_path}" ]]; then
-        prefix_success "fzf ${DIM}(${platform})${RST}"
-        return 0
-    fi
+    os="${platform%-*}"    # darwin or linux
+    arch="${platform#*-}"  # amd64 or arm64
 
-    if [[ -z "${version}" ]]; then
-        prefix_warn "fzf: no version in versions.json"
-        return 1
-    fi
-
-    mkdir -p "${BIN_DIR}/${platform}"
-
-    local url
-    case "${platform}" in
-        linux-amd64)  url="https://github.com/junegunn/fzf/releases/download/v${version}/fzf-${version}-linux_amd64.tar.gz" ;;
-        linux-arm64)  url="https://github.com/junegunn/fzf/releases/download/v${version}/fzf-${version}-linux_arm64.tar.gz" ;;
-        darwin-amd64) url="https://github.com/junegunn/fzf/releases/download/v${version}/fzf-${version}-darwin_amd64.tar.gz" ;;
-        darwin-arm64) url="https://github.com/junegunn/fzf/releases/download/v${version}/fzf-${version}-darwin_arm64.tar.gz" ;;
-        *) prefix_error "fzf: unsupported platform ${platform}"; return 1 ;;
+    case "${tool}" in
+        jq)
+            # jq releases use 'macos' instead of 'darwin' for macOS builds
+            jq_os="${os}"
+            [[ "${os}" == "darwin" ]] && jq_os="macos"
+            # jq releases use format: jq-<os>-<arch>
+            echo "https://github.com/jqlang/jq/releases/download/jq-${version}/jq-${jq_os}-${arch}"
+            ;;
+        fzf)
+            # fzf releases use format: fzf-<version>-<os>_<arch>.tar.gz (note: underscore)
+            echo "https://github.com/junegunn/fzf/releases/download/v${version}/fzf-${version}-${os}_${arch}.tar.gz"
+            ;;
+        *)
+            return 1
+            ;;
     esac
+}
 
-    prefix_info "fzf v${version} ${DIM}(${platform})${RST} downloading..."
-    if curl -sL "${url}" | tar xz -C "${BIN_DIR}/${platform}"; then
-        chmod +x "${bin_path}"
-        prefix_success "fzf v${version} ${DIM}(${platform})${RST}"
+# Get version for a binary tool (from versions.json with fallback)
+get_binary_version() {
+    local tool="$1"
+    local version
+    version=$(get_version "$tool")
+    if [[ -n "$version" ]]; then
+        echo "$version"
     else
-        prefix_error "fzf: download failed"
-        return 1
+        # Fallback defaults if versions.json is missing or tool not found
+        case "$tool" in
+            jq)  echo "1.7.1" ;;
+            fzf) echo "0.60.3" ;;
+            *)   return 1 ;;
+        esac
     fi
 }
 
-download_jq() {
-    local platform="$1"
-    local version bin_path
-    version=$(get_version "jq")
-    bin_path="${BIN_DIR}/${platform}/jq"
+# Download a binary tool to bin/<platform>/
+# Usage: download_binary <tool>
+# Returns: 0 on success, 1 on failure
+download_binary() {
+    local tool="$1"
+    local platform version url bin_dir target
 
-    if [[ -x "${bin_path}" ]]; then
-        prefix_success "jq ${DIM}(${platform})${RST}"
+    # Check for download tool availability first
+    if ! has_download_tool; then
+        prefix_error "${tool}: no download tool available (need curl or wget)"
+        prefix_info "Install with: apt-get install curl (Linux) or brew install curl (macOS)"
+        return 1
+    fi
+
+    platform=$(detect_platform)
+    version=$(get_binary_version "${tool}") || {
+        prefix_error "${tool}: unknown tool"
+        return 1
+    }
+    url=$(get_binary_url "${tool}" "${platform}" "${version}") || {
+        prefix_error "${tool}: failed to get download URL"
+        return 1
+    }
+
+    bin_dir="${JSH_DIR}/bin/${platform}"
+    target="${bin_dir}/${tool}"
+
+    # Check if already exists
+    if [[ -x "${target}" ]]; then
+        prefix_success "${tool} v${version} (cached)"
         return 0
     fi
 
-    if [[ -z "${version}" ]]; then
-        prefix_warn "jq: no version in versions.json"
+    # Create directory
+    mkdir -p "${bin_dir}"
+
+    prefix_info "${tool} v${version} downloading..."
+
+    case "${tool}" in
+        jq)
+            # jq is a single binary - direct download
+            if download_file "${url}" "${target}"; then
+                chmod +x "${target}"
+                prefix_success "${tool} v${version}"
+                return 0
+            else
+                prefix_error "${tool}: download failed"
+                prefix_info "Install manually: brew install jq (macOS) or apt install jq (Linux)"
+                return 1
+            fi
+            ;;
+        fzf)
+            # fzf is a tarball - extract to temp then move
+            local tmp_dir
+            tmp_dir=$(mktemp -d)
+            if download_tarball "${url}" "${tmp_dir}"; then
+                mv "${tmp_dir}/fzf" "${target}"
+                chmod +x "${target}"
+                rm -rf "${tmp_dir}"
+                prefix_success "${tool} v${version}"
+                return 0
+            else
+                rm -rf "${tmp_dir}"
+                prefix_error "${tool}: download failed"
+                prefix_info "Install manually: brew install fzf (macOS) or apt install fzf (Linux)"
+                return 1
+            fi
+            ;;
+        *)
+            prefix_error "${tool}: no download handler"
+            return 1
+            ;;
+    esac
+}
+
+# Download all binary tools (with user confirmation)
+# Usage: download_all_binaries [--force]
+download_all_binaries() {
+    local force=false
+    [[ "${1:-}" == "--force" ]] && force=true
+
+    local platform bin_dir
+    platform=$(detect_platform)
+    bin_dir="${JSH_DIR}/bin/${platform}"
+
+    echo ""
+    echo "${CYAN}Shell Tools:${RST}"
+    echo "  ${DIM}Target: ${bin_dir}/${RST}"
+    echo ""
+
+    local errors=0
+    local tools=("jq" "fzf")
+
+    for tool in "${tools[@]}"; do
+        # Skip if exists and not forcing
+        if [[ -x "${bin_dir}/${tool}" ]] && [[ "${force}" == false ]]; then
+            prefix_success "${tool} (already installed)"
+            continue
+        fi
+
+        download_binary "${tool}" || ((errors++))
+    done
+
+    if [[ ${errors} -gt 0 ]]; then
+        echo ""
+        warn "Some tools failed to download. You can:"
+        echo "  ${DIM}1. Retry: jsh deps refresh${RST}"
+        echo "  ${DIM}2. Install via package manager: brew install jq fzf${RST}"
         return 1
     fi
 
-    mkdir -p "${BIN_DIR}/${platform}"
+    return 0
+}
 
-    local url
-    case "${platform}" in
-        darwin-arm64) url="https://github.com/jqlang/jq/releases/download/jq-${version}/jq-macos-arm64" ;;
-        darwin-amd64) url="https://github.com/jqlang/jq/releases/download/jq-${version}/jq-macos-amd64" ;;
-        linux-amd64)  url="https://github.com/jqlang/jq/releases/download/jq-${version}/jq-linux-amd64" ;;
-        linux-arm64)  url="https://github.com/jqlang/jq/releases/download/jq-${version}/jq-linux-arm64" ;;
-        *) prefix_error "jq: unsupported platform ${platform}"; return 1 ;;
+# Download a tool for a specific platform
+# Usage: download_binary_for_platform <tool> <platform>
+download_binary_for_platform() {
+    local tool="$1" platform="$2"
+    local version url bin_dir target
+
+    version=$(get_binary_version "${tool}") || {
+        prefix_error "${tool}: unknown tool"
+        return 1
+    }
+    url=$(get_binary_url "${tool}" "${platform}" "${version}") || {
+        prefix_error "${tool}: failed to get download URL for ${platform}"
+        return 1
+    }
+
+    bin_dir="${JSH_DIR}/bin/${platform}"
+    target="${bin_dir}/${tool}"
+
+    # Check if already exists
+    if [[ -x "${target}" ]]; then
+        prefix_success "${tool} ${platform} (cached)"
+        return 0
+    fi
+
+    mkdir -p "${bin_dir}"
+    prefix_info "${tool} ${platform} v${version} downloading..."
+
+    case "${tool}" in
+        jq)
+            if download_file "${url}" "${target}"; then
+                chmod +x "${target}"
+                prefix_success "${tool} ${platform} v${version}"
+                return 0
+            fi
+            ;;
+        fzf)
+            local tmp_dir
+            tmp_dir=$(mktemp -d)
+            if download_tarball "${url}" "${tmp_dir}"; then
+                mv "${tmp_dir}/fzf" "${target}"
+                chmod +x "${target}"
+                rm -rf "${tmp_dir}"
+                prefix_success "${tool} ${platform} v${version}"
+                return 0
+            fi
+            rm -rf "${tmp_dir}"
+            ;;
     esac
 
-    prefix_info "jq v${version} ${DIM}(${platform})${RST} downloading..."
-    if curl -sL "${url}" -o "${bin_path}"; then
-        chmod +x "${bin_path}"
-        prefix_success "jq v${version} ${DIM}(${platform})${RST}"
-    else
-        prefix_error "jq: download failed"
+    prefix_error "${tool} ${platform}: download failed"
+    return 1
+}
+
+# Download binaries for all supported platforms
+# Usage: download_all_platforms [--force]
+download_all_platforms() {
+    local force=false
+    [[ "${1:-}" == "--force" ]] && force=true
+
+    if ! has_download_tool; then
+        error "No download tool available (need curl or wget)"
         return 1
     fi
+
+    local platforms=("darwin-arm64" "darwin-amd64" "linux-arm64" "linux-amd64")
+    local tools=("fzf" "jq")
+    local errors=0
+
+    echo ""
+    echo "${CYAN}Downloading binaries for all platforms...${RST}"
+    echo ""
+
+    for platform in "${platforms[@]}"; do
+        echo "${BOLD}${platform}:${RST}"
+        for tool in "${tools[@]}"; do
+            local target="${JSH_DIR}/bin/${platform}/${tool}"
+            if [[ -x "${target}" ]] && [[ "${force}" == false ]]; then
+                prefix_success "${tool} (cached)"
+            else
+                download_binary_for_platform "${tool}" "${platform}" || ((errors++))
+            fi
+        done
+        echo ""
+    done
+
+    if [[ ${errors} -gt 0 ]]; then
+        warn "${errors} download(s) failed"
+        return 1
+    fi
+
+    success "All platform binaries downloaded"
+    return 0
+}
+
+# Check if bundled binaries are available and add to PATH
+# Call this during shell initialization
+setup_binary_path() {
+    local platform bin_dir
+    platform=$(detect_platform)
+    bin_dir="${JSH_DIR}/bin/${platform}"
+
+    # Only add to PATH if directory exists and has executables
+    if [[ -d "${bin_dir}" ]] && [[ -n "$(ls -A "${bin_dir}" 2>/dev/null)" ]]; then
+        # Prepend to PATH so bundled versions take priority
+        export PATH="${bin_dir}:${PATH}"
+        return 0
+    fi
+
+    return 1
 }
 
 # =============================================================================
@@ -198,12 +428,18 @@ download_zsh_autosuggestions() {
         return 1
     fi
 
+    if ! has_download_tool; then
+        prefix_error "zsh-autosuggestions: no download tool available (need curl or wget)"
+        return 1
+    fi
+
     mkdir -p "${LIB_DIR}/zsh-plugins"
 
     prefix_info "zsh-autosuggestions v${version} downloading..."
-    local tmp_dir
+    local tmp_dir url
     tmp_dir=$(mktemp -d)
-    if curl -sL "https://github.com/zsh-users/zsh-autosuggestions/archive/refs/tags/v${version}.tar.gz" | tar xz -C "${tmp_dir}"; then
+    url="https://github.com/zsh-users/zsh-autosuggestions/archive/refs/tags/v${version}.tar.gz"
+    if download_tarball "${url}" "${tmp_dir}"; then
         cp "${tmp_dir}/zsh-autosuggestions-${version}/zsh-autosuggestions.zsh" "${target}"
         rm -rf "${tmp_dir}"
         prefix_success "zsh-autosuggestions v${version}"
@@ -229,12 +465,18 @@ download_zsh_syntax_highlighting() {
         return 1
     fi
 
+    if ! has_download_tool; then
+        prefix_error "zsh-syntax-highlighting: no download tool available (need curl or wget)"
+        return 1
+    fi
+
     mkdir -p "${LIB_DIR}/zsh-plugins/highlighters"
 
     prefix_info "zsh-syntax-highlighting v${version} downloading..."
-    local tmp_dir
+    local tmp_dir url
     tmp_dir=$(mktemp -d)
-    if curl -sL "https://github.com/zsh-users/zsh-syntax-highlighting/archive/refs/tags/${version}.tar.gz" | tar xz -C "${tmp_dir}"; then
+    url="https://github.com/zsh-users/zsh-syntax-highlighting/archive/refs/tags/${version}.tar.gz"
+    if download_tarball "${url}" "${tmp_dir}"; then
         cp "${tmp_dir}/zsh-syntax-highlighting-${version}/zsh-syntax-highlighting.zsh" "${target}"
         rm -rf "${LIB_DIR}/zsh-plugins/highlighters"
         cp -r "${tmp_dir}/zsh-syntax-highlighting-${version}/highlighters" "${LIB_DIR}/zsh-plugins/"
@@ -263,12 +505,18 @@ download_zsh_history_substring_search() {
         return 1
     fi
 
+    if ! has_download_tool; then
+        prefix_error "zsh-history-substring-search: no download tool available (need curl or wget)"
+        return 1
+    fi
+
     mkdir -p "${LIB_DIR}/zsh-plugins"
 
     prefix_info "zsh-history-substring-search v${version} downloading..."
-    local tmp_dir
+    local tmp_dir url
     tmp_dir=$(mktemp -d)
-    if curl -sL "https://github.com/zsh-users/zsh-history-substring-search/archive/refs/tags/v${version}.tar.gz" | tar xz -C "${tmp_dir}"; then
+    url="https://github.com/zsh-users/zsh-history-substring-search/archive/refs/tags/v${version}.tar.gz"
+    if download_tarball "${url}" "${tmp_dir}"; then
         cp "${tmp_dir}/zsh-history-substring-search-${version}/zsh-history-substring-search.zsh" "${target}"
         rm -rf "${tmp_dir}"
         prefix_success "zsh-history-substring-search v${version}"
@@ -343,26 +591,26 @@ _deps_banner() {
 
 main() {
     local force_download=false
-    local current_only=false
     local subcmd=""
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -f|--force) force_download=true; FORCE_DOWNLOAD=1; shift ;;
-            --current)  current_only=true; shift ;;
             -h|--help)
                 echo "Usage: deps.sh [COMMAND] [OPTIONS]"
                 echo ""
                 echo "Commands:"
-                echo "  install         Download all dependencies (default)"
+                echo "  install         Download all ZSH plugins (default)"
                 echo "  status          Show dependency status"
                 echo "  submodules      List submodules status"
                 echo "  submodules update  Update all submodules"
                 echo ""
                 echo "Options:"
                 echo "  -f, --force     Force re-download of all dependencies"
-                echo "  --current       Only download for current platform"
                 echo "  -h, --help      Show this help"
+                echo ""
+                echo "Note: fzf, jq, and other tools should be installed via your"
+                echo "package manager (brew install fzf jq)"
                 exit 0
                 ;;
             install|status|submodules)
@@ -398,21 +646,6 @@ main() {
     echo ""
 
     local errors=0
-    local platforms_to_install=()
-
-    if [[ "${current_only}" == true ]]; then
-        platforms_to_install=("${current_platform}")
-    else
-        platforms_to_install=("${TARGET_PLATFORMS[@]}")
-    fi
-
-    # Download binaries for all target platforms
-    echo "${CYAN}Binaries:${RST}"
-    for platform in "${platforms_to_install[@]}"; do
-        download_fzf "${platform}" || ((errors++))
-        download_jq "${platform}" || ((errors++))
-    done
-    echo ""
 
     # Download ZSH plugins (platform-independent)
     echo "${CYAN}ZSH Plugins:${RST}"
@@ -542,20 +775,27 @@ _jsh_deps_status() {
     info "Platform: ${current_platform}"
     echo ""
 
-    # Binary status
-    echo "${CYAN}Bundled Binaries:${RST}"
-    local binaries=("fzf" "jq")
-    for bin in "${binaries[@]}"; do
-        local bin_path="${BIN_DIR}/${current_platform}/${bin}"
-        if [[ -x "${bin_path}" ]]; then
-            local version_info=""
-            case "${bin}" in
-                fzf) version_info=$("${bin_path}" --version 2>/dev/null | head -1) ;;
-                jq)  version_info=$("${bin_path}" --version 2>/dev/null) ;;
+    # System tools status
+    echo "${CYAN}System Tools (install via package manager):${RST}"
+    local tools=("jq" "fzf" "fd" "rg" "bat" "eza")
+    for tool in "${tools[@]}"; do
+        if has "${tool}"; then
+            local version=""
+            case "${tool}" in
+                jq)  version=$("${tool}" --version 2>/dev/null) ;;
+                fzf) version=$("${tool}" --version 2>/dev/null | head -1) ;;
+                fd)  version=$("${tool}" --version 2>/dev/null | cut -d' ' -f2) ;;
+                rg)  version=$("${tool}" --version 2>/dev/null | head -1 | cut -d' ' -f2) ;;
+                bat) version=$("${tool}" --version 2>/dev/null | cut -d' ' -f2) ;;
+                eza) version=$("${tool}" --version 2>/dev/null | sed -n '2s/^v\([^ ]*\).*/\1/p') ;;
             esac
-            prefix_success "${bin} ${DIM}(${version_info})${RST}"
+            prefix_success "${tool} ${DIM}(${version})${RST}"
         else
-            prefix_warn "${bin} not installed for ${current_platform}"
+            if [[ "${tool}" == "jq" ]]; then
+                prefix_error "${tool} (required - install with: brew install jq)"
+            else
+                prefix_info "${tool} ${DIM}(optional)${RST}"
+            fi
         fi
     done
     echo ""
@@ -583,7 +823,7 @@ _jsh_deps_status() {
 
     # Version info
     if [[ -f "${VERSIONS_FILE}" ]]; then
-        echo "${CYAN}Configured Versions:${RST}"
+        echo "${CYAN}Configured Plugin Versions:${RST}"
         if has jq; then
             jq -r 'to_entries[] | "  \(.key): v\(.value)"' "${VERSIONS_FILE}"
         else
@@ -598,11 +838,13 @@ _jsh_preflight_full() {
     platform=$(detect_platform)
 
     # Check system capabilities
-    local has_git=false has_curl=false has_make=false has_gcc=false
+    local has_git=false has_curl=false has_make=false has_gcc=false has_jq=false has_fzf=false
     has git && has_git=true
     has curl && has_curl=true
     has make && has_make=true
     has gcc && has_gcc=true
+    has jq && has_jq=true
+    has fzf && has_fzf=true
 
     # Check for glibc version (Linux only)
     local glibc_version="N/A"
@@ -622,9 +864,9 @@ _jsh_preflight_full() {
     "make": ${has_make},
     "gcc": ${has_gcc}
   },
-  "binaries": {
-    "fzf": $([ -x "${BIN_DIR}/${platform}/fzf" ] && echo true || echo false),
-    "jq": $([ -x "${BIN_DIR}/${platform}/jq" ] && echo true || echo false)
+  "system_tools": {
+    "jq": ${has_jq},
+    "fzf": ${has_fzf}
   }
 }
 EOF
