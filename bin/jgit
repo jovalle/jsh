@@ -201,6 +201,13 @@ _git_parse_url() {
         owner="${path_part%%/*}"
         repo="${path_part#*/}"
         repo="${repo%.git}"
+
+    elif [[ "$url" == */* ]] && [[ "$url" != *:* ]] && [[ "$url" != *.* ]]; then
+        # Shorthand format: owner/repo (assume github.com)
+        platform="github.com"
+        owner="${url%%/*}"
+        repo="${url#*/}"
+        repo="${repo%.git}"
     fi
 
     printf '%s|%s|%s' "$platform" "$owner" "$repo"
@@ -1297,10 +1304,10 @@ EOF
 # Source interactive library (lazy load)
 _source_interactive() {
     if [[ -z "${_UI_RESET:-}" ]]; then
-        if [[ -f "${JSH_DIR}/lib/jgit-interactive.sh" ]]; then
-            source "${JSH_DIR}/lib/jgit-interactive.sh"
+        if [[ -f "${JSH_DIR}/lib/jgit/jgit-interactive.sh" ]]; then
+            source "${JSH_DIR}/lib/jgit/jgit-interactive.sh"
         else
-            abort "Interactive library not found: ${JSH_DIR}/lib/jgit-interactive.sh"
+            abort "Interactive library not found: ${JSH_DIR}/lib/jgit/jgit-interactive.sh"
         fi
     fi
 }
