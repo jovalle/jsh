@@ -1,11 +1,10 @@
 # =============================================================================
-# Jsh Makefile - Shell Environment Build System
+# Jsh - Shell Environment Build System
 # =============================================================================
 # This Makefile provides a unified interface for:
+# - Project dependencies
 # - Linting and formatting shell scripts
 # - Running tests across different shells
-# - Managing binary and plugin dependencies
-# - Docker development environment
 # - CI/CD pipeline integration
 #
 # Usage: make [target]
@@ -23,13 +22,12 @@ SHELL := bash
 JSH_DIR := $(CURDIR)
 SRC_DIR := $(JSH_DIR)/src
 LIB_DIR := $(JSH_DIR)/lib
-BIN_DIR := $(LIB_DIR)/bin
 TESTS_DIR := $(JSH_DIR)/tests
 SCRIPTS_DIR := $(JSH_DIR)/scripts
 PLUGINS_DIR := $(LIB_DIR)/zsh-plugins
 
-# Version manifest
-VERSIONS_FILE := $(BIN_DIR)/versions.json
+# Version manifest for ZSH plugins
+VERSIONS_FILE := $(LIB_DIR)/versions.json
 
 # =============================================================================
 # Platform Detection
@@ -57,38 +55,23 @@ else
 endif
 
 PLATFORM := $(OS)-$(ARCH)
-PLATFORM_BIN_DIR := $(BIN_DIR)/$(PLATFORM)
-
-# All supported platforms for bulk downloads
-PLATFORMS := linux-amd64 linux-arm64 darwin-amd64 darwin-arm64
 
 # =============================================================================
-# Tool Versions (from versions.json)
+# Tool Versions
 # =============================================================================
 
-# Use system jq if available, otherwise provide defaults
+# ZSH plugin versions (from versions.json or defaults)
+# Note: jq/fzf versions are managed in lib/versions.json (use 'jsh deps refresh')
 JQ_CMD := $(shell command -v jq 2>/dev/null)
 ifdef JQ_CMD
-    FZF_VERSION := $(shell $(JQ_CMD) -r '.fzf // "0.67.0"' $(VERSIONS_FILE) 2>/dev/null)
-    JQ_VERSION := $(shell $(JQ_CMD) -r '.jq // "1.7.1"' $(VERSIONS_FILE) 2>/dev/null)
     ZSH_AUTOSUGGESTIONS_VERSION := $(shell $(JQ_CMD) -r '."zsh-autosuggestions" // "0.7.1"' $(VERSIONS_FILE) 2>/dev/null)
     ZSH_SYNTAX_HIGHLIGHTING_VERSION := $(shell $(JQ_CMD) -r '."zsh-syntax-highlighting" // "0.8.0"' $(VERSIONS_FILE) 2>/dev/null)
-    ZSH_HISTORY_SUBSTRING_SEARCH_VERSION := $(shell $(JQ_CMD) -r '."zsh-history-substring-search" // "1.0.2"' $(VERSIONS_FILE) 2>/dev/null)
+    ZSH_HISTORY_SUBSTRING_SEARCH_VERSION := $(shell $(JQ_CMD) -r '."zsh-history-substring-search" // "1.1.0"' $(VERSIONS_FILE) 2>/dev/null)
 else
-    FZF_VERSION := 0.67.0
-    JQ_VERSION := 1.7.1
     ZSH_AUTOSUGGESTIONS_VERSION := 0.7.1
     ZSH_SYNTAX_HIGHLIGHTING_VERSION := 0.8.0
-    ZSH_HISTORY_SUBSTRING_SEARCH_VERSION := 1.0.2
+    ZSH_HISTORY_SUBSTRING_SEARCH_VERSION := 1.1.0
 endif
-
-# =============================================================================
-# Docker Settings
-# =============================================================================
-
-DOCKER_IMAGE := jsh-dev
-DOCKER_TAG := latest
-DOCKER_PLATFORMS := linux/amd64,linux/arm64
 
 # =============================================================================
 # CI Detection & Colors
@@ -120,13 +103,11 @@ endif
 # =============================================================================
 
 .PHONY: help all clean clean-all
-.PHONY: lint lint-shell lint-syntax lint-compat lint-yaml lint-format format
+.PHONY: lint lint-shell lint-syntax lint-compat lint-yaml lint-format lint-secrets format
 .PHONY: test test-verbose test-tap test-bash test-zsh
-.PHONY: deps deps-check deps-download deps-download-all deps-verify deps-force
-.PHONY: deps-plugins deps-plugins-force
-.PHONY: docker docker-build docker-build-multi docker-dev docker-shell docker-test docker-clean
-.PHONY: ci ci-lint ci-test ci-binaries
-.PHONY: pre-push install-hooks
+.PHONY: deps deps-check deps-install
+.PHONY: ci ci-lint ci-test
+.PHONY: docker docker-bash docker-zsh
 
 # =============================================================================
 # Help
@@ -139,7 +120,6 @@ help: ## Show this help message
 	@printf "$(YELLOW)Usage:$(RESET) make [target]\n"
 	@echo ""
 	@printf "$(YELLOW)Platform:$(RESET) $(PLATFORM)\n"
-	@printf "$(YELLOW)Versions:$(RESET) fzf=$(FZF_VERSION) jq=$(JQ_VERSION)\n"
 	@echo ""
 	@printf "$(YELLOW)Targets:$(RESET)\n"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -158,17 +138,38 @@ clean: ## Clean generated files and caches
 	@rm -rf $(TESTS_DIR)/.bats-*
 	@rm -rf /tmp/jsh-*
 	@printf "$(GREEN)✔$(RESET) Clean complete\n"
+	@# Check for platform binaries and prompt for removal
+	@bin_dirs=$$(find $(JSH_DIR)/bin -maxdepth 1 -type d -name '*-*' 2>/dev/null | head -5); \
+	if [ -n "$$bin_dirs" ]; then \
+		printf "\n$(YELLOW)Platform binaries found:$(RESET)\n"; \
+		for d in $$bin_dirs; do \
+			count=$$(find "$$d" -type f 2>/dev/null | wc -l | tr -d ' '); \
+			printf "  %s (%s files)\n" "$$(basename $$d)" "$$count"; \
+		done; \
+		printf "\n"; \
+		printf "Remove platform binaries? [y/N] "; \
+		read -r ans; \
+		if [ "$$ans" = "y" ] || [ "$$ans" = "Y" ]; then \
+			rm -rf $(JSH_DIR)/bin/*-*/; \
+			printf "$(GREEN)✔$(RESET) Platform binaries removed\n"; \
+		else \
+			printf "$(CYAN)◆$(RESET) Binaries kept\n"; \
+		fi; \
+	fi
 
-clean-all: clean docker-clean ## Clean everything including Docker images
-	@printf "$(BLUE)==>$(RESET) Removing downloaded binaries...\n"
-	@rm -f $(BIN_DIR)/*/fzf $(BIN_DIR)/*/jq
-	@printf "$(GREEN)✔$(RESET) Full cleanup complete\n"
+clean-all: ## Clean everything including platform binaries (no prompt)
+	@printf "$(BLUE)==>$(RESET) Cleaning all...\n"
+	@rm -rf $(JSH_DIR)/.cache
+	@rm -rf $(TESTS_DIR)/.bats-*
+	@rm -rf /tmp/jsh-*
+	@rm -rf $(JSH_DIR)/bin/*-*/
+	@printf "$(GREEN)✔$(RESET) Full clean complete\n"
 
 # =============================================================================
 # Linting
 # =============================================================================
 
-lint: lint-shell lint-compat lint-yaml ## Run all linters
+lint: lint-shell lint-compat lint-yaml lint-secrets ## Run all linters
 
 lint-shell: ## Run ShellCheck on all shell scripts
 	@printf "$(BLUE)==>$(RESET) Running ShellCheck...\n"
@@ -246,6 +247,16 @@ format: ## Fix formatting with prettier
 		exit 1; \
 	fi
 
+lint-secrets: ## Scan for secrets with gitleaks (via pre-commit)
+	@printf "$(BLUE)==>$(RESET) Scanning for secrets...\n"
+	@if command -v pre-commit >/dev/null 2>&1; then \
+		pre-commit run gitleaks --all-files && \
+		printf "$(GREEN)✔$(RESET) No secrets detected\n"; \
+	else \
+		printf "$(YELLOW)⚠$(RESET) pre-commit not installed, skipping secret scan\n"; \
+		printf "  Install: pip install pre-commit\n"; \
+	fi
+
 # =============================================================================
 # Testing
 # =============================================================================
@@ -272,283 +283,122 @@ test-zsh: ## Run tests explicitly in zsh
 	@zsh -c 'bats $(TESTS_DIR)/*.bats'
 
 # =============================================================================
-# Dependency Management
+# Dependencies
+# =============================================================================
+# Required tools for development:
+#   - bash 4+      : Modern bash features (associative arrays, etc.)
+#   - shellcheck   : Shell script linting
+#   - bats         : Bash testing framework
+#   - pre-commit   : Git hook management
+#   - jq           : JSON processing (for dependency management)
+# Optional tools:
+#   - yamllint     : YAML linting
+#   - prettier     : Formatting (via npx)
 # =============================================================================
 
-deps: deps-check deps-download deps-plugins deps-verify ## Full dependency setup for current platform
+# Tool requirements
+REQUIRED_TOOLS := shellcheck bats pre-commit jq
+OPTIONAL_TOOLS := yamllint
 
-deps-check: ## Check if required tools are available
-	@printf "$(BLUE)==>$(RESET) Checking required tools...\n"
-	@command -v curl >/dev/null 2>&1 || { printf "$(RED)✘$(RESET) curl not found\n"; exit 1; }
-	@command -v tar >/dev/null 2>&1 || { printf "$(RED)✘$(RESET) tar not found\n"; exit 1; }
-	@printf "$(GREEN)✔$(RESET) Required tools available\n"
+deps: deps-install ## Bootstrap dev environment (install tools + configure hooks)
+	@printf "\n$(BLUE)==>$(RESET) Configuring git hooks...\n"
+	@pre-commit install --hook-type pre-commit --hook-type commit-msg >/dev/null 2>&1 && \
+		printf "$(GREEN)✔$(RESET) Pre-commit hooks installed\n" || \
+		printf "$(RED)✘$(RESET) Failed to install pre-commit hooks\n"
+	@printf "\n$(BLUE)==>$(RESET) Running verification...\n"
+	@$(MAKE) --no-print-directory deps-check
+	@printf "\n$(GREEN)✔$(RESET) Dev environment ready! Run 'make all' to verify.\n"
 
-deps-download: ## Download binaries for current platform
-	@printf "$(BLUE)==>$(RESET) Downloading binaries for $(PLATFORM)...\n"
-	@mkdir -p $(PLATFORM_BIN_DIR)
-	@$(MAKE) --no-print-directory _download-fzf-$(PLATFORM)
-	@$(MAKE) --no-print-directory _download-jq-$(PLATFORM)
-	@printf "$(GREEN)✔$(RESET) Binaries downloaded for $(PLATFORM)\n"
-
-deps-download-all: ## Download binaries for all platforms (CI)
-	@printf "$(BLUE)==>$(RESET) Downloading binaries for all platforms...\n"
-	@for platform in $(PLATFORMS); do \
-		printf "$(CYAN)  ➜$(RESET) $$platform\n"; \
-		mkdir -p $(BIN_DIR)/$$platform; \
-		$(MAKE) --no-print-directory _download-fzf-$$platform || exit 1; \
-		$(MAKE) --no-print-directory _download-jq-$$platform || exit 1; \
-	done
-	@printf "$(GREEN)✔$(RESET) All platform binaries downloaded\n"
-
-deps-verify: ## Verify downloaded binaries work
-	@printf "$(BLUE)==>$(RESET) Verifying binaries for $(PLATFORM)...\n"
-	@if [ -x "$(PLATFORM_BIN_DIR)/fzf" ]; then \
-		$(PLATFORM_BIN_DIR)/fzf --version >/dev/null 2>&1 && \
-		printf "$(GREEN)✔$(RESET) fzf $(FZF_VERSION)\n" || \
-		printf "$(RED)✘$(RESET) fzf binary error\n"; \
+deps-check: ## Verify all dependencies are installed
+	@printf "$(BLUE)==>$(RESET) Checking dependencies...\n"
+	@missing=0; \
+	for tool in $(REQUIRED_TOOLS); do \
+		if command -v "$$tool" >/dev/null 2>&1; then \
+			ver=$$($$tool --version 2>/dev/null | head -1 | sed 's/.*version //;s/[^0-9.].*//'); \
+			printf "  $(GREEN)✔$(RESET) $$tool $(CYAN)$$ver$(RESET)\n"; \
+		else \
+			printf "  $(RED)✘$(RESET) $$tool $(RED)(missing)$(RESET)\n"; \
+			missing=1; \
+		fi; \
+	done; \
+	for tool in $(OPTIONAL_TOOLS); do \
+		if command -v "$$tool" >/dev/null 2>&1; then \
+			ver=$$($$tool --version 2>/dev/null | head -1 | sed 's/.*version //;s/[^0-9.].*//'); \
+			printf "  $(GREEN)✔$(RESET) $$tool $(CYAN)$$ver$(RESET)\n"; \
+		else \
+			printf "  $(YELLOW)○$(RESET) $$tool $(YELLOW)(optional)$(RESET)\n"; \
+		fi; \
+	done; \
+	printf "\n"; \
+	bash_ver=$$(bash --version | head -1 | sed 's/.*version \([0-9]*\).*/\1/'); \
+	if [ "$$bash_ver" -ge 4 ] 2>/dev/null; then \
+		printf "  $(GREEN)✔$(RESET) bash 4+ $(CYAN)(v$$bash_ver)$(RESET)\n"; \
 	else \
-		printf "$(YELLOW)⚠$(RESET) fzf not found\n"; \
-	fi
-	@if [ -x "$(PLATFORM_BIN_DIR)/jq" ]; then \
-		$(PLATFORM_BIN_DIR)/jq --version >/dev/null 2>&1 && \
-		printf "$(GREEN)✔$(RESET) jq $(JQ_VERSION)\n" || \
-		printf "$(RED)✘$(RESET) jq binary error\n"; \
+		printf "  $(RED)✘$(RESET) bash 4+ $(RED)(found v$$bash_ver)$(RESET)\n"; \
+		missing=1; \
+	fi; \
+	if [ -f .git/hooks/pre-commit ] && grep -q pre-commit .git/hooks/pre-commit 2>/dev/null; then \
+		printf "  $(GREEN)✔$(RESET) pre-commit hooks configured\n"; \
 	else \
-		printf "$(YELLOW)⚠$(RESET) jq not found\n"; \
+		printf "  $(YELLOW)○$(RESET) pre-commit hooks $(YELLOW)(not installed)$(RESET)\n"; \
+	fi; \
+	if [ "$$missing" -eq 1 ]; then \
+		printf "\n$(RED)✘$(RESET) Missing required dependencies. Run: make deps-install\n"; \
+		exit 1; \
 	fi
 
-deps-force: clean-all deps-download-all deps-plugins-force ## Force re-download everything
-
-# -----------------------------------------------------------------------------
-# FZF Downloads
-# -----------------------------------------------------------------------------
-
-_download-fzf-linux-amd64:
-	@if [ ! -x "$(BIN_DIR)/linux-amd64/fzf" ]; then \
-		curl -sL "https://github.com/junegunn/fzf/releases/download/v$(FZF_VERSION)/fzf-$(FZF_VERSION)-linux_amd64.tar.gz" | tar xz -C $(BIN_DIR)/linux-amd64; \
-		chmod +x $(BIN_DIR)/linux-amd64/fzf; \
+deps-install: ## Install required development tools
+	@printf "$(BLUE)==>$(RESET) Installing development dependencies...\n"
+	@printf "$(CYAN)    Platform:$(RESET) $(PLATFORM)\n\n"
+ifeq ($(OS),darwin)
+	@# macOS: Use Homebrew
+	@if ! command -v brew >/dev/null 2>&1; then \
+		printf "$(RED)✘$(RESET) Homebrew not found. Install from https://brew.sh\n"; \
+		exit 1; \
 	fi
-
-_download-fzf-linux-arm64:
-	@if [ ! -x "$(BIN_DIR)/linux-arm64/fzf" ]; then \
-		curl -sL "https://github.com/junegunn/fzf/releases/download/v$(FZF_VERSION)/fzf-$(FZF_VERSION)-linux_arm64.tar.gz" | tar xz -C $(BIN_DIR)/linux-arm64; \
-		chmod +x $(BIN_DIR)/linux-arm64/fzf; \
-	fi
-
-_download-fzf-darwin-amd64:
-	@if [ ! -x "$(BIN_DIR)/darwin-amd64/fzf" ]; then \
-		curl -sL "https://github.com/junegunn/fzf/releases/download/v$(FZF_VERSION)/fzf-$(FZF_VERSION)-darwin_amd64.tar.gz" | tar xz -C $(BIN_DIR)/darwin-amd64; \
-		chmod +x $(BIN_DIR)/darwin-amd64/fzf; \
-	fi
-
-_download-fzf-darwin-arm64:
-	@if [ ! -x "$(BIN_DIR)/darwin-arm64/fzf" ]; then \
-		curl -sL "https://github.com/junegunn/fzf/releases/download/v$(FZF_VERSION)/fzf-$(FZF_VERSION)-darwin_arm64.tar.gz" | tar xz -C $(BIN_DIR)/darwin-arm64; \
-		chmod +x $(BIN_DIR)/darwin-arm64/fzf; \
-	fi
-
-# -----------------------------------------------------------------------------
-# jq Downloads
-# -----------------------------------------------------------------------------
-
-_download-jq-linux-amd64:
-	@if [ ! -x "$(BIN_DIR)/linux-amd64/jq" ]; then \
-		curl -sL "https://github.com/jqlang/jq/releases/download/jq-$(JQ_VERSION)/jq-linux-amd64" -o $(BIN_DIR)/linux-amd64/jq; \
-		chmod +x $(BIN_DIR)/linux-amd64/jq; \
-	fi
-
-_download-jq-linux-arm64:
-	@if [ ! -x "$(BIN_DIR)/linux-arm64/jq" ]; then \
-		curl -sL "https://github.com/jqlang/jq/releases/download/jq-$(JQ_VERSION)/jq-linux-arm64" -o $(BIN_DIR)/linux-arm64/jq; \
-		chmod +x $(BIN_DIR)/linux-arm64/jq; \
-	fi
-
-_download-jq-darwin-amd64:
-	@if [ ! -x "$(BIN_DIR)/darwin-amd64/jq" ]; then \
-		curl -sL "https://github.com/jqlang/jq/releases/download/jq-$(JQ_VERSION)/jq-macos-amd64" -o $(BIN_DIR)/darwin-amd64/jq; \
-		chmod +x $(BIN_DIR)/darwin-amd64/jq; \
-	fi
-
-_download-jq-darwin-arm64:
-	@if [ ! -x "$(BIN_DIR)/darwin-arm64/jq" ]; then \
-		curl -sL "https://github.com/jqlang/jq/releases/download/jq-$(JQ_VERSION)/jq-macos-arm64" -o $(BIN_DIR)/darwin-arm64/jq; \
-		chmod +x $(BIN_DIR)/darwin-arm64/jq; \
-	fi
-
-# -----------------------------------------------------------------------------
-# ZSH Plugin Downloads
-# -----------------------------------------------------------------------------
-
-deps-plugins: ## Download ZSH plugins
-	@printf "$(BLUE)==>$(RESET) Downloading ZSH plugins...\n"
-	@mkdir -p $(PLUGINS_DIR)/highlighters
-	@$(MAKE) --no-print-directory _download-zsh-autosuggestions
-	@$(MAKE) --no-print-directory _download-zsh-syntax-highlighting
-	@$(MAKE) --no-print-directory _download-zsh-history-substring-search
-	@printf "$(GREEN)✔$(RESET) ZSH plugins downloaded\n"
-
-deps-plugins-force: ## Force re-download ZSH plugins
-	@rm -f $(PLUGINS_DIR)/zsh-autosuggestions.zsh
-	@rm -f $(PLUGINS_DIR)/zsh-syntax-highlighting.zsh
-	@rm -f $(PLUGINS_DIR)/zsh-history-substring-search.zsh
-	@rm -rf $(PLUGINS_DIR)/highlighters
-	@$(MAKE) --no-print-directory deps-plugins
-
-_download-zsh-autosuggestions:
-	@if [ ! -f "$(PLUGINS_DIR)/zsh-autosuggestions.zsh" ]; then \
-		tmp=$$(mktemp -d); \
-		curl -sL "https://github.com/zsh-users/zsh-autosuggestions/archive/refs/tags/v$(ZSH_AUTOSUGGESTIONS_VERSION).tar.gz" | tar xz -C "$$tmp"; \
-		cp "$$tmp/zsh-autosuggestions-$(ZSH_AUTOSUGGESTIONS_VERSION)/zsh-autosuggestions.zsh" $(PLUGINS_DIR)/; \
-		rm -rf "$$tmp"; \
-		printf "  $(GREEN)✔$(RESET) zsh-autosuggestions v$(ZSH_AUTOSUGGESTIONS_VERSION)\n"; \
-	fi
-
-_download-zsh-syntax-highlighting:
-	@if [ ! -f "$(PLUGINS_DIR)/zsh-syntax-highlighting.zsh" ]; then \
-		tmp=$$(mktemp -d); \
-		curl -sL "https://github.com/zsh-users/zsh-syntax-highlighting/archive/refs/tags/$(ZSH_SYNTAX_HIGHLIGHTING_VERSION).tar.gz" | tar xz -C "$$tmp"; \
-		cp "$$tmp/zsh-syntax-highlighting-$(ZSH_SYNTAX_HIGHLIGHTING_VERSION)/zsh-syntax-highlighting.zsh" $(PLUGINS_DIR)/; \
-		rm -rf $(PLUGINS_DIR)/highlighters; \
-		cp -r "$$tmp/zsh-syntax-highlighting-$(ZSH_SYNTAX_HIGHLIGHTING_VERSION)/highlighters" $(PLUGINS_DIR)/; \
-		rm -rf "$$tmp"; \
-		printf "  $(GREEN)✔$(RESET) zsh-syntax-highlighting v$(ZSH_SYNTAX_HIGHLIGHTING_VERSION)\n"; \
-	fi
-
-_download-zsh-history-substring-search:
-	@if [ ! -f "$(PLUGINS_DIR)/zsh-history-substring-search.zsh" ]; then \
-		tmp=$$(mktemp -d); \
-		curl -sL "https://github.com/zsh-users/zsh-history-substring-search/archive/refs/tags/v$(ZSH_HISTORY_SUBSTRING_SEARCH_VERSION).tar.gz" | tar xz -C "$$tmp"; \
-		cp "$$tmp/zsh-history-substring-search-$(ZSH_HISTORY_SUBSTRING_SEARCH_VERSION)/zsh-history-substring-search.zsh" $(PLUGINS_DIR)/; \
-		rm -rf "$$tmp"; \
-		printf "  $(GREEN)✔$(RESET) zsh-history-substring-search v$(ZSH_HISTORY_SUBSTRING_SEARCH_VERSION)\n"; \
-	fi
-
-# -----------------------------------------------------------------------------
-# Vim Plugin Setup (portable vim-plug configuration)
-# -----------------------------------------------------------------------------
-
-VIM_CONFIG_DIR := $(LIB_DIR)/vim-config
-VIM_PLUGGED_DIR := $(VIM_CONFIG_DIR)/plugged
-VIM_PLUG_URL := https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim
-
-vim-setup: ## Download vim-plug and clone vim plugins
-	@printf "$(BLUE)==>$(RESET) Setting up portable vim configuration...\n"
-	@mkdir -p $(VIM_CONFIG_DIR)/autoload $(VIM_PLUGGED_DIR)
-	@if [ ! -f "$(VIM_CONFIG_DIR)/autoload/plug.vim" ]; then \
-		printf "  Downloading vim-plug...\n"; \
-		curl -fsSL $(VIM_PLUG_URL) -o $(VIM_CONFIG_DIR)/autoload/plug.vim; \
-		printf "  $(GREEN)✔$(RESET) vim-plug installed\n"; \
-	fi
-	@$(MAKE) --no-print-directory _clone-vim-plugins
-	@printf "$(GREEN)✔$(RESET) Vim setup complete\n"
-
-vim-update: ## Update vim plugins to latest
-	@printf "$(BLUE)==>$(RESET) Updating vim plugins...\n"
-	@for dir in $(VIM_PLUGGED_DIR)/*/; do \
-		if [ -d "$$dir/.git" ]; then \
-			name=$$(basename "$$dir"); \
-			printf "  Updating $$name...\n"; \
-			git -C "$$dir" pull --quiet 2>/dev/null || true; \
+	@printf "$(BLUE)==>$(RESET) Installing via Homebrew...\n"
+	@for tool in shellcheck bats-core pre-commit jq yamllint; do \
+		if brew list "$$tool" >/dev/null 2>&1; then \
+			printf "  $(GREEN)✔$(RESET) $$tool (already installed)\n"; \
+		else \
+			printf "  $(BLUE)↓$(RESET) Installing $$tool...\n"; \
+			brew install "$$tool" >/dev/null 2>&1 && \
+				printf "  $(GREEN)✔$(RESET) $$tool installed\n" || \
+				printf "  $(RED)✘$(RESET) Failed to install $$tool\n"; \
 		fi; \
 	done
-	@printf "$(GREEN)✔$(RESET) Vim plugins updated\n"
-
-vim-clean: ## Remove vim plugins (keeps vimrc)
-	@printf "$(BLUE)==>$(RESET) Cleaning vim plugins...\n"
-	@rm -rf $(VIM_PLUGGED_DIR)
-	@printf "$(GREEN)✔$(RESET) Vim plugins removed\n"
-
-vim-verify: ## Verify vim setup is complete
-	@printf "$(BLUE)==>$(RESET) Verifying vim setup...\n"
-	@if [ -f "$(VIM_CONFIG_DIR)/autoload/plug.vim" ]; then \
-		printf "  $(GREEN)✔$(RESET) vim-plug installed\n"; \
+	@# Ensure bash 4+ is available
+	@bash_ver=$$(bash --version | head -1 | sed 's/.*version \([0-9]*\).*/\1/'); \
+	if [ "$$bash_ver" -lt 4 ] 2>/dev/null; then \
+		printf "\n$(BLUE)==>$(RESET) Installing modern bash...\n"; \
+		brew install bash >/dev/null 2>&1 && \
+			printf "  $(GREEN)✔$(RESET) bash 4+ installed\n" || \
+			printf "  $(RED)✘$(RESET) Failed to install bash\n"; \
+	fi
+else ifeq ($(OS),linux)
+	@# Linux: Detect package manager and install
+	@printf "$(BLUE)==>$(RESET) Installing via package manager...\n"
+	@if command -v apt-get >/dev/null 2>&1; then \
+		printf "  $(CYAN)Detected:$(RESET) apt (Debian/Ubuntu)\n"; \
+		sudo apt-get update -qq; \
+		sudo apt-get install -y -qq shellcheck bats jq python3-pip >/dev/null 2>&1; \
+		pip3 install --user pre-commit yamllint >/dev/null 2>&1; \
+	elif command -v dnf >/dev/null 2>&1; then \
+		printf "  $(CYAN)Detected:$(RESET) dnf (Fedora/RHEL)\n"; \
+		sudo dnf install -y -q ShellCheck bats jq python3-pip >/dev/null 2>&1; \
+		pip3 install --user pre-commit yamllint >/dev/null 2>&1; \
+	elif command -v pacman >/dev/null 2>&1; then \
+		printf "  $(CYAN)Detected:$(RESET) pacman (Arch)\n"; \
+		sudo pacman -S --noconfirm --quiet shellcheck bash-bats jq python-pre-commit yamllint >/dev/null 2>&1; \
 	else \
-		printf "  $(RED)✘$(RESET) vim-plug missing\n"; \
+		printf "$(YELLOW)⚠$(RESET) Unknown package manager. Install manually:\n"; \
+		printf "    shellcheck bats pre-commit jq yamllint\n"; \
 	fi
-	@if [ -f "$(VIM_CONFIG_DIR)/vimrc" ]; then \
-		printf "  $(GREEN)✔$(RESET) vimrc present\n"; \
-	else \
-		printf "  $(RED)✘$(RESET) vimrc missing\n"; \
-	fi
-	@plugins_count=$$(ls -d $(VIM_PLUGGED_DIR)/*/ 2>/dev/null | wc -l | tr -d ' '); \
-	if [ "$$plugins_count" -ge 5 ]; then \
-		printf "  $(GREEN)✔$(RESET) $$plugins_count vim plugins installed\n"; \
-	else \
-		printf "  $(YELLOW)⚠$(RESET) Only $$plugins_count plugins (expected 8)\n"; \
-	fi
-
-_clone-vim-plugins:
-	@printf "  Cloning vim plugins...\n"
-	@if [ ! -d "$(VIM_PLUGGED_DIR)/fzf" ]; then \
-		git clone --depth 1 https://github.com/junegunn/fzf.git $(VIM_PLUGGED_DIR)/fzf 2>/dev/null; \
-		printf "    $(GREEN)✔$(RESET) fzf\n"; \
-	fi
-	@if [ ! -d "$(VIM_PLUGGED_DIR)/fzf.vim" ]; then \
-		git clone --depth 1 https://github.com/junegunn/fzf.vim.git $(VIM_PLUGGED_DIR)/fzf.vim 2>/dev/null; \
-		printf "    $(GREEN)✔$(RESET) fzf.vim\n"; \
-	fi
-	@if [ ! -d "$(VIM_PLUGGED_DIR)/vim-fugitive" ]; then \
-		git clone --depth 1 https://github.com/tpope/vim-fugitive.git $(VIM_PLUGGED_DIR)/vim-fugitive 2>/dev/null; \
-		printf "    $(GREEN)✔$(RESET) vim-fugitive\n"; \
-	fi
-	@if [ ! -d "$(VIM_PLUGGED_DIR)/vim-gitgutter" ]; then \
-		git clone --depth 1 https://github.com/airblade/vim-gitgutter.git $(VIM_PLUGGED_DIR)/vim-gitgutter 2>/dev/null; \
-		printf "    $(GREEN)✔$(RESET) vim-gitgutter\n"; \
-	fi
-	@if [ ! -d "$(VIM_PLUGGED_DIR)/lightline.vim" ]; then \
-		git clone --depth 1 https://github.com/itchyny/lightline.vim.git $(VIM_PLUGGED_DIR)/lightline.vim 2>/dev/null; \
-		printf "    $(GREEN)✔$(RESET) lightline.vim\n"; \
-	fi
-	@if [ ! -d "$(VIM_PLUGGED_DIR)/nerdtree" ]; then \
-		git clone --depth 1 https://github.com/preservim/nerdtree.git $(VIM_PLUGGED_DIR)/nerdtree 2>/dev/null; \
-		printf "    $(GREEN)✔$(RESET) nerdtree\n"; \
-	fi
-	@if [ ! -d "$(VIM_PLUGGED_DIR)/vim-surround" ]; then \
-		git clone --depth 1 https://github.com/tpope/vim-surround.git $(VIM_PLUGGED_DIR)/vim-surround 2>/dev/null; \
-		printf "    $(GREEN)✔$(RESET) vim-surround\n"; \
-	fi
-	@if [ ! -d "$(VIM_PLUGGED_DIR)/vim-commentary" ]; then \
-		git clone --depth 1 https://github.com/tpope/vim-commentary.git $(VIM_PLUGGED_DIR)/vim-commentary 2>/dev/null; \
-		printf "    $(GREEN)✔$(RESET) vim-commentary\n"; \
-	fi
-
-# =============================================================================
-# Docker
-# =============================================================================
-
-DOCKER_BUILD_ARGS := --build-arg FZF_VERSION=$(FZF_VERSION) \
-                     --build-arg JQ_VERSION=$(JQ_VERSION)
-
-docker: docker-build ## Build Docker development image
-
-docker-build: ## Build the Docker image
-	@printf "$(BLUE)==>$(RESET) Building Docker image...\n"
-	@docker build $(DOCKER_BUILD_ARGS) -t $(DOCKER_IMAGE):$(DOCKER_TAG) .
-	@printf "$(GREEN)✔$(RESET) Docker image built: $(DOCKER_IMAGE):$(DOCKER_TAG)\n"
-
-docker-build-multi: ## Build for multiple platforms (requires buildx)
-	@printf "$(BLUE)==>$(RESET) Building multi-platform Docker image...\n"
-	@docker buildx build $(DOCKER_BUILD_ARGS) \
-		--platform $(DOCKER_PLATFORMS) \
-		-t $(DOCKER_IMAGE):$(DOCKER_TAG) .
-
-docker-dev: docker-build ## Start interactive development container
-	@printf "$(BLUE)==>$(RESET) Starting dev container...\n"
-	@docker compose up -d dev
-	@docker compose exec dev /bin/zsh
-
-docker-shell: ## Quick shell in a fresh container
-	@docker compose run --rm dev /bin/zsh
-
-docker-test: docker-build ## Run tests inside container
-	@printf "$(BLUE)==>$(RESET) Running tests in container...\n"
-	@docker compose run --rm ci
-
-docker-clean: ## Remove Docker images and containers
-	@printf "$(BLUE)==>$(RESET) Cleaning Docker resources...\n"
-	@docker compose down -v --rmi local 2>/dev/null || true
-	@docker rmi $(DOCKER_IMAGE):$(DOCKER_TAG) 2>/dev/null || true
-	@printf "$(GREEN)✔$(RESET) Docker cleanup complete\n"
+else
+	@printf "$(YELLOW)⚠$(RESET) Unsupported platform: $(PLATFORM)\n"
+	@printf "    Install manually: shellcheck bats pre-commit jq\n"
+endif
+	@printf "\n$(GREEN)✔$(RESET) Tool installation complete\n"
 
 # =============================================================================
 # CI Targets (used by GitHub Actions and locally)
@@ -568,21 +418,35 @@ ci-test: ## CI test stage
 	@printf "$(BLUE)==>$(RESET) CI: Testing...\n"
 	@$(MAKE) --no-print-directory test
 
-ci-binaries: ## CI binary update stage
-	@printf "$(BLUE)==>$(RESET) CI: Updating binaries...\n"
-	@$(MAKE) --no-print-directory deps-download-all
-	@$(MAKE) --no-print-directory deps-plugins
-
 # =============================================================================
-# Git Hooks
+# Docker Development
 # =============================================================================
 
-pre-push: lint test ## Run before pushing (install with: make install-hooks)
-	@printf "$(GREEN)✔$(RESET) Pre-push checks passed\n"
+DOCKER_IMAGE ?= debian:bookworm
+DOCKER_SHELL ?= bash
+DOCKER_NAME := jsh-test-$(shell date +%s)
 
-install-hooks: ## Install git pre-push hook
-	@printf "$(BLUE)==>$(RESET) Installing git hooks...\n"
-	@echo '#!/bin/sh' > $(JSH_DIR)/.git/hooks/pre-push
-	@echo 'make pre-push' >> $(JSH_DIR)/.git/hooks/pre-push
-	@chmod +x $(JSH_DIR)/.git/hooks/pre-push
-	@printf "$(GREEN)✔$(RESET) Pre-push hook installed\n"
+docker: ## Run ephemeral Docker container for testing (DOCKER_SHELL=bash|zsh)
+	@printf "$(BLUE)==>$(RESET) Starting ephemeral container ($(DOCKER_SHELL))...\n"
+	@printf "$(CYAN)    Tip:$(RESET) Run './jsh setup' then 'source ~/.$(DOCKER_SHELL)rc' to test jsh\n"
+	@docker run -it --rm \
+		--name "$(DOCKER_NAME)" \
+		-v "$(JSH_DIR):/root/.jsh" \
+		-w /root/.jsh \
+		-e TERM=xterm-256color \
+		$(DOCKER_IMAGE) \
+		$(DOCKER_SHELL)
+
+docker-bash: ## Run ephemeral Docker container with bash
+	@$(MAKE) --no-print-directory docker DOCKER_SHELL=bash
+
+docker-zsh: ## Run ephemeral Docker container with zsh (installs zsh first)
+	@printf "$(BLUE)==>$(RESET) Starting ephemeral container (zsh)...\n"
+	@printf "$(CYAN)    Tip:$(RESET) Run './jsh setup' then 'source ~/.zshrc' to test jsh\n"
+	@docker run -it --rm \
+		--name "$(DOCKER_NAME)" \
+		-v "$(JSH_DIR):/root/.jsh" \
+		-w /root/.jsh \
+		-e TERM=xterm-256color \
+		$(DOCKER_IMAGE) \
+		sh -c 'apt-get update -qq && apt-get install -y -qq zsh >/dev/null 2>&1 && exec zsh'
