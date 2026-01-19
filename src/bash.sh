@@ -215,19 +215,55 @@ export docs="${HOME}/Documents"
 export jsh="${JSH_DIR}"
 
 # =============================================================================
-# FZF Key Bindings (shell-specific; config in tools.sh)
+# History Search with FZF fallback (from lib/fzf submodule)
 # =============================================================================
+# Runtime-safe: checks fzf availability on each invocation, not just at startup.
+# Falls back to bash's native reverse-i-search if fzf goes missing.
 
-# Source fzf key-bindings and completion (bundled with jsh)
-if has fzf && [[ -f "${JSH_DIR}/src/fzf/key-bindings.bash" ]]; then
-    source "${JSH_DIR}/src/fzf/key-bindings.bash"
-    source "${JSH_DIR}/src/fzf/completion.bash"
-else
-    # Bash already has Ctrl+R via readline, just warn in SSH sessions
-    if [[ "${JSH_ENV:-}" == "ssh" ]] && [[ -z "${_JSH_FZF_WARNED:-}" ]]; then
-        export _JSH_FZF_WARNED=1
-        printf '%s\n' "${C_MUTED:-\033[2m}[jsh] fzf not found - using standard history search (Ctrl+R)${RST:-\033[0m}" >&2
+# Store original Ctrl+R binding to restore if fzf disappears
+_JSH_ORIGINAL_CTRL_R=$(bind -p 2>/dev/null | grep '\\C-r' | head -1)
+
+_jsh_history_search() {
+    if command -v fzf >/dev/null 2>&1; then
+        # fzf available - use __fzf_history__ if defined, else basic fzf
+        if declare -F __fzf_history__ >/dev/null 2>&1; then
+            __fzf_history__
+        else
+            # Minimal fzf history search
+            local selected
+            selected=$(HISTTIMEFORMAT='' history | fzf --height=40% --reverse --tac --no-sort --exact --query="$READLINE_LINE" | sed 's/^ *[0-9]* *//')
+            if [[ -n "$selected" ]]; then
+                READLINE_LINE="$selected"
+                READLINE_POINT=${#READLINE_LINE}
+            fi
+        fi
+    else
+        # fzf not available - restore native readline reverse-i-search
+        # Unbind our function and restore original binding
+        bind '"\C-r": reverse-search-history'
+        # Notify user that we've restored native search
+        printf '\n%s\n' "${C_MUTED:-}[jsh] fzf unavailable - restored native Ctrl+R search${RST:-}"
+        READLINE_LINE=""
+        READLINE_POINT=0
     fi
+}
+
+# Source fzf key-bindings and completion from submodule, then wrap with our resilient function
+if has fzf && [[ -f "${JSH_DIR}/lib/fzf/shell/key-bindings.bash" ]]; then
+    source "${JSH_DIR}/lib/fzf/shell/key-bindings.bash"
+    source "${JSH_DIR}/lib/fzf/shell/completion.bash"
+    # Override with our wrapper for runtime resilience
+    bind -x '"\C-r": _jsh_history_search'
+elif has fzf; then
+    # fzf available but no key-bindings file - use our minimal implementation
+    bind -x '"\C-r": _jsh_history_search'
+fi
+# If fzf not available at all, leave readline's default Ctrl+R binding intact
+
+# One-time warning in SSH sessions when fzf not available
+if ! has fzf && [[ "${JSH_ENV:-}" == "ssh" ]] && [[ -z "${_JSH_FZF_WARNED:-}" ]]; then
+    export _JSH_FZF_WARNED=1
+    printf '%s\n' "${C_MUTED:-\033[2m}[jsh] fzf not found - using standard history search (Ctrl+R)${RST:-\033[0m}" >&2
 fi
 
 # =============================================================================
