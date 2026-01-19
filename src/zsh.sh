@@ -83,17 +83,35 @@ fi
 
 autoload -Uz compinit
 
-# Only regenerate completion dump once a day
+# Only regenerate completion dump once a day (or when new completions added)
 _zsh_compdump="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/zcompdump-${ZSH_VERSION}"
 # Use absolute paths - PATH may not be fully set during early init
 /bin/mkdir -p "$(/usr/bin/dirname "${_zsh_compdump}" 2>/dev/null || dirname "${_zsh_compdump}")" 2>/dev/null || mkdir -p "$(dirname "${_zsh_compdump}")"
 
-# shellcheck disable=SC1009,SC1036,SC1072,SC1073
-if [[ -n "${_zsh_compdump}"(#qN.mh+24) ]]; then
+# Check if completions need rebuild:
+# - Dump doesn't exist or is older than 24 hours
+# - Any custom completion file is newer than the dump
+_jsh_needs_compinit_rebuild() {
+    local dump="$1"
+    # No dump file? Rebuild
+    [[ ! -f "$dump" ]] && return 0
+    # shellcheck disable=SC1009,SC1036,SC1072,SC1073
+    # Dump older than 24 hours? Rebuild
+    [[ -n "${dump}"(#qN.mh+24) ]] && return 0
+    # Any custom completion file newer than dump? Rebuild
+    local comp
+    for comp in "${JSH_DIR}"/src/completions/_*(N); do
+        [[ "$comp" -nt "$dump" ]] && return 0
+    done
+    return 1
+}
+
+if _jsh_needs_compinit_rebuild "${_zsh_compdump}"; then
     compinit -i -d "${_zsh_compdump}"
 else
     compinit -C -d "${_zsh_compdump}"
 fi
+unset -f _jsh_needs_compinit_rebuild
 
 # Process deferred completions (registered before compinit loaded)
 if [[ -n "${_JSH_DEFERRED_COMPLETIONS[*]:-}" ]]; then
@@ -158,6 +176,13 @@ bindkey '^[[1;5C' forward-word   # Ctrl+Right
 bindkey '^[b' backward-word      # Alt+b
 bindkey '^[f' forward-word       # Alt+f
 
+# Word deletion (Ctrl+Backspace / Ctrl+Delete)
+bindkey '^W' backward-kill-word         # Ctrl+W - traditional Unix binding
+bindkey '^[[3;5~' kill-word             # Ctrl+Delete - delete word forward
+bindkey '^[[127;5u' backward-kill-word  # Ctrl+Backspace (kitty/CSI u mode)
+bindkey '^[^?' backward-kill-word       # Alt+Backspace (common alternative)
+bindkey '^[^H' backward-kill-word       # Alt+Backspace (alternate encoding)
+
 # =============================================================================
 # Directory Hashing (Quick cd)
 # =============================================================================
@@ -189,24 +214,56 @@ _jsh_set_title() {
 add-zsh-hook precmd _jsh_set_title
 
 # =============================================================================
-# FZF Key Bindings (shell-specific; config in tools.sh)
+# History Search with FZF fallback (from lib/fzf submodule)
 # =============================================================================
+# Runtime-safe: checks fzf availability on each invocation, not just at startup.
+# Falls back to zsh's native incremental search (bck-i-search) if fzf goes missing.
 
-# Source fzf key-bindings and completion (embedded in src/fzf/)
-if has fzf && [[ -f "${JSH_DIR}/src/fzf/key-bindings.zsh" ]]; then
-    source "${JSH_DIR}/src/fzf/key-bindings.zsh"
-    source "${JSH_DIR}/src/fzf/completion.zsh"
-else
-    # Fallback: Standard zsh incremental history search
-    # Use history-incremental-search (searches anywhere in command, not just prefix)
-    bindkey '^R' history-incremental-search-backward
-    bindkey '^S' history-incremental-search-forward
-
-    # One-time warning in SSH sessions
-    if [[ "${JSH_ENV:-}" == "ssh" ]] && [[ -z "${_JSH_FZF_WARNED:-}" ]]; then
-        export _JSH_FZF_WARNED=1
-        printf '%s\n' "${C_MUTED:-\033[2m}[jsh] fzf not found - using standard history search (Ctrl+R)${RST:-\033[0m}" >&2
+_jsh_history_search() {
+    if (( $+commands[fzf] )); then
+        # fzf available - use fzf-history-widget if loaded
+        if (( $+widgets[fzf-history-widget] )); then
+            zle fzf-history-widget
+        else
+            # fzf exists but widget not loaded - use basic fzf search
+            local selected
+            selected=$(fc -rl 1 | fzf --height=40% --reverse --tac --no-sort --exact --query="${LBUFFER}" | sed 's/^ *[0-9]* *//')
+            if [[ -n "$selected" ]]; then
+                BUFFER="$selected"
+                CURSOR=${#BUFFER}
+            fi
+            zle redisplay
+        fi
+    else
+        # fzf not available - rebind to native and invoke it
+        # This ensures the native bck-i-search mode is properly entered
+        bindkey '^R' history-incremental-search-backward
+        zle history-incremental-search-backward
     fi
+}
+zle -N _jsh_history_search
+
+# Source fzf key-bindings and completion from submodule
+if has fzf && [[ -f "${JSH_DIR}/lib/fzf/shell/key-bindings.zsh" ]]; then
+    source "${JSH_DIR}/lib/fzf/shell/key-bindings.zsh"
+    source "${JSH_DIR}/lib/fzf/shell/completion.zsh"
+    # Override fzf's binding with our wrapper for runtime resilience
+    bindkey '^R' _jsh_history_search
+elif has fzf; then
+    # fzf available but no key-bindings file - use our wrapper
+    bindkey '^R' _jsh_history_search
+else
+    # No fzf - explicitly bind to native incremental search
+    # (bare zsh in vi mode has ^R bound to 'redisplay' which does nothing useful)
+    bindkey '^R' history-incremental-search-backward
+fi
+
+bindkey '^S' history-incremental-search-forward
+
+# One-time warning in SSH sessions when fzf not available
+if ! has fzf && [[ "${JSH_ENV:-}" == "ssh" ]] && [[ -z "${_JSH_FZF_WARNED:-}" ]]; then
+    export _JSH_FZF_WARNED=1
+    printf '%s\n' "${C_MUTED:-\033[2m}[jsh] fzf not found - using standard history search (Ctrl+R)${RST:-\033[0m}" >&2
 fi
 
 # =============================================================================
