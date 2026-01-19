@@ -43,6 +43,14 @@ export JSH_DIR
 [[ $- != *i* ]] && return 0
 
 # =============================================================================
+# Terminal Settings (must be early, before keybindings)
+# =============================================================================
+
+# Unbind Ctrl+R from terminal "reprint" so shells can use it for history search
+# Without this, the terminal driver captures ^R before the shell sees it
+[[ -t 0 ]] && stty rprnt undef 2>/dev/null
+
+# =============================================================================
 # Profiler (optional, zero overhead when disabled)
 # =============================================================================
 
@@ -104,6 +112,26 @@ _source_module "core.sh"
 # 1b. Dependency management (optional, requires jq for full functionality)
 source_if "${JSH_DIR}/src/deps.sh"
 
+# =============================================================================
+# PATH Setup (must be before zsh.sh/bash.sh for fzf detection)
+# =============================================================================
+# Note: Platform detection is handled in core.sh (already sourced above)
+# JSH_PLATFORM is already set by core.sh
+
+# Jsh binaries and tools
+path_prepend "${JSH_DIR}/bin"                           # Bundled utilities
+path_prepend "${JSH_DIR}/bin/${JSH_PLATFORM}"           # Platform binaries (fzf, jq)
+path_prepend "${JSH_DIR}"                               # jsh CLI itself
+path_prepend "${JSH_DIR}/ssh"                           # jssh
+
+# User local binaries
+path_prepend "${HOME}/.local/bin"
+
+# Language-specific paths
+path_prepend "${HOME}/.cargo/bin"     # Rust
+path_prepend "${HOME}/go/bin"         # Go
+path_prepend "${HOME}/.npm-global/bin"  # Node global
+
 # 2. Vi-mode configuration (before shell-specific, affects keybindings)
 _source_module "vi-mode.sh"
 
@@ -140,25 +168,6 @@ if [[ "${JSH_SHELL}" == "bash" ]]; then
     _source_module "prompt.sh"
     prompt_init
 fi
-
-# =============================================================================
-# PATH Setup
-# =============================================================================
-# Note: Platform detection is handled in core.sh (already sourced above)
-# JSH_PLATFORM is already set by core.sh
-
-# Jsh binaries and tools
-path_prepend "${JSH_DIR}/bin"                           # Bundled utilities
-path_prepend "${JSH_DIR}"                               # jsh CLI itself
-path_prepend "${JSH_DIR}/ssh"                           # jssh
-
-# User local binaries
-path_prepend "${HOME}/.local/bin"
-
-# Language-specific paths
-path_prepend "${HOME}/.cargo/bin"     # Rust
-path_prepend "${HOME}/go/bin"         # Go
-path_prepend "${HOME}/.npm-global/bin"  # Node global
 
 # =============================================================================
 # Tool Configuration
