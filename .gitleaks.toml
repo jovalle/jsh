@@ -1,0 +1,79 @@
+# =============================================================================
+# Gitleaks Configuration for jsh
+# =============================================================================
+# This configuration extends gitleaks' default ruleset with project-specific
+# allowlists to reduce false positives while maintaining security coverage.
+#
+# Documentation: https://github.com/gitleaks/gitleaks#configuration
+# =============================================================================
+
+title = "jsh gitleaks config"
+
+# Use the default gitleaks rules as a base
+# This provides 160+ secret detection patterns out of the box
+
+[extend]
+# Extend the default configuration
+useDefault = true
+
+# =============================================================================
+# Global Allowlist
+# =============================================================================
+# Paths and patterns that should never trigger alerts
+
+[allowlist]
+description = "Global allowlist for jsh project"
+
+# Paths that are intentionally excluded from scanning
+paths = [
+    # Example files with placeholder credentials (not real secrets)
+    '''local/\.jshrc\.example''',
+    '''local/projects\.json\.example''',
+    '''local/profiles\.json\.example''',
+    # Test fixtures that may contain fake secrets for testing
+    '''tests/fixtures/.*''',
+    # Vendored third-party code
+    '''lib/zsh-plugins/.*''',
+    '''lib/vim-config/plugged/.*''',
+    # Lock files and generated content
+    '''package-lock\.json''',
+    '''yarn\.lock''',
+]
+
+# Regex patterns for content that should be ignored
+regexes = [
+    # Placeholder patterns used in example files
+    '''your-.*-here''',
+    '''YOUR_.*_HERE''',
+    '''<your-.*>''',
+    '''PLACEHOLDER''',
+    '''example\.com''',
+    '''xxx+''',
+]
+
+# =============================================================================
+# Rule-specific Allowlists
+# =============================================================================
+# Fine-tune specific rules to reduce false positives
+
+[[rules]]
+id = "generic-api-key"
+description = "Generic API Key"
+regex = '''(?i)(?:api[_-]?key|apikey)\s*[:=]\s*['"]?([a-zA-Z0-9_\-]{20,})['"]?'''
+# Allow this rule but with specific exclusions
+[rules.allowlist]
+regexes = [
+    # Exclude obvious placeholders
+    '''(?i)your[-_]?api[-_]?key''',
+    '''(?i)api[-_]?key[-_]?here''',
+]
+
+# =============================================================================
+# Commit Message Scanning
+# =============================================================================
+# Also scan commit messages for accidentally included secrets
+
+[git]
+# Number of git log commits to scan (0 = all)
+# For pre-commit hooks, this is ignored (only staged changes are scanned)
+numCommits = 50
