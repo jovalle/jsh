@@ -22,38 +22,8 @@ if [[ -f "${JSH_DIR}/src/core.sh" ]]; then
 fi
 
 # =============================================================================
-# Colors
+# Platform Helpers
 # =============================================================================
-
-if [[ -t 1 ]]; then
-    RED=$'\e[31m'
-    GREEN=$'\e[32m'
-    YELLOW=$'\e[33m'
-    BLUE=$'\e[34m'
-    CYAN=$'\e[36m'
-    BOLD=$'\e[1m'
-    DIM=$'\e[2m'
-    RST=$'\e[0m'
-else
-    RED="" GREEN="" YELLOW="" BLUE="" CYAN="" BOLD="" DIM="" RST=""
-fi
-
-# =============================================================================
-# Helpers
-# =============================================================================
-
-info()    { echo "${BLUE}$*${RST}"; }
-success() { echo "${GREEN}$*${RST}"; }
-warn()    { echo "${YELLOW}$*${RST}" >&2; }
-error()   { echo "${RED}$*${RST}" >&2; }
-die()     { error "$@"; exit 1; }
-
-prefix_info()    { echo "${BLUE}◆${RST} $*"; }
-prefix_success() { echo "${GREEN}✔${RST} $*"; }
-prefix_warn()    { echo "${YELLOW}⚠${RST} $*" >&2; }
-prefix_error()   { echo "${RED}✘${RST} $*" >&2; }
-
-has() { command -v "$1" >/dev/null 2>&1; }
 
 is_macos() { [[ "$(uname -s)" == "Darwin" ]]; }
 is_linux() { [[ "$(uname -s)" == "Linux" ]]; }
@@ -145,378 +115,12 @@ EOF
 }
 
 # =============================================================================
-# Symlink Configuration DSL
-# =============================================================================
-#
-# Format: TYPE SOURCE [-> DESTINATION] [@PLATFORM]
-#
-# Types:
-#   file      - Link single file (default dest: $HOME/filename)
-#   dir       - Link entire directory (default dest: $HOME/dirname)
-#   children  - Link each child of directory (default dest: $HOME/dirname/)
-#
-# Variables:
-#   $HOME        - User home directory
-#   $XDG_CONFIG  - XDG config dir ($XDG_CONFIG_HOME or ~/.config)
-#   $VSCODE_USER - VSCode user settings dir (platform-aware)
-#
-# Platforms: @all (default), @macos, @linux
-# =============================================================================
-
-get_symlink_rules() {
-    cat << 'RULES'
-# Home Dotfiles
-file .zshrc
-file .bashrc
-file .gitconfig
-file .inputrc
-file .tmux.conf
-file .vimrc
-file .editorconfig
-file .shellcheckrc
-file .markdownlint.jsonc
-file .prettierrc.json
-file .eslintrc.json
-file .pylintrc
-file .czrc
-file .ripgreprc
-
-# XDG Config (link each subdirectory)
-children .config -> $XDG_CONFIG
-
-# VSCode (platform-specific destination)
-children .vscode/user -> $VSCODE_USER
-RULES
-}
-
-# =============================================================================
-# Symlink DSL Parser
-# =============================================================================
-
-# Expand path variables
-_expand_path() {
-    local path="$1"
-    local xdg_config="${XDG_CONFIG_HOME:-${HOME}/.config}"
-    local vscode_user
-
-    case "$(uname -s)" in
-        Darwin) vscode_user="${HOME}/Library/Application Support/Code/User" ;;
-        *)      vscode_user="${xdg_config}/Code/User" ;;
-    esac
-
-    # Replace variables (longer names first to avoid partial matches)
-    path="${path//\$VSCODE_USER/${vscode_user}}"
-    path="${path//\$XDG_CONFIG/${xdg_config}}"
-    path="${path//\$HOME/${HOME}}"
-
-    echo "${path}"
-}
-
-# Check if platform specifier matches current platform
-_platform_matches() {
-    local platform="$1"
-
-    case "${platform}" in
-        @all|"") return 0 ;;
-        @macos)  is_macos && return 0 ;;
-        @linux)  is_linux && return 0 ;;
-    esac
-    return 1
-}
-
-# Process all symlink rules for a given action
-# Args: $1 = backup_dir (for link action), $2 = action (link|unlink|status)
-_process_symlink_rules() {
-    local backup_dir="$1"
-    local action="${2:-link}"
-
-    while IFS= read -r line; do
-        # Skip comments and blank lines
-        [[ -z "${line}" || "${line}" =~ ^[[:space:]]*# ]] && continue
-
-        # Trim leading/trailing whitespace
-        line="${line#"${line%%[![:space:]]*}"}"
-        line="${line%"${line##*[![:space:]]}"}"
-
-        # Extract platform specifier if present
-        local platform="@all"
-        if [[ "${line}" =~ [[:space:]]@(macos|linux|all)[[:space:]]*$ ]]; then
-            platform="@${BASH_REMATCH[1]}"
-            line="${line% @*}"
-            line="${line%"${line##*[![:space:]]}"}"
-        fi
-
-        # Skip if platform doesn't match
-        _platform_matches "${platform}" || continue
-
-        # Parse: TYPE SOURCE [-> DESTINATION]
-        local rule_type source dest
-
-        if [[ "${line}" =~ ^([a-z]+)[[:space:]]+(.+)[[:space:]]*-\>[[:space:]]*(.+)$ ]]; then
-            # Explicit destination: "type source -> dest"
-            rule_type="${BASH_REMATCH[1]}"
-            source="${BASH_REMATCH[2]}"
-            dest="${BASH_REMATCH[3]}"
-        elif [[ "${line}" =~ ^([a-z]+)[[:space:]]+(.+)$ ]]; then
-            # Implicit destination: "type source"
-            rule_type="${BASH_REMATCH[1]}"
-            source="${BASH_REMATCH[2]}"
-            dest=""
-        else
-            warn "Invalid rule: ${line}"
-            continue
-        fi
-
-        # Trim whitespace from parsed values
-        source="${source%"${source##*[![:space:]]}"}"
-        dest="${dest#"${dest%%[![:space:]]*}"}"
-
-        # Expand variables in destination
-        [[ -n "${dest}" ]] && dest=$(_expand_path "${dest}")
-
-        # Execute based on rule type and action
-        case "${rule_type}" in
-            file)
-                # Default destination: $HOME/$(basename source)
-                [[ -z "${dest}" ]] && dest="${HOME}/$(basename "${source}")"
-
-                case "${action}" in
-                    link)   _link_file "${source}" "${dest}" "${backup_dir}" ;;
-                    unlink) _unlink_single "${source}" "${dest}" ;;
-                    status) _status_single "${source}" "${dest}" ;;
-                esac
-                ;;
-
-            dir)
-                # Default destination: $HOME/source
-                [[ -z "${dest}" ]] && dest="${HOME}/${source}"
-
-                case "${action}" in
-                    link)   _link_directory "${source}" "${dest}" "${backup_dir}" ;;
-                    unlink) _unlink_single "${source}" "${dest}" ;;
-                    status) _status_single "${source}" "${dest}" ;;
-                esac
-                ;;
-
-            children)
-                # Default destination: $HOME/source
-                [[ -z "${dest}" ]] && dest="${HOME}/${source}"
-
-                case "${action}" in
-                    link)   _link_directory_children "${source}" "${dest}" "${backup_dir}" ;;
-                    unlink) _unlink_directory_children "${source}" "${dest}" ;;
-                    status) _status_directory_children "${source}" "${dest}" ;;
-                esac
-                ;;
-
-            *)
-                warn "Unknown rule type: ${rule_type}"
-                ;;
-        esac
-
-    done < <(get_symlink_rules)
-}
-
-# =============================================================================
-# Dotfile Symlink Helpers
-# =============================================================================
-
-# Link a single file
-# Args: $1 = source (relative to JSH_DIR), $2 = destination (absolute), $3 = backup_dir
-_link_file() {
-    local src_rel="$1"
-    local dest="$2"
-    local backup_dir="$3"
-    local src="${JSH_DIR}/${src_rel}"
-    local display_name="${src_rel}"
-
-    [[ -e "${src}" ]] || { prefix_warn "${display_name} source not found, skipping"; return 0; }
-
-    if [[ -L "${dest}" ]]; then
-        local current
-        current=$(readlink "${dest}")
-        if [[ "${current}" == "${src}" ]]; then
-            prefix_info "${display_name} already linked"
-            return 0
-        fi
-        rm "${dest}"
-    elif [[ -e "${dest}" ]]; then
-        mkdir -p "${backup_dir}"
-        if ! mv "${dest}" "${backup_dir}/" 2>/dev/null; then
-            prefix_warn "${display_name} cannot be moved (immutable or permission denied), skipping"
-            return 0
-        fi
-        prefix_info "Backed up ${display_name} to ${backup_dir}/"
-    fi
-
-    mkdir -p "$(dirname "${dest}")"
-    ln -s "${src}" "${dest}"
-    prefix_success "Linked ${display_name}"
-}
-
-# Link all children of a directory
-# Args: $1 = source dir (relative to JSH_DIR), $2 = dest dir (absolute), $3 = backup_dir
-_link_directory_children() {
-    local src_rel="${1%/}"
-    local dest_dir="${2%/}"
-    local backup_dir="$3"
-    local src_dir="${JSH_DIR}/${src_rel}"
-
-    [[ -d "${src_dir}" ]] || { prefix_warn "${src_rel}/ source directory not found, skipping"; return 0; }
-
-    mkdir -p "${dest_dir}"
-
-    for child in "${src_dir}"/*; do
-        [[ -e "${child}" ]] || continue
-        local child_name
-        child_name=$(basename "${child}")
-        local child_dest="${dest_dir}/${child_name}"
-        local child_src_rel="${src_rel}/${child_name}"
-
-        if [[ -L "${child_dest}" ]]; then
-            local current
-            current=$(readlink "${child_dest}")
-            if [[ "${current}" == "${child}" ]]; then
-                prefix_info "${child_src_rel} already linked"
-                continue
-            fi
-            rm "${child_dest}"
-        elif [[ -e "${child_dest}" ]]; then
-            mkdir -p "${backup_dir}"
-            if ! mv "${child_dest}" "${backup_dir}/" 2>/dev/null; then
-                prefix_warn "${child_src_rel} cannot be moved (immutable or permission denied), skipping"
-                continue
-            fi
-            prefix_info "Backed up ${child_src_rel} to ${backup_dir}/"
-        fi
-
-        ln -s "${child}" "${child_dest}"
-        prefix_success "Linked ${child_src_rel}"
-    done
-}
-
-# Show status of a single symlink
-_status_single() {
-    local display_name="$1"
-    local dest="$2"
-
-    if [[ -L "${dest}" ]]; then
-        local link_target resolved
-        link_target=$(readlink "${dest}")
-        resolved=$(readlink -f "${dest}" 2>/dev/null || readlink "${dest}")
-        if [[ "${resolved}" == "${JSH_DIR}/"* ]] || [[ "${resolved}" == "${JSH_DIR}" ]]; then
-            echo "  ${GREEN}✔${RST} ${display_name} -> ${link_target}"
-        else
-            echo "  ${YELLOW}~${RST} ${display_name} -> ${link_target}"
-        fi
-    elif [[ -e "${dest}" ]]; then
-        echo "  ${YELLOW}~${RST} ${display_name} (exists, not linked)"
-    else
-        echo "  ${DIM}-${RST} ${display_name}"
-    fi
-}
-
-# Link an entire directory
-# Args: $1 = source (relative to JSH_DIR), $2 = destination (absolute), $3 = backup_dir
-_link_directory() {
-    local src_rel="$1"
-    local dest="$2"
-    local backup_dir="$3"
-    local src="${JSH_DIR}/${src_rel}"
-    local display_name="${src_rel}"
-
-    [[ -d "${src}" ]] || { prefix_warn "${display_name}/ source not found, skipping"; return 0; }
-
-    if [[ -L "${dest}" ]]; then
-        local current
-        current=$(readlink "${dest}")
-        if [[ "${current}" == "${src}" ]]; then
-            prefix_info "${display_name}/ already linked"
-            return 0
-        fi
-        rm "${dest}"
-    elif [[ -e "${dest}" ]]; then
-        mkdir -p "${backup_dir}"
-        if ! mv "${dest}" "${backup_dir}/" 2>/dev/null; then
-            prefix_warn "${display_name}/ cannot be moved (immutable or permission denied), skipping"
-            return 0
-        fi
-        prefix_info "Backed up ${display_name}/ to ${backup_dir}/"
-    fi
-
-    mkdir -p "$(dirname "${dest}")"
-    ln -s "${src}" "${dest}"
-    prefix_success "Linked ${display_name}/"
-}
-
-# Unlink a single file or directory
-# Args: $1 = source (relative to JSH_DIR), $2 = destination (absolute)
-_unlink_single() {
-    local src_rel="$1"
-    local dest="$2"
-
-    if [[ -L "${dest}" ]]; then
-        local resolved
-        resolved=$(readlink -f "${dest}" 2>/dev/null || readlink "${dest}")
-        if [[ "${resolved}" == "${JSH_DIR}/"* ]] || [[ "${resolved}" == "${JSH_DIR}" ]]; then
-            rm "${dest}"
-            prefix_success "Unlinked ${src_rel}"
-        fi
-    fi
-}
-
-# Unlink all children of a directory
-# Args: $1 = source dir (relative to JSH_DIR), $2 = dest dir (absolute)
-_unlink_directory_children() {
-    local src_rel="${1%/}"
-    local dest_dir="${2%/}"
-    local src_dir="${JSH_DIR}/${src_rel}"
-
-    [[ -d "${src_dir}" ]] || return 0
-
-    for child in "${src_dir}"/*; do
-        [[ -e "${child}" ]] || continue
-        local child_name
-        child_name=$(basename "${child}")
-        local child_dest="${dest_dir}/${child_name}"
-        local child_src_rel="${src_rel}/${child_name}"
-
-        if [[ -L "${child_dest}" ]]; then
-            local resolved
-            resolved=$(readlink -f "${child_dest}" 2>/dev/null || readlink "${child_dest}")
-            if [[ "${resolved}" == "${JSH_DIR}/"* ]] || [[ "${resolved}" == "${JSH_DIR}" ]]; then
-                rm "${child_dest}"
-                prefix_success "Unlinked ${child_src_rel}"
-            fi
-        fi
-    done
-}
-
-# Show status of directory children
-# Args: $1 = source dir (relative to JSH_DIR), $2 = dest dir (absolute)
-_status_directory_children() {
-    local src_rel="${1%/}"
-    local dest_dir="${2%/}"
-    local src_dir="${JSH_DIR}/${src_rel}"
-
-    [[ -d "${src_dir}" ]] || return 0
-
-    for child in "${src_dir}"/*; do
-        [[ -e "${child}" ]] || continue
-        local child_name
-        child_name=$(basename "${child}")
-        local child_dest="${dest_dir}/${child_name}"
-        _status_single "${src_rel}/${child_name}" "${child_dest}"
-    done
-}
-
-# =============================================================================
 # Banner and Requirements
 # =============================================================================
 
 show_banner() {
     echo ""
-    echo "${BOLD}${CYAN}"
+    echo "${BOLD}${CYN}"
     echo "     ██╗███████╗██╗  ██╗"
     echo "     ██║██╔════╝██║  ██║"
     echo "     ██║███████╗███████║"
@@ -528,9 +132,23 @@ show_banner() {
 }
 
 check_requirements() {
+    local skip_git="${1:-false}"
+    local cmd_name="${2:-bootstrap}"
+
     info "Checking requirements..."
 
-    has git || die "git is required but not installed"
+    if [[ "${skip_git}" != true ]]; then
+        if ! has git; then
+            error "git is required but not installed"
+            prefix_info "If jsh is already cloned, use: jsh ${cmd_name} --no-git"
+            exit 1
+        fi
+    fi
+
+    if ! has curl && ! has wget; then
+        warn "curl/wget not found (needed for tool downloads)"
+        prefix_info "Install with: apt-get install curl (Linux) or brew install curl (macOS)"
+    fi
 
     if ! has zsh; then
         warn "zsh is not installed (recommended for full experience)"
@@ -545,11 +163,239 @@ show_next_steps() {
     echo ""
     echo "1. Reload your shell:"
     echo ""
-    echo "   ${CYAN}exec \$SHELL${RST}"
+    echo "   ${CYN}exec \$SHELL${RST}"
     echo ""
     echo "${BOLD}Useful commands:${RST}"
-    echo "  ${CYAN}jsh status${RST}   - Show installation status"
+    echo "  ${CYN}jsh status${RST}   - Show installation status"
     echo ""
+}
+
+# =============================================================================
+# Bootstrap: External Download Management
+# =============================================================================
+# All operations requiring external downloads are grouped here.
+# Users must approve a summary before ANY downloads occur.
+
+# Detect platform for binary downloads
+_bootstrap_detect_platform() {
+    if declare -f detect_platform >/dev/null 2>&1; then
+        detect_platform
+    else
+        local os arch
+        os="$(uname -s)"; os="${os,,}"
+        arch="$(uname -m)"
+        case "${arch}" in
+            x86_64) arch="amd64" ;;
+            aarch64|arm64) arch="arm64" ;;
+        esac
+        echo "${os}-${arch}"
+    fi
+}
+
+# Prompt for Y/n with default
+_bootstrap_confirm() {
+    local prompt="$1" default="${2:-y}"
+    local response
+
+    # Non-interactive mode: return default when no TTY
+    if [[ ! -t 0 ]] || [[ ! -t 1 ]]; then
+        [[ "${default}" == "y" ]]
+        return
+    fi
+
+    if [[ "${default}" == "y" ]]; then
+        read -r -p "${prompt} [Y/n] " response
+        [[ ! "${response}" =~ ^[Nn] ]]
+    else
+        read -r -p "${prompt} [y/N] " response
+        [[ "${response}" =~ ^[Yy] ]]
+    fi
+}
+
+# Gather user selections for all external downloads
+# Sets global variables: BOOTSTRAP_SHELL_TOOLS
+# Note: ZSH plugins are embedded in lib/zsh-plugins/ (managed by Renovate/GitHub Actions)
+_bootstrap_gather_selections() {
+    BOOTSTRAP_SHELL_TOOLS=false
+    BOOTSTRAP_ALL_PLATFORMS=false
+
+    # Check if download tools are available
+    local can_download=false
+    if has curl || has wget; then
+        can_download=true
+    fi
+
+    # Check if jq/fzf already available
+    local has_jq=false has_fzf=false
+    has jq && has_jq=true
+    has fzf && has_fzf=true
+
+    # Skip download section entirely if tools are installed or downloads impossible
+    if [[ "${has_jq}" == true ]] && [[ "${has_fzf}" == true ]]; then
+        echo ""
+        echo "${CYN}Shell Tools:${RST}"
+        echo "  ${GRN}✔${RST} jq and fzf already installed"
+        return 0
+    fi
+
+    if [[ "${can_download}" == false ]]; then
+        echo ""
+        echo "${CYN}Shell Tools:${RST}"
+        echo "  ${YLW}⚠${RST} curl/wget not available - cannot download tools"
+        echo "  ${DIM}Install missing tools via package manager:${RST}"
+        echo "  ${DIM}  macOS: brew install jq fzf${RST}"
+        echo "  ${DIM}  Linux: apt install jq fzf curl${RST}"
+        return 0
+    fi
+
+    # Show download options
+    echo ""
+    echo "${BOLD}External Downloads${RST}"
+    echo "${DIM}The following optional components require downloading from GitHub.${RST}"
+    echo "${DIM}Select what you'd like to install:${RST}"
+    echo ""
+
+    # --- Shell Tools (jq, fzf) ---
+    echo "${CYN}Shell Tools (jq, fzf):${RST}"
+    echo ""
+    echo "  ${BOLD}jq${RST}  - JSON processor (required for jsh features)"
+    echo "  ${BOLD}fzf${RST} - Fuzzy finder (recommended for enhanced experience)"
+    echo ""
+    echo "  ${DIM}These can be downloaded to bin/<platform>/ or installed via:${RST}"
+    echo "  ${DIM}  macOS: brew install jq fzf${RST}"
+    echo "  ${DIM}  Linux: apt install jq fzf${RST}"
+    echo ""
+
+    if _bootstrap_confirm "  Download jq and fzf binaries?" "y"; then
+        BOOTSTRAP_SHELL_TOOLS=true
+    fi
+
+    # --- Multi-platform binaries (for jssh portability) ---
+    if [[ "${BOOTSTRAP_SHELL_TOOLS}" == true ]]; then
+        echo ""
+        echo "${CYN}Multi-Platform Support (for jssh):${RST}"
+        echo ""
+        echo "  ${DIM}Download binaries for all platforms (darwin/linux, arm64/amd64)${RST}"
+        echo "  ${DIM}This enables portable shell environment via jssh.${RST}"
+        echo ""
+
+        if _bootstrap_confirm "  Download for all platforms?" "n"; then
+            BOOTSTRAP_ALL_PLATFORMS=true
+        fi
+    fi
+}
+
+# Show summary of all pending downloads and get final approval
+# Returns: 0 if approved, 1 if cancelled
+_bootstrap_show_download_summary() {
+    local has_downloads=false
+
+    echo ""
+    echo "${BOLD}════════════════════════════════════════════════════════════════${RST}"
+    echo "${BOLD}                    Download Summary${RST}"
+    echo "${BOLD}════════════════════════════════════════════════════════════════${RST}"
+    echo ""
+
+    # Always show local operations
+    echo "${CYN}Local Operations:${RST}"
+    if [[ "${BOOTSTRAP_SKIP_GIT:-false}" == true ]]; then
+        echo "  ${DIM}-${RST} Git operations skipped (--no-git)"
+    elif [[ ! -d "${JSH_DIR}/.git" ]]; then
+        echo "  ${GRN}•${RST} Clone jsh repository to ${JSH_DIR}"
+        echo "  ${GRN}•${RST} Initialize git submodules (fzf, zsh-completions, fzf-tab)"
+    else
+        echo "  ${GRN}•${RST} Update jsh repository"
+        echo "  ${GRN}•${RST} Initialize git submodules (fzf, zsh-completions, fzf-tab)"
+    fi
+    echo "  ${GRN}•${RST} Create symlinks for dotfiles"
+    echo ""
+
+    # Show shell tools downloads
+    if [[ "${BOOTSTRAP_SHELL_TOOLS:-false}" == true ]]; then
+        has_downloads=true
+        if [[ "${BOOTSTRAP_ALL_PLATFORMS:-false}" == true ]]; then
+            echo "${CYN}Shell Tools (all platforms for jssh portability):${RST}"
+            echo "  ${YLW}↓${RST} jq - JSON processor"
+            echo "  ${YLW}↓${RST} fzf - Fuzzy finder"
+            echo "  ${DIM}    Platforms: darwin-arm64, darwin-amd64, linux-arm64, linux-amd64${RST}"
+        else
+            local platform
+            platform=$(_bootstrap_detect_platform)
+            echo "${CYN}Shell Tools (from GitHub → bin/${platform}/):${RST}"
+            echo "  ${YLW}↓${RST} jq - JSON processor"
+            echo "  ${YLW}↓${RST} fzf - Fuzzy finder"
+        fi
+        echo ""
+    fi
+
+    if [[ "${has_downloads}" == false ]]; then
+        echo "${DIM}No external downloads selected.${RST}"
+        echo ""
+    fi
+
+    echo "${BOLD}════════════════════════════════════════════════════════════════${RST}"
+    echo ""
+
+    if [[ "${has_downloads}" == true ]]; then
+        echo "${YLW}The above items will be downloaded from external sources.${RST}"
+    fi
+
+    if ! _bootstrap_confirm "Proceed with installation?" "y"; then
+        info "Installation cancelled."
+        return 1
+    fi
+
+    return 0
+}
+
+# Execute shell tools downloads (jq, fzf)
+_bootstrap_download_shell_tools() {
+    if [[ "${BOOTSTRAP_SHELL_TOOLS:-false}" != true ]]; then
+        return 0
+    fi
+
+    info "Downloading shell tools..."
+
+    # Source deps.sh for download functions
+    if [[ -f "${JSH_DIR}/src/deps.sh" ]]; then
+        # shellcheck disable=SC1091
+        source "${JSH_DIR}/src/deps.sh"
+    else
+        prefix_error "deps.sh not found - cannot download tools"
+        prefix_info "Install manually: brew install jq fzf (macOS) or apt install jq fzf (Linux)"
+        return 1
+    fi
+
+    local errors=0
+
+    # Download for all platforms (jssh portability) or just current
+    if [[ "${BOOTSTRAP_ALL_PLATFORMS:-false}" == true ]]; then
+        download_all_platforms || ((errors++))
+    else
+        # Download jq (required)
+        if ! command -v jq >/dev/null 2>&1; then
+            download_binary "jq" || ((errors++))
+        else
+            prefix_success "jq (system)"
+        fi
+
+        # Download fzf (recommended)
+        if ! command -v fzf >/dev/null 2>&1; then
+            download_binary "fzf" || ((errors++))
+        else
+            prefix_success "fzf (system)"
+        fi
+    fi
+
+    if [[ ${errors} -gt 0 ]]; then
+        echo ""
+        warn "Some tools failed to download."
+        echo "  ${DIM}You can still use jsh, but some features may be limited.${RST}"
+        echo "  ${DIM}Install via package manager: brew install jq fzf${RST}"
+        # Don't fail the entire bootstrap - graceful degradation
+    fi
+
+    return 0
 }
 
 # =============================================================================
@@ -563,6 +409,10 @@ if [[ -f "${JSH_DIR}/src/deps.sh" ]]; then
     source "${JSH_DIR}/src/core.sh"
     source "${JSH_DIR}/src/deps.sh"
     # Load command modules
+    source_if "${JSH_DIR}/src/symlinks.sh"
+    source_if "${JSH_DIR}/src/status.sh"
+    source_if "${JSH_DIR}/src/upgrade.sh"
+    source_if "${JSH_DIR}/src/host.sh"
     source_if "${JSH_DIR}/src/tools.sh"
     source_if "${JSH_DIR}/src/clean.sh"
     source_if "${JSH_DIR}/src/install.sh"
@@ -586,37 +436,33 @@ ${BOLD}USAGE:${RST}
     jsh <command> [options]
 
 ${BOLD}SETUP COMMANDS:${RST}
-    ${CYAN}bootstrap${RST}   Clone/update repo and setup (for fresh installs)
-    ${CYAN}setup${RST}       Setup jsh (link dotfiles)
-    ${CYAN}teardown${RST}    Remove jsh symlinks and optionally the entire installation
-    ${CYAN}upgrade${RST}     Check for plugin/binary updates and manage versions
+    ${CYN}bootstrap${RST}   Clone/update repo and setup (for fresh installs)
+    ${CYN}setup${RST}       Setup jsh (link dotfiles)
+    ${CYN}teardown${RST}    Remove jsh symlinks and optionally the entire installation
+    ${CYN}upgrade${RST}     Check for plugin/binary updates and manage versions
 
 ${BOLD}SYMLINK COMMANDS:${RST}
-    ${CYAN}link${RST}        Create symlinks for managed dotfiles
-    ${CYAN}unlink${RST}      Remove symlinks (optionally restore backups)
+    ${CYN}link${RST}        Create symlinks for managed dotfiles
+    ${CYN}unlink${RST}      Remove symlinks (optionally restore backups)
 
 ${BOLD}INFO COMMANDS:${RST}
-    ${CYAN}status${RST}      Show installation status, symlinks, and check for issues
-    ${CYAN}doctor${RST}      Comprehensive health check with diagnostics and fixes
-
-${BOLD}PROJECT COMMANDS:${RST}
-    ${CYAN}project${RST}     Manage projects (sync, status, navigate, profiles)
-    ${CYAN}profiles${RST}    Manage git profiles (shortcut for 'projects profile')
+    ${CYN}status${RST}      Show installation status, symlinks, and check for issues
+    ${CYN}doctor${RST}      Comprehensive health check with diagnostics and fixes
 
 ${BOLD}PACKAGE & TOOLS:${RST}
-    ${CYAN}pkg${RST}         Manage packages (add, remove, list, sync, bundle, service)
-    ${CYAN}install${RST}     Install packages (brew, npm, pip, cargo)
-    ${CYAN}clean${RST}       Clean caches and temporary files
-    ${CYAN}tools${RST}       Discover and manage development tools
-    ${CYAN}cli${RST}         CLI helper for script discovery and completions
+    ${CYN}pkg${RST}         Manage packages (add, remove, list, sync, bundle, service)
+    ${CYN}install${RST}     Install packages (brew, npm, pip, cargo)
+    ${CYN}clean${RST}       Clean caches and temporary files
+    ${CYN}tools${RST}       Discover and manage development tools
+    ${CYN}cli${RST}         CLI helper for script discovery and completions
 
 ${BOLD}CONFIGURATION:${RST}
-    ${CYAN}sync${RST}        Sync git repo with remote (safe bidirectional)
-    ${CYAN}configure${RST}   Configure system settings and applications
+    ${CYN}sync${RST}        Sync git repo with remote (safe bidirectional)
+    ${CYN}configure${RST}   Configure system settings and applications
 
 ${BOLD}DEPENDENCY COMMANDS:${RST}
-    ${CYAN}deps${RST}        Manage dependencies (status, check, refresh, doctor)
-    ${CYAN}host${RST}        Manage remote host configurations for jssh
+    ${CYN}deps${RST}        Manage dependencies (status, check, refresh, doctor)
+    ${CYN}host${RST}        Manage remote host configurations for jssh
 
 ${BOLD}OPTIONS:${RST}
     -h, --help      Show this help
@@ -646,8 +492,6 @@ ${BOLD}ENVIRONMENT:${RST}
     JSH_DIR           Jsh installation directory (default: ~/.jsh)
     JSH_REPO          Git repository URL (default: github.com/jovalle/jsh)
     JSH_BRANCH        Branch to install (default: main)
-    PROJECTS          Space/newline separated list of git repos to sync
-    PROJECTS_DIR      Directory for git projects (default: ~/projects)
 
 HELP
 }
@@ -672,11 +516,6 @@ _setup_interactive() {
     read -r -p "Enable vi-mode keybindings? [Y/n]: " vi_mode
     vi_mode="${vi_mode:-y}"
 
-    # Project directory
-    local projects_dir
-    read -r -p "Project directory location [~/projects]: " projects_dir
-    projects_dir="${projects_dir:-$HOME/projects}"
-
     echo ""
     info "Saving configuration..."
 
@@ -686,7 +525,6 @@ _setup_interactive() {
 # Jsh Configuration (generated by setup --interactive)
 export EDITOR="${editor}"
 export JSH_VI_MODE=$([[ "${vi_mode,,}" =~ ^y ]] && echo 1 || echo 0)
-export PROJECTS_DIR="${projects_dir}"
 EOF
 
     prefix_success "Configuration saved to local/.jshrc"
@@ -712,18 +550,20 @@ EOF
 
 # @jsh-cmd setup Setup jsh (link dotfiles)
 # @jsh-opt -i,--interactive Run interactive setup wizard
+# @jsh-opt --no-git Skip git operations (submodule init)
 cmd_setup() {
     local interactive=false
+    local skip_git=false
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -i|--interactive) interactive=true; shift ;;
+            --no-git) skip_git=true; shift ;;
             *) shift ;;
         esac
     done
 
     show_banner
-    check_requirements
 
     if [[ "$interactive" == true ]]; then
         _setup_interactive
@@ -732,8 +572,12 @@ cmd_setup() {
 
     info "Setting up jsh..."
 
-    # Initialize submodules
-    if [[ -d "${JSH_DIR}/.git" ]]; then
+    # Initialize submodules (unless --no-git or git unavailable)
+    if [[ "${skip_git}" == true ]]; then
+        prefix_info "Skipping git operations (--no-git)"
+    elif ! has git; then
+        prefix_info "git not found, skipping submodule init"
+    elif [[ -d "${JSH_DIR}/.git" ]]; then
         info "Initializing submodules..."
         if git -C "${JSH_DIR}" submodule update --init --depth 1 2>/dev/null; then
             # Show submodule status
@@ -800,7 +644,7 @@ cmd_teardown() {
 
     if [[ "${skip_confirm}" != true ]]; then
         echo ""
-        echo "${YELLOW}Are you sure you want to teardown jsh? T_T${RST}"
+        echo "${YLW}Are you sure you want to teardown jsh? T_T${RST}"
         if [[ "${full_teardown}" == true ]]; then
             echo "${RED}This will completely remove ${JSH_DIR}!${RST}"
         fi
@@ -837,383 +681,6 @@ cmd_teardown() {
     echo ""
     echo "Don't forget to remove the 'source ~/.jsh/src/init.sh' line"
     echo "from your .zshrc or .bashrc"
-}
-
-# Find broken symlinks in a directory
-_find_broken_symlinks() {
-    local search_dir="$1"
-    local depth="${2:-1}"
-
-    [[ -d "${search_dir}" ]] || return
-
-    find "${search_dir}" -maxdepth "${depth}" -type l 2>/dev/null | while read -r link; do
-        if [[ ! -e "${link}" ]]; then
-            echo "${link}"
-        fi
-    done
-}
-
-# =============================================================================
-# Key Dependencies Health Check
-# =============================================================================
-# Note: Platform detection is in core.sh, use $JSH_PLATFORM variable
-
-# Check a bundled binary's health
-# Returns: 0=healthy, 1=not bundled, 2=not in PATH, 3=wrong version in PATH, 4=runtime error
-# Output: status message suitable for display
-_check_bundled_binary() {
-    local name="$1"
-    local bin_dir="$2"
-    local bundled="${bin_dir}/${name}"
-    local resolved version_output exit_code
-
-    # Check if bundled binary exists
-    if [[ ! -x "${bundled}" ]]; then
-        echo "not_bundled"
-        return 1
-    fi
-
-    # Check what's being resolved via PATH
-    resolved=$(command -v "${name}" 2>/dev/null)
-    if [[ -z "${resolved}" ]]; then
-        echo "not_in_path"
-        return 2
-    fi
-
-    # Check if resolved binary is our bundled version
-    if [[ "${resolved}" != "${bundled}" ]]; then
-        echo "wrong_path:${resolved}"
-        return 3
-    fi
-
-    # Run version check to verify runtime health
-    # Capture both stdout and stderr, and the exit code
-    case "${name}" in
-        fzf)
-            version_output=$("${bundled}" --version 2>&1)
-            exit_code=$?
-            if [[ ${exit_code} -eq 0 ]]; then
-                echo "healthy:${version_output}"
-                return 0
-            fi
-            ;;
-        jq)
-            version_output=$("${bundled}" --version 2>&1)
-            exit_code=$?
-            if [[ ${exit_code} -eq 0 ]]; then
-                # jq --version outputs "jq-X.Y.Z", strip the "jq-" prefix
-                echo "healthy:${version_output#jq-}"
-                return 0
-            fi
-            ;;
-        *)
-            # Generic check for other binaries
-            version_output=$("${bundled}" --version 2>&1 || "${bundled}" -v 2>&1 || true)
-            exit_code=$?
-            if [[ ${exit_code} -eq 0 ]]; then
-                local ver_line
-                ver_line=$(echo "${version_output}" | head -1)
-                echo "healthy:${ver_line}"
-                return 0
-            fi
-            ;;
-    esac
-
-    # Runtime error - try to identify the cause
-    if [[ "${version_output}" == *"GLIBC"* ]]; then
-        echo "runtime_error:glibc version mismatch"
-    elif [[ "${version_output}" == *"cannot open shared object"* ]]; then
-        local missing_lib
-        missing_lib=$(echo "${version_output}" | grep -o 'lib[^:]*\.so[^ ]*' | head -1)
-        echo "runtime_error:missing ${missing_lib:-shared library}"
-    elif [[ "${version_output}" == *"Illegal instruction"* ]]; then
-        echo "runtime_error:CPU instruction incompatibility"
-    else
-        echo "runtime_error:${version_output%%$'\n'*}"
-    fi
-    return 4
-}
-
-# @jsh-cmd status Show installation status, symlinks, and check for issues
-# @jsh-opt -f,--fix Fix issues (remove broken symlinks)
-# @jsh-opt -v,--verbose Show verbose output
-cmd_status() {
-    local fix_issues=false
-    local verbose=false
-
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --fix|-f)
-                fix_issues=true
-                shift
-                ;;
-            --verbose|-v)
-                verbose=true
-                shift
-                ;;
-            *)
-                shift
-                ;;
-        esac
-    done
-
-    show_banner
-
-    # Installation info
-    echo "${CYAN}Installation:${RST}"
-    echo "  Directory: ${JSH_DIR}"
-    echo "  Version:   ${VERSION}"
-
-    if [[ -d "${JSH_DIR}/.git" ]]; then
-        local branch commit remote_status
-        branch=$(git -C "${JSH_DIR}" branch --show-current 2>/dev/null || echo "unknown")
-        commit=$(git -C "${JSH_DIR}" rev-parse --short HEAD 2>/dev/null || echo "unknown")
-        echo "  Branch:    ${branch}"
-        echo "  Commit:    ${commit}"
-
-        # Check if ahead/behind remote
-        local ahead behind
-        ahead=$(git -C "${JSH_DIR}" rev-list --count @{u}..HEAD 2>/dev/null || echo "0")
-        behind=$(git -C "${JSH_DIR}" rev-list --count HEAD..@{u} 2>/dev/null || echo "0")
-        if [[ "${ahead}" -gt 0 ]] || [[ "${behind}" -gt 0 ]]; then
-            remote_status=""
-            [[ "${ahead}" -gt 0 ]] && remote_status+="${GREEN}↑${ahead}${RST}"
-            [[ "${behind}" -gt 0 ]] && remote_status+="${RED}↓${behind}${RST}"
-            echo "  Remote:    ${remote_status}"
-        fi
-    fi
-
-    # Platform info
-    echo ""
-    echo "${CYAN}Platform:${RST}"
-    local platform="${JSH_PLATFORM:-unknown}"
-    echo "  OS:        ${JSH_OS:-$(uname -s | tr '[:upper:]' '[:lower:]')}"
-    echo "  Arch:      ${JSH_ARCH:-$(uname -m)}"
-    echo "  Platform:  ${platform}"
-    echo "  Shell:     ${SHELL##*/} (${JSH_SHELL:-unknown})"
-    echo "  EDITOR:    ${EDITOR:-not set}"
-
-    # Detailed symlink status
-    echo ""
-    echo "${CYAN}Symlinks:${RST}"
-    _process_symlink_rules "" "status"
-
-    # Tool checks - Requirements
-    echo ""
-    echo "${CYAN}Requirements:${RST}"
-    local issues=0
-
-    # Required tools with versions
-    echo "  ${DIM}Required:${RST}"
-    local required=("git" "curl")
-    for tool in "${required[@]}"; do
-        if has "${tool}"; then
-            local ver=""
-            case "${tool}" in
-                git)  ver=$(git --version 2>/dev/null | cut -d' ' -f3) ;;
-                curl) ver=$(curl --version 2>/dev/null | head -1 | cut -d' ' -f2) ;;
-            esac
-            echo "    ${GREEN}✔${RST} ${tool} ${DIM}${ver}${RST}"
-        else
-            echo "    ${RED}✘${RST} ${tool} ${DIM}(required)${RST}"
-            ((issues++))
-        fi
-    done
-
-    # Check bash version (require 4.0+ for modern features)
-    local bash_ver bash_major
-    bash_ver="${BASH_VERSION:-$(bash --version 2>/dev/null | head -1 | sed 's/.*version \([0-9.]*\).*/\1/')}"
-    bash_major="${bash_ver%%.*}"
-    if [[ "${bash_major}" -ge 4 ]]; then
-        echo "    ${GREEN}✔${RST} bash ${DIM}${bash_ver}${RST}"
-    else
-        echo "    ${RED}✘${RST} bash ${DIM}${bash_ver} (need 4.0+, run: jsh deps fix-bash)${RST}"
-        ((issues++))
-    fi
-
-    if has zsh; then
-        local zsh_ver
-        zsh_ver=$(zsh --version 2>/dev/null | cut -d' ' -f2)
-        echo "    ${GREEN}✔${RST} zsh ${DIM}${zsh_ver}${RST}"
-    else
-        echo "    ${YELLOW}⚠${RST} zsh ${DIM}(recommended)${RST}"
-    fi
-
-    # Optional tools
-    echo "  ${DIM}Optional:${RST}"
-    local recommended=("fzf" "fd" "rg" "bat" "eza" "tmux" "jq")
-    for tool in "${recommended[@]}"; do
-        if has "${tool}"; then
-            local ver=""
-            case "${tool}" in
-                fzf)  ver=$("${tool}" --version 2>/dev/null | head -1) ;;
-                fd)   ver=$("${tool}" --version 2>/dev/null | cut -d' ' -f2) ;;
-                rg)   ver=$("${tool}" --version 2>/dev/null | head -1 | cut -d' ' -f2) ;;
-                bat)  ver=$("${tool}" --version 2>/dev/null | cut -d' ' -f2) ;;
-                eza)  ver=$("${tool}" --version 2>/dev/null | sed -n '2s/^v\([^ ]*\).*/\1/p') ;;
-                tmux) ver=$("${tool}" -V 2>/dev/null | cut -d' ' -f2) ;;
-                jq)   ver=$("${tool}" --version 2>/dev/null) ;;
-            esac
-            echo "    ${GREEN}✔${RST} ${tool} ${DIM}${ver}${RST}"
-        else
-            echo "    ${DIM}-${RST} ${tool}"
-        fi
-    done
-
-    # Bundled binaries
-    echo ""
-    echo "${CYAN}Bundled Binaries:${RST}"
-    local bin_dir="${JSH_DIR}/lib/bin/${platform}"
-
-    if [[ "${platform}" == "unknown" ]]; then
-        echo "  ${YELLOW}⚠${RST} Unknown platform, cannot check bundled binaries"
-    elif [[ ! -d "${bin_dir}" ]]; then
-        echo "  ${YELLOW}⚠${RST} No bundled binaries for ${platform}"
-        echo "  ${DIM}Run: ${JSH_DIR}/src/deps.sh${RST}"
-    else
-        local key_deps=("fzf" "jq")
-        for dep in "${key_deps[@]}"; do
-            local result status_type status_detail
-            result=$(_check_bundled_binary "${dep}" "${bin_dir}")
-            status_type="${result%%:*}"
-            status_detail="${result#*:}"
-
-            case "${status_type}" in
-                healthy)
-                    echo "  ${GREEN}✔${RST} ${dep}: ${status_detail}"
-                    ;;
-                not_bundled)
-                    echo "  ${DIM}-${RST} ${dep} (not bundled for ${platform})"
-                    ;;
-                not_in_path)
-                    echo "  ${RED}✘${RST} ${dep}: bundled but not in PATH"
-                    echo "      ${DIM}Expected: ${bin_dir}/${dep}${RST}"
-                    ((issues++))
-                    ;;
-                wrong_path)
-                    echo "  ${YELLOW}⚠${RST} ${dep}: using system version"
-                    echo "      ${DIM}Active:   ${status_detail}${RST}"
-                    echo "      ${DIM}Bundled:  ${bin_dir}/${dep}${RST}"
-                    ;;
-                runtime_error)
-                    echo "  ${RED}✘${RST} ${dep}: ${status_detail}"
-                    echo "      ${DIM}Binary: ${bin_dir}/${dep}${RST}"
-                    ((issues++))
-                    ;;
-            esac
-        done
-    fi
-
-    # ZSH Plugins
-    echo ""
-    echo "${CYAN}ZSH Plugins:${RST}"
-    local plugins_dir="${JSH_DIR}/lib/zsh-plugins"
-    local plugins=("zsh-autosuggestions" "zsh-syntax-highlighting" "zsh-history-substring-search")
-    for plugin in "${plugins[@]}"; do
-        local plugin_file="${plugins_dir}/${plugin}.zsh"
-        if [[ -f "${plugin_file}" ]]; then
-            echo "  ${GREEN}✔${RST} ${plugin}"
-        else
-            echo "  ${YELLOW}⚠${RST} ${plugin} ${DIM}(not installed)${RST}"
-        fi
-    done
-
-    # Check highlighters directory for syntax highlighting
-    if [[ -d "${plugins_dir}/highlighters" ]]; then
-        local highlighter_count
-        highlighter_count=$(find "${plugins_dir}/highlighters" -name "*.zsh" 2>/dev/null | wc -l | tr -d ' ')
-        echo "  ${GREEN}✔${RST} highlighters ${DIM}(${highlighter_count} files)${RST}"
-    fi
-
-    # Submodules
-    echo ""
-    echo "${CYAN}Submodules:${RST}"
-    local gitmodules="${JSH_DIR}/.gitmodules"
-    if [[ -f "${gitmodules}" ]]; then
-        while IFS= read -r line; do
-            if [[ "${line}" =~ path\ =\ (.+) ]]; then
-                local submod_path="${BASH_REMATCH[1]}"
-                local full_path="${JSH_DIR}/${submod_path}"
-
-                if [[ ! -d "${full_path}" ]]; then
-                    echo "  ${RED}✘${RST} ${submod_path} ${DIM}(not cloned)${RST}"
-                    ((issues++))
-                elif [[ -z "$(ls -A "${full_path}" 2>/dev/null)" ]]; then
-                    echo "  ${YELLOW}○${RST} ${submod_path} ${DIM}(not initialized)${RST}"
-                else
-                    local sub_commit
-                    sub_commit=$(git -C "${full_path}" rev-parse --short HEAD 2>/dev/null || echo "?")
-                    echo "  ${GREEN}✔${RST} ${submod_path} ${DIM}(${sub_commit})${RST}"
-                fi
-            fi
-        done < "${gitmodules}"
-    else
-        echo "  ${DIM}No submodules configured${RST}"
-    fi
-
-    # Dependency versions (from versions.json)
-    local versions_file="${JSH_DIR}/lib/bin/versions.json"
-    if [[ -f "${versions_file}" ]]; then
-        echo ""
-        echo "${CYAN}Configured Versions:${RST}"
-        if has jq; then
-            jq -r 'to_entries[] | "  \(.key): v\(.value)"' "${versions_file}" 2>/dev/null
-        else
-            # Fallback without jq
-            while IFS= read -r line; do
-                if [[ "${line}" =~ \"([^\"]+)\":\ *\"([^\"]+)\" ]]; then
-                    echo "  ${BASH_REMATCH[1]}: v${BASH_REMATCH[2]}"
-                fi
-            done < "${versions_file}"
-        fi
-    fi
-
-    # Broken symlinks check
-    echo ""
-    echo "${CYAN}Broken symlinks:${RST}"
-    local xdg_config="${XDG_CONFIG_HOME:-${HOME}/.config}"
-    local broken_links=()
-
-    while IFS= read -r link; do
-        [[ -n "${link}" ]] && broken_links+=("${link}")
-    done < <(_find_broken_symlinks "${JSH_DIR}" 3)
-
-    while IFS= read -r link; do
-        [[ -n "${link}" ]] && broken_links+=("${link}")
-    done < <(_find_broken_symlinks "${HOME}" 1)
-
-    while IFS= read -r link; do
-        [[ -n "${link}" ]] && broken_links+=("${link}")
-    done < <(_find_broken_symlinks "${xdg_config}" 2)
-
-    if [[ ${#broken_links[@]} -eq 0 ]]; then
-        echo "  ${GREEN}✔${RST} None found"
-    else
-        for link in "${broken_links[@]}"; do
-            local target
-            target=$(readlink "${link}" 2>/dev/null || echo "unknown")
-            if [[ "${fix_issues}" == true ]]; then
-                rm -f "${link}"
-                echo "  ${GREEN}✔${RST} Fixed: ${link}"
-            else
-                echo "  ${RED}✘${RST} ${link} -> ${target}"
-                ((issues++))
-            fi
-        done
-
-        if [[ "${fix_issues}" != true ]] && [[ ${#broken_links[@]} -gt 0 ]]; then
-            echo ""
-            info "Run ${CYAN}jsh status --fix${RST} to remove broken symlinks"
-        fi
-    fi
-
-    # Summary
-    echo ""
-    if [[ "${issues}" -eq 0 ]]; then
-        prefix_success "No issues found"
-    else
-        prefix_warn "${issues} issue(s) found"
-    fi
 }
 
 # @jsh-cmd link Create symlinks for managed dotfiles
@@ -1288,13 +755,13 @@ _restore_backup() {
             local file_count
             file_count=$(find "${backup_path}" -type f 2>/dev/null | wc -l | tr -d ' ')
             if [[ ${i} -eq 0 ]]; then
-                echo "  ${CYAN}${backup}${RST} (${file_count} files) ${GREEN}[latest]${RST}"
+                echo "  ${CYN}${backup}${RST} (${file_count} files) ${GRN}[latest]${RST}"
             else
                 echo "  ${backup} (${file_count} files)"
             fi
         done
         echo ""
-        echo "Usage: ${CYAN}jsh unlink --restore${RST} or ${CYAN}jsh unlink --restore=NAME${RST}"
+        echo "Usage: ${CYN}jsh unlink --restore${RST} or ${CYN}jsh unlink --restore=NAME${RST}"
         return 0
     fi
 
@@ -1360,202 +827,6 @@ cmd_reload() {
 }
 
 # =============================================================================
-# Upgrade Command
-# =============================================================================
-
-# @jsh-cmd upgrade Check for plugin/binary updates and manage versions
-# @jsh-opt -c,--check Dry run - show what would be done
-# @jsh-opt --no-brew Skip brew upgrade
-# @jsh-opt --no-submodules Skip submodule update
-cmd_upgrade() {
-    local check_only=false
-    local skip_brew=false
-    local skip_submodules=false
-
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --check|-c) check_only=true; shift ;;
-            --no-brew) skip_brew=true; shift ;;
-            --no-submodules) skip_submodules=true; shift ;;
-            -h|--help)
-                echo "${BOLD}jsh upgrade${RST} - Update jsh to latest version"
-                echo ""
-                echo "${BOLD}USAGE:${RST}"
-                echo "    jsh upgrade [options]"
-                echo ""
-                echo "${BOLD}OPTIONS:${RST}"
-                echo "    ${CYAN}-c, --check${RST}       Dry run - show what would be done"
-                echo "    ${CYAN}--no-brew${RST}         Skip brew upgrade"
-                echo "    ${CYAN}--no-submodules${RST}   Skip submodule update"
-                echo ""
-                echo "${BOLD}BEHAVIOR:${RST}"
-                echo "    1. Stash any local changes (preserved safely)"
-                echo "    2. Fetch and rebase onto upstream"
-                echo "    3. Update git submodules"
-                echo "    4. Upgrade Homebrew dependencies (macOS)"
-                echo "    5. Restore local changes from stash"
-                return 0
-                ;;
-            *) shift ;;
-        esac
-    done
-
-    info "Jsh Upgrade"
-    echo ""
-
-    cd "${JSH_DIR}" || { error "Cannot cd to ${JSH_DIR}"; return 1; }
-
-    # Check current state
-    local current_branch current_commit has_changes stash_created=false
-    current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
-    current_commit=$(git rev-parse --short HEAD 2>/dev/null)
-
-    prefix_info "Current: ${current_branch} @ ${current_commit}"
-
-    # Check for local changes (staged, unstaged, untracked)
-    if ! git diff --quiet HEAD 2>/dev/null || [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
-        has_changes=true
-        local staged unstaged untracked
-        staged=$(git diff --cached --name-only | wc -l | tr -d ' ')
-        unstaged=$(git diff --name-only | wc -l | tr -d ' ')
-        untracked=$(git ls-files --others --exclude-standard | wc -l | tr -d ' ')
-        prefix_warn "Local changes detected: ${staged} staged, ${unstaged} modified, ${untracked} untracked"
-    else
-        has_changes=false
-        prefix_success "Working tree is clean"
-    fi
-    echo ""
-
-    # Fetch upstream
-    info "Fetching upstream..."
-    if [[ "${check_only}" == true ]]; then
-        prefix_info "[dry-run] Would fetch from origin"
-    else
-        if git fetch origin 2>/dev/null; then
-            prefix_success "Fetched latest from origin"
-        else
-            prefix_warn "Failed to fetch (offline or no remote?)"
-        fi
-    fi
-
-    # Check if we're behind
-    local behind=0
-    behind=$(git rev-list --count "HEAD..origin/${current_branch}" 2>/dev/null || echo "0")
-    if [[ "${behind}" -gt 0 ]]; then
-        prefix_info "${behind} commit(s) behind origin/${current_branch}"
-    else
-        prefix_success "Already up to date with origin/${current_branch}"
-    fi
-    echo ""
-
-    # Stash local changes if needed
-    if [[ "${has_changes}" == true ]] && [[ "${behind}" -gt 0 ]]; then
-        info "Preserving local changes..."
-        if [[ "${check_only}" == true ]]; then
-            prefix_info "[dry-run] Would stash changes"
-        else
-            local stash_msg="jsh-upgrade-$(date +%Y%m%d-%H%M%S)"
-            if git stash push -u -m "${stash_msg}" 2>/dev/null; then
-                stash_created=true
-                prefix_success "Stashed as: ${stash_msg}"
-            else
-                error "Failed to stash changes - aborting"
-                return 1
-            fi
-        fi
-        echo ""
-    fi
-
-    # Rebase onto upstream
-    if [[ "${behind}" -gt 0 ]]; then
-        info "Updating to latest..."
-        if [[ "${check_only}" == true ]]; then
-            prefix_info "[dry-run] Would rebase onto origin/${current_branch}"
-        else
-            if git rebase "origin/${current_branch}" 2>/dev/null; then
-                local new_commit
-                new_commit=$(git rev-parse --short HEAD 2>/dev/null)
-                prefix_success "Updated: ${current_commit} → ${new_commit}"
-            else
-                error "Rebase failed - restoring state"
-                git rebase --abort 2>/dev/null
-                if [[ "${stash_created}" == true ]]; then
-                    git stash pop 2>/dev/null
-                fi
-                return 1
-            fi
-        fi
-        echo ""
-    fi
-
-    # Update submodules
-    if [[ "${skip_submodules}" != true ]]; then
-        info "Updating submodules..."
-        if [[ "${check_only}" == true ]]; then
-            prefix_info "[dry-run] Would update submodules"
-        else
-            if git submodule update --init --recursive 2>/dev/null; then
-                prefix_success "Submodules updated"
-            else
-                prefix_warn "Submodule update had issues (may be OK)"
-            fi
-        fi
-        echo ""
-    fi
-
-    # Homebrew upgrades (macOS only)
-    if [[ "${skip_brew}" != true ]] && [[ "$(uname)" == "Darwin" ]] && has brew; then
-        info "Checking Homebrew dependencies..."
-
-        local brew_deps=("bash" "fzf" "jq" "fd" "ripgrep" "bat" "eza")
-        local outdated=()
-
-        for dep in "${brew_deps[@]}"; do
-            if brew list "${dep}" &>/dev/null; then
-                if brew outdated "${dep}" &>/dev/null; then
-                    outdated+=("${dep}")
-                fi
-            fi
-        done
-
-        if [[ ${#outdated[@]} -gt 0 ]]; then
-            prefix_info "Outdated: ${outdated[*]}"
-            if [[ "${check_only}" == true ]]; then
-                prefix_info "[dry-run] Would run: brew upgrade ${outdated[*]}"
-            else
-                if brew upgrade "${outdated[@]}" 2>/dev/null; then
-                    prefix_success "Upgraded: ${outdated[*]}"
-                else
-                    prefix_warn "Some upgrades may have failed"
-                fi
-            fi
-        else
-            prefix_success "All Homebrew dependencies up to date"
-        fi
-        echo ""
-    fi
-
-    # Restore stashed changes
-    if [[ "${stash_created}" == true ]]; then
-        info "Restoring local changes..."
-        if git stash pop 2>/dev/null; then
-            prefix_success "Local changes restored"
-        else
-            prefix_warn "Stash pop had conflicts - resolve manually"
-            prefix_info "Your changes are in: git stash list"
-        fi
-        echo ""
-    fi
-
-    # Summary
-    if [[ "${check_only}" == true ]]; then
-        success "Dry run complete - no changes made"
-    else
-        success "Upgrade complete!"
-    fi
-}
-
-# =============================================================================
 # Dependency Commands
 # =============================================================================
 
@@ -1603,12 +874,12 @@ cmd_deps() {
             echo "    jsh deps <command>"
             echo ""
             echo "${BOLD}COMMANDS:${RST}"
-            echo "    ${CYAN}status${RST}        Show all dependencies and resolved strategies"
-            echo "    ${CYAN}check${RST}         Re-run preflight checks"
-            echo "    ${CYAN}refresh${RST}       Force re-download/rebuild dependencies"
-            echo "    ${CYAN}doctor${RST}        Diagnose dependency issues"
-            echo "    ${CYAN}capabilities${RST}  Show build capability profiles"
-            echo "    ${CYAN}fix-bash${RST}      Install/configure bash 4+ (macOS)"
+            echo "    ${CYN}status${RST}        Show all dependencies and resolved strategies"
+            echo "    ${CYN}check${RST}         Re-run preflight checks"
+            echo "    ${CYN}refresh${RST}       Force re-download/rebuild dependencies"
+            echo "    ${CYN}doctor${RST}        Diagnose dependency issues"
+            echo "    ${CYN}capabilities${RST}  Show build capability profiles"
+            echo "    ${CYN}fix-bash${RST}      Install/configure bash 4+ (macOS)"
             ;;
     esac
 }
@@ -1708,41 +979,29 @@ cmd_deps_doctor() {
         prefix_warn "No state file (run: jsh deps check)"
     fi
 
-    # Check platform binaries
+    # Check system tools
     echo ""
-    info "Platform: ${JSH_PLATFORM:-unknown}"
-    local platform="${JSH_PLATFORM:-unknown}"
-    local bin_dir="${JSH_DIR}/lib/bin/${platform}"
-
-    if [[ -d "${bin_dir}" ]]; then
-        prefix_success "Binary directory exists: lib/bin/${platform}"
-
-        local binaries=("fzf" "jq")
-        for bin in "${binaries[@]}"; do
-            if [[ -x "${bin_dir}/${bin}" ]]; then
-                # Test if it runs
-                if "${bin_dir}/${bin}" --version >/dev/null 2>&1; then
-                    prefix_success "${bin} is executable and runs"
-                else
-                    prefix_error "${bin} exists but fails to run (likely glibc/library issue)"
-                    ((issues++))
-
-                    # Try to diagnose
-                    local err_output
-                    err_output=$("${bin_dir}/${bin}" --version 2>&1 || true)
-                    if [[ "${err_output}" == *"GLIBC"* ]]; then
-                        echo "      ${DIM}Cause: glibc version mismatch${RST}"
-                        echo "      ${DIM}Solution: Use 'build' strategy or upgrade system${RST}"
-                    fi
-                fi
+    info "System Tools (install via package manager):"
+    local tools=("jq" "fzf" "fd" "rg")
+    for tool in "${tools[@]}"; do
+        if has "${tool}"; then
+            local version=""
+            case "${tool}" in
+                jq)  version=$("${tool}" --version 2>/dev/null) ;;
+                fzf) version=$("${tool}" --version 2>/dev/null | head -1) ;;
+                fd)  version=$("${tool}" --version 2>/dev/null | cut -d' ' -f2) ;;
+                rg)  version=$("${tool}" --version 2>/dev/null | head -1 | cut -d' ' -f2) ;;
+            esac
+            prefix_success "${tool} ${DIM}(${version})${RST}"
+        else
+            if [[ "${tool}" == "jq" ]]; then
+                prefix_error "${tool} (required - install with: brew install jq)"
+                ((issues++))
             else
-                prefix_warn "${bin} not found in lib/bin/${platform}"
+                prefix_info "${tool} ${DIM}(optional)${RST}"
             fi
-        done
-    else
-        prefix_warn "Binary directory not found for ${platform}"
-        prefix_info "Run: jsh deps refresh"
-    fi
+        fi
+    done
 
     # Summary
     echo ""
@@ -1870,210 +1129,99 @@ cmd_deps_fix_bash() {
     fi
 }
 
-# =============================================================================
-# Host Commands
-# =============================================================================
+# @jsh-cmd bootstrap Clone/update repo and setup (for fresh installs)
+# @jsh-opt -y,--non-interactive Skip prompts, use defaults
+# @jsh-opt --tools Download jq and fzf for current platform
+# @jsh-opt --all-platforms Download jq and fzf for all platforms (jssh)
+# @jsh-opt --no-git Skip git clone/pull and submodule operations
+cmd_bootstrap() {
+    local interactive=true
+    local with_tools=false
+    local all_platforms=false
+    local skip_git=false
 
-# @jsh-cmd host Manage remote host configurations for jssh
-# @jsh-sub list List known remote hosts
-# @jsh-sub status Show host capabilities and decisions
-# @jsh-sub refresh Re-run remote preflight for a host
-# @jsh-sub reset Clear cached decisions for a host
-cmd_host() {
-    local subcmd="${1:-list}"
-    shift 2>/dev/null || true
-
-    case "${subcmd}" in
-        list|ls|l)
-            cmd_host_list "$@"
-            ;;
-        status|s)
-            cmd_host_status "$@"
-            ;;
-        refresh|r)
-            cmd_host_refresh "$@"
-            ;;
-        reset)
-            cmd_host_reset "$@"
-            ;;
-        *)
-            echo "${BOLD}jsh host${RST} - Remote host management"
-            echo ""
-            echo "${BOLD}USAGE:${RST}"
-            echo "    jsh host <command> [hostname]"
-            echo ""
-            echo "${BOLD}COMMANDS:${RST}"
-            echo "    ${CYAN}list${RST}          List known remote hosts"
-            echo "    ${CYAN}status${RST}        Show host capabilities and decisions"
-            echo "    ${CYAN}refresh${RST}       Re-run remote preflight for a host"
-            echo "    ${CYAN}reset${RST}         Clear cached decisions for a host"
-            ;;
-    esac
-}
-
-cmd_host_list() {
-    local hosts_dir="${JSH_DIR}/local/hosts"
-
-    echo ""
-    echo "${BOLD}Known Remote Hosts${RST}"
-    echo ""
-
-    if [[ ! -d "${hosts_dir}" ]] || [[ -z "$(ls -A "${hosts_dir}" 2>/dev/null)" ]]; then
-        prefix_info "No remote hosts configured yet"
-        echo ""
-        echo "Remote hosts are tracked when you use ${CYAN}jssh${RST} to connect."
-        return 0
-    fi
-
-    for host_file in "${hosts_dir}"/*.json; do
-        [[ -f "${host_file}" ]] || continue
-
-        local hostname platform last_check
-        if has jq; then
-            hostname=$(jq -r '.hostname // "unknown"' "${host_file}")
-            platform=$(jq -r '.platform // "unknown"' "${host_file}")
-            last_check=$(jq -r '.last_check // "never"' "${host_file}")
-        else
-            hostname=$(basename "${host_file}" .json)
-            platform="unknown"
-            last_check="unknown"
-        fi
-
-        printf "  ${CYAN}%-30s${RST}  ${DIM}%s${RST}  %s\n" \
-            "${hostname}" "${platform}" "${last_check}"
+    # Parse options
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --non-interactive|-y) interactive=false; shift ;;
+            --tools) with_tools=true; shift ;;
+            --all-platforms) all_platforms=true; with_tools=true; shift ;;
+            --no-git) skip_git=true; shift ;;
+            -h|--help)
+                echo "Usage: jsh bootstrap [options]"
+                echo ""
+                echo "Options:"
+                echo "  -y, --non-interactive   Skip prompts, use defaults"
+                echo "  --tools                 Download jq and fzf for current platform"
+                echo "  --all-platforms         Download jq and fzf for all platforms (jssh)"
+                echo "  --no-git                Skip git clone/pull and submodule operations"
+                echo "  -h, --help              Show this help"
+                return 0
+                ;;
+            *) shift ;;
+        esac
     done
 
-    echo ""
-}
-
-cmd_host_status() {
-    local hostname="${1:-}"
-
-    if [[ -z "${hostname}" ]]; then
-        error "Usage: jsh host status <hostname>"
-        return 1
-    fi
-
-    local hosts_dir="${JSH_DIR}/local/hosts"
-    local host_file
-
-    # Try exact match first, then glob
-    if [[ -f "${hosts_dir}/${hostname}.json" ]]; then
-        host_file="${hosts_dir}/${hostname}.json"
-    else
-        # Try to find a match
-        local matches=("${hosts_dir}"/*"${hostname}"*.json)
-        if [[ ${#matches[@]} -eq 1 ]] && [[ -f "${matches[0]}" ]]; then
-            host_file="${matches[0]}"
-        elif [[ ${#matches[@]} -gt 1 ]]; then
-            error "Multiple matches found. Be more specific:"
-            for m in "${matches[@]}"; do
-                echo "  $(basename "${m}" .json)"
-            done
-            return 1
-        else
-            error "Host not found: ${hostname}"
-            prefix_info "Available hosts: jsh host list"
-            return 1
-        fi
-    fi
-
-    if ! has jq; then
-        cat "${host_file}"
-        return 0
-    fi
-
-    echo ""
-    echo "${BOLD}Host: $(jq -r '.hostname' "${host_file}")${RST}"
-    echo ""
-
-    echo "${CYAN}System:${RST}"
-    echo "  Platform:    $(jq -r '.platform // "unknown"' "${host_file}")"
-    echo "  glibc:       $(jq -r '.glibc // "N/A"' "${host_file}")"
-    echo "  Last check:  $(jq -r '.last_check // "never"' "${host_file}")"
-    echo ""
-
-    echo "${CYAN}Capabilities:${RST}"
-    jq -r '.capabilities // {} | to_entries[] | "  \(if .value then "✔" else "✘" end) \(.key)"' "${host_file}"
-    echo ""
-
-    echo "${CYAN}Dependency Decisions:${RST}"
-    jq -r '.decisions // {} | to_entries[] | "  \(.key): \(.value.strategy) (\(.value.reason // ""))"' "${host_file}"
-    echo ""
-}
-
-cmd_host_refresh() {
-    local hostname="${1:-}"
-
-    if [[ -z "${hostname}" ]]; then
-        error "Usage: jsh host refresh <hostname>"
-        return 1
-    fi
-
-    info "Refreshing host: ${hostname}"
-    warn "Remote host refresh requires jssh connection"
-    prefix_info "Connect with: jssh ${hostname}"
-    prefix_info "The preflight will run automatically on connection"
-}
-
-cmd_host_reset() {
-    local hostname="${1:-}"
-
-    if [[ -z "${hostname}" ]]; then
-        error "Usage: jsh host reset <hostname>"
-        return 1
-    fi
-
-    local hosts_dir="${JSH_DIR}/local/hosts"
-    local host_file="${hosts_dir}/${hostname}.json"
-
-    if [[ ! -f "${host_file}" ]]; then
-        # Try glob match
-        local matches=("${hosts_dir}"/*"${hostname}"*.json)
-        if [[ ${#matches[@]} -eq 1 ]] && [[ -f "${matches[0]}" ]]; then
-            host_file="${matches[0]}"
-        else
-            error "Host not found: ${hostname}"
-            return 1
-        fi
-    fi
-
-    local actual_hostname
-    actual_hostname=$(basename "${host_file}" .json)
-
-    read -r -p "Reset all decisions for ${actual_hostname}? [y/N] " confirm
-    if [[ "${confirm}" =~ ^[Yy] ]]; then
-        rm -f "${host_file}"
-        success "Reset ${actual_hostname} - will re-prompt on next jssh connection"
-    else
-        info "Cancelled"
-    fi
-}
-
-# @jsh-cmd bootstrap Clone/update repo and setup (for fresh installs)
-cmd_bootstrap() {
     show_banner
-    check_requirements
+    check_requirements "${skip_git}" "bootstrap"
 
-    if [[ -d "${JSH_DIR}" ]]; then
-        if [[ -d "${JSH_DIR}/.git" ]]; then
-            info "Jsh already installed, updating..."
-            git -C "${JSH_DIR}" pull --rebase || warn "Failed to pull updates"
-        else
-            die "${JSH_DIR} exists but is not a git repository"
-        fi
-    else
-        info "Cloning Jsh..."
-        git clone --depth 1 --branch "${JSH_BRANCH}" "${JSH_REPO}" "${JSH_DIR}"
+    # Non-interactive mode: no TTY or explicit flag
+    if [[ "${interactive}" == true ]] && [[ ! -t 0 || ! -t 1 ]]; then
+        interactive=false
     fi
 
-    info "Initializing submodules..."
-    git -C "${JSH_DIR}" submodule update --init --depth 1 || warn "Failed to init submodules"
+    # === Phase 1: Gather user selections ===
+    if [[ "${interactive}" == true ]]; then
+        _bootstrap_gather_selections
+    else
+        # Non-interactive mode: use flags or defaults
+        BOOTSTRAP_SHELL_TOOLS="${with_tools}"
+        BOOTSTRAP_ALL_PLATFORMS="${all_platforms}"
+    fi
 
+    # Set skip_git for use in summary display
+    BOOTSTRAP_SKIP_GIT="${skip_git}"
+
+    # === Phase 2: Show summary and get approval ===
+    if ! _bootstrap_show_download_summary; then
+        return 1
+    fi
+
+    # === Phase 3: Execute local operations ===
+    echo ""
+
+    # Clone or update repository (unless --no-git)
+    if [[ "${skip_git}" == true ]]; then
+        prefix_info "Skipping git operations (--no-git)"
+        if [[ ! -d "${JSH_DIR}" ]]; then
+            die "${JSH_DIR} does not exist. Cannot skip git operations on fresh install."
+        fi
+    else
+        if [[ -d "${JSH_DIR}" ]]; then
+            if [[ -d "${JSH_DIR}/.git" ]]; then
+                info "Updating jsh repository..."
+                git -C "${JSH_DIR}" pull --rebase || warn "Failed to pull updates"
+            else
+                die "${JSH_DIR} exists but is not a git repository"
+            fi
+        else
+            info "Cloning jsh repository..."
+            git clone --depth 1 --branch "${JSH_BRANCH}" "${JSH_REPO}" "${JSH_DIR}"
+        fi
+
+        info "Initializing submodules..."
+        git -C "${JSH_DIR}" submodule update --init --depth 1 || warn "Failed to init submodules"
+    fi
+
+    # === Phase 4: Execute external downloads ===
+    _bootstrap_download_shell_tools
+
+    # === Phase 5: Local configuration ===
     info "Setting up dotfiles..."
     cmd_link
     mkdir -p "${JSH_DIR}/local"
 
+    echo ""
     success "Jsh installed successfully!"
     show_next_steps
 }
@@ -2132,18 +1280,6 @@ main() {
             ;;
         bootstrap)
             cmd_bootstrap "$@"
-            ;;
-        project|proj|p)
-            project "$@"
-            ;;
-        profile)
-            project profile "$@"
-            ;;
-        projects)
-            project -l -v
-            ;;
-        profiles)
-            project profile list
             ;;
         deps|dependencies)
             cmd_deps "$@"
