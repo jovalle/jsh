@@ -12,48 +12,42 @@ _jsh_completion() {
         cword="${COMP_CWORD}"
     }
 
-    local jsh_complete="${JSH_DIR:-${HOME}/.jsh}/bin/jsh-complete"
+    local jsh_completion="${JSH_DIR:-${HOME}/.jsh}/bin/jsh-completion"
 
     # Check if helper exists
-    if [[ ! -x "$jsh_complete" ]]; then
+    if [[ ! -x "$jsh_completion" ]]; then
         return
     fi
 
-    # First argument - complete commands
+    # First argument - complete commands (options available via --help)
     if [[ $cword -eq 1 ]]; then
         local commands
-        commands=$("$jsh_complete" commands 2>/dev/null | cut -d: -f1 | tr '\n' ' ')
-        COMPREPLY=($(compgen -W "$commands -h --help -v --version" -- "$cur"))
+        commands=$("$jsh_completion" commands 2>/dev/null | cut -d: -f1 | tr '\n' ' ')
+        COMPREPLY=($(compgen -W "$commands" -- "$cur"))
         return
     fi
 
     # Get the main command
     local cmd="${words[1]}"
 
-    # Get subcommands and options for this command
-    local subcommands options
-    subcommands=$("$jsh_complete" subcommands "$cmd" 2>/dev/null | cut -d: -f1 | tr '\n' ' ')
-    options=$("$jsh_complete" options "$cmd" 2>/dev/null | cut -d: -f1 | tr ',' ' ' | tr '\n' ' ')
+    # Get subcommands for this command (options available via --help)
+    local subcommands
+    subcommands=$("$jsh_completion" subcommands "$cmd" 2>/dev/null | cut -d: -f1 | tr '\n' ' ')
 
-    # Second argument - complete subcommands or options
+    # Second argument - complete subcommands only
     if [[ $cword -eq 2 ]]; then
-        COMPREPLY=($(compgen -W "$subcommands $options -h --help" -- "$cur"))
+        COMPREPLY=($(compgen -W "$subcommands" -- "$cur"))
         return
     fi
 
-    # Third+ argument - complete options
-    COMPREPLY=($(compgen -W "$options -h --help" -- "$cur"))
+    # No further completions
+    COMPREPLY=()
 
-    # Handle special dynamic completions
+    # Handle special dynamic completions (positional arguments only)
     case "$cmd" in
         host)
             if [[ "${words[2]}" =~ ^(status|refresh|reset)$ ]] && [[ $cword -eq 3 ]]; then
                 _jsh_host_names
-            fi
-            ;;
-        unlink)
-            if [[ "$prev" == "--restore" ]] || [[ "$cur" == "--restore="* ]]; then
-                _jsh_backup_names
             fi
             ;;
     esac
@@ -65,26 +59,10 @@ _jsh_host_names() {
     local hosts=""
 
     if [[ -d "$hosts_dir" ]]; then
-        hosts=$(find "$hosts_dir" -maxdepth 1 -name '*.json' 2>/dev/null | \
-            xargs -I {} basename {} .json | tr '\n' ' ')
+        hosts=$(find "$hosts_dir" -maxdepth 1 -name '*.json' -exec basename {} .json \; 2>/dev/null | tr '\n' ' ')
     fi
 
     COMPREPLY=($(compgen -W "$hosts" -- "${COMP_WORDS[COMP_CWORD]}"))
-}
-
-# Dynamic completion: backup names
-_jsh_backup_names() {
-    local backup_dir="${HOME}/.jsh_backup"
-    local backups="latest"
-
-    if [[ -d "$backup_dir" ]]; then
-        local dir_backups
-        dir_backups=$(find "$backup_dir" -maxdepth 1 -type d -name '[0-9]*' 2>/dev/null | \
-            xargs -I {} basename {} | tr '\n' ' ')
-        backups="$backups $dir_backups"
-    fi
-
-    COMPREPLY=($(compgen -W "$backups" -- "${COMP_WORDS[COMP_CWORD]}"))
 }
 
 # Register completion

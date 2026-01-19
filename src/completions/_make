@@ -14,31 +14,8 @@ _make() {
     local curcontext="$curcontext" state line
     typeset -A opt_args
 
-    # Standard make options
+    # Complete targets only - use --help for options
     _arguments -C \
-        '-B[Unconditionally make all targets]' \
-        '-C[Change directory before reading makefiles]:directory:_directories' \
-        '-d[Print debugging information]' \
-        '-e[Environment variables override makefiles]' \
-        '-f[Read FILE as a makefile]:makefile:_files' \
-        '-i[Ignore errors from commands]' \
-        '-I[Search directory for included makefiles]:directory:_directories' \
-        '-j[Allow N jobs at once]:jobs:' \
-        '-k[Keep going when some targets cannot be made]' \
-        '-l[Do not start multiple jobs unless load < N]:load:' \
-        '-n[Print commands but do not execute]' \
-        '-o[Consider FILE to be very old]:file:_files' \
-        '-p[Print database of rules and variables]' \
-        '-q[Run no commands; exit status says if up to date]' \
-        '-r[Disable built-in implicit rules]' \
-        '-R[Disable built-in variable settings]' \
-        '-s[Silent mode]' \
-        '-S[Turns off -k]' \
-        '-t[Touch targets instead of remaking them]' \
-        '-v[Print version]' \
-        '-w[Print working directory]' \
-        '-W[Consider FILE to be infinitely new]:file:_files' \
-        '--help[Display help]' \
         '*:target:->targets'
 
     case $state in

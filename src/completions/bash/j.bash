@@ -12,28 +12,7 @@ _j_completion() {
         cword="${COMP_CWORD}"
     }
 
-    local commands="-c --code -r --remote --add -a --remove --list -l --clean --help -h -"
-
-    # After -r/--remote, complete with remote project names
-    if [[ "$prev" == "-r" || "$prev" == "--remote" ]]; then
-        _j_complete_remotes
-        return
-    fi
-
-    # First argument - complete commands and directories
-    if [[ $cword -eq 1 ]]; then
-        # If starting with -, complete commands
-        if [[ "$cur" == -* ]]; then
-            COMPREPLY=($(compgen -W "$commands" -- "$cur"))
-            return
-        fi
-
-        # Otherwise, complete directories
-        _j_complete_directories
-        return
-    fi
-
-    # Additional arguments - complete directories only (multiple query terms)
+    # Complete directories only - use --help for options
     _j_complete_directories
 }
 
@@ -92,18 +71,6 @@ _j_complete_directories() {
     local unique_dirs
     unique_dirs=$(echo "$dirs" | tr ' ' '\n' | sort -u | tr '\n' ' ')
     COMPREPLY=($(compgen -W "$unique_dirs" -- "$cur"))
-}
-
-_j_complete_remotes() {
-    local cur="${COMP_WORDS[COMP_CWORD]}"
-    local config_file="${JSH_DIR:-${HOME}/.jsh}/local/projects.json"
-    local remotes=""
-
-    if [[ -f "$config_file" ]] && command -v jq &>/dev/null; then
-        remotes=$(jq -r '.remotes | keys[]' "$config_file" 2>/dev/null | tr '\n' ' ')
-    fi
-
-    COMPREPLY=($(compgen -W "$remotes" -- "$cur"))
 }
 
 # Register completion

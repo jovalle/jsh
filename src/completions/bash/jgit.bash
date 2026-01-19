@@ -48,7 +48,8 @@ _jgit_completion() {
             _jgit_profile_completion
             ;;
         list|-l)
-            COMPREPLY=($(compgen -W "-v --verbose" -- "$cur"))
+            # Options available via: jgit list --help
+            COMPREPLY=()
             ;;
         add)
             # After URL, complete local name (no completion)
