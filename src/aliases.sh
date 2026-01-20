@@ -10,6 +10,10 @@ _JSH_ALIASES_LOADED=1
 # Core Aliases (Always Loaded)
 # =============================================================================
 
+alias p='project'
+alias pp='project profile'
+alias projects='project -l -v'
+
 # -----------------------------------------------------------------------------
 # Navigation
 # -----------------------------------------------------------------------------
@@ -99,9 +103,6 @@ alias week='date +%V'
 
 alias reload='exec "${SHELL}"'
 alias rl='exec "${SHELL}"'
-
-# Note: 'j' is defined as a function in j.sh (smart directory jumping)
-alias p='project'
 
 # -----------------------------------------------------------------------------
 # Editors

@@ -102,6 +102,11 @@ _vimode_setup_zsh() {
         bindkey -M viins '^?' backward-delete-char  # Backspace
         bindkey -M viins '^H' backward-delete-char
         bindkey -M viins '^D' delete-char-or-list
+
+        # Ctrl+Backspace (word deletion) - must be in viins to avoid escape sequence misinterpretation
+        bindkey -M viins '^[[127;5u' backward-kill-word  # CSI u mode (Ghostty/Kitty)
+        bindkey -M viins '^[^?' backward-kill-word       # Escape + DEL encoding
+        bindkey -M viins '^[^H' backward-kill-word       # Escape + BS encoding
         bindkey -M viins '^B' backward-char
         bindkey -M viins '^F' forward-char
     fi

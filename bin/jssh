@@ -182,25 +182,14 @@ _jssh_check_setup() {
         success "FZF shell integration: present"
     fi
 
-    # Check FZF binaries
-    local fzf_platforms=0
-    for platform in linux-amd64 darwin-arm64; do
-        if [[ -x "${JSH_DIR}/lib/bin/${platform}/fzf" ]]; then
-            ((fzf_platforms++))
-        fi
-    done
-
-    if [[ ${fzf_platforms} -eq 0 ]]; then
-        printf "${C_RED}✗${C_RESET} No fzf binaries found in lib/bin/\n" >&2
-        printf "  ${C_DIM}Run: make download-binaries${C_RESET}\n" >&2
-        ((errors++))
-    elif [[ ${fzf_platforms} -lt 2 ]]; then
-        printf "${C_YELLOW}!${C_RESET} Only ${fzf_platforms}/2 fzf platform binaries found\n" >&2
-        ((warnings++))
-    else
+    # Check FZF (now a system dependency)
+    if command -v fzf >/dev/null 2>&1; then
         local fzf_version
-        fzf_version=$("${JSH_DIR}/lib/bin/darwin-arm64/fzf" --version 2>/dev/null | cut -d' ' -f1 || echo "unknown")
-        success "FZF binaries: ${fzf_platforms} platforms (v${fzf_version})"
+        fzf_version=$(fzf --version 2>/dev/null | cut -d' ' -f1 || echo "unknown")
+        success "FZF: installed (v${fzf_version})"
+    else
+        printf "${C_YELLOW}!${C_RESET} FZF not installed (optional - install via package manager)\n" >&2
+        ((warnings++))
     fi
 
     # Check config files
@@ -304,18 +293,7 @@ _jssh_build_payload() {
         cp "${JSH_DIR}/src/fzf"/*.bash "${payload_dir}/src/fzf/" 2>/dev/null || true
     fi
 
-    # Copy fzf binaries for all platforms
-    local fzf_copied=0
-    for platform in linux-amd64 darwin-arm64; do
-        if [[ -x "${JSH_DIR}/lib/bin/${platform}/fzf" ]]; then
-            mkdir -p "${payload_dir}/bin/${platform}"
-            cp "${JSH_DIR}/lib/bin/${platform}/fzf" "${payload_dir}/bin/${platform}/"
-            chmod +x "${payload_dir}/bin/${platform}/fzf"
-            ((fzf_copied++))
-            debug "  Added fzf for ${platform}"
-        fi
-    done
-    [[ ${fzf_copied} -eq 0 ]] && warn "No fzf binaries found - remote hosts won't have fzf"
+    # Note: fzf is now a system dependency - remote hosts should install via package manager
 
     # Copy vim-config (vim-plug + plugins for full editing experience)
     if [[ -d "${JSH_DIR}/lib/vim-config" ]]; then
@@ -702,13 +680,7 @@ main() {
         die "Jsh source directory not found. Run: jssh --check"
     fi
 
-    # Check for fzf binaries (warn but don't fail)
-    local _fzf_ok=0
-    [[ -x "${JSH_DIR}/lib/bin/linux-amd64/fzf" ]] && ((_fzf_ok++))
-    [[ -x "${JSH_DIR}/lib/bin/darwin-arm64/fzf" ]] && ((_fzf_ok++))
-    if [[ ${_fzf_ok} -eq 0 ]]; then
-        warn "No fzf binaries found - run: jssh --check"
-    fi
+    # Note: fzf is now a system dependency - must be installed on remote hosts separately
 
     # Ensure payload exists
     local payload_path payload_size
