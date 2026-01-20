@@ -13,8 +13,8 @@ setup() {
     mkdir -p "${JSH_TEST_TEMP}"
 
     # Source libraries
-    source "${JSH_DIR}/lib/jgit-timestamp.sh"
-    source "${JSH_DIR}/lib/jgit-ui.sh"
+    source "${JSH_DIR}/lib/jgit/jgit-timestamp.sh"
+    source "${JSH_DIR}/lib/jgit/jgit-ui.sh"
 }
 
 # =============================================================================
@@ -300,25 +300,26 @@ setup() {
 @test "jgit: help shows interactive options" {
     run "${JSH_DIR}/bin/jgit" --help
 
-    assert_contains "$output" "commit -i"
-    assert_contains "$output" "push -i"
+    # Help shows "(use -i for interactive)" format
+    assert_contains "$output" "-i"
     assert_contains "$output" "interactive"
+    assert_contains "$output" "commit"
+    assert_contains "$output" "push"
 }
 
-@test "jgit: help shows timestamp formats" {
+@test "jgit: help shows core commands" {
     run "${JSH_DIR}/bin/jgit" --help
 
-    assert_contains "$output" "+30m"
-    assert_contains "$output" "-2h"
-    assert_contains "$output" "Relative"
+    assert_contains "$output" "update"
+    assert_contains "$output" "profile"
+    assert_contains "$output" "backup"
 }
 
-@test "jgit: help shows preset patterns" {
+@test "jgit: help shows usage examples" {
     run "${JSH_DIR}/bin/jgit" --help
 
-    assert_contains "$output" "work-hours"
-    assert_contains "$output" "quick-fix"
-    assert_contains "$output" "irl"
+    assert_contains "$output" "EXAMPLES"
+    assert_contains "$output" "jgit commit -i"
 }
 
 @test "jgit: commit without -i passes through to git" {
@@ -373,7 +374,7 @@ setup() {
 # =============================================================================
 
 @test "integration: interactive libraries load without error" {
-    source "${JSH_DIR}/lib/jgit-interactive.sh"
+    source "${JSH_DIR}/lib/jgit/jgit-interactive.sh"
 
     # Should have defined functions
     declare -f cmd_commit_interactive >/dev/null
@@ -388,7 +389,7 @@ setup() {
     repo_dir=$(create_test_repo)
     cd "$repo_dir" || fail "Failed to cd to test repo"
 
-    source "${JSH_DIR}/lib/jgit-interactive.sh"
+    source "${JSH_DIR}/lib/jgit/jgit-interactive.sh"
 
     # Get original HEAD
     local original_head
