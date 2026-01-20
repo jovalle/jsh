@@ -51,6 +51,7 @@
   "ripgrep",
   "rsync",
   "shellcheck",
+  "snyk-cli",
   "sops",
   "speedtest-cli",
   "sshpass",

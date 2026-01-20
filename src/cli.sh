@@ -151,6 +151,7 @@ _cmd_cli_help() {
 # Main Entry Point
 # =============================================================================
 
+# shellcheck disable=SC2120  # Function handles zero args (shows help)
 cmd_cli() {
     local cmd="${1:-}"
 
@@ -184,7 +185,7 @@ cmd_cli() {
             if [[ $# -gt 0 ]]; then
                 _cmd_cli_help "$@"
             else
-                cmd_cli  # Show usage
+                cmd_cli  # Show usage  # shellcheck disable=SC2119
             fi
             ;;
         discover|d)

@@ -44,7 +44,10 @@ _jsh_detect_env() {
     # Detect environment type (ssh, local, container, etc.)
     if [[ -n "${SSH_CONNECTION:-}" || -n "${SSH_CLIENT:-}" ]]; then
         echo "ssh"
-    elif [[ -f "/.dockerenv" ]] || grep -q docker /proc/1/cgroup 2>/dev/null; then
+    elif [[ -f "/.dockerenv" ]]; then
+        echo "container"
+    # Note: grep separated to avoid set -e triggering on grep exit code 1
+    elif grep -q docker /proc/1/cgroup 2>/dev/null; then
         echo "container"
     elif [[ -n "${JSH_EPHEMERAL:-}" ]]; then
         echo "ephemeral"  # SSH carry-through session
@@ -77,11 +80,6 @@ _jsh_platform_string() {
 }
 JSH_PLATFORM="${JSH_PLATFORM:-$(_jsh_platform_string)}"
 export JSH_PLATFORM
-
-# Add bundled binaries to PATH (platform-specific, takes precedence over system)
-JSH_BIN_DIR="${JSH_DIR}/lib/bin/${JSH_PLATFORM}"
-export JSH_BIN_DIR
-[[ -d "${JSH_BIN_DIR}" ]] && PATH="${JSH_BIN_DIR}:${PATH}"
 
 # =============================================================================
 # Terminal Capability Detection
@@ -402,7 +400,7 @@ if [[ -z "${EDITOR:-}" ]]; then
         export EDITOR="vi"
     fi
 fi
-export VISUAL="${VISUAL:-$EDITOR}"
+export VISUAL="${VISUAL:-${EDITOR:-}}"
 
 # Locale (UTF-8 preferred)
 if [[ -z "${LANG:-}" ]] || [[ "${LANG}" == "C" ]] || [[ "${LANG}" == "POSIX" ]]; then
@@ -410,7 +408,7 @@ if [[ -z "${LANG:-}" ]] || [[ "${LANG}" == "C" ]] || [[ "${LANG}" == "POSIX" ]];
         export LANG="en_US.UTF-8"
     fi
 fi
-export LC_ALL="${LC_ALL:-$LANG}"
+export LC_ALL="${LC_ALL:-${LANG:-}}"
 
 # =============================================================================
 # Debug Mode

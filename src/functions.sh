@@ -777,11 +777,6 @@ _projects_display_path() {
     fi
 }
 
-# Aliases
-alias p='project'
-alias pp='project profile'
-alias projects='project -l -v'
-
 # Bash completion for project command
 if [[ -n "${BASH_VERSION:-}" ]]; then
     _project_completions() {

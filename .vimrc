@@ -292,11 +292,6 @@ endif
 if exists('g:loaded_fzf')
     let g:fzf_layout = { 'down': '40%' }
     let g:fzf_preview_window = ['right:50%', 'ctrl-/']
-
-    " Use bundled fzf binary if available
-    if executable($JSH_DIR . '/lib/bin/' . $JSH_PLATFORM . '/fzf')
-        let $FZF_DEFAULT_COMMAND = $JSH_DIR . '/lib/bin/' . $JSH_PLATFORM . '/fzf'
-    endif
 endif
 
 " =============================================================================

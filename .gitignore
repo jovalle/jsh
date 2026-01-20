@@ -209,6 +209,11 @@ kubeconfig
 # Jsh-Specific (only applies to this repo)
 # =============================================================================
 
+# Platform-specific binaries (downloaded via `make download-tools`)
+# These are not stored in git - users download on-demand or use system packages
+bin/darwin-*/
+bin/linux-*/
+
 # Zsh plugin test files (not needed for runtime)
 lib/zsh-plugins/highlighters/*/test-data/
 
