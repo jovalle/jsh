@@ -269,10 +269,12 @@ _status_single() {
     local dest="$2"
 
     if [[ -L "${dest}" ]]; then
-        local link_target resolved
+        local link_target resolved jsh_dir_resolved
         link_target=$(readlink "${dest}")
         resolved=$(readlink -f "${dest}" 2>/dev/null || readlink "${dest}")
-        if [[ "${resolved}" == "${JSH_DIR}/"* ]] || [[ "${resolved}" == "${JSH_DIR}" ]]; then
+        # Canonicalize JSH_DIR for comparison (handles paths like /foo/tests/..)
+        jsh_dir_resolved=$(cd "${JSH_DIR}" && pwd -P)
+        if [[ "${resolved}" == "${jsh_dir_resolved}/"* ]] || [[ "${resolved}" == "${jsh_dir_resolved}" ]]; then
             echo "  ${GRN}✔${RST} ${display_name} -> ${link_target}"
         else
             echo "  ${YLW}~${RST} ${display_name} -> ${link_target}"
