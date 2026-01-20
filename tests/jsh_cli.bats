@@ -270,7 +270,8 @@ find_modern_bash() {
 @test "cli: configure --check shows dry run" {
     local modern_bash
     modern_bash=$(find_modern_bash) || skip "No bash 4+ found"
-    run "${modern_bash}" "${JSH_DIR}/jsh" configure --check
+    # --check requires a subcommand (all, macos, dock, etc.)
+    run "${modern_bash}" "${JSH_DIR}/jsh" configure all --check
     [ "$status" -eq 0 ]
     # Should show dry-run indicator
     assert_contains "$output" "dry-run"

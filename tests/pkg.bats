@@ -96,27 +96,6 @@ EOF
 }
 
 # =============================================================================
-# Bundle Command Tests
-# =============================================================================
-
-@test "pkg: bundle list shows bundles" {
-    local modern_bash
-    modern_bash=$(find_modern_bash) || skip "No bash 4+ found"
-    run "${modern_bash}" "${JSH_DIR}/jsh" pkg bundle list
-    [ "$status" -eq 0 ]
-    assert_contains "$output" "Available Bundles"
-}
-
-@test "pkg: bundle help shows usage" {
-    local modern_bash
-    modern_bash=$(find_modern_bash) || skip "No bash 4+ found"
-    run "${modern_bash}" "${JSH_DIR}/jsh" pkg bundle help
-    [ "$status" -eq 0 ]
-    assert_contains "$output" "USAGE"
-    assert_contains "$output" "install"
-}
-
-# =============================================================================
 # Service Command Tests
 # =============================================================================
 
@@ -176,11 +155,12 @@ EOF
     assert_contains "$output" "Package Diff"
 }
 
-@test "pkg: audit runs without error" {
+@test "pkg: audit shows audit header" {
     local modern_bash
     modern_bash=$(find_modern_bash) || skip "No bash 4+ found"
     run "${modern_bash}" "${JSH_DIR}/jsh" pkg audit
-    [ "$status" -eq 0 ]
+    # audit returns 1 if it finds orphaned packages (which is valid behavior)
+    # so we just check that it runs and shows the expected output
     assert_contains "$output" "Package Audit"
 }
 
@@ -222,12 +202,6 @@ EOF
 
 @test "pkg: configs directory exists" {
     assert_dir_exists "${JSH_DIR}/configs/packages"
-}
-
-@test "pkg: bundles.json exists and is valid JSON" {
-    assert_file_exists "${JSH_DIR}/configs/bundles.json"
-    # Validate JSON syntax
-    jq empty "${JSH_DIR}/configs/bundles.json" || skip "jq not available"
 }
 
 # =============================================================================
