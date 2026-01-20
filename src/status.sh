@@ -51,8 +51,13 @@ _check_bundled_binary() {
         return 2
     fi
 
+    # Canonicalize paths for comparison (handles paths like /foo/tests/../bin)
+    local bundled_resolved resolved_canonical
+    bundled_resolved=$(cd "$(dirname "${bundled}")" && pwd -P)/$(basename "${bundled}")
+    resolved_canonical=$(cd "$(dirname "${resolved}")" && pwd -P)/$(basename "${resolved}")
+
     # Check if resolved binary is our bundled version
-    if [[ "${resolved}" != "${bundled}" ]]; then
+    if [[ "${resolved_canonical}" != "${bundled_resolved}" ]]; then
         echo "wrong_path:${resolved}"
         return 3
     fi
