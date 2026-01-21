@@ -114,35 +114,6 @@ format_duration() {
     fi
 }
 
-# Detect the best available inhibit method
-detect_inhibit_method() {
-    case "$(uname -s)" in
-        Darwin)
-            if command -v caffeinate &>/dev/null; then
-                printf 'caffeinate'
-                return 0
-            fi
-            ;;
-        Linux)
-            if command -v systemd-inhibit &>/dev/null; then
-                printf 'systemd-inhibit'
-                return 0
-            fi
-            if command -v gnome-session-inhibit &>/dev/null; then
-                printf 'gnome-session-inhibit'
-                return 0
-            fi
-            if command -v xdg-screensaver &>/dev/null; then
-                printf 'xdg-screensaver'
-                return 0
-            fi
-            ;;
-    esac
-
-    # Fallback
-    printf 'fallback'
-}
-
 # Check if background cafe is running
 is_running() {
     if [[ -f "${CAFE_PID_FILE}" ]]; then
@@ -240,6 +211,7 @@ run_caffeinate() {
 }
 
 # Linux systemd-inhibit
+# Returns 0 on success, 1 on failure (allows cascade to next method)
 run_systemd_inhibit() {
     local duration="$1"
     local display="$2"
@@ -248,34 +220,60 @@ run_systemd_inhibit() {
     shift 4
     local cmd=("$@")
 
-    local what="idle:sleep"
-    [[ "${display}" == "true" ]] && what="${what}:handle-lid-switch"
-
-    local args=(
-        --what="${what}"
-        --who="${SCRIPT_NAME}"
-        --why="${reason}"
-        --mode=block
-    )
-
-    if [[ ${#cmd[@]} -gt 0 ]]; then
-        debug "Running: systemd-inhibit ${args[*]} -- ${cmd[*]}"
-        systemd-inhibit "${args[@]}" -- "${cmd[@]}"
+    # Build sleep command for when no user command is provided
+    local sleep_cmd
+    if [[ "${duration}" -gt 0 ]]; then
+        sleep_cmd="sleep ${duration}"
     else
-        # No command - use sleep
-        local sleep_cmd
-        if [[ "${duration}" -gt 0 ]]; then
-            sleep_cmd="sleep ${duration}"
-        else
-            sleep_cmd="sleep infinity"
-        fi
-        debug "Running: systemd-inhibit ${args[*]} -- ${sleep_cmd}"
-        # shellcheck disable=SC2086
-        systemd-inhibit "${args[@]}" -- ${sleep_cmd}
+        sleep_cmd="sleep infinity"
     fi
+
+    # Build list of --what values to try (most to least restrictive)
+    # Different inhibit types have different permission requirements:
+    #   idle  - prevent screensaver (usually allowed for regular users)
+    #   sleep - prevent suspend (often requires elevated permissions)
+    local what_variants=()
+    local base_what="idle:sleep"
+    [[ "${display}" == "true" ]] && base_what="${base_what}:handle-lid-switch"
+    what_variants+=("${base_what}")
+    what_variants+=("idle")  # Fallback: just idle (most permissive)
+
+    # Try each --what variant
+    local what
+    for what in "${what_variants[@]}"; do
+        # For each --what, try block mode then delay mode
+        local mode
+        for mode in block delay; do
+            local args=(
+                --what="${what}"
+                --who="${SCRIPT_NAME}"
+                --why="${reason}"
+                --mode="${mode}"
+            )
+
+            if [[ ${#cmd[@]} -gt 0 ]]; then
+                debug "Trying: systemd-inhibit --what=${what} --mode=${mode}"
+                if systemd-inhibit "${args[@]}" -- "${cmd[@]}" 2>/dev/null; then
+                    return 0
+                fi
+            else
+                debug "Trying: systemd-inhibit --what=${what} --mode=${mode}"
+                # shellcheck disable=SC2086
+                if systemd-inhibit "${args[@]}" -- ${sleep_cmd} 2>/dev/null; then
+                    return 0
+                fi
+            fi
+        done
+        debug "--what=${what} failed, trying simpler variant..."
+    done
+
+    # All variants failed - return failure to try next method
+    debug "systemd-inhibit failed (likely no session or permissions)"
+    return 1
 }
 
 # Linux gnome-session-inhibit
+# Returns 0 on success, 1 on failure (allows cascade to next method)
 run_gnome_inhibit() {
     local duration="$1"
     local display="$2"
@@ -294,8 +292,10 @@ run_gnome_inhibit() {
     )
 
     if [[ ${#cmd[@]} -gt 0 ]]; then
-        debug "Running: gnome-session-inhibit ${args[*]} -- ${cmd[*]}"
-        gnome-session-inhibit "${args[@]}" -- "${cmd[@]}"
+        debug "Trying: gnome-session-inhibit ${args[*]} -- ${cmd[*]}"
+        if gnome-session-inhibit "${args[@]}" -- "${cmd[@]}" 2>/dev/null; then
+            return 0
+        fi
     else
         local sleep_cmd
         if [[ "${duration}" -gt 0 ]]; then
@@ -303,17 +303,29 @@ run_gnome_inhibit() {
         else
             sleep_cmd="sleep infinity"
         fi
-        debug "Running: gnome-session-inhibit ${args[*]} -- ${sleep_cmd}"
+        debug "Trying: gnome-session-inhibit ${args[*]} -- ${sleep_cmd}"
         # shellcheck disable=SC2086
-        gnome-session-inhibit "${args[@]}" -- ${sleep_cmd}
+        if gnome-session-inhibit "${args[@]}" -- ${sleep_cmd} 2>/dev/null; then
+            return 0
+        fi
     fi
+
+    debug "gnome-session-inhibit failed"
+    return 1
 }
 
 # X11 xdg-screensaver fallback
+# Returns 0 on success, 1 on failure (allows cascade to next method)
 run_xdg_inhibit() {
     local duration="$1"
-    shift 3  # Skip display, system, reason
+    shift 4  # Skip duration, display, system, reason
     local cmd=("$@")
+
+    # Requires X11 display
+    if [[ -z "${DISPLAY:-}" ]]; then
+        debug "xdg-screensaver requires DISPLAY (no X11 session)"
+        return 1
+    fi
 
     # Get a window ID (use root window if none)
     local window_id
@@ -323,13 +335,16 @@ run_xdg_inhibit() {
         window_id="root"
     fi
 
-    # Start screensaver inhibit
-    xdg-screensaver suspend "${window_id}" 2>/dev/null &
-    local inhibit_pid=$!
+    # Test if xdg-screensaver actually works
+    if ! xdg-screensaver suspend "${window_id}" 2>/dev/null; then
+        debug "xdg-screensaver suspend failed"
+        return 1
+    fi
+
+    debug "xdg-screensaver inhibit active"
 
     # Cleanup on exit
     cleanup() {
-        kill "${inhibit_pid}" 2>/dev/null || true
         xdg-screensaver resume "${window_id}" 2>/dev/null || true
     }
     trap cleanup EXIT
@@ -343,16 +358,17 @@ run_xdg_inhibit() {
             sleep infinity
         fi
     fi
+    return 0
 }
 
-# Fallback: just keep running
+# Fallback: just keep running (always succeeds - last resort)
 run_fallback() {
     local duration="$1"
-    shift 3  # Skip display, system, reason
+    shift 4  # Skip duration, display, system, reason
     local cmd=("$@")
 
-    warn "No system inhibit tool found, using fallback method"
-    info "System may still sleep - consider installing systemd-inhibit or caffeinate"
+    warn "No system inhibit method available, using fallback"
+    info "System may still sleep - consider installing systemd-inhibit"
 
     if [[ ${#cmd[@]} -gt 0 ]]; then
         "${cmd[@]}"
@@ -367,6 +383,92 @@ run_fallback() {
             done
         fi
     fi
+    return 0
+}
+
+# =============================================================================
+# Cascading Inhibit Runner
+# =============================================================================
+
+# Try each inhibit method in sequence until one succeeds
+# This handles cases where a tool exists but fails (e.g., permissions)
+run_inhibit() {
+    local duration="$1"
+    local display="$2"
+    local system="$3"
+    local reason="$4"
+    shift 4
+    local cmd=("$@")
+
+    local methods=()
+    local method
+
+    # Build list of available methods based on platform
+    case "$(uname -s)" in
+        Darwin)
+            command -v caffeinate &>/dev/null && methods+=(caffeinate)
+            ;;
+        Linux)
+            command -v systemd-inhibit &>/dev/null && methods+=(systemd-inhibit)
+            command -v gnome-session-inhibit &>/dev/null && methods+=(gnome-session-inhibit)
+            command -v xdg-screensaver &>/dev/null && methods+=(xdg-screensaver)
+            ;;
+    esac
+
+    # Always have fallback as last resort
+    methods+=(fallback)
+
+    # Try each method until one succeeds
+    for method in "${methods[@]}"; do
+        debug "Trying inhibit method: ${method}"
+
+        case "${method}" in
+            caffeinate)
+                if run_caffeinate "${duration}" "${display}" "${system}" "${cmd[@]}"; then
+                    return 0
+                fi
+                ;;
+            systemd-inhibit)
+                if run_systemd_inhibit "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"; then
+                    return 0
+                fi
+                ;;
+            gnome-session-inhibit)
+                if run_gnome_inhibit "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"; then
+                    return 0
+                fi
+                ;;
+            xdg-screensaver)
+                if run_xdg_inhibit "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"; then
+                    return 0
+                fi
+                ;;
+            fallback)
+                # Fallback always succeeds
+                run_fallback "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"
+                return 0
+                ;;
+        esac
+
+        debug "${method} failed, trying next method..."
+    done
+
+    return 0
+}
+
+# Get the first available method name (for display purposes)
+get_primary_method() {
+    case "$(uname -s)" in
+        Darwin)
+            command -v caffeinate &>/dev/null && { printf 'caffeinate'; return; }
+            ;;
+        Linux)
+            command -v systemd-inhibit &>/dev/null && { printf 'systemd-inhibit'; return; }
+            command -v gnome-session-inhibit &>/dev/null && { printf 'gnome-session-inhibit'; return; }
+            command -v xdg-screensaver &>/dev/null && { printf 'xdg-screensaver'; return; }
+            ;;
+    esac
+    printf 'fallback'
 }
 
 # =============================================================================
@@ -448,10 +550,10 @@ main() {
     # Remaining args are the command to wrap
     local cmd=("$@")
 
-    # Detect method
+    # Get primary method name (for display - actual method may cascade)
     local method
-    method=$(detect_inhibit_method)
-    debug "Using inhibit method: ${method}"
+    method=$(get_primary_method)
+    debug "Primary inhibit method: ${method} (will cascade on failure)"
 
     # Check for existing background process
     if [[ "${background}" == "true" ]]; then
@@ -471,7 +573,7 @@ main() {
         else
             info "Keeping awake indefinitely (Ctrl+C to stop)..."
         fi
-        printf "%sMethod: %s | Display: %s | System: %s%s\n" \
+        printf "%sMethod: %s (auto) | Display: %s | System: %s%s\n" \
             "${C_DIM}" "${method}" "${display}" "${system}" "${C_RESET}"
     fi
 
@@ -483,24 +585,8 @@ main() {
             exec > /dev/null 2>&1
             exec < /dev/null
 
-            # Run the inhibit
-            case "${method}" in
-                caffeinate)
-                    run_caffeinate "${duration}" "${display}" "${system}" "${cmd[@]}"
-                    ;;
-                systemd-inhibit)
-                    run_systemd_inhibit "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"
-                    ;;
-                gnome-session-inhibit)
-                    run_gnome_inhibit "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"
-                    ;;
-                xdg-screensaver)
-                    run_xdg_inhibit "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"
-                    ;;
-                fallback)
-                    run_fallback "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"
-                    ;;
-            esac
+            # Run inhibit with automatic cascade on failure
+            run_inhibit "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"
         ) &
 
         local bg_pid=$!
@@ -510,24 +596,8 @@ main() {
         exit 0
     fi
 
-    # Foreground mode
-    case "${method}" in
-        caffeinate)
-            run_caffeinate "${duration}" "${display}" "${system}" "${cmd[@]}"
-            ;;
-        systemd-inhibit)
-            run_systemd_inhibit "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"
-            ;;
-        gnome-session-inhibit)
-            run_gnome_inhibit "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"
-            ;;
-        xdg-screensaver)
-            run_xdg_inhibit "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"
-            ;;
-        fallback)
-            run_fallback "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"
-            ;;
-    esac
+    # Foreground mode - use cascading inhibit
+    run_inhibit "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"
 }
 
 # Handle interrupts gracefully
