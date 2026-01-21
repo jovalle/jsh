@@ -64,7 +64,7 @@ warn()    { echo "${YELLOW}$*${RST}" >&2; }
 error()   { echo "${RED}$*${RST}" >&2; }
 
 prefix_info()    { echo "  ${BLUE}◆${RST} $*"; }
-prefix_success() { echo "  ${GREEN}✔${RST} $*"; }
+prefix_success() { echo "  ${GREEN}✓${RST} $*"; }
 prefix_warn()    { echo "  ${YELLOW}⚠${RST} $*" >&2; }
 prefix_error()   { echo "  ${RED}✘${RST} $*" >&2; }
 
@@ -144,7 +144,7 @@ get_version() {
 # Usage: get_binary_url <tool> <platform> <version>
 get_binary_url() {
     local tool="$1" platform="$2" version="$3"
-    local os arch jq_os
+    local os arch jq_os nvim_os nvim_arch
 
     os="${platform%-*}"    # darwin or linux
     arch="${platform#*-}"  # amd64 or arm64
@@ -160,6 +160,16 @@ get_binary_url() {
         fzf)
             # fzf releases use format: fzf-<version>-<os>_<arch>.tar.gz (note: underscore)
             echo "https://github.com/junegunn/fzf/releases/download/v${version}/fzf-${version}-${os}_${arch}.tar.gz"
+            ;;
+        nvim)
+            # nvim releases use format: nvim-<os>-<arch>.tar.gz
+            # macOS uses 'macos', linux uses 'linux'
+            # arch: x86_64 or arm64
+            nvim_os="${os}"
+            [[ "${os}" == "darwin" ]] && nvim_os="macos"
+            nvim_arch="${arch}"
+            [[ "${arch}" == "amd64" ]] && nvim_arch="x86_64"
+            echo "https://github.com/neovim/neovim/releases/download/v${version}/nvim-${nvim_os}-${nvim_arch}.tar.gz"
             ;;
         *)
             return 1
@@ -177,9 +187,10 @@ get_binary_version() {
     else
         # Fallback defaults if versions.json is missing or tool not found
         case "$tool" in
-            jq)  echo "1.7.1" ;;
-            fzf) echo "0.60.3" ;;
-            *)   return 1 ;;
+            jq)   echo "1.7.1" ;;
+            fzf)  echo "0.60.3" ;;
+            nvim) echo "0.11.5" ;;
+            *)    return 1 ;;
         esac
     fi
 }
@@ -249,6 +260,35 @@ download_binary() {
                 rm -rf "${tmp_dir}"
                 prefix_error "${tool}: download failed"
                 prefix_info "Install manually: brew install fzf (macOS) or apt install fzf (Linux)"
+                return 1
+            fi
+            ;;
+        nvim)
+            # nvim is a tarball with directory structure - extract entire package
+            local tmp_dir nvim_dir nvim_install_dir
+            tmp_dir=$(mktemp -d)
+            nvim_install_dir="${JSH_DIR}/lib/nvim/${platform}"
+            if download_tarball "${url}" "${tmp_dir}"; then
+                # Find the extracted directory (nvim-linux-x86_64 or nvim-macos-arm64 etc.)
+                nvim_dir=$(find "${tmp_dir}" -maxdepth 1 -type d -name 'nvim-*' | head -1)
+                if [[ -z "${nvim_dir}" ]]; then
+                    rm -rf "${tmp_dir}"
+                    prefix_error "${tool}: unexpected archive structure"
+                    return 1
+                fi
+                # Install to lib/nvim/<platform>/
+                mkdir -p "${nvim_install_dir}"
+                rm -rf "${nvim_install_dir:?}"/*
+                mv "${nvim_dir}"/* "${nvim_install_dir}/"
+                rm -rf "${tmp_dir}"
+                # Create symlink in bin/<platform>/
+                ln -sf "${nvim_install_dir}/bin/nvim" "${target}"
+                prefix_success "${tool} v${version}"
+                return 0
+            else
+                rm -rf "${tmp_dir}"
+                prefix_error "${tool}: download failed"
+                prefix_info "Install manually: brew install neovim (macOS) or dnf install neovim (Linux)"
                 return 1
             fi
             ;;
@@ -342,6 +382,24 @@ download_binary_for_platform() {
                 rm -rf "${tmp_dir}"
                 prefix_success "${tool} ${platform} v${version}"
                 return 0
+            fi
+            rm -rf "${tmp_dir}"
+            ;;
+        nvim)
+            local tmp_dir nvim_dir nvim_install_dir
+            tmp_dir=$(mktemp -d)
+            nvim_install_dir="${JSH_DIR}/lib/nvim/${platform}"
+            if download_tarball "${url}" "${tmp_dir}"; then
+                nvim_dir=$(find "${tmp_dir}" -maxdepth 1 -type d -name 'nvim-*' | head -1)
+                if [[ -n "${nvim_dir}" ]]; then
+                    mkdir -p "${nvim_install_dir}"
+                    rm -rf "${nvim_install_dir:?}"/*
+                    mv "${nvim_dir}"/* "${nvim_install_dir}/"
+                    rm -rf "${tmp_dir}"
+                    ln -sf "${nvim_install_dir}/bin/nvim" "${target}"
+                    prefix_success "${tool} ${platform} v${version}"
+                    return 0
+                fi
             fi
             rm -rf "${tmp_dir}"
             ;;
@@ -661,7 +719,7 @@ main() {
 
     # Summary
     if [[ ${errors} -eq 0 ]]; then
-        echo "${GREEN}✔${RST} All dependencies configured"
+        echo "${GREEN}✓${RST} All dependencies configured"
     else
         echo "${YELLOW}⚠${RST} Completed with ${errors} warning(s)"
     fi
@@ -716,7 +774,7 @@ list_submodules() {
             # Check if submodule is up to date
             local head_commit
             if head_commit=$(git -C "${full_path}" rev-parse --short HEAD 2>/dev/null); then
-                status_icon="${GREEN}✔${RST}"
+                status_icon="${GREEN}✓${RST}"
                 status_text="${DIM}${head_commit}${RST}"
             else
                 status_icon="${YELLOW}?${RST}"
@@ -891,7 +949,7 @@ _jsh_capability_status() {
                 cargo) version=$(cargo --version 2>/dev/null | cut -d' ' -f2) ;;
                 go)    version=$(go version 2>/dev/null | cut -d' ' -f3 | sed 's/go//') ;;
             esac
-            echo "  ${GREEN}✔${RST} ${tool} ${DIM}(${version})${RST}"
+            echo "  ${GREEN}✓${RST} ${tool} ${DIM}(${version})${RST}"
         else
             echo "  ${DIM}-${RST} ${tool}"
         fi

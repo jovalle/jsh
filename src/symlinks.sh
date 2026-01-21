@@ -52,6 +52,8 @@ file .ripgreprc
 # XDG Config (link each subdirectory)
 children .config -> $XDG_CONFIG
 
+# Note: Neovim/LazyVim symlink is created during nvim installation (not here)
+
 # VSCode (platform-specific destination)
 children .vscode/user -> $VSCODE_USER
 RULES
@@ -275,7 +277,7 @@ _status_single() {
         # Canonicalize JSH_DIR for comparison (handles paths like /foo/tests/..)
         jsh_dir_resolved=$(cd "${JSH_DIR}" && pwd -P)
         if [[ "${resolved}" == "${jsh_dir_resolved}/"* ]] || [[ "${resolved}" == "${jsh_dir_resolved}" ]]; then
-            echo "  ${GRN}✔${RST} ${display_name} -> ${link_target}"
+            echo "  ${GRN}✓${RST} ${display_name} -> ${link_target}"
         else
             echo "  ${YLW}~${RST} ${display_name} -> ${link_target}"
         fi

@@ -113,7 +113,7 @@ _sync_check() {
         [[ ${ahead} -gt 0 ]] && echo "    ${GRN}↑${RST} ${ahead} commit(s) ahead (need push)"
         [[ ${behind} -gt 0 ]] && echo "    ${YLW}↓${RST} ${behind} commit(s) behind (need pull)"
     else
-        echo "  Remote:   ${GRN}✔${RST} Up to date"
+        echo "  Remote:   ${GRN}✓${RST} Up to date"
     fi
 
     echo ""
@@ -124,7 +124,7 @@ _sync_check() {
         [[ ${unstaged} -gt 0 ]] && echo "    ${YLW}!${RST} ${unstaged} modified"
         [[ ${untracked} -gt 0 ]] && echo "    ${RED}?${RST} ${untracked} untracked"
     else
-        echo "  Local:    ${GRN}✔${RST} Clean working tree"
+        echo "  Local:    ${GRN}✓${RST} Clean working tree"
     fi
 
     echo ""

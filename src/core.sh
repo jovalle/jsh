@@ -266,6 +266,61 @@ die() {
 }
 
 # =============================================================================
+# Spinner (braille animation for long-running operations)
+# =============================================================================
+
+_SPINNER_PID=""
+_SPINNER_FRAMES=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
+
+_spinner_loop() {
+    local msg="$1"
+    local i=0
+    local frame_count=${#_SPINNER_FRAMES[@]}
+
+    # Hide cursor
+    printf '\e[?25l'
+
+    while true; do
+        printf '\r%s %s' "${_SPINNER_FRAMES[$i]}" "${msg}"
+        i=$(( (i + 1) % frame_count ))
+        sleep 0.08
+    done
+}
+
+_spinner_cleanup() {
+    spinner_stop
+}
+
+spinner_start() {
+    local msg="${1:-Loading...}"
+
+    # Only show spinner if stdout is a terminal
+    [[ ! -t 1 ]] && return 0
+
+    # Set up cleanup trap
+    trap '_spinner_cleanup' INT TERM
+
+    _spinner_loop "${msg}" &
+    _SPINNER_PID=$!
+    disown "$_SPINNER_PID" 2>/dev/null
+}
+
+spinner_stop() {
+    [[ -z "${_SPINNER_PID}" ]] && return 0
+
+    kill "$_SPINNER_PID" 2>/dev/null
+    wait "$_SPINNER_PID" 2>/dev/null
+
+    # Show cursor, clear line
+    printf '\e[?25h\r\e[K'
+
+    _SPINNER_PID=""
+
+    # Remove our trap
+    trap - INT TERM
+}
+
+# =============================================================================
 # Print Functions (colored output for interactive/terminal use)
 # =============================================================================
 
@@ -277,7 +332,7 @@ print_error()   { echo "${C_ERR}$*${RST}" >&2; }
 
 # Prefixed output (for status lists, validation results)
 prefix_info()    { echo "${BLU}◆${RST} $*"; }
-prefix_success() { echo "${GRN}✔${RST} $*"; }
+prefix_success() { echo "${GRN}✓${RST} $*"; }
 prefix_warn()    { echo "${YLW}⚠${RST} $*" >&2; }
 prefix_error()   { echo "${RED}✘${RST} $*" >&2; }
 
