@@ -263,7 +263,7 @@ cmd_clean() {
             local size
             size=$(${size_func} 2>/dev/null)
             available_targets+=("${name}")
-            printf "  ${GRN}✔${RST} %-25s %s\n" "${desc}" "${DIM}(${size})${RST}"
+            printf "  ${GRN}✓${RST} %-25s %s\n" "${desc}" "${DIM}(${size})${RST}"
         fi
     done
 

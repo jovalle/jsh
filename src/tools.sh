@@ -20,7 +20,7 @@ TOOLS[direnv]="shell|Directory-based env vars|direnv version|brew install direnv
 
 # Editor Tools
 TOOLS[vim]="editor|Vi Improved|vim --version|brew install vim"
-TOOLS[nvim]="editor|Neovim - hyperextensible|nvim --version|brew install neovim"
+TOOLS[nvim]="editor|Neovim - hyperextensible|nvim --version|jsh:nvim"
 TOOLS[code]="editor|Visual Studio Code|code --version|brew install --cask visual-studio-code"
 TOOLS[helix]="editor|Modal editor in Rust|hx --version|brew install helix"
 
@@ -89,6 +89,80 @@ TOOL_CATEGORIES[k8s]="Kubernetes Tools"
 TOOL_CATEGORIES[cloud]="Cloud & Infrastructure"
 TOOL_CATEGORIES[git]="Git Tools"
 TOOL_CATEGORIES[network]="Network Tools"
+
+# =============================================================================
+# Platform-Specific Package Mappings
+# =============================================================================
+
+# Map brew package names to dnf package names (only where they differ)
+declare -gA TOOL_PKG_MAP_DNF
+TOOL_PKG_MAP_DNF[neovim]="neovim"
+TOOL_PKG_MAP_DNF[fd]="fd-find"
+TOOL_PKG_MAP_DNF[ripgrep]="ripgrep"
+TOOL_PKG_MAP_DNF[kubectl]="kubectl"
+TOOL_PKG_MAP_DNF[git-delta]="git-delta"
+TOOL_PKG_MAP_DNF[the_silver_searcher]="the_silver_searcher"
+TOOL_PKG_MAP_DNF[vim]="vim-enhanced"
+
+# Get platform-appropriate install command for a package
+# Args: $1 = brew package name or special jsh: command (from install_cmd)
+# Returns: platform-specific install command
+_tools_get_install_cmd() {
+    local brew_pkg="$1"
+    local os_type
+    os_type=$(uname -s)
+
+    # Handle jsh: prefixed commands (custom install via jsh deps)
+    if [[ "${brew_pkg}" == jsh:* ]]; then
+        local tool_name="${brew_pkg#jsh:}"
+        echo "source '${JSH_DIR}/src/deps.sh' && download_binary '${tool_name}'"
+        return
+    fi
+
+    if [[ "${os_type}" == "Darwin" ]]; then
+        # macOS: use brew as-is
+        if [[ "${brew_pkg}" == *"--cask"* ]]; then
+            echo "brew install ${brew_pkg}"
+        else
+            echo "brew install ${brew_pkg}"
+        fi
+    elif [[ "${os_type}" == "Linux" ]]; then
+        # Linux: translate to dnf
+        local pkg_name="${brew_pkg}"
+
+        # Handle brew install --cask (not applicable on Linux)
+        if [[ "${pkg_name}" == *"--cask"* ]]; then
+            echo "echo 'Cask not available on Linux: ${pkg_name}'"
+            return
+        fi
+
+        # Check if we have a mapping for this package
+        if [[ -n "${TOOL_PKG_MAP_DNF[${pkg_name}]:-}" ]]; then
+            pkg_name="${TOOL_PKG_MAP_DNF[${pkg_name}]}"
+        fi
+
+        # Handle special cases
+        case "${pkg_name}" in
+            xcode-select)
+                echo "echo 'xcode-select not applicable on Linux'"
+                ;;
+            docker)
+                echo "sudo dnf install -y podman podman-docker"
+                ;;
+            colima)
+                echo "echo 'colima not applicable on Linux (use podman)'"
+                ;;
+            awscli)
+                echo "sudo dnf install -y awscli2"
+                ;;
+            *)
+                echo "sudo dnf install -y ${pkg_name}"
+                ;;
+        esac
+    else
+        echo "echo 'Unsupported platform: ${os_type}'"
+    fi
+}
 
 # =============================================================================
 # Helper Functions
@@ -217,7 +291,7 @@ cmd_tools_list() {
 
         # Print tool
         if [[ "${installed}" == true ]]; then
-            printf "  ${GRN}✔${RST} %-14s ${DIM}%-30s${RST} %s\n" "${name}" "${_TOOL_DESC}" "${version}"
+            printf "  ${GRN}✓${RST} %-14s ${DIM}%-30s${RST} %s\n" "${name}" "${_TOOL_DESC}" "${version}"
         else
             printf "  ${DIM}-${RST} %-14s ${DIM}%-30s${RST}\n" "${name}" "${_TOOL_DESC}"
         fi
@@ -244,7 +318,7 @@ cmd_tools_check() {
             if eval "${_TOOL_CHECK}" >/dev/null 2>&1; then
                 local version
                 version=$(_tools_get_version "${name}" || true)
-                results+=("${GRN}✔${RST} ${name} ${DIM}(${version})${RST}")
+                results+=("${GRN}✓${RST} ${name} ${DIM}(${version})${RST}")
             else
                 results+=("${RED}✘${RST} ${name}: check command failed")
                 ((errors++)) || true  # Avoid exit when errors=0 with set -e
@@ -299,8 +373,15 @@ cmd_tools_install() {
     echo ""
     for name in "${tools_to_install[@]}"; do
         _tools_parse "${name}"
+
+        # Get platform-appropriate install command
+        local brew_pkg="${_TOOL_INSTALL#brew install }"
+        brew_pkg="${brew_pkg#brew install --cask }"
+        local install_cmd
+        install_cmd=$(_tools_get_install_cmd "${brew_pkg}")
+
         info "Installing ${name}..."
-        if eval "${_TOOL_INSTALL}"; then
+        if eval "${install_cmd}"; then
             prefix_success "${name} installed"
         else
             prefix_error "${name} installation failed"

@@ -133,7 +133,7 @@ cmd_host_status() {
     echo ""
 
     echo "${CYN}Capabilities:${RST}"
-    jq -r '.capabilities // {} | to_entries[] | "  \(if .value then "✔" else "✘" end) \(.key)"' "${host_file}"
+    jq -r '.capabilities // {} | to_entries[] | "  \(if .value then "✓" else "✘" end) \(.key)"' "${host_file}"
     echo ""
 
     echo "${CYN}Dependency Decisions:${RST}"

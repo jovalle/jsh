@@ -137,7 +137,7 @@ clean: ## Clean generated files and caches
 	@rm -rf $(JSH_DIR)/.cache
 	@rm -rf $(TESTS_DIR)/.bats-*
 	@rm -rf /tmp/jsh-*
-	@printf "$(GREEN)✔$(RESET) Clean complete\n"
+	@printf "$(GREEN)✓$(RESET) Clean complete\n"
 	@# Check for platform binaries and prompt for removal
 	@bin_dirs=$$(find $(JSH_DIR)/bin -maxdepth 1 -type d -name '*-*' 2>/dev/null | head -5); \
 	if [ -n "$$bin_dirs" ]; then \
@@ -151,7 +151,7 @@ clean: ## Clean generated files and caches
 		read -r ans; \
 		if [ "$$ans" = "y" ] || [ "$$ans" = "Y" ]; then \
 			rm -rf $(JSH_DIR)/bin/*-*/; \
-			printf "$(GREEN)✔$(RESET) Platform binaries removed\n"; \
+			printf "$(GREEN)✓$(RESET) Platform binaries removed\n"; \
 		else \
 			printf "$(CYAN)◆$(RESET) Binaries kept\n"; \
 		fi; \
@@ -163,7 +163,7 @@ clean-all: ## Clean everything including platform binaries (no prompt)
 	@rm -rf $(TESTS_DIR)/.bats-*
 	@rm -rf /tmp/jsh-*
 	@rm -rf $(JSH_DIR)/bin/*-*/
-	@printf "$(GREEN)✔$(RESET) Full clean complete\n"
+	@printf "$(GREEN)✓$(RESET) Full clean complete\n"
 
 # =============================================================================
 # Linting
@@ -184,7 +184,7 @@ lint-shell: ## Run ShellCheck on all shell scripts
 	@if [ -d "$(SCRIPTS_DIR)" ]; then \
 		find $(SCRIPTS_DIR) -name '*.sh' -exec shellcheck {} +; \
 	fi
-	@printf "$(GREEN)✔$(RESET) ShellCheck passed\n"
+	@printf "$(GREEN)✓$(RESET) ShellCheck passed\n"
 
 lint-syntax: ## Quick syntax check (bash -n) for all scripts
 	@printf "$(BLUE)==>$(RESET) Checking shell syntax...\n"
@@ -194,7 +194,7 @@ lint-syntax: ## Quick syntax check (bash -n) for all scripts
 		bash -n "$$f" || exit 1; \
 	done
 	@bash -n $(JSH_DIR)/jsh
-	@printf "$(GREEN)✔$(RESET) Syntax check passed\n"
+	@printf "$(GREEN)✓$(RESET) Syntax check passed\n"
 
 lint-compat: ## Verify bash 4+ is available (required for jsh)
 	@printf "$(BLUE)==>$(RESET) Checking bash version requirement...\n"
@@ -216,13 +216,13 @@ lint-compat: ## Verify bash 4+ is available (required for jsh)
 		printf "  Then ensure Homebrew is in PATH, or run: jsh deps fix-bash\n"; \
 		exit 1; \
 	fi; \
-	printf "$(GREEN)✔$(RESET) Bash 4+ available: $$found_bash\n"
+	printf "$(GREEN)✓$(RESET) Bash 4+ available: $$found_bash\n"
 
 lint-yaml: ## Run yamllint on YAML files
 	@printf "$(BLUE)==>$(RESET) Running yamllint...\n"
 	@if command -v yamllint >/dev/null 2>&1; then \
 		yamllint -c $(JSH_DIR)/.yamllint $(JSH_DIR)/.github/workflows/*.yml && \
-		printf "$(GREEN)✔$(RESET) YAML lint passed\n"; \
+		printf "$(GREEN)✓$(RESET) YAML lint passed\n"; \
 	else \
 		printf "$(YELLOW)⚠$(RESET) yamllint not installed, skipping\n"; \
 	fi
@@ -231,7 +231,7 @@ lint-format: ## Check formatting with prettier
 	@printf "$(BLUE)==>$(RESET) Checking format with prettier...\n"
 	@if command -v npx >/dev/null 2>&1; then \
 		npx prettier --check "**/*.{json,yaml,yml,md}" --ignore-path .gitignore 2>/dev/null && \
-		printf "$(GREEN)✔$(RESET) Format check passed\n" || \
+		printf "$(GREEN)✓$(RESET) Format check passed\n" || \
 		printf "$(YELLOW)⚠$(RESET) Format issues found (run 'make format' to fix)\n"; \
 	else \
 		printf "$(YELLOW)⚠$(RESET) npx not available, skipping format check\n"; \
@@ -241,7 +241,7 @@ format: ## Fix formatting with prettier
 	@printf "$(BLUE)==>$(RESET) Formatting files...\n"
 	@if command -v npx >/dev/null 2>&1; then \
 		npx prettier --write "**/*.{json,yaml,yml,md}" --ignore-path .gitignore; \
-		printf "$(GREEN)✔$(RESET) Formatting complete\n"; \
+		printf "$(GREEN)✓$(RESET) Formatting complete\n"; \
 	else \
 		printf "$(RED)✘$(RESET) npx not available\n"; \
 		exit 1; \
@@ -251,7 +251,7 @@ lint-secrets: ## Scan for secrets with gitleaks (via pre-commit)
 	@printf "$(BLUE)==>$(RESET) Scanning for secrets...\n"
 	@if command -v pre-commit >/dev/null 2>&1; then \
 		pre-commit run gitleaks --all-files && \
-		printf "$(GREEN)✔$(RESET) No secrets detected\n"; \
+		printf "$(GREEN)✓$(RESET) No secrets detected\n"; \
 	else \
 		printf "$(YELLOW)⚠$(RESET) pre-commit not installed, skipping secret scan\n"; \
 		printf "  Install: pip install pre-commit\n"; \
@@ -265,7 +265,7 @@ test: ## Run BATS unit tests
 	@printf "$(BLUE)==>$(RESET) Running BATS tests...\n"
 	@bats --version
 	@bats $(TESTS_DIR)/*.bats
-	@printf "$(GREEN)✔$(RESET) Tests passed\n"
+	@printf "$(GREEN)✓$(RESET) Tests passed\n"
 
 test-verbose: ## Run tests with verbose output
 	@printf "$(BLUE)==>$(RESET) Running BATS tests (verbose)...\n"
@@ -303,11 +303,11 @@ OPTIONAL_TOOLS := yamllint
 deps: deps-install ## Bootstrap dev environment (install tools + configure hooks)
 	@printf "\n$(BLUE)==>$(RESET) Configuring git hooks...\n"
 	@pre-commit install --hook-type pre-commit --hook-type commit-msg >/dev/null 2>&1 && \
-		printf "$(GREEN)✔$(RESET) Pre-commit hooks installed\n" || \
+		printf "$(GREEN)✓$(RESET) Pre-commit hooks installed\n" || \
 		printf "$(RED)✘$(RESET) Failed to install pre-commit hooks\n"
 	@printf "\n$(BLUE)==>$(RESET) Running verification...\n"
 	@$(MAKE) --no-print-directory deps-check
-	@printf "\n$(GREEN)✔$(RESET) Dev environment ready! Run 'make all' to verify.\n"
+	@printf "\n$(GREEN)✓$(RESET) Dev environment ready! Run 'make all' to verify.\n"
 
 deps-check: ## Verify all dependencies are installed
 	@printf "$(BLUE)==>$(RESET) Checking dependencies...\n"
@@ -315,7 +315,7 @@ deps-check: ## Verify all dependencies are installed
 	for tool in $(REQUIRED_TOOLS); do \
 		if command -v "$$tool" >/dev/null 2>&1; then \
 			ver=$$($$tool --version 2>/dev/null | head -1 | sed 's/.*version //;s/[^0-9.].*//'); \
-			printf "  $(GREEN)✔$(RESET) $$tool $(CYAN)$$ver$(RESET)\n"; \
+			printf "  $(GREEN)✓$(RESET) $$tool $(CYAN)$$ver$(RESET)\n"; \
 		else \
 			printf "  $(RED)✘$(RESET) $$tool $(RED)(missing)$(RESET)\n"; \
 			missing=1; \
@@ -324,7 +324,7 @@ deps-check: ## Verify all dependencies are installed
 	for tool in $(OPTIONAL_TOOLS); do \
 		if command -v "$$tool" >/dev/null 2>&1; then \
 			ver=$$($$tool --version 2>/dev/null | head -1 | sed 's/.*version //;s/[^0-9.].*//'); \
-			printf "  $(GREEN)✔$(RESET) $$tool $(CYAN)$$ver$(RESET)\n"; \
+			printf "  $(GREEN)✓$(RESET) $$tool $(CYAN)$$ver$(RESET)\n"; \
 		else \
 			printf "  $(YELLOW)○$(RESET) $$tool $(YELLOW)(optional)$(RESET)\n"; \
 		fi; \
@@ -332,13 +332,13 @@ deps-check: ## Verify all dependencies are installed
 	printf "\n"; \
 	bash_ver=$$(bash --version | head -1 | sed 's/.*version \([0-9]*\).*/\1/'); \
 	if [ "$$bash_ver" -ge 4 ] 2>/dev/null; then \
-		printf "  $(GREEN)✔$(RESET) bash 4+ $(CYAN)(v$$bash_ver)$(RESET)\n"; \
+		printf "  $(GREEN)✓$(RESET) bash 4+ $(CYAN)(v$$bash_ver)$(RESET)\n"; \
 	else \
 		printf "  $(RED)✘$(RESET) bash 4+ $(RED)(found v$$bash_ver)$(RESET)\n"; \
 		missing=1; \
 	fi; \
 	if [ -f .git/hooks/pre-commit ] && grep -q pre-commit .git/hooks/pre-commit 2>/dev/null; then \
-		printf "  $(GREEN)✔$(RESET) pre-commit hooks configured\n"; \
+		printf "  $(GREEN)✓$(RESET) pre-commit hooks configured\n"; \
 	else \
 		printf "  $(YELLOW)○$(RESET) pre-commit hooks $(YELLOW)(not installed)$(RESET)\n"; \
 	fi; \
@@ -359,11 +359,11 @@ ifeq ($(OS),darwin)
 	@printf "$(BLUE)==>$(RESET) Installing via Homebrew...\n"
 	@for tool in shellcheck bats-core pre-commit jq yamllint; do \
 		if brew list "$$tool" >/dev/null 2>&1; then \
-			printf "  $(GREEN)✔$(RESET) $$tool (already installed)\n"; \
+			printf "  $(GREEN)✓$(RESET) $$tool (already installed)\n"; \
 		else \
 			printf "  $(BLUE)↓$(RESET) Installing $$tool...\n"; \
 			brew install "$$tool" >/dev/null 2>&1 && \
-				printf "  $(GREEN)✔$(RESET) $$tool installed\n" || \
+				printf "  $(GREEN)✓$(RESET) $$tool installed\n" || \
 				printf "  $(RED)✘$(RESET) Failed to install $$tool\n"; \
 		fi; \
 	done
@@ -372,7 +372,7 @@ ifeq ($(OS),darwin)
 	if [ "$$bash_ver" -lt 4 ] 2>/dev/null; then \
 		printf "\n$(BLUE)==>$(RESET) Installing modern bash...\n"; \
 		brew install bash >/dev/null 2>&1 && \
-			printf "  $(GREEN)✔$(RESET) bash 4+ installed\n" || \
+			printf "  $(GREEN)✓$(RESET) bash 4+ installed\n" || \
 			printf "  $(RED)✘$(RESET) Failed to install bash\n"; \
 	fi
 else ifeq ($(OS),linux)
@@ -398,14 +398,14 @@ else
 	@printf "$(YELLOW)⚠$(RESET) Unsupported platform: $(PLATFORM)\n"
 	@printf "    Install manually: shellcheck bats pre-commit jq\n"
 endif
-	@printf "\n$(GREEN)✔$(RESET) Tool installation complete\n"
+	@printf "\n$(GREEN)✓$(RESET) Tool installation complete\n"
 
 # =============================================================================
 # CI Targets (used by GitHub Actions and locally)
 # =============================================================================
 
 ci: ci-lint ci-test ## Full CI pipeline (mirrors GitHub Actions)
-	@printf "$(GREEN)✔$(RESET) CI pipeline complete\n"
+	@printf "$(GREEN)✓$(RESET) CI pipeline complete\n"
 
 ci-lint: ## CI lint stage
 	@printf "$(BLUE)==>$(RESET) CI: Linting...\n"
