@@ -618,16 +618,33 @@ EOF
 
 # Override cd to track directories
 # Preserve existing cd wrapper functionality (create dirs if needed)
+_j_has_original_cd=false
+
 if declare -f cd &>/dev/null; then
     # There's an existing cd function - wrap it using shell-specific methods
     if [[ "${_J_SHELL}" == "zsh" ]]; then
-        # zsh: use functions -c to copy
-        functions -c cd _j_original_cd
+        # zsh: use functions -c to copy (requires zsh 5.3.1+)
+        # Suppress errors if the command fails during init
+        if functions -c cd _j_original_cd 2>/dev/null; then
+            _j_has_original_cd=true
+        else
+            # Fallback: save function body and recreate
+            # This handles edge cases where functions -c fails during shell init
+            _j_cd_body="$(functions cd 2>/dev/null)"
+            if [[ -n "${_j_cd_body}" ]]; then
+                eval "_j_original_cd ${_j_cd_body#cd }" 2>/dev/null && _j_has_original_cd=true
+            fi
+            unset _j_cd_body
+        fi
     else
         # bash: use eval with sed to rename the function
-        eval "$(declare -f cd | sed '1s/^cd /_j_original_cd /')"
+        if eval "$(declare -f cd | sed '1s/^cd /_j_original_cd /')" 2>/dev/null; then
+            _j_has_original_cd=true
+        fi
     fi
+fi
 
+if [[ "${_j_has_original_cd}" == true ]]; then
     cd() {
         _J_PREV_DIR="${PWD}"
         _j_original_cd "$@" || return $?
@@ -642,7 +659,7 @@ if declare -f cd &>/dev/null; then
         fi
     }
 else
-    # No existing wrapper - use builtin
+    # No existing wrapper or copy failed - use builtin
     cd() {
         _J_PREV_DIR="${PWD}"
         builtin cd "$@" || return $?
@@ -657,6 +674,8 @@ else
         fi
     }
 fi
+
+unset _j_has_original_cd
 
 # Migrate from old ~/.marks file if it exists
 _j_migrate_marks() {
