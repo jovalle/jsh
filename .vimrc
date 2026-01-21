@@ -94,7 +94,9 @@ endif
 set number                      " Line numbers
 set relativenumber              " Relative line numbers
 set cursorline                  " Highlight current line
-set cursorlineopt=number        " Only highlight line number, not whole line
+if exists('+cursorlineopt')
+    set cursorlineopt=number    " Only highlight line number, not whole line
+endif
 set scrolloff=8                 " Keep 8 lines above/below cursor
 set sidescrolloff=8             " Keep 8 columns left/right of cursor
 set signcolumn=auto             " Show sign column only when needed
