@@ -174,8 +174,8 @@ inoremap jj <Esc>
 inoremap jk <Esc>
 
 " Clear search highlight
-nnoremap <Esc> :nohlsearch<CR>
 nnoremap <leader>h :nohlsearch<CR>
+nnoremap <C-l> :nohlsearch<CR><C-l>
 
 " Save and quit
 nnoremap <leader>w :w<CR>
