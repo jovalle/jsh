@@ -174,7 +174,11 @@ fi
 # =============================================================================
 
 # Vim as default editor (portable across SSH sessions)
-if has vim; then
+if has nvim; then
+    export EDITOR="nvim"
+    export VISUAL="nvim"
+
+elif has vim; then
     export EDITOR="vim"
     export VISUAL="vim"
 fi
@@ -183,9 +187,6 @@ fi
 export LESS="-R -F -i -M -S"
 export LESSHISTFILE="${XDG_CACHE_HOME:-$HOME/.cache}/less/history"
 ensure_dir "$(dirname "${LESSHISTFILE}")"
-
-# Ripgrep config
-export RIPGREP_CONFIG_PATH="${JSH_DIR}/core/ripgreprc"
 
 # Man pages with color
 export MANPAGER="less -R --use-color -Dd+r -Du+b"
