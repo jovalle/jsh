@@ -98,7 +98,7 @@ font-family = JetBrainsMono Nerd Font
 # font-family = Menlo
 
 # Font size in points
-font-size = 14
+font-size = 10
 
 # Enable font thickening (makes fonts appear bolder)
 # Useful for light fonts on dark backgrounds
