@@ -47,9 +47,6 @@ set bell-style none
 
 set keymap vi-insert
 
-# jj to exit insert mode
-"jj": vi-movement-mode
-
 # Ctrl+L clears screen
 "\C-l": clear-screen
 
