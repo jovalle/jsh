@@ -107,12 +107,15 @@ alias rl='exec "${SHELL}"'
 # -----------------------------------------------------------------------------
 # Editors
 # -----------------------------------------------------------------------------
-if has vim; then
+if has nvim; then
+  alias vim='nvim'
+  alias vi='nvim'
+elif has vim; then
   alias vi='vim'
   alias v='vim'
 fi
 
-alias e='"${EDITOR:-vim}"'
+alias e='"${EDITOR:-vi}"'
 
 # -----------------------------------------------------------------------------
 # Disk and System
