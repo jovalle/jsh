@@ -1,13 +1,8 @@
 [
-  "bat",
-  "curl",
-  "fd-find",
-  "fzf",
-  "git",
-  "jq",
-  "neovim",
-  "ripgrep",
-  "tmux",
-  "vim",
+  "blueman",
+  "code",
+  "pavucontrol",
+  "podman",
+  "xclip",
   "zsh"
 ]

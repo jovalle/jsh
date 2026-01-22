@@ -1,1 +1,1 @@
-["atuin", "syncthing"]
+["gpg-agent.socket", "podman.socket", "ssh-agent"]

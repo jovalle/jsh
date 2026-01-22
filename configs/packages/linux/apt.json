@@ -1,19 +1,10 @@
 [
-  "bat",
   "build-essential",
   "cifs-utils",
   "curl",
   "dkms",
-  "fd-find",
-  "fzf",
-  "git",
-  "jq",
-  "neovim",
   "net-tools",
   "nvme-cli",
-  "ripgrep",
   "s-tui",
-  "tmux",
-  "vim",
   "zsh"
 ]
