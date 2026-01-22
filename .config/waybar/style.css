@@ -1,0 +1,363 @@
+/* ╔═══════════════════════════════════════════════════════════════════════════╗
+ * ║                    WAYBAR STYLING - iStat Menus Style                     ║
+ * ╚═══════════════════════════════════════════════════════════════════════════╝ */
+
+/* Color Palette - Clean, muted tones inspired by iStat Menus */
+@define-color bg rgba(24, 24, 32, 0.92);
+@define-color bg-alt rgba(40, 42, 54, 0.95);
+@define-color bg-module rgba(50, 52, 66, 0.8);
+@define-color fg #e0e0e0;
+@define-color fg-dim #8a8a9a;
+@define-color border rgba(255, 255, 255, 0.08);
+
+/* System monitor colors */
+@define-color cpu #6ecbf5;
+@define-color memory #c792ea;
+@define-color disk #ffcb6b;
+@define-color network #82aaff;
+@define-color bluetooth #7aa2f7;
+@define-color audio #a6e3a1;
+@define-color backlight #ffd580;
+@define-color battery-good #98c379;
+@define-color battery-warning #e5c07b;
+@define-color battery-critical #e06c75;
+
+/* ┌───────────────────────────────────────────────────────────────────────────┐
+ * │                            BASE STYLING                                    │
+ * └───────────────────────────────────────────────────────────────────────────┘ */
+
+* {
+    font-family: "SF Pro Display", "JetBrainsMono Nerd Font", "Inter", sans-serif;
+    font-size: 12px;
+    font-weight: 500;
+    min-height: 0;
+    border: none;
+    border-radius: 0;
+}
+
+window#waybar {
+    background: @bg;
+    border-radius: 10px;
+    border: 1px solid @border;
+    color: @fg;
+}
+
+window#waybar.hidden {
+    opacity: 0.2;
+}
+
+tooltip {
+    background: @bg-alt;
+    border: 1px solid @border;
+    border-radius: 8px;
+}
+
+tooltip label {
+    color: @fg;
+    padding: 6px 8px;
+    font-size: 11px;
+}
+
+/* ┌───────────────────────────────────────────────────────────────────────────┐
+ * │                      DEFAULT MODULE STYLING                                │
+ * └───────────────────────────────────────────────────────────────────────────┘ */
+
+#workspaces,
+#window,
+#clock,
+#cpu,
+#memory,
+#disk,
+#custom-netspeed,
+#network,
+#bluetooth,
+#pulseaudio,
+#backlight,
+#battery,
+#tray {
+    padding: 0 10px;
+    margin: 4px 1px;
+    background: transparent;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+}
+
+/* ┌───────────────────────────────────────────────────────────────────────────┐
+ * │                          WORKSPACES                                        │
+ * └───────────────────────────────────────────────────────────────────────────┘ */
+
+#workspaces {
+    background: @bg-module;
+    padding: 0 4px;
+    margin-left: 4px;
+}
+
+#workspaces button {
+    color: @fg-dim;
+    padding: 0 8px;
+    margin: 4px 2px;
+    background: transparent;
+    border-radius: 4px;
+    transition: all 0.2s ease;
+}
+
+#workspaces button.active {
+    color: @fg;
+    background: rgba(110, 203, 245, 0.25);
+}
+
+#workspaces button.urgent {
+    color: @fg;
+    background: @battery-critical;
+}
+
+#workspaces button:hover {
+    color: @fg;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+#workspaces button.special {
+    color: @cpu;
+}
+
+/* ┌───────────────────────────────────────────────────────────────────────────┐
+ * │                           WINDOW TITLE                                     │
+ * └───────────────────────────────────────────────────────────────────────────┘ */
+
+#window {
+    color: @fg-dim;
+    padding: 0 12px;
+    font-weight: 400;
+}
+
+window#waybar.empty #window {
+    background: transparent;
+}
+
+/* ┌───────────────────────────────────────────────────────────────────────────┐
+ * │                              CLOCK                                         │
+ * └───────────────────────────────────────────────────────────────────────────┘ */
+
+#clock {
+    color: @fg;
+    background: @bg-module;
+    font-weight: 500;
+    padding: 0 14px;
+}
+
+#clock:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* ┌───────────────────────────────────────────────────────────────────────────┐
+ * │                    SYSTEM MONITORS - iStat Style                          │
+ * └───────────────────────────────────────────────────────────────────────────┘ */
+
+/* CPU */
+#cpu {
+    color: @cpu;
+}
+
+#cpu.warning {
+    color: @battery-warning;
+}
+
+#cpu.critical {
+    color: @battery-critical;
+}
+
+#cpu:hover {
+    background: rgba(110, 203, 245, 0.15);
+}
+
+/* Memory */
+#memory {
+    color: @memory;
+}
+
+#memory.warning {
+    color: @battery-warning;
+}
+
+#memory.critical {
+    color: @battery-critical;
+}
+
+#memory:hover {
+    background: rgba(199, 146, 234, 0.15);
+}
+
+/* Disk */
+#disk {
+    color: @disk;
+}
+
+#disk:hover {
+    background: rgba(255, 203, 107, 0.15);
+}
+
+/* Network Speed */
+#custom-netspeed {
+    color: @fg-dim;
+    font-size: 11px;
+    padding: 0 8px;
+}
+
+/* ┌───────────────────────────────────────────────────────────────────────────┐
+ * │                            NETWORK                                         │
+ * └───────────────────────────────────────────────────────────────────────────┘ */
+
+#network {
+    color: @network;
+}
+
+#network.disconnected {
+    color: @battery-critical;
+}
+
+#network.linked {
+    color: @battery-warning;
+}
+
+#network:hover {
+    background: rgba(130, 170, 255, 0.15);
+}
+
+/* ┌───────────────────────────────────────────────────────────────────────────┐
+ * │                           BLUETOOTH                                        │
+ * └───────────────────────────────────────────────────────────────────────────┘ */
+
+#bluetooth {
+    color: @bluetooth;
+    padding: 0 8px;
+}
+
+#bluetooth.disabled {
+    color: @fg-dim;
+}
+
+#bluetooth.connected {
+    color: @bluetooth;
+}
+
+#bluetooth:hover {
+    background: rgba(122, 162, 247, 0.15);
+}
+
+/* ┌───────────────────────────────────────────────────────────────────────────┐
+ * │                            AUDIO                                           │
+ * └───────────────────────────────────────────────────────────────────────────┘ */
+
+#pulseaudio {
+    color: @audio;
+}
+
+#pulseaudio.muted {
+    color: @fg-dim;
+}
+
+#pulseaudio:hover {
+    background: rgba(166, 227, 161, 0.15);
+}
+
+/* ┌───────────────────────────────────────────────────────────────────────────┐
+ * │                           BACKLIGHT                                        │
+ * └───────────────────────────────────────────────────────────────────────────┘ */
+
+#backlight {
+    color: @backlight;
+    padding: 0 8px;
+}
+
+#backlight:hover {
+    background: rgba(255, 213, 128, 0.15);
+}
+
+/* ┌───────────────────────────────────────────────────────────────────────────┐
+ * │                            BATTERY                                         │
+ * └───────────────────────────────────────────────────────────────────────────┘ */
+
+#battery {
+    color: @battery-good;
+}
+
+#battery.good {
+    color: @battery-good;
+}
+
+#battery.charging,
+#battery.plugged,
+#battery.full {
+    color: @battery-good;
+}
+
+#battery.warning:not(.charging) {
+    color: @battery-warning;
+}
+
+#battery.critical:not(.charging) {
+    color: @battery-critical;
+    animation: pulse 1s ease-in-out infinite alternate;
+}
+
+#battery:hover {
+    background: rgba(152, 195, 121, 0.15);
+}
+
+@keyframes pulse {
+    from {
+        opacity: 1;
+    }
+    to {
+        opacity: 0.6;
+    }
+}
+
+/* ┌───────────────────────────────────────────────────────────────────────────┐
+ * │                           SYSTEM TRAY                                      │
+ * └───────────────────────────────────────────────────────────────────────────┘ */
+
+#tray {
+    padding: 0 6px;
+    margin-right: 4px;
+}
+
+#tray > .passive {
+    -gtk-icon-effect: dim;
+}
+
+#tray > .needs-attention {
+    -gtk-icon-effect: highlight;
+    background-color: rgba(224, 108, 117, 0.3);
+    border-radius: 4px;
+}
+
+#tray menu {
+    background: @bg-alt;
+    border: 1px solid @border;
+    border-radius: 8px;
+}
+
+#tray menu menuitem {
+    padding: 4px 8px;
+}
+
+#tray menu menuitem:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* ┌───────────────────────────────────────────────────────────────────────────┐
+ * │                        MODULE SEPARATORS                                   │
+ * └───────────────────────────────────────────────────────────────────────────┘ */
+
+/* Visual separator between system monitors and status icons */
+#network {
+    margin-left: 4px;
+    border-left: 1px solid @border;
+    padding-left: 12px;
+}
+
+#tray {
+    border-left: 1px solid @border;
+    padding-left: 8px;
+}
