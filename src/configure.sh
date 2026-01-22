@@ -23,9 +23,11 @@ CONFIG_MODULES[macos]="macOS system defaults|darwin|macos/defaults.sh"
 CONFIG_MODULES[dock]="macOS Dock settings|darwin|macos/dock.sh"
 CONFIG_MODULES[finder]="macOS Finder settings|darwin|macos/finder.sh"
 CONFIG_MODULES[apps]="Application configs (VSCode)|all|apps/vscode.sh"
-CONFIG_MODULES[linux]="Linux system settings|linux|linux/system.sh"
-CONFIG_MODULES[sudoers]="Sudoers configuration|linux|linux/sudoers.sh"
-CONFIG_MODULES[systemd]="Systemd user services|linux|linux/systemd.sh"
+CONFIG_MODULES[linux]="GNOME settings|linux|linux/configure-settings.sh"
+CONFIG_MODULES[sudoers]="Sudoers configuration|linux|linux/configure-sudoers.sh"
+CONFIG_MODULES[systemd]="Systemd user services|linux|linux/configure-systemd.sh"
+CONFIG_MODULES[hyprland]="Hyprland/Wayland environment|linux|linux/configure-hyprland.sh"
+CONFIG_MODULES[repos]="DNF repositories (COPR)|linux|linux/configure-repos.sh"
 
 # =============================================================================
 # Helper Functions
@@ -230,35 +232,84 @@ _configure_vscode() {
 _configure_linux() {
     local dry_run="${1:-false}"
 
-    echo "${BOLD}Linux System Configuration${RST}"
+    echo "${BOLD}Linux System Configuration (GNOME)${RST}"
     echo ""
 
+    local script_path="${JSH_SCRIPTS_DIR}/linux/configure-settings.sh"
+
     if [[ "${dry_run}" == true ]]; then
-        echo "  ${DIM}[dry-run] Would configure Linux system settings${RST}"
+        echo "  ${DIM}[dry-run] Would run: ${script_path}${RST}"
         return 0
     fi
 
-    # Set timezone if needed
-    if command -v timedatectl >/dev/null 2>&1; then
-        local current_tz
-        current_tz=$(timedatectl show --property=Timezone --value 2>/dev/null)
-        if [[ -z "${current_tz}" ]]; then
-            info "Timezone not set, consider running: sudo timedatectl set-timezone <your-tz>"
-        else
-            prefix_success "Timezone: ${current_tz}"
-        fi
+    if [[ -x "${script_path}" ]]; then
+        bash "${script_path}"
+    else
+        warn "Script not found or not executable: ${script_path}"
+        return 1
+    fi
+}
+
+_configure_systemd() {
+    local dry_run="${1:-false}"
+
+    echo "${BOLD}Systemd User Services${RST}"
+    echo ""
+
+    local script_path="${JSH_SCRIPTS_DIR}/linux/configure-systemd.sh"
+
+    if [[ "${dry_run}" == true ]]; then
+        echo "  ${DIM}[dry-run] Would run: ${script_path}${RST}"
+        return 0
     fi
 
-    # Enable useful systemd services
-    if command -v systemctl >/dev/null 2>&1; then
-        local user_services=("gpg-agent.service" "ssh-agent.service")
-        for service in "${user_services[@]}"; do
-            if systemctl --user is-enabled "${service}" >/dev/null 2>&1; then
-                prefix_success "${service} enabled"
-            else
-                prefix_info "${service} not enabled (run: systemctl --user enable ${service})"
-            fi
-        done
+    if [[ -x "${script_path}" ]]; then
+        bash "${script_path}"
+    else
+        warn "Script not found or not executable: ${script_path}"
+        return 1
+    fi
+}
+
+_configure_hyprland() {
+    local dry_run="${1:-false}"
+
+    echo "${BOLD}Hyprland/Wayland Environment${RST}"
+    echo ""
+
+    local script_path="${JSH_SCRIPTS_DIR}/linux/configure-hyprland.sh"
+
+    if [[ "${dry_run}" == true ]]; then
+        echo "  ${DIM}[dry-run] Would run: ${script_path}${RST}"
+        return 0
+    fi
+
+    if [[ -x "${script_path}" ]]; then
+        bash "${script_path}"
+    else
+        warn "Script not found or not executable: ${script_path}"
+        return 1
+    fi
+}
+
+_configure_repos() {
+    local dry_run="${1:-false}"
+
+    echo "${BOLD}DNF Repositories (COPR)${RST}"
+    echo ""
+
+    local script_path="${JSH_SCRIPTS_DIR}/linux/configure-repos.sh"
+
+    if [[ "${dry_run}" == true ]]; then
+        echo "  ${DIM}[dry-run] Would run: ${script_path}${RST}"
+        return 0
+    fi
+
+    if [[ -x "${script_path}" ]]; then
+        bash "${script_path}"
+    else
+        warn "Script not found or not executable: ${script_path}"
+        return 1
     fi
 }
 
@@ -279,7 +330,7 @@ cmd_configure_list() {
         desc=$(_configure_module_desc "${module}")
 
         if _configure_module_applicable "${module}"; then
-            printf "  ${GRN}✔${RST} %-12s %s\n" "${module}" "${desc}"
+            printf "  ${GRN}✓${RST} %-12s %s\n" "${module}" "${desc}"
         else
             printf "  ${DIM}-${RST} %-12s %s ${DIM}(not applicable)${RST}\n" "${module}" "${desc}"
         fi
@@ -314,6 +365,8 @@ cmd_configure_all() {
         _configure_dock "${dry_run}"
     elif [[ "${os_type}" == "Linux" ]]; then
         _configure_linux "${dry_run}"
+        echo ""
+        _configure_systemd "${dry_run}"
     fi
 
     echo ""
@@ -389,6 +442,41 @@ cmd_configure() {
             fi
             _configure_linux "${dry_run}"
             ;;
+        systemd)
+            if [[ "$(uname -s)" != "Linux" ]]; then
+                error "Systemd configuration only available on Linux"
+                return 1
+            fi
+            _configure_systemd "${dry_run}"
+            ;;
+        hyprland)
+            if [[ "$(uname -s)" != "Linux" ]]; then
+                error "Hyprland configuration only available on Linux"
+                return 1
+            fi
+            _configure_hyprland "${dry_run}"
+            ;;
+        repos)
+            if [[ "$(uname -s)" != "Linux" ]]; then
+                error "Repository configuration only available on Linux"
+                return 1
+            fi
+            _configure_repos "${dry_run}"
+            ;;
+        sudoers)
+            if [[ "$(uname -s)" != "Linux" ]]; then
+                error "Sudoers configuration only available on Linux"
+                return 1
+            fi
+            local script_path="${JSH_SCRIPTS_DIR}/linux/configure-sudoers.sh"
+            if [[ "${dry_run}" == true ]]; then
+                echo "  ${DIM}[dry-run] Would run: ${script_path}${RST}"
+            elif [[ -x "${script_path}" ]]; then
+                bash "${script_path}"
+            else
+                warn "Script not found: ${script_path}"
+            fi
+            ;;
         list|ls)
             cmd_configure_list
             ;;
@@ -403,7 +491,11 @@ cmd_configure() {
             echo "    ${CYAN}macos${RST}         macOS system defaults"
             echo "    ${CYAN}dock${RST}          macOS Dock settings"
             echo "    ${CYAN}apps${RST}          Application configs (VS Code)"
-            echo "    ${CYAN}linux${RST}         Linux system settings"
+            echo "    ${CYAN}linux${RST}         GNOME desktop settings"
+            echo "    ${CYAN}systemd${RST}       Systemd user services"
+            echo "    ${CYAN}hyprland${RST}      Hyprland/Wayland environment"
+            echo "    ${CYAN}repos${RST}         DNF repositories (COPR)"
+            echo "    ${CYAN}sudoers${RST}       Sudoers configuration"
             echo "    ${CYAN}list${RST}          Show available configurations"
             echo ""
             echo "${BOLD}OPTIONS:${RST}"
@@ -415,6 +507,10 @@ cmd_configure() {
             echo "    jsh configure --check        # Preview all changes"
             echo "    jsh configure macos          # macOS defaults only"
             echo "    jsh configure dock           # Dock settings only"
+            echo "    jsh configure linux          # GNOME settings (Linux)"
+            echo "    jsh configure hyprland       # Hyprland/Wayland setup (Linux)"
+            echo "    jsh configure systemd        # Enable user services (Linux)"
+            echo "    jsh configure repos          # Enable COPR repos (Linux)"
             echo "    jsh configure list           # List available modules"
             ;;
         *)
