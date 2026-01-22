@@ -1,0 +1,109 @@
+/* ╔═══════════════════════════════════════════════════════════════════════════╗
+ * ║                          WOFI STYLING                                      ║
+ * ║  Curated from: JaKooLit, end-4, ML4W dotfiles                             ║
+ * ╚═══════════════════════════════════════════════════════════════════════════╝ */
+
+/* Color Palette - Matches Waybar */
+@define-color bg rgba(30, 30, 46, 0.95);
+@define-color bg-alt rgba(49, 50, 68, 1);
+@define-color fg #cdd6f4;
+@define-color cyan #89dceb;
+@define-color lavender #b4befe;
+@define-color surface0 #313244;
+
+/* Main Window */
+window {
+    font-family: "JetBrainsMono Nerd Font", sans-serif;
+    font-size: 14px;
+    background-color: @bg;
+    border: 2px solid @lavender;
+    border-radius: 16px;
+}
+
+/* Input Field */
+#input {
+    margin: 12px;
+    padding: 12px 16px;
+    border: none;
+    border-radius: 12px;
+    background-color: @bg-alt;
+    color: @fg;
+    font-size: 15px;
+}
+
+#input:focus {
+    border: none;
+    outline: none;
+}
+
+/* Scrollable Area */
+#scroll {
+    margin: 0 12px 12px 12px;
+    border: none;
+    background: transparent;
+}
+
+/* Outer Container */
+#outer-box {
+    margin: 0;
+    padding: 0;
+    border: none;
+}
+
+/* Inner Container */
+#inner-box {
+    margin: 0;
+    padding: 0;
+    border: none;
+    background: transparent;
+}
+
+/* Individual Entries */
+#entry {
+    padding: 10px 16px;
+    margin: 4px 0;
+    border-radius: 10px;
+    background: transparent;
+    color: @fg;
+    transition: all 0.2s ease;
+}
+
+#entry:selected {
+    background-color: @surface0;
+    color: @cyan;
+}
+
+#entry:hover {
+    background-color: @surface0;
+}
+
+/* Entry Text */
+#text {
+    margin: 0 8px;
+    color: inherit;
+}
+
+#text:selected {
+    color: @cyan;
+}
+
+/* App Icons */
+#img {
+    margin-right: 8px;
+}
+
+/* Scrollbar */
+scrollbar {
+    background: transparent;
+    border: none;
+}
+
+scrollbar slider {
+    background: @surface0;
+    border-radius: 4px;
+    min-width: 6px;
+}
+
+scrollbar slider:hover {
+    background: @lavender;
+}

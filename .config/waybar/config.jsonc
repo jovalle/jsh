@@ -1,0 +1,225 @@
+{
+    // ╔═══════════════════════════════════════════════════════════════════════════╗
+    // ║                    WAYBAR CONFIGURATION - iStat Style                     ║
+    // ╚═══════════════════════════════════════════════════════════════════════════╝
+
+    "layer": "top",
+    "position": "top",
+    "height": 32,
+    "spacing": 0,
+    "margin-top": 4,
+    "margin-left": 8,
+    "margin-right": 8,
+    "exclusive": true,
+    "passthrough": false,
+    "fixed-center": true,
+
+    "modules-left": [
+        "hyprland/workspaces",
+        "hyprland/window"
+    ],
+    "modules-center": [
+        "clock"
+    ],
+    "modules-right": [
+        "cpu",
+        "memory",
+        "disk",
+        "custom/netspeed",
+        "network",
+        "bluetooth",
+        "pulseaudio",
+        "backlight",
+        "battery",
+        "tray"
+    ],
+
+    // ┌───────────────────────────────────────────────────────────────────────────┐
+    // │                          LEFT MODULES                                      │
+    // └───────────────────────────────────────────────────────────────────────────┘
+
+    "hyprland/workspaces": {
+        "format": "{name}",
+        "on-click": "activate",
+        "on-scroll-up": "hyprctl dispatch workspace e-1",
+        "on-scroll-down": "hyprctl dispatch workspace e+1",
+        "all-outputs": true,
+        "active-only": false,
+        "show-special": true,
+        "persistent-workspaces": {
+            "*": 5
+        }
+    },
+
+    "hyprland/window": {
+        "format": "{}",
+        "max-length": 40,
+        "separate-outputs": true,
+        "rewrite": {
+            "(.*) — Mozilla Firefox": " $1",
+            "(.*) - Brave": " $1",
+            "(.*) - Visual Studio Code": " $1",
+            "(.*)ghostty": " Terminal",
+            "(.*) - Nautilus": " $1"
+        }
+    },
+
+    // ┌───────────────────────────────────────────────────────────────────────────┐
+    // │                         CENTER MODULES                                     │
+    // └───────────────────────────────────────────────────────────────────────────┘
+
+    "clock": {
+        "format": "󰥔 {:%a %b %d  %I:%M %p}",
+        "format-alt": "󰃰 {:%Y-%m-%d  %H:%M:%S}",
+        "tooltip-format": "<tt><small>{calendar}</small></tt>",
+        "interval": 1,
+        "calendar": {
+            "mode": "year",
+            "mode-mon-col": 3,
+            "weeks-pos": "right",
+            "on-scroll": 1,
+            "format": {
+                "months": "<span color='#cdd6f4'><b>{}</b></span>",
+                "days": "<span color='#a6adc8'>{}</span>",
+                "weeks": "<span color='#89b4fa'><b>W{}</b></span>",
+                "weekdays": "<span color='#f9e2af'><b>{}</b></span>",
+                "today": "<span color='#f38ba8'><b><u>{}</u></b></span>"
+            }
+        },
+        "actions": {
+            "on-click-right": "mode",
+            "on-scroll-up": "shift_up",
+            "on-scroll-down": "shift_down"
+        }
+    },
+
+    // ┌───────────────────────────────────────────────────────────────────────────┐
+    // │                    RIGHT MODULES - iStat Style                            │
+    // └───────────────────────────────────────────────────────────────────────────┘
+
+    // CPU Monitor
+    "cpu": {
+        "interval": 2,
+        "format": "󰻠 {usage}%",
+        "format-alt": "󰻠 {avg_frequency}GHz",
+        "tooltip-format": "󰻠 CPU: {usage}%\nLoad: {load}\nFrequency: {avg_frequency}GHz",
+        "states": {
+            "normal": 0,
+            "warning": 70,
+            "critical": 90
+        }
+    },
+
+    // Memory Monitor
+    "memory": {
+        "interval": 5,
+        "format": "󰍛 {percentage}%",
+        "format-alt": "󰍛 {used:0.1f}G/{total:0.1f}G",
+        "tooltip-format": "󰍛 RAM: {used:0.1f}GiB / {total:0.1f}GiB ({percentage}%)\nSwap: {swapUsed:0.1f}GiB / {swapTotal:0.1f}GiB ({swapPercentage}%)",
+        "states": {
+            "normal": 0,
+            "warning": 70,
+            "critical": 90
+        }
+    },
+
+    // Disk Monitor
+    "disk": {
+        "interval": 30,
+        "format": "󰋊 {percentage_used}%",
+        "format-alt": "󰋊 {used}/{total}",
+        "path": "/",
+        "tooltip-format": "󰋊 Disk: {used} / {total} ({percentage_used}%)\nFree: {free}"
+    },
+
+    // Network Speed
+    "custom/netspeed": {
+        "interval": 2,
+        "exec": "f=/tmp/waybar_net; r1=$(cat /sys/class/net/*/statistics/rx_bytes 2>/dev/null | paste -sd+ | bc); t1=$(cat /sys/class/net/*/statistics/tx_bytes 2>/dev/null | paste -sd+ | bc); sleep 1; r2=$(cat /sys/class/net/*/statistics/rx_bytes 2>/dev/null | paste -sd+ | bc); t2=$(cat /sys/class/net/*/statistics/tx_bytes 2>/dev/null | paste -sd+ | bc); rx=$((r2-r1)); tx=$((t2-t1)); fmt(){ if [ $1 -ge 1073741824 ]; then printf '%.1fG' $(echo \"scale=1;$1/1073741824\"|bc); elif [ $1 -ge 1048576 ]; then printf '%.1fM' $(echo \"scale=1;$1/1048576\"|bc); elif [ $1 -ge 1024 ]; then printf '%.0fK' $((($1+512)/1024)); else printf '%.0fB' $1; fi; }; echo \"󰇚 $(fmt $rx)/s  󰕒 $(fmt $tx)/s\"",
+        "format": "{}",
+        "tooltip-format": "Network throughput"
+    },
+
+    // Network / WiFi
+    "network": {
+        "interval": 5,
+        "format-wifi": "󰤨 {ipaddr}",
+        "format-ethernet": "󰈀 {ipaddr}",
+        "format-disconnected": "󰤭 Offline",
+        "format-alt": "󰤨 {essid} ({signalStrength}%)",
+        "tooltip-format-wifi": "󰤨 WiFi: {essid}\nSignal: {signalStrength}%\nIP: {ipaddr}/{cidr}\nFrequency: {frequency}MHz",
+        "tooltip-format-ethernet": "󰈀 Ethernet: {ifname}\nIP: {ipaddr}/{cidr}",
+        "tooltip-format-disconnected": "󰤭 Disconnected",
+        "on-click-right": "nm-connection-editor"
+    },
+
+    // Bluetooth
+    "bluetooth": {
+        "format": "󰂯 On",
+        "format-disabled": "󰂲 Off",
+        "format-connected": "󰂱 {num_connections}",
+        "format-connected-battery": "󰂱 {device_battery_percentage}%",
+        "tooltip-format": "󰂯 Bluetooth\n{controller_alias}\t{controller_address}",
+        "tooltip-format-connected": "󰂱 Bluetooth Connected\n{controller_alias}\n\n{device_enumerate}",
+        "tooltip-format-enumerate-connected": "  {device_alias}",
+        "tooltip-format-enumerate-connected-battery": "  {device_alias} ({device_battery_percentage}%)",
+        "on-click": "blueman-manager",
+        "on-click-right": "rfkill toggle bluetooth"
+    },
+
+    // Audio / PulseAudio
+    "pulseaudio": {
+        "format": "{icon} {volume}%",
+        "format-bluetooth": "󰂰 {volume}%",
+        "format-muted": "󰝟 Muted",
+        "format-icons": {
+            "headphone": "󰋋",
+            "hands-free": "󰋎",
+            "headset": "󰋎",
+            "phone": "",
+            "portable": "",
+            "car": "󰄋",
+            "default": ["󰕿", "󰖀", "󰕾"]
+        },
+        "scroll-step": 5,
+        "on-click": "pavucontrol",
+        "on-click-right": "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle",
+        "tooltip-format": "󰕾 Audio: {desc}\nVolume: {volume}%"
+    },
+
+    // Backlight
+    "backlight": {
+        "device": "apple-panel-bl",
+        "format": "{icon} {percent}%",
+        "format-alt": "{icon}",
+        "format-icons": ["󰃞", "󰃟", "󰃠"],
+        "scroll-step": 5,
+        "on-scroll-up": "brightnessctl set 5%+",
+        "on-scroll-down": "brightnessctl set 5%-",
+        "tooltip-format": "󰃠 Brightness: {percent}%"
+    },
+
+    // Battery
+    "battery": {
+        "bat": "macsmc-battery",
+        "interval": 30,
+        "states": {
+            "full": 100,
+            "good": 80,
+            "warning": 30,
+            "critical": 15
+        },
+        "format": "{icon} {capacity}%",
+        "format-charging": "󰂄 {capacity}%",
+        "format-plugged": "󰚥 {capacity}%",
+        "format-full": "󰁹 Full",
+        "format-icons": ["󰂎", "󰁺", "󰁻", "󰁼", "󰁽", "󰁾", "󰁿", "󰂀", "󰂁", "󰂂", "󰁹"],
+        "tooltip-format": "󰁹 Battery: {capacity}%\n{timeTo}\nHealth: {health}%\nPower: {power:.1f}W"
+    },
+
+    // System Tray
+    "tray": {
+        "icon-size": 14,
+        "spacing": 6
+    }
+}

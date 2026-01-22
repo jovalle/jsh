@@ -1,0 +1,37 @@
+# ╔═══════════════════════════════════════════════════════════════════════════╗
+# ║                         WOFI CONFIGURATION                                  ║
+# ║  Curated from: JaKooLit, end-4, ML4W dotfiles                              ║
+# ╚═══════════════════════════════════════════════════════════════════════════╝
+
+# Dimensions
+width=500
+height=400
+
+# Position
+location=center
+xoffset=0
+yoffset=0
+
+# Appearance
+show=drun
+prompt=Search...
+filter_rate=100
+allow_markup=true
+allow_images=true
+image_size=32
+no_actions=true
+
+# Behavior
+insensitive=true
+hide_scroll=true
+matching=fuzzy
+sort_order=alphabetical
+
+# Layout
+halign=fill
+orientation=vertical
+content_halign=fill
+columns=1
+
+# Performance
+drun-display_generic=false
