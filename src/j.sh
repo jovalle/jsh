@@ -106,9 +106,9 @@ _j_add() {
     local now
     now="$(_j_now)"
 
-    # Use awk to update or add entry atomically
+    # Use gawk to update or add entry atomically
     if [[ -f "${J_DATA}" ]]; then
-        awk -F'|' -v path="${path}" -v now="${now}" '
+        gawk -F'|' -v path="${path}" -v now="${now}" '
             BEGIN { found=0; OFS="|" }
             $1 == path { print path, $2+1, now; found=1; next }
             { print }
@@ -129,7 +129,7 @@ _j_remove() {
     local count_before count_after
     count_before=$(wc -l < "${J_DATA}" | tr -d ' ')
 
-    awk -F'|' -v path="${path}" '$1 != path' "${J_DATA}" > "${J_DATA}.tmp"
+    gawk -F'|' -v path="${path}" '$1 != path' "${J_DATA}" > "${J_DATA}.tmp"
     mv "${J_DATA}.tmp" "${J_DATA}"
 
     count_after=$(wc -l < "${J_DATA}" | tr -d ' ')
@@ -257,7 +257,7 @@ _j_calculate_scores() {
 
     [[ ! -f "${J_DATA}" ]] && return
 
-    awk -F'|' -v now="${now}" -v decay="${_J_DECAY}" -v min="${_J_MIN_SCORE}" '
+    gawk -F'|' -v now="${now}" -v decay="${_J_DECAY}" -v min="${_J_MIN_SCORE}" '
         {
             path = $1
             count = $2
@@ -324,7 +324,7 @@ _j_query() {
                     results="${results}1.0000|${path}"$'\n'
                 fi
             fi
-        done < <(jgit list 2>/dev/null | awk '{print $1}')
+        done < <(jgit list 2>/dev/null | gawk '{print $1}')
     fi
 
     # Sort by score descending
@@ -449,9 +449,8 @@ _j_cd_hook() {
             # zsh: &! backgrounds and disowns silently (no job control output)
             ( PATH="$PATH" _j_add "${PWD}" ) &>/dev/null &!
         else
-            # bash: background and disown separately
-            ( PATH="$PATH" _j_add "${PWD}" ) &>/dev/null &
-            disown 2>/dev/null || true
+            # bash: background inside subshell to suppress job notification
+            ( PATH="$PATH" _j_add "${PWD}" & ) &>/dev/null
         fi
     fi
 }
@@ -646,8 +645,8 @@ if [[ "${_j_has_original_cd}" == true ]]; then
             if [[ "${_J_SHELL}" == "zsh" ]]; then
                 ( PATH="$PATH" _j_add "${PWD}" ) &>/dev/null &!
             else
-                ( PATH="$PATH" _j_add "${PWD}" ) &>/dev/null &
-                disown 2>/dev/null || true
+                # bash: background inside subshell to suppress job notification
+                ( PATH="$PATH" _j_add "${PWD}" & ) &>/dev/null
             fi
         fi
     }
@@ -661,8 +660,8 @@ else
             if [[ "${_J_SHELL}" == "zsh" ]]; then
                 ( PATH="$PATH" _j_add "${PWD}" ) &>/dev/null &!
             else
-                ( PATH="$PATH" _j_add "${PWD}" ) &>/dev/null &
-                disown 2>/dev/null || true
+                # bash: background inside subshell to suppress job notification
+                ( PATH="$PATH" _j_add "${PWD}" & ) &>/dev/null
             fi
         fi
     }
