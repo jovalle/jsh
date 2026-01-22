@@ -7,3 +7,6 @@
 [submodule "lib/fzf"]
 	path = lib/fzf
 	url = https://github.com/junegunn/fzf.git
+[submodule "lib/lazyvim"]
+	path = lib/lazyvim
+	url = https://github.com/LazyVim/starter.git

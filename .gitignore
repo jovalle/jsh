@@ -233,6 +233,9 @@ lib/mason-packages/
 # Vim plugins (downloaded on setup)
 lib/vim-config/plugged/
 
+# Neovim pre-built binaries (downloaded on setup)
+lib/nvim/
+
 # Keep nvim config but don't track (user may want it locally)
 .config/nvim/
 
