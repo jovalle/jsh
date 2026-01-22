@@ -1,13 +1,11 @@
-# brew.sh - Homebrew shellenv caching for faster shell startup
+# brew.sh - Homebrew/Linuxbrew shellenv caching for faster shell startup
 # Caches `brew shellenv` output to avoid 20-40ms overhead per shell
+# Works on both macOS (Homebrew) and Linux (Linuxbrew)
 # shellcheck disable=SC2034
 
 # Load guard
 [[ -n "${_JSH_BREW_LOADED:-}" ]] && return 0
 _JSH_BREW_LOADED=1
-
-# Only run on macOS
-[[ "$(uname -s)" != "Darwin" ]] && return 0
 
 # =============================================================================
 # Configuration
@@ -19,15 +17,19 @@ _BREW_CACHE_HEAD="${_BREW_CACHE_DIR}/head"
 _BREW_CACHE_TTL=86400  # 24 hours in seconds
 
 # =============================================================================
-# Homebrew Path Detection
+# Homebrew/Linuxbrew Path Detection
 # =============================================================================
 
-# Find Homebrew installation (Apple Silicon or Intel)
+# Find Homebrew/Linuxbrew installation
+# macOS: /opt/homebrew (Apple Silicon) or /usr/local (Intel)
+# Linux: /home/linuxbrew/.linuxbrew
 _brew_find_prefix() {
     if [[ -x "/opt/homebrew/bin/brew" ]]; then
         echo "/opt/homebrew"
     elif [[ -x "/usr/local/bin/brew" ]]; then
         echo "/usr/local"
+    elif [[ -x "/home/linuxbrew/.linuxbrew/bin/brew" ]]; then
+        echo "/home/linuxbrew/.linuxbrew"
     else
         return 1
     fi
@@ -56,11 +58,13 @@ _brew_cache_valid() {
     fi
     [[ ${cache_age} -gt ${_BREW_CACHE_TTL} ]] && return 1
 
-    # Check if Homebrew HEAD changed (indicates brew update)
+    # Check if Homebrew/Linuxbrew HEAD changed (indicates brew update)
     if [[ -f "${head_file}" ]]; then
-        local cached_head current_head
+        local cached_head current_head homebrew_repo
         cached_head=$(cat "${head_file}" 2>/dev/null)
-        current_head=$(git -C "${brew_prefix}/Homebrew" rev-parse HEAD 2>/dev/null || echo "")
+        # Homebrew repo location (same structure on macOS and Linux)
+        homebrew_repo="${brew_prefix}/Homebrew"
+        current_head=$(git -C "${homebrew_repo}" rev-parse HEAD 2>/dev/null || echo "")
         if [[ -n "${current_head}" ]] && [[ "${cached_head}" != "${current_head}" ]]; then
             return 1
         fi
@@ -84,9 +88,10 @@ _brew_update_cache() {
     # Write cache
     echo "${shellenv_output}" > "${_BREW_CACHE_FILE}"
 
-    # Store Homebrew HEAD for invalidation detection
-    local head_commit
-    head_commit=$(git -C "${brew_prefix}/Homebrew" rev-parse HEAD 2>/dev/null || echo "")
+    # Store Homebrew/Linuxbrew HEAD for invalidation detection
+    local head_commit homebrew_repo
+    homebrew_repo="${brew_prefix}/Homebrew"
+    head_commit=$(git -C "${homebrew_repo}" rev-parse HEAD 2>/dev/null || echo "")
     if [[ -n "${head_commit}" ]]; then
         echo "${head_commit}" > "${_BREW_CACHE_HEAD}"
     fi
@@ -95,7 +100,7 @@ _brew_update_cache() {
 }
 
 # =============================================================================
-# Main: Load Homebrew Environment
+# Main: Load Homebrew/Linuxbrew Environment
 # =============================================================================
 
 _brew_setup() {
@@ -129,18 +134,18 @@ _brew_setup() {
 # Clear the shellenv cache (useful after manual brew changes)
 brew_cache_clear() {
     rm -f "${_BREW_CACHE_FILE}" "${_BREW_CACHE_HEAD}"
-    echo "Homebrew shellenv cache cleared"
+    echo "Brew shellenv cache cleared"
 }
 
 # Show cache status
 brew_cache_status() {
     local brew_prefix
     brew_prefix=$(_brew_find_prefix) || {
-        echo "Homebrew not found"
+        echo "Homebrew/Linuxbrew not found"
         return 1
     }
 
-    echo "Homebrew prefix: ${brew_prefix}"
+    echo "Brew prefix: ${brew_prefix}"
     echo "Cache directory: ${_BREW_CACHE_DIR}"
 
     if [[ -f "${_BREW_CACHE_FILE}" ]]; then
