@@ -5,6 +5,5 @@
   "commitizen",
   "cz-conventional-changelog",
   "get-shit-done-cc",
-  "prettier",
   "typescript"
 ]

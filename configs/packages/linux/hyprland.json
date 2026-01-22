@@ -1,0 +1,16 @@
+[
+  "brightnessctl",
+  "grim",
+  "hyprland",
+  "hyprpaper",
+  "mako",
+  "network-manager-applet",
+  "lxpolkit",
+  "slurp",
+  "swayidle",
+  "swaylock",
+  "waybar",
+  "wl-clipboard",
+  "wofi",
+  "xdg-desktop-portal-hyprland"
+]
