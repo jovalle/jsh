@@ -681,127 +681,6 @@ else
 fi
 
 # =============================================================================
-# Project Navigation (thin wrapper around bin/jgit)
-# =============================================================================
-
-# project - Navigate to project directories and manage git projects
-# This is a shell wrapper around jgit that handles:
-#   - cd operations (which jgit as an external script cannot do)
-#   - Extracting CD: lines from jgit output for add/create commands
-#
-# Usage: project <name>           Navigate to project
-#        project -l [-v]          List projects
-#        project add <url> [name] Clone repository (then cd)
-#        project create <name>    Create project (then cd)
-#        project profile [cmd]    Profile management
-project() {
-    # No arguments - show help
-    if [[ $# -eq 0 ]]; then
-        jgit --help
-        return 0
-    fi
-
-    local cmd="$1"
-
-    case "${cmd}" in
-        # Commands that need cd handling after jgit completes
-        # Uses temp file for CD path to allow interactive prompts to display
-        add|create)
-            local cd_file
-            cd_file=$(mktemp "${TMPDIR:-/tmp}/jgit-cd.XXXXXX")
-
-            # Run jgit with temp file for CD path communication
-            # This allows interactive prompts (like profile selection) to display
-            JSH_WRAPPER=1 JSH_CD_FILE="${cd_file}" jgit "$@"
-            local ret=$?
-
-            # If successful, cd to the directory from temp file
-            if [[ $ret -eq 0 && -f "${cd_file}" ]]; then
-                local target_dir
-                target_dir=$(cat "${cd_file}")
-                if [[ -n "${target_dir}" && -d "${target_dir}" ]]; then
-                    cd "${target_dir}" || ret=1
-                fi
-            fi
-
-            rm -f "${cd_file}"
-            return $ret
-            ;;
-
-        # Pass-through commands (no cd needed)
-        -l|--list|list)
-            jgit list "${@:2}"
-            ;;
-
-        profile)
-            jgit profile "${@:2}"
-            ;;
-
-        update)
-            jgit update "${@:2}"
-            ;;
-
-        -h|--help|help)
-            jgit --help
-            ;;
-
-        -*)
-            # Handle flags like -v passed after -l
-            jgit "$@"
-            ;;
-
-        # Default: navigate to project by name
-        *)
-            local target_path
-            target_path=$(jgit path "$@" 2>&1)
-
-            if [[ $? -eq 0 && -n "${target_path}" && -d "${target_path}" ]]; then
-                cd "${target_path}" || return 1
-                # Show current location with color
-                echo "${C_GIT:-\033[36m}$(_projects_display_path "${target_path}")${RST:-\033[0m}"
-            else
-                # jgit path already printed error, just propagate exit code
-                return 1
-            fi
-            ;;
-    esac
-}
-
-# Helper to display path with ~ for $HOME
-_projects_display_path() {
-    local _dir="$1"
-    if [[ "${_dir}" == "${HOME}"* ]]; then
-        echo "~${_dir#"$HOME"}"
-    else
-        echo "${_dir}"
-    fi
-}
-
-# Bash completion for project command
-if [[ -n "${BASH_VERSION:-}" ]]; then
-    _project_completions() {
-        local cur="${COMP_WORDS[COMP_CWORD]}"
-        local first="${COMP_WORDS[1]:-}"
-
-        # Get completions from jgit
-        local completions=""
-
-        if [[ ${COMP_CWORD} -eq 1 ]]; then
-            # First arg: subcommands + project names
-            completions="add create profile -l --list"
-            completions+=" $(jgit list 2>/dev/null | awk '{print $1}' | tr '\n' ' ')"
-        elif [[ "${first}" == "profile" ]]; then
-            completions="list check docs $(jgit profile list 2>/dev/null | awk 'NR>2 {print $1}' | tr '\n' ' ')"
-        fi
-
-        # shellcheck disable=SC2207
-        COMPREPLY=($(compgen -W "${completions}" -- "${cur}"))
-    }
-    complete -F _project_completions project
-    complete -F _project_completions p
-fi
-
-# =============================================================================
 # Reload Function
 # =============================================================================
 
@@ -809,7 +688,7 @@ reload_jsh() {
     # Unset load guards
     unset _JSH_CORE_LOADED _JSH_GITSTATUS_LOADED _JSH_PROMPT_LOADED
     unset _JSH_VIMODE_LOADED _JSH_ALIASES_LOADED _JSH_FUNCTIONS_LOADED
-    unset _JSH_ZSH_LOADED _JSH_BASH_LOADED _JSH_INIT_LOADED
+    unset _JSH_ZSH_LOADED _JSH_BASH_LOADED _JSH_INIT_LOADED _JSH_J_LOADED
 
     # Re-source
     source "${JSH_DIR}/src/init.sh"
