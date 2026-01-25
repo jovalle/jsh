@@ -385,6 +385,29 @@
   "terminal.integrated.stickyScroll.enabled": false,
   "typescript.updateImportsOnFileMove.enabled": "always",
   "vim.useSystemClipboard": true,
+  "workbench.colorCustomizations": {
+    "terminal.ansiBlack": "#000000",
+    "terminal.ansiBlue": "#2472C8",
+    "terminal.ansiBrightBlack": "#666666",
+    "terminal.ansiBrightBlue": "#3B8EEA",
+    "terminal.ansiBrightCyan": "#29B8DB",
+    "terminal.ansiBrightGreen": "#23D18B",
+    "terminal.ansiBrightMagenta": "#D670D6",
+    "terminal.ansiBrightRed": "#F14C4C",
+    "terminal.ansiBrightWhite": "#E5E5E5",
+    "terminal.ansiBrightYellow": "#F5F543",
+    "terminal.ansiCyan": "#11A8CD",
+    "terminal.ansiGreen": "#0DBC79",
+    "terminal.ansiMagenta": "#BC3FBC",
+    "terminal.ansiRed": "#CD3131",
+    "terminal.ansiWhite": "#E5E5E5",
+    "terminal.ansiYellow": "#E5E510",
+    "terminal.background": "#1F1F1F",
+    "terminal.foreground": "#CCCCCC",
+    "terminal.selectionBackground": "#264F78",
+    "terminalCursor.foreground": "#CCCCCC"
+  },
+  "workbench.colorTheme": "Default Dark Modern",
   "workbench.editorAssociations": {
     "*.plist": "default"
   },
@@ -397,34 +420,5 @@
   "yaml.format.bracketSpacing": true,
   "yaml.format.enable": true,
   "yaml.format.singleQuote": false,
-  "yaml.validate": true,
-
-  // =========================================================================
-  // VS Code Dark Modern Theme - Terminal Colors
-  // See configs/colors.json for full documentation
-  // =========================================================================
-  "workbench.colorTheme": "Default Dark Modern",
-  "workbench.colorCustomizations": {
-    // Terminal ANSI colors (VS Code Dark Modern defaults)
-    "terminal.ansiBlack": "#000000",
-    "terminal.ansiRed": "#CD3131",
-    "terminal.ansiGreen": "#0DBC79",
-    "terminal.ansiYellow": "#E5E510",
-    "terminal.ansiBlue": "#2472C8",
-    "terminal.ansiMagenta": "#BC3FBC",
-    "terminal.ansiCyan": "#11A8CD",
-    "terminal.ansiWhite": "#E5E5E5",
-    "terminal.ansiBrightBlack": "#666666",
-    "terminal.ansiBrightRed": "#F14C4C",
-    "terminal.ansiBrightGreen": "#23D18B",
-    "terminal.ansiBrightYellow": "#F5F543",
-    "terminal.ansiBrightBlue": "#3B8EEA",
-    "terminal.ansiBrightMagenta": "#D670D6",
-    "terminal.ansiBrightCyan": "#29B8DB",
-    "terminal.ansiBrightWhite": "#E5E5E5",
-    "terminal.background": "#1F1F1F",
-    "terminal.foreground": "#CCCCCC",
-    "terminalCursor.foreground": "#CCCCCC",
-    "terminal.selectionBackground": "#264F78"
-  }
+  "yaml.validate": true
 }
