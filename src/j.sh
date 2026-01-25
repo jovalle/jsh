@@ -14,13 +14,25 @@
 #
 # Usage:
 #   j              Interactive directory selection
-#   j <query>      Jump to best matching directory
+#   j <query>      Jump to best matching directory/project
 #   j <q1> <q2>    Multiple keywords (all must match)
-#   j -           Jump to previous directory
-#   j --add       Add current directory to database
-#   j --remove    Remove current directory from database
-#   j --list      List all directories with scores
-#   j --clean     Remove non-existent directories
+#   j -            Jump to previous directory
+#   j -v [query]   Verbose mode (show search steps)
+#   j -c [query]   Jump and open in VS Code
+#   j -r <name>    Open remote project in VS Code
+#
+# Project Management:
+#   j add <url> [name]   Clone repository and cd into it
+#   j create <name>      Create project directory and cd into it
+#   j profile [cmd]      Git profile management
+#   j update             Safe pull with stash and rebase
+#   j -l|--list [-v]     List all projects (via jgit list)
+#
+# Database Management:
+#   j --db         Show frecency database with scores
+#   j -a|--add     Add current directory to frecency database
+#   j --remove     Remove current directory from database
+#   j --clean      Remove non-existent directories
 #
 # Environment:
 #   J_DATA        Path to data file (default: ~/.jsh/local/j.db)
@@ -61,10 +73,12 @@ _J_PREV_DIR=""
 _J_SHELL="bash"
 [[ -n "${ZSH_VERSION:-}" ]] && _J_SHELL="zsh"
 
-# Lowercase using bash 4+ parameter expansion
-_j_lowercase() {
-    printf '%s' "${1,,}"
-}
+# Lowercase: zsh uses ${(L)}, bash 4+ uses ${,,}
+if [[ "${_J_SHELL}" == "zsh" ]]; then
+    _j_lowercase() { printf '%s' "${(L)1}"; }
+else
+    _j_lowercase() { printf '%s' "${1,,}"; }
+fi
 
 # =============================================================================
 # Database Functions (file-based, no associative arrays for portability)
@@ -106,9 +120,9 @@ _j_add() {
     local now
     now="$(_j_now)"
 
-    # Use gawk to update or add entry atomically
+    # Use awk to update or add entry atomically
     if [[ -f "${J_DATA}" ]]; then
-        gawk -F'|' -v path="${path}" -v now="${now}" '
+        command -p awk -F'|' -v path="${path}" -v now="${now}" '
             BEGIN { found=0; OFS="|" }
             $1 == path { print path, $2+1, now; found=1; next }
             { print }
@@ -129,7 +143,7 @@ _j_remove() {
     local count_before count_after
     count_before=$(wc -l < "${J_DATA}" | tr -d ' ')
 
-    gawk -F'|' -v path="${path}" '$1 != path' "${J_DATA}" > "${J_DATA}.tmp"
+    command -p awk -F'|' -v path="${path}" '$1 != path' "${J_DATA}" > "${J_DATA}.tmp"
     mv "${J_DATA}.tmp" "${J_DATA}"
 
     count_after=$(wc -l < "${J_DATA}" | tr -d ' ')
@@ -145,11 +159,11 @@ _j_clean() {
 
     while IFS='|' read -r path count time; do
         [[ -z "${path}" ]] && continue
-        (( total++ ))
+        (( total += 1 ))
         if [[ -d "${path}" ]]; then
             printf '%s|%s|%s\n' "${path}" "${count}" "${time}"
         else
-            (( removed++ ))
+            (( removed += 1 ))
         fi
     done < "${J_DATA}" > "${tmpfile}"
 
@@ -257,7 +271,7 @@ _j_calculate_scores() {
 
     [[ ! -f "${J_DATA}" ]] && return
 
-    gawk -F'|' -v now="${now}" -v decay="${_J_DECAY}" -v min="${_J_MIN_SCORE}" '
+    command -p awk -F'|' -v now="${now}" -v decay="${_J_DECAY}" -v min="${_J_MIN_SCORE}" '
         {
             path = $1
             count = $2
@@ -309,24 +323,6 @@ _j_query() {
         fi
     done < <(_j_calculate_scores)
 
-    # Also include jsh projects that match
-    if command -v jgit &>/dev/null; then
-        while IFS= read -r name; do
-            [[ -z "${name}" ]] && continue
-            path=$(jgit path "${name}" 2>/dev/null) || continue
-            [[ -z "${path}" ]] && continue
-            [[ ! -d "${path}" ]] && continue
-            [[ "${path}" == "${PWD}" ]] && continue
-
-            # Check if already in database (grep for exact path match)
-            if [[ ! -f "${J_DATA}" ]] || ! grep -q "^${path}|" "${J_DATA}" 2>/dev/null; then
-                if [[ $# -eq 0 ]] || _j_matches "${path}" "$@"; then
-                    results="${results}1.0000|${path}"$'\n'
-                fi
-            fi
-        done < <(jgit list 2>/dev/null | gawk '{print $1}')
-    fi
-
     # Sort by score descending
     printf '%s' "${results}" | command -p sort -t'|' -k1 -rn
 }
@@ -352,7 +348,7 @@ _j_list() {
     while IFS= read -r line; do
         [[ -z "${line}" ]] && continue
         entries+=("${line}")
-        (( count++ ))
+        (( count += 1 ))
     done < <(_j_query)
 
     if [[ ${count} -eq 0 ]]; then
@@ -386,7 +382,7 @@ _j_interactive() {
         [[ -z "${line}" ]] && continue
         entries+=("${line}")
         paths+=("${line#*|}")
-        (( count++ ))
+        (( count += 1 ))
     done < <(_j_query "$@")
 
     if [[ ${count} -eq 0 ]]; then
@@ -412,10 +408,14 @@ _j_interactive() {
         # Fallback: numbered list selection
         printf '%sSelect directory:%s\n' "${DIM:-}" "${RST:-}" >&2
         local i=1 entry
-        for entry in "${entries[@]:0:10}"; do
+        local -a display_paths=()
+        for entry in "${entries[@]}"; do
+            [[ -z "${entry}" ]] && continue
+            [[ ${i} -gt 10 ]] && break
+            display_paths+=("${entry#*|}")
             printf '  %s[%d]%s %s%s%s\n' "${C_GIT:-}" "${i}" "${RST:-}" \
                 "${CYN:-}" "$(_j_display_path "${entry#*|}")" "${RST:-}" >&2
-            (( i++ ))
+            (( i += 1 ))
         done
 
         printf '%sEnter number (1-%d):%s ' "${DIM:-}" "$(( i - 1 ))" "${RST:-}" >&2
@@ -423,7 +423,16 @@ _j_interactive() {
         read -r choice
 
         if [[ "${choice}" =~ ^[0-9]+$ ]] && [[ "${choice}" -ge 1 ]] && [[ "${choice}" -lt "${i}" ]]; then
-            selected="${paths[$(( choice - 1 ))]}"
+            # Use loop to find nth entry (portable across bash/zsh indexing)
+            local n=0 p
+            for p in "${display_paths[@]}"; do
+                [[ -z "${p}" ]] && continue
+                (( n += 1 ))
+                if [[ ${n} -eq ${choice} ]]; then
+                    selected="${p}"
+                    break
+                fi
+            done
         else
             return 1
         fi
@@ -456,16 +465,52 @@ _j_cd_hook() {
 }
 
 # =============================================================================
+# Path Resolution Fallback
+# =============================================================================
+
+# Try to resolve a query as a directory path
+# Checks: relative path, ~/query, ~/.$query
+# Output: resolved absolute path, or empty
+_j_resolve_path() {
+    local query="$1"
+
+    # Try as relative path from PWD
+    if [[ -d "${PWD}/${query}" ]]; then
+        (cd "${PWD}/${query}" && pwd -P)
+        return 0
+    fi
+
+    # Try as path under HOME (e.g., "jsh" → ~/.jsh won't match, but ".jsh" → ~/.jsh will)
+    if [[ -d "${HOME}/${query}" ]]; then
+        (cd "${HOME}/${query}" && pwd -P)
+        return 0
+    fi
+
+    # Try with dot prefix under HOME (e.g., "jsh" → ~/.jsh)
+    if [[ "${query}" != .* ]] && [[ -d "${HOME}/.${query}" ]]; then
+        (cd "${HOME}/.${query}" && pwd -P)
+        return 0
+    fi
+
+    return 1
+}
+
+# =============================================================================
 # Main j Function
 # =============================================================================
 
 j() {
     local open_code=false
     local open_remote=false
+    local verbose=false
 
     # Parse flags first
     while [[ $# -gt 0 ]]; do
         case "$1" in
+            -v|--verbose)
+                verbose=true
+                shift
+                ;;
             -c|--code)
                 open_code=true
                 shift
@@ -489,6 +534,11 @@ j() {
                 return 0
                 ;;
             -l|--list)
+                shift
+                jgit list "$@"
+                return $?
+                ;;
+            --db)
                 _j_list
                 return 0
                 ;;
@@ -498,22 +548,34 @@ j() {
                 ;;
             -h|--help)
                 cat << 'EOF'
-j - Smart directory jumping (zoxide-like)
+j - Smart directory jumping + project management
 
 Usage:
-  j              Interactive directory selection
-  j <query>      Jump to best matching directory
+  j              Interactive directory selection (fzf)
+  j <query>      Jump to best matching directory/project
   j <q1> <q2>    Multiple keywords (all must match)
   j -            Jump to previous directory
-  j -c <query>   Jump to directory and open in VS Code
+  j -v [query]   Verbose mode (show search steps)
+  j -c [query]   Jump and open in VS Code
   j -r <name>    Open remote project in VS Code (no cd)
 
-Commands:
-  j --add        Add current directory to database
+Project Management:
+  j add <url> [name]   Clone repository and cd into it
+  j create <name>      Create project directory and cd into it
+  j profile [cmd]      Git profile management
+  j update             Safe pull with stash and rebase
+  j -l|--list [-v]     List all projects (via jgit list)
+
+Database Management:
+  j --db         Show frecency database with scores
+  j -a|--add     Add current directory to frecency database
   j --remove     Remove current directory from database
-  j --list       List all directories with scores
   j --clean      Remove non-existent directories
-  j --help       Show this help
+  j -h|--help    Show this help
+
+Aliases:
+  p              Same as j
+  jj             Same as j profile
 
 Environment:
   J_DATA         Path to data file (default: ~/.jsh/local/j.db)
@@ -524,10 +586,6 @@ Remote projects are configured in ~/.jsh/local/projects.json
 
 The 'j' command learns from your navigation patterns. Directories you
 visit frequently and recently will rank higher in search results.
-
-Integration:
-  - jsh projects are automatically included in search results
-  - Use 'jgit' for explicit project navigation
 EOF
                 return 0
                 ;;
@@ -566,6 +624,40 @@ EOF
         return $?
     fi
 
+    # Subcommand handling (project management)
+    case "${1:-}" in
+        add|create)
+            # Clone/create project then cd into it via temp file
+            local cd_file
+            cd_file=$(mktemp "${TMPDIR:-/tmp}/jgit-cd.XXXXXX")
+
+            JSH_WRAPPER=1 JSH_CD_FILE="${cd_file}" jgit "$@"
+            local ret=$?
+
+            if [[ $ret -eq 0 && -f "${cd_file}" ]]; then
+                local target_dir
+                target_dir=$(cat "${cd_file}")
+                if [[ -n "${target_dir}" && -d "${target_dir}" ]]; then
+                    _j_cd_hook "${target_dir}" || ret=1
+                    [[ "${open_code}" == true ]] && code .
+                fi
+            fi
+
+            rm -f "${cd_file}"
+            return $ret
+            ;;
+        profile)
+            shift
+            jgit profile "$@"
+            return $?
+            ;;
+        update)
+            shift
+            jgit update "$@"
+            return $?
+            ;;
+    esac
+
     # No arguments - interactive selection
     if [[ $# -eq 0 ]]; then
         local selected
@@ -578,37 +670,59 @@ EOF
     fi
 
     # Query mode - find best match
-    local entries=() count=0
+    [[ "${verbose}" == true ]] && printf '%s[j]%s Searching frecency database (%s)...\n' "${DIM:-}" "${RST:-}" "${J_DATA}" >&2
+
+    local best="" count=0 line
 
     while IFS= read -r line; do
         [[ -z "${line}" ]] && continue
-        entries+=("${line}")
-        (( count++ ))
+        [[ -z "${best}" ]] && best="${line}"
+        (( count += 1 ))
     done < <(_j_query "$@")
 
-    if [[ ${count} -eq 0 ]]; then
-        # No match in j database - try as project name
+    if [[ ${count} -gt 0 ]]; then
+        local path="${best#*|}"
+        [[ "${verbose}" == true ]] && printf '%s[j]%s Found %d match(es) in database, best: %s%s%s\n' \
+            "${DIM:-}" "${RST:-}" "${count}" "${CYN:-}" "$(_j_display_path "${path}")" "${RST:-}" >&2
+        _j_cd_hook "${path}"
+        [[ "${open_code}" == true ]] && code .
+        return 0
+    fi
+
+    # Fallbacks only apply for single-keyword queries
+    if [[ $# -eq 1 ]]; then
+        [[ "${verbose}" == true ]] && printf '%s[j]%s No match in database, trying path resolution...\n' "${DIM:-}" "${RST:-}" >&2
+
+        # Fallback 1: Try resolving query as a directory path
+        local resolved
+        resolved="$(_j_resolve_path "$1")"
+        if [[ -n "${resolved}" ]] && [[ -d "${resolved}" ]]; then
+            [[ "${verbose}" == true ]] && printf '%s[j]%s Resolved path: %s%s%s\n' \
+                "${DIM:-}" "${RST:-}" "${CYN:-}" "$(_j_display_path "${resolved}")" "${RST:-}" >&2
+            _j_cd_hook "${resolved}"
+            [[ "${open_code}" == true ]] && code .
+            return 0
+        fi
+
+        # Fallback 2: Try as jgit project name (fast - single lookup)
         if command -v jgit &>/dev/null; then
+            [[ "${verbose}" == true ]] && printf '%s[j]%s Trying jgit project lookup for "%s"...\n' "${DIM:-}" "${RST:-}" "$1" >&2
             local project_path
             project_path=$(jgit path "$1" 2>/dev/null)
             if [[ -n "${project_path}" ]] && [[ -d "${project_path}" ]]; then
+                [[ "${verbose}" == true ]] && printf '%s[j]%s Found project: %s%s%s\n' \
+                    "${DIM:-}" "${RST:-}" "${CYN:-}" "$(_j_display_path "${project_path}")" "${RST:-}" >&2
                 _j_cd_hook "${project_path}"
                 [[ "${open_code}" == true ]] && code .
                 return 0
             fi
         fi
-
-        printf '%s!%s No matching directory: %s%s%s\n' "${C_WARN:-}" "${RST:-}" "${BOLD:-}" "$*" "${RST:-}" >&2
-        return 1
     fi
 
-    # Jump to highest scoring match
-    local best="${entries[0]}"
-    local path="${best#*|}"
-
-    _j_cd_hook "${path}"
-    [[ "${open_code}" == true ]] && code .
-    return 0
+    [[ "${verbose}" == true ]] && printf '%s[j]%s No matching directory found for: %s%s%s\n' \
+        "${DIM:-}" "${RST:-}" "${BOLD:-}" "$*" "${RST:-}" >&2
+    printf '%s!%s No matching directory: %s%s%s\n' "${C_WARN:-}" "${RST:-}" "${BOLD:-}" "$*" "${RST:-}"
+    return 1
 }
 
 # =============================================================================
@@ -688,7 +802,7 @@ _j_migrate_marks() {
 
         # Give migrated bookmarks a base count of 10
         printf '%s|10|%s\n' "${path}" "${now}" >> "${J_DATA}"
-        (( count++ ))
+        (( count += 1 ))
     done < "${marks_file}"
 
     if [[ ${count} -gt 0 ]]; then
@@ -698,3 +812,36 @@ _j_migrate_marks() {
 
 # Run migration on first load
 _j_migrate_marks
+
+# Bash completion for j command
+if [[ -n "${BASH_VERSION:-}" ]]; then
+    _j_completions() {
+        local cur="${COMP_WORDS[COMP_CWORD]}"
+        local first="${COMP_WORDS[1]:-}"
+
+        local completions=""
+
+        if [[ ${COMP_CWORD} -eq 1 ]]; then
+            # First arg: subcommands + project names + flags
+            completions="add create profile update"
+            completions+=" $(jgit list 2>/dev/null | awk '{print $1}' | tr '\n' ' ')"
+        elif [[ "${first}" == "profile" ]]; then
+            completions="list status check docs $(jgit profile list 2>/dev/null | awk 'NR>2 {print $1}' | tr '\n' ' ')"
+        fi
+
+        # shellcheck disable=SC2207
+        COMPREPLY=($(compgen -W "${completions}" -- "${cur}"))
+    }
+    complete -F _j_completions j
+    complete -F _j_completions p
+
+    # jj is 'j profile' - complete with profile args directly
+    _jj_completions() {
+        local cur="${COMP_WORDS[COMP_CWORD]}"
+        local completions="list status check docs"
+        completions+=" $(jgit profile list 2>/dev/null | awk 'NR>2 {print $1}' | tr '\n' ' ')"
+        # shellcheck disable=SC2207
+        COMPREPLY=($(compgen -W "${completions}" -- "${cur}"))
+    }
+    complete -F _jj_completions jj
+fi
