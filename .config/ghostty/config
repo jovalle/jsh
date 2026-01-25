@@ -121,7 +121,7 @@ font-feature = liga
 # ==============================================================================
 
 # Internal color scheme
-theme = Catppuccin Mocha
+theme = Dark+
 
 # External theme file (optional)
 # config-file = ~/.config/ghostty/themes/tokyonight
