@@ -1,4 +1,4 @@
-#compdef j
+#compdef j p jj
 # shellcheck shell=bash
 # shellcheck disable=SC2207,SC2296,SC2034,SC2154,SC2206,SC2155,SC2128,SC1087
 # SC2207: zsh array syntax differs from bash
@@ -11,19 +11,28 @@
 # SC1087: zsh uses $var[idx] not ${var[idx]}
 
 # ============================================================================
-# j - Zsh Completion (Smart Directory Jumping)
+# j - Zsh Completion (Smart Directory Jumping + Project Management)
 # ============================================================================
-# Tab completion for the j command (zoxide-like directory jumping)
-# Provides directory suggestions from the frecency database and projects
+# Tab completion for the j command
+# Provides directory/project navigation, cloning, creation, and profiles
 # ============================================================================
 
 _j() {
     local curcontext="$curcontext" state line
     typeset -A opt_args
 
+    # Handle jj alias: directly complete profile arguments
+    if [[ "$service" == "jj" ]]; then
+        _j_profile
+        return
+    fi
+
     _arguments -C \
+        '(-v --verbose)'{-v,--verbose}'[Show search steps]' \
+        '(-c --code)'{-c,--code}'[Open in VS Code]' \
+        '(-r --remote)'{-r,--remote}'[Open remote project]' \
         '1: :->first_arg' \
-        '*: :->query'
+        '*::arg:->args'
 
     case $state in
         first_arg)
@@ -33,21 +42,46 @@ _j() {
                 return
             fi
 
-            # Only show directories/projects (no flags)
-            _j_directories
+            # Show subcommands + directories/projects
+            _j_commands_and_directories
             ;;
-        query)
-            # After -r, complete with remote project names
-            local prev_word="${words[CURRENT-1]:-}"
-            if [[ "$prev_word" == "-r" || "$prev_word" == "--remote" ]]; then
-                _j_remote_projects
-                return
-            fi
-
-            # Additional query terms - directories only
-            _j_directories
+        args)
+            case $words[1] in
+                profile)
+                    _j_profile
+                    ;;
+                add)
+                    _j_add
+                    ;;
+                create)
+                    _arguments '1:project name:'
+                    ;;
+                -r|--remote)
+                    _j_remote_projects
+                    ;;
+                *)
+                    # Additional query terms - directories only
+                    _j_directories
+                    ;;
+            esac
             ;;
     esac
+}
+
+# Main completion: subcommands + directories/projects
+_j_commands_and_directories() {
+    local -a commands
+    commands=(
+        'add:Clone repository and cd into it'
+        'create:Create project directory and cd into it'
+        'profile:Git profile management'
+        'update:Safe pull with stash and rebase'
+    )
+
+    _describe -t commands 'commands' commands
+
+    # Also complete directories/projects for quick navigation
+    _j_directories
 }
 
 # Complete directories from j database and projects
@@ -134,6 +168,36 @@ _j_remote_projects() {
     if [[ ${#remotes[@]} -gt 0 ]]; then
         _describe -t remotes 'remote projects' remotes
     fi
+}
+
+# Profile subcommands + profile names
+_j_profile() {
+    local -a commands profiles
+    commands=(
+        'list:List all configured profiles'
+        'status:Show current profile for this repo'
+        'check:Verify profile configuration'
+        'docs:Show profile documentation'
+    )
+
+    # Add dynamic profile names if config exists
+    local jsh_profiles="${JSH_PROFILES:-${HOME}/.jsh/local/profiles.json}"
+    if [[ -f "$jsh_profiles" ]] && command -v jq &>/dev/null; then
+        local p
+        for p in $(jq -r '.profiles | keys | .[]' "$jsh_profiles" 2>/dev/null); do
+            [[ -n "$p" ]] && profiles+=("${p}:Apply profile '${p}' to current repo")
+        done
+    fi
+
+    _describe -t commands 'command' commands
+    (( ${#profiles[@]} )) && _describe -t profiles 'profile' profiles
+}
+
+# Add command - git URL then optional name
+_j_add() {
+    _arguments -C \
+        '1:git URL:_urls' \
+        '2:local name (optional):'
 }
 
 _j "$@"
