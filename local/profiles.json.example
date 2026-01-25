@@ -1,30 +1,40 @@
 {
-  "_comment": "Git profiles for jsh projects",
+  "_comment": "Git profiles for jsh projects — identity isolation for commits",
   "_note": "Copy to local/profiles.json and customize for your needs",
   "_schema": {
-    "name": "Git user.name",
-    "email": "Git user.email",
-    "user": "GitHub/GitLab username (for origin URL)",
-    "ssh_host": "SSH host alias from ~/.ssh/config (e.g., github-personal)",
-    "host": "Actual hostname for HTTPS (defaults to ssh_host if not set)"
+    "name": "(required) Git user.name for commits",
+    "email": "(required) Git user.email for commits",
+    "user": "(required) GitHub/GitLab username (for remote URL owner)",
+    "ssh_key": "(required) Path to SSH private key for this identity",
+    "host": "(optional) Git host FQDN (default: github.com)",
+    "signingkey": "(optional) Path to signing key (SSH or GPG)",
+    "gpgsign": "(optional) Enable commit signing (default: true when signingkey set)",
+    "signingformat": "(optional) Signing format: ssh or openpgp (default: ssh)",
+    "_deprecated_ssh_host": "Use ssh_key instead. Run: jgit profile migrate"
+  },
+  "_usage": {
+    "apply": "jgit profile <name>     — assign profile to current repo",
+    "commit": "jgit commit [args...]   — identity-enforced commit (no leakage)",
+    "status": "jgit profile            — show profile + identity leak check",
+    "list": "jgit profile list       — list all profiles with key/signing info",
+    "migrate": "jgit profile migrate    — migrate ssh_host → ssh_key"
   },
   "profiles": {
     "personal": {
       "name": "Your Name",
       "email": "personal@example.com",
       "user": "yourusername",
-      "ssh_host": "github-personal"
+      "ssh_key": "~/.ssh/id_ed25519_personal",
+      "signingkey": "~/.ssh/id_ed25519_personal",
+      "gpgsign": true,
+      "signingformat": "ssh"
     },
     "work": {
       "name": "Your Name",
       "email": "work@company.com",
       "user": "workusername",
+      "ssh_key": "~/.ssh/id_ed25519_work",
       "host": "github.company.com"
-    },
-    "opensource": {
-      "name": "Your Name",
-      "email": "opensource@example.com",
-      "user": "ossusername"
     }
   }
 }
