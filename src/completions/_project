@@ -1,164 +1,17 @@
-#compdef project p pp
+#compdef project
 # shellcheck shell=bash
-# shellcheck disable=SC2207,SC2296,SC2034,SC2154,SC2206,SC2155,SC2128,SC1087
-# SC2207: zsh array syntax differs from bash
-# SC2296: zsh parameter expansion syntax
-# SC2034: variables used by zsh completion system
-# SC2154: variables provided by zsh completion system
-# SC2206: word splitting is intentional for zsh arrays
-# SC2155: declare and assign separately - acceptable in completions
-# SC2128: zsh array subscripting syntax differs from bash
-# SC1087: zsh uses $var[idx] not ${var[idx]}
+# shellcheck disable=SC2296,SC2034
 
 # ============================================================================
-# project/p - Zsh Completion (Git Project Navigation)
+# project - Backward compatibility shim (redirects to _j)
 # ============================================================================
-# Tab completion for the project/p command (jgit wrapper)
-# Provides project navigation, cloning, creation, and profile management
+# The project command has been merged into j.
+# This shim ensures existing 'project' usage still gets completions.
 # ============================================================================
 
 _project() {
-    local curcontext="$curcontext" state line
-    typeset -A opt_args
-
-    # Handle pp alias: directly complete profile arguments
-    if [[ "$service" == "pp" ]]; then
-        _project_profile_only
-        return
-    fi
-
-    _arguments -C \
-        '1: :->first_arg' \
-        '*::arg:->args'
-
-    case $state in
-        first_arg)
-            _project_commands_and_names
-            ;;
-        args)
-            case $words[1] in
-                profile)
-                    _project_profile
-                    ;;
-                list)
-                    # Options available via: project list --help
-                    return
-                    ;;
-                add)
-                    _project_add
-                    ;;
-                create)
-                    _project_create
-                    ;;
-                *)
-                    # Additional project name query
-                    _project_names
-                    ;;
-            esac
-            ;;
-    esac
-}
-
-# Main completion: subcommands + project names
-_project_commands_and_names() {
-    local -a commands
-    commands=(
-        'add:Clone repository with smart SSH (then cd)'
-        'create:Create new project directory (then cd)'
-        'list:List all projects'
-        'profile:Show or manage git profiles'
-        'update:Safe pull with stash and rebase'
-    )
-
-    # Merge commands and project names
-    _describe -t commands 'commands' commands
-
-    # Also complete project names for quick navigation
-    _project_names
-}
-
-# Complete project names dynamically
-_project_names() {
-    local -a projects
-    local projects_paths="${JSH_PROJECTS:-${HOME}/.jsh,${HOME}/projects/*}"
-
-    # Expand paths and collect project names
-    local entry
-    for entry in ${(s:,:)projects_paths}; do
-        entry="${entry/#\~/${HOME}}"
-        entry="${entry#"${entry%%[![:space:]]*}"}"
-        entry="${entry%"${entry##*[![:space:]]}"}"
-
-        if [[ "$entry" == *"*"* ]]; then
-            local dir
-            for dir in ${~entry}; do
-                [[ -d "$dir" ]] && projects+=("${dir##*/}:${dir/#$HOME/~}")
-            done
-        elif [[ -d "$entry" ]]; then
-            projects+=("${entry##*/}:${entry/#$HOME/~}")
-        fi
-    done
-
-    (( ${#projects[@]} )) && _describe -t projects 'projects' projects
-}
-
-# Profile subcommands + profile names
-_project_profile() {
-    local -a commands profiles
-    commands=(
-        'list:List all configured profiles'
-        'status:Show current profile for this repo'
-        'check:Verify profile configuration'
-        'docs:Show profile documentation'
-    )
-
-    # Add dynamic profile names if config exists
-    local jsh_profiles="${JSH_PROFILES:-${HOME}/.jsh/local/profiles.json}"
-    if [[ -f "$jsh_profiles" ]] && command -v jq &>/dev/null; then
-        local p
-        for p in $(jq -r '.profiles | keys | .[]' "$jsh_profiles" 2>/dev/null); do
-            [[ -n "$p" ]] && profiles+=("${p}:Apply profile '${p}' to current repo")
-        done
-    fi
-
-    # Separate groups for commands vs profiles (better fzf-tab display)
-    _describe -t commands 'command' commands
-    (( ${#profiles[@]} )) && _describe -t profiles 'profile' profiles
-}
-
-# Direct profile completion for pp alias (no _arguments overhead)
-_project_profile_only() {
-    local -a commands profiles
-    commands=(
-        'list:List all configured profiles'
-        'status:Show current profile for this repo'
-        'check:Verify profile configuration'
-        'docs:Show profile documentation'
-    )
-
-    local jsh_profiles="${JSH_PROFILES:-${HOME}/.jsh/local/profiles.json}"
-    if [[ -f "$jsh_profiles" ]] && command -v jq &>/dev/null; then
-        local p
-        for p in $(jq -r '.profiles | keys | .[]' "$jsh_profiles" 2>/dev/null); do
-            [[ -n "$p" ]] && profiles+=("${p}:Apply profile '${p}'")
-        done
-    fi
-
-    _describe -t commands 'command' commands
-    (( ${#profiles[@]} )) && _describe -t profiles 'profile' profiles
-}
-
-# Add command - git URL then optional name
-_project_add() {
-    _arguments -C \
-        '1:git URL:_urls' \
-        '2:local name (optional):'
-}
-
-# Create command - project name
-_project_create() {
-    _arguments \
-        '1:project name:'
+    # Delegate to the j completion function
+    _j "$@"
 }
 
 _project "$@"
