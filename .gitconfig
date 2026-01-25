@@ -19,7 +19,7 @@
 
 [commit]
     verbose = true
-    gpgsign = false
+    # gpgsign = true  # Enable via jgit profile or ~/.gitconfig.local
 
 [push]
     default = current
@@ -272,10 +272,28 @@
 
 [include]
     path = ~/.gitconfig.local
+
 [filter "lfs"]
-	clean = git-lfs clean -- %f
-	smudge = git-lfs smudge -- %f
-	process = git-lfs filter-process
-	required = true
+    clean = git-lfs clean -- %f
+    smudge = git-lfs smudge -- %f
+    process = git-lfs filter-process
+    required = true
+
 [lfs]
-	fetchinclude = *
+    fetchinclude = *
+
+# =============================================================================
+# User Identity & Signing
+# =============================================================================
+# Configure via ~/.gitconfig.local or jgit profile:
+#
+#   [user]
+#       name = Your Name
+#       email = your@email.com
+#       signingkey = YOUR_GPG_KEY_ID
+#
+#   [gpg]
+#       program = /path/to/gpg
+#
+#   [commit]
+#       gpgsign = true
