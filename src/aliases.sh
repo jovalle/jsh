@@ -10,9 +10,9 @@ _JSH_ALIASES_LOADED=1
 # Core Aliases (Always Loaded)
 # =============================================================================
 
-alias p='project'
-alias pp='project profile'
-alias projects='project -l -v'
+alias p='j'
+alias jj='j profile'
+alias projects='j -l -v'
 
 # -----------------------------------------------------------------------------
 # Navigation
