@@ -6,16 +6,17 @@
 #
 # @cmd (none)              In repo: detailed view | Not in repo: list all
 # @cmd update              Safe pull: stash → rebase → apply
-# @cmd profile             Show/apply git identity profiles
+# @cmd profile             Show/apply git identity profiles (leak check)
 # @cmd list                List all projects with status
 # @cmd path <name>         Output path for shell cd wrapper
-# @cmd commit              Create commit (use -i for interactive)
+# @cmd commit              Identity-enforced commit (requires profile)
 # @cmd push                Push commits (use -i for interactive)
 # @cmd backup              Manage jgit backup refs
 # @cmd <other>             Passthrough to git
 #
-# @sub profile:list        List all available profiles
+# @sub profile:list        List all profiles with key/signing info
 # @sub profile:<name>      Apply profile to current repo
+# @sub profile:migrate     Migrate ssh_host → ssh_key
 # @sub backup:list         List backup refs
 # @sub backup:restore      Restore from backup ref
 #
@@ -135,6 +136,41 @@ _profile_field() {
     elif command -v yq &>/dev/null; then
         printf '%s' "$data" | yq -r ".${field} // empty"
     fi
+}
+
+# Validate profile has all required fields and resources exist
+# Returns 0 if valid, 1 if invalid (prints error to stderr)
+_profile_validate() {
+    local profile_name="$1"
+    local profile_data="$2"
+
+    local required_fields=("name" "email" "user" "ssh_key")
+    local field value
+
+    for field in "${required_fields[@]}"; do
+        value=$(_profile_field "$profile_data" "$field")
+        if [[ -z "$value" ]]; then
+            error "Profile '${profile_name}' missing required field: ${field}"
+            return 1
+        fi
+    done
+
+    # Validate ssh_key file exists (expand ~)
+    local ssh_key
+    ssh_key=$(_profile_field "$profile_data" "ssh_key")
+    ssh_key="${ssh_key/#\~/${HOME}}"
+    if [[ ! -f "$ssh_key" ]]; then
+        error "SSH key not found: $ssh_key (profile: ${profile_name})"
+        return 1
+    fi
+
+    return 0
+}
+
+# Expand ~ in a path
+_expand_tilde() {
+    local path="$1"
+    printf '%s' "${path/#\~/${HOME}}"
 }
 
 # =============================================================================
@@ -433,7 +469,7 @@ _git_upstream_status() {
 _profiles_apply() {
     local profile_name="$1"
     local dir="${2:-.}"
-    local profile_data p_name email user host ssh_host
+    local profile_data p_name email user ssh_key signingkey gpgsign signingformat host
 
     profile_data="$(_profiles_get "$profile_name")"
     if [[ -z "$profile_data" ]]; then
@@ -446,40 +482,63 @@ _profiles_apply() {
         return 1
     fi
 
+    # Validate required fields before applying
+    if ! _profile_validate "$profile_name" "$profile_data"; then
+        return 1
+    fi
+
     p_name=$(_profile_field "$profile_data" "name")
     email=$(_profile_field "$profile_data" "email")
     user=$(_profile_field "$profile_data" "user")
+    ssh_key=$(_profile_field "$profile_data" "ssh_key")
+    signingkey=$(_profile_field "$profile_data" "signingkey")
+    gpgsign=$(_profile_field "$profile_data" "gpgsign")
+    signingformat=$(_profile_field "$profile_data" "signingformat")
     host=$(_profile_field "$profile_data" "host")
-    ssh_host=$(_profile_field "$profile_data" "ssh_host")
 
-    [[ -n "$p_name" ]] && git -C "$dir" config user.name "$p_name"
-    [[ -n "$email" ]] && git -C "$dir" config user.email "$email"
+    # Store profile assignment as source of truth
+    git -C "$dir" config --local jsh.profile "$profile_name"
 
-    # Update origin remote to use correct SSH host
-    if [[ -n "$user" ]]; then
-        local origin_url repo_name
-        origin_url=$(git -C "$dir" remote get-url origin 2>/dev/null)
+    # Set identity in local git config
+    git -C "$dir" config --local user.name "$p_name"
+    git -C "$dir" config --local user.email "$email"
 
-        if [[ -n "$origin_url" ]]; then
-            local parsed url_host
-            parsed="$(_git_parse_url "$origin_url")"
-            url_host="${parsed%%|*}"
-            repo_name="${parsed##*|}"
+    # Set SSH command for key isolation (standard URLs, specific key)
+    local expanded_ssh_key
+    expanded_ssh_key="$(_expand_tilde "$ssh_key")"
+    git -C "$dir" config --local core.sshCommand "ssh -i ${expanded_ssh_key} -o IdentitiesOnly=yes"
 
-            local target_ssh_host
-            if [[ -n "$ssh_host" ]]; then
-                target_ssh_host="$ssh_host"
-            elif [[ -n "$host" ]]; then
-                target_ssh_host="$(_ssh_derive_host "$host" "$user")"
-            elif [[ -n "$url_host" ]] && [[ "$url_host" == *.* ]]; then
-                target_ssh_host="$(_ssh_derive_host "$url_host" "$user")"
-            fi
+    # Handle signing configuration
+    if [[ -n "$signingkey" ]]; then
+        local expanded_signingkey
+        expanded_signingkey="$(_expand_tilde "$signingkey")"
+        git -C "$dir" config --local user.signingkey "$expanded_signingkey"
+        git -C "$dir" config --local commit.gpgsign "${gpgsign:-true}"
+        git -C "$dir" config --local gpg.format "${signingformat:-ssh}"
+    else
+        # Explicitly disable signing to prevent default key leakage
+        git -C "$dir" config --local commit.gpgsign "false"
+        git -C "$dir" config --local --unset user.signingkey 2>/dev/null || true
+        git -C "$dir" config --local --unset gpg.format 2>/dev/null || true
+    fi
 
-            if [[ -n "$target_ssh_host" ]] && _ssh_host_exists "$target_ssh_host"; then
-                local new_origin_url="git@${target_ssh_host}:${user}/${repo_name}.git"
-                git -C "$dir" remote set-url origin "$new_origin_url"
-                info "Remote updated to use SSH host: $target_ssh_host"
-            fi
+    # Migrate old-style SSH host alias remote URLs to standard hosts
+    local origin_url
+    origin_url=$(git -C "$dir" remote get-url origin 2>/dev/null) || true
+
+    if [[ -n "$origin_url" ]]; then
+        local parsed url_host repo_name
+        parsed="$(_git_parse_url "$origin_url")"
+        url_host="${parsed%%|*}"
+        repo_name="${parsed##*|}"
+
+        # Detect old-style SSH host aliases (e.g., github-jovalle)
+        if [[ -n "$url_host" ]] && [[ "$url_host" != *.* ]]; then
+            # Non-FQDN host = SSH alias, migrate to standard host
+            local standard_host="${host:-github.com}"
+            local new_origin_url="git@${standard_host}:${user}/${repo_name}.git"
+            git -C "$dir" remote set-url origin "$new_origin_url"
+            info "Migrated remote: ${url_host} → ${standard_host} (using core.sshCommand)"
         fi
     fi
 
@@ -487,10 +546,20 @@ _profiles_apply() {
 }
 
 # Detect which profile matches a git repo's config
+# Prefers jsh.profile (explicit assignment) over email matching (legacy)
 _profiles_detect() {
     local dir="${1:-.}"
-    local current_email profile_name profile_data p_email
 
+    # First: check explicit profile assignment
+    local assigned
+    assigned=$(git -C "$dir" config --local jsh.profile 2>/dev/null) || true
+    if [[ -n "$assigned" ]]; then
+        printf '%s\n' "$assigned"
+        return 0
+    fi
+
+    # Fallback: match by email (legacy repos without jsh.profile)
+    local current_email profile_name profile_data p_email
     current_email=$(git -C "$dir" config user.email 2>/dev/null)
     [[ -z "$current_email" ]] && return 1
 
@@ -508,30 +577,92 @@ _profiles_detect() {
     return 1
 }
 
-# Show current profile status
+# Show current profile status with leak check
 cmd_profile_status() {
     if ! git rev-parse --git-dir &>/dev/null; then
         error "Not in a git repository"
         return 1
     fi
 
-    local detected_profile origin_url
-    local current_name current_email
+    local assigned_profile origin_url
+    local current_name current_email ssh_cmd
+    assigned_profile=$(git config --local jsh.profile 2>/dev/null) || true
     current_name=$(git config user.name 2>/dev/null)
     current_email=$(git config user.email 2>/dev/null)
-    detected_profile="$(_profiles_detect 2>/dev/null)"
-    origin_url=$(git remote get-url origin 2>/dev/null)
+    ssh_cmd=$(git config --local core.sshCommand 2>/dev/null) || true
+    origin_url=$(git remote get-url origin 2>/dev/null) || true
 
-    printf '%s\n' "Current git user:"
-    printf '  Name:   %s\n' "${current_name:-${C_DIM}(not set)${C_RESET}}"
-    printf '  Email:  %s\n' "${current_email:-${C_DIM}(not set)${C_RESET}}"
-    printf '  Origin: %b%s%b\n' "$C_CYAN" "${origin_url:-${C_DIM}(not set)${C_RESET}}" "$C_RESET"
-    printf '\n'
-
-    if [[ -n "$detected_profile" ]]; then
-        printf 'Profile: %b%s%b\n' "$C_GREEN" "$detected_profile" "$C_RESET"
+    if [[ -n "$assigned_profile" ]]; then
+        printf 'Profile:  %b%s%b\n' "$C_GREEN" "$assigned_profile" "$C_RESET"
     else
-        printf 'Profile: %b(none)%b\n' "$C_DIM" "$C_RESET"
+        printf 'Profile:  %b(none)%b\n' "$C_DIM" "$C_RESET"
+    fi
+
+    printf 'Name:     %s\n' "${current_name:-${C_DIM}(not set)${C_RESET}}"
+    printf 'Email:    %s\n' "${current_email:-${C_DIM}(not set)${C_RESET}}"
+    printf 'Origin:   %b%s%b\n' "$C_CYAN" "${origin_url:-${C_DIM}(not set)${C_RESET}}" "$C_RESET"
+
+    # Show SSH key info
+    if [[ -n "$ssh_cmd" ]]; then
+        local key_path
+        key_path=$(printf '%s' "$ssh_cmd" | sed -n 's/.*-i \([^ ]*\).*/\1/p')
+        if [[ -n "$key_path" ]]; then
+            local key_name="${key_path##*/}"
+            if [[ -f "$key_path" ]]; then
+                printf 'SSH Key:  %s %b✓%b\n' "$key_name" "$C_GREEN" "$C_RESET"
+            else
+                printf 'SSH Key:  %s %b✗ NOT FOUND%b\n' "$key_name" "$C_RED" "$C_RESET"
+            fi
+        fi
+    fi
+
+    # Show signing status
+    local signingkey gpgsign
+    signingkey=$(git config --local user.signingkey 2>/dev/null) || true
+    gpgsign=$(git config --local commit.gpgsign 2>/dev/null) || true
+    if [[ -n "$signingkey" ]] && [[ "$gpgsign" == "true" ]]; then
+        local format
+        format=$(git config --local gpg.format 2>/dev/null) || true
+        printf 'Signing:  %s (%s) %b✓%b\n' "${signingkey##*/}" "${format:-gpg}" "$C_GREEN" "$C_RESET"
+    else
+        printf 'Signing:  %b(disabled)%b\n' "$C_DIM" "$C_RESET"
+    fi
+
+    # Identity leak check
+    printf '\n'
+    printf '%bIdentity Check:%b\n' "$C_BOLD" "$C_RESET"
+    local has_leak=false
+
+    if [[ -n "${GIT_AUTHOR_NAME:-}" ]]; then
+        printf '  GIT_AUTHOR_NAME ...... %b⚠ "%s" OVERRIDES profile!%b\n' "$C_YELLOW" "$GIT_AUTHOR_NAME" "$C_RESET"
+        has_leak=true
+    else
+        printf '  GIT_AUTHOR_NAME ...... %bok%b\n' "$C_GREEN" "$C_RESET"
+    fi
+
+    if [[ -n "${GIT_AUTHOR_EMAIL:-}" ]]; then
+        printf '  GIT_AUTHOR_EMAIL ..... %b⚠ "%s" OVERRIDES profile!%b\n' "$C_YELLOW" "$GIT_AUTHOR_EMAIL" "$C_RESET"
+        has_leak=true
+    else
+        printf '  GIT_AUTHOR_EMAIL ..... %bok%b\n' "$C_GREEN" "$C_RESET"
+    fi
+
+    if [[ -n "${GIT_COMMITTER_NAME:-}" ]]; then
+        printf '  GIT_COMMITTER_NAME ... %b⚠ "%s" OVERRIDES profile!%b\n' "$C_YELLOW" "$GIT_COMMITTER_NAME" "$C_RESET"
+        has_leak=true
+    else
+        printf '  GIT_COMMITTER_NAME ... %bok%b\n' "$C_GREEN" "$C_RESET"
+    fi
+
+    if [[ -n "${GIT_COMMITTER_EMAIL:-}" ]]; then
+        printf '  GIT_COMMITTER_EMAIL .. %b⚠ "%s" OVERRIDES profile!%b\n' "$C_YELLOW" "$GIT_COMMITTER_EMAIL" "$C_RESET"
+        has_leak=true
+    else
+        printf '  GIT_COMMITTER_EMAIL .. %bok%b\n' "$C_GREEN" "$C_RESET"
+    fi
+
+    if [[ "$has_leak" == "true" ]]; then
+        printf '\n  %b⚠ jgit commit will override these env vars with profile values.%b\n' "$C_YELLOW" "$C_RESET"
     fi
 }
 
@@ -544,17 +675,34 @@ cmd_profile_list() {
     fi
 
     local current_profile
-    current_profile="$(_profiles_detect 2>/dev/null)" || true
+    current_profile=$(git config --local jsh.profile 2>/dev/null) || true
 
-    printf '%b%-15s %-30s %s%b\n' "$C_DIM" "PROFILE" "EMAIL" "NAME" "$C_RESET"
-    printf '%s\n' "$(printf '%60s' '' | tr ' ' '-')"
+    printf '%b%-15s %-28s %-20s %s%b\n' "$C_DIM" "PROFILE" "EMAIL" "SSH KEY" "SIGNING" "$C_RESET"
+    printf '%s\n' "$(printf '%80s' '' | tr ' ' '─')"
 
     while IFS= read -r profile_name; do
         [[ -z "$profile_name" ]] && continue
-        local profile_data name email marker
+        local profile_data email ssh_key signingkey signingformat marker
+        local ssh_display signing_display
         profile_data="$(_profiles_get "$profile_name")"
-        name=$(_profile_field "$profile_data" "name")
         email=$(_profile_field "$profile_data" "email")
+        ssh_key=$(_profile_field "$profile_data" "ssh_key")
+        signingkey=$(_profile_field "$profile_data" "signingkey")
+        signingformat=$(_profile_field "$profile_data" "signingformat")
+
+        # SSH key display
+        if [[ -n "$ssh_key" ]]; then
+            ssh_display="${ssh_key##*/}"
+        else
+            ssh_display="${C_RED}✗ missing${C_RESET}"
+        fi
+
+        # Signing display
+        if [[ -n "$signingkey" ]]; then
+            signing_display="✓ ${signingformat:-ssh}"
+        else
+            signing_display="✗ none"
+        fi
 
         if [[ "$profile_name" == "$current_profile" ]]; then
             marker="${C_GREEN}* ${C_RESET}"
@@ -562,7 +710,7 @@ cmd_profile_list() {
             marker="  "
         fi
 
-        printf '%s%b%-15s%b %-30s %s\n' "$marker" "$C_CYAN" "$profile_name" "$C_RESET" "$email" "$name"
+        printf '%s%b%-15s%b %-28s %-20s %s\n' "$marker" "$C_CYAN" "$profile_name" "$C_RESET" "$email" "$ssh_display" "$signing_display"
     done < <(_profiles_list)
 }
 
@@ -582,10 +730,69 @@ cmd_profile_apply() {
         return 1
     fi
 
-    if _profiles_apply "$profile_name"; then
-        printf '%b\n' "${C_GREEN}Applied profile:${C_RESET} ${C_CYAN}${profile_name}${C_RESET}"
-        printf '\n'
-        cmd_profile_status
+    if ! _profiles_apply "$profile_name"; then
+        return 1
+    fi
+
+    printf '%b\n' "${C_GREEN}Applied profile:${C_RESET} ${C_CYAN}${profile_name}${C_RESET}"
+    printf '\n'
+    cmd_profile_status
+}
+
+# Migrate profiles from ssh_host to ssh_key
+cmd_profile_migrate() {
+    if [[ ! -f "$JSH_PROFILES" ]]; then
+        error "No profiles file found: $JSH_PROFILES"
+        return 1
+    fi
+
+    local ssh_config="${HOME}/.ssh/config"
+    local migrated=0
+
+    while IFS= read -r profile_name; do
+        [[ -z "$profile_name" ]] && continue
+        local profile_data ssh_host ssh_key
+        profile_data="$(_profiles_get "$profile_name")"
+        ssh_host=$(_profile_field "$profile_data" "ssh_host")
+        ssh_key=$(_profile_field "$profile_data" "ssh_key")
+
+        # Skip if already has ssh_key or no ssh_host
+        [[ -n "$ssh_key" ]] && continue
+        [[ -z "$ssh_host" ]] && continue
+
+        # Look up IdentityFile from ssh config
+        local identity_file=""
+        if [[ -f "$ssh_config" ]]; then
+            identity_file=$(awk -v host="$ssh_host" '
+                BEGIN { found=0 }
+                /^[[:space:]]*Host[[:space:]]/ {
+                    found=0
+                    n=split($0, hosts, /[[:space:]]+/)
+                    for (i=2; i<=n; i++) {
+                        if (hosts[i] == host) found=1
+                    }
+                }
+                found && /^[[:space:]]*IdentityFile[[:space:]]/ {
+                    gsub(/^[[:space:]]*IdentityFile[[:space:]]+/, "")
+                    print
+                    exit
+                }
+            ' "$ssh_config")
+        fi
+
+        if [[ -n "$identity_file" ]]; then
+            info "Profile '${profile_name}': ssh_host '${ssh_host}' → ssh_key '${identity_file}'"
+            migrated=$((migrated + 1))
+        else
+            warn "Profile '${profile_name}': ssh_host '${ssh_host}' found but no IdentityFile in ${ssh_config}"
+        fi
+    done < <(_profiles_list)
+
+    if [[ "$migrated" -eq 0 ]]; then
+        info "No profiles need migration."
+    else
+        info "${migrated} profile(s) identified for migration."
+        info "Update your ${JSH_PROFILES} manually with the ssh_key paths shown above."
     fi
 }
 
@@ -596,6 +803,7 @@ cmd_profile() {
     case "$subcmd" in
         ""|status)     cmd_profile_status ;;
         list|ls)       cmd_profile_list ;;
+        migrate)       cmd_profile_migrate ;;
         -h|--help|help)
             cat << EOF
 Usage: jgit profile [command] [args]
@@ -603,6 +811,7 @@ Usage: jgit profile [command] [args]
 Commands:
   (none)        Show current profile for this repo
   list          List all configured profiles
+  migrate       Migrate ssh_host → ssh_key using ~/.ssh/config
   <name>        Apply profile to current repo
 
 Config: $JSH_PROFILES
@@ -1344,9 +1553,73 @@ cmd_commit() {
             [[ -n "$arg" ]] && args+=("$arg")
         done < <(_strip_interactive_flag "$@")
         cmd_commit_interactive "${args[@]}"
-    else
-        exec git commit "$@"
+        return $?
     fi
+
+    # Profile-enforced commit
+    if ! git rev-parse --git-dir &>/dev/null; then
+        error "Not in a git repository"
+        return 1
+    fi
+
+    # Step 1: Resolve profile
+    local profile_name
+    profile_name=$(git config --local jsh.profile 2>/dev/null) || true
+    if [[ -z "$profile_name" ]]; then
+        error "No profile assigned. Run: jgit profile <name>"
+        printf '%s\n' "Available profiles:" >&2
+        _profiles_list | while read -r p; do printf '%s\n' "  $p" >&2; done
+        return 1
+    fi
+
+    # Step 2: Load and validate profile
+    local profile_data
+    profile_data="$(_profiles_get "$profile_name")"
+    if [[ -z "$profile_data" ]]; then
+        error "Profile '${profile_name}' not found in ${JSH_PROFILES}"
+        return 1
+    fi
+
+    if ! _profile_validate "$profile_name" "$profile_data"; then
+        return 1
+    fi
+
+    # Step 3: Extract fields
+    local p_name email ssh_key signingkey signingformat
+    p_name=$(_profile_field "$profile_data" "name")
+    email=$(_profile_field "$profile_data" "email")
+    ssh_key=$(_profile_field "$profile_data" "ssh_key")
+    signingkey=$(_profile_field "$profile_data" "signingkey")
+    signingformat=$(_profile_field "$profile_data" "signingformat")
+
+    # Expand paths
+    ssh_key="$(_expand_tilde "$ssh_key")"
+    [[ -n "$signingkey" ]] && signingkey="$(_expand_tilde "$signingkey")"
+
+    # Step 4: Build commit command with identity enforcement
+    # git-level args go before "commit", commit-level args go after
+    local -a git_args=()
+    local -a sign_args=()
+
+    # Handle signing
+    if [[ -n "$signingkey" ]]; then
+        git_args+=("-c" "user.signingkey=${signingkey}")
+        git_args+=("-c" "gpg.format=${signingformat:-ssh}")
+        sign_args+=("--gpg-sign=${signingkey}")
+    else
+        sign_args+=("--no-gpg-sign")
+    fi
+
+    # Step 5: Execute with profile identity (env vars override everything)
+    GIT_AUTHOR_NAME="$p_name" \
+    GIT_AUTHOR_EMAIL="$email" \
+    GIT_COMMITTER_NAME="$p_name" \
+    GIT_COMMITTER_EMAIL="$email" \
+    GIT_SSH_COMMAND="ssh -i ${ssh_key} -o IdentitiesOnly=yes" \
+    git -c "user.name=${p_name}" \
+        -c "user.email=${email}" \
+        "${git_args[@]}" \
+        commit "${sign_args[@]}" "$@"
 }
 
 # =============================================================================
