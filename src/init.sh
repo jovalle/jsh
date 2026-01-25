@@ -128,9 +128,10 @@ path_prepend "${JSH_DIR}/ssh"                           # jssh
 path_prepend "${HOME}/.local/bin"
 
 # Language-specific paths
-path_prepend "${HOME}/.cargo/bin"     # Rust
-path_prepend "${HOME}/go/bin"         # Go
-path_prepend "${HOME}/.npm-global/bin"  # Node global
+path_prepend "${HOME}/.cargo/bin"         # Rust
+path_prepend "${HOME}/go/bin"             # Go
+path_prepend "${HOME}/.npm-global/bin"    # Node global
+path_prepend "${HOME}/.local/share/pnpm"  # pnpm global
 
 # 2. Vi-mode configuration (before shell-specific, affects keybindings)
 _source_module "vi-mode.sh"
@@ -138,13 +139,10 @@ _source_module "vi-mode.sh"
 # 3. Aliases (tiered system)
 _source_module "aliases.sh"
 
-# 4. Functions (includes project() wrapper for jgit)
+# 4. Functions (shell utilities)
 _source_module "functions.sh"
 
-# Note: project/profile management now lives in bin/jgit
-# The project() function in functions.sh is a thin wrapper that handles cd
-
-# 4b. Smart directory jumping (j command - zoxide-like frecency)
+# 4b. Smart directory jumping + project management (j command)
 _source_module "j.sh"
 
 # 5. Git status functions (for prompt)
@@ -172,6 +170,9 @@ fi
 # =============================================================================
 # Tool Configuration
 # =============================================================================
+
+# pnpm home directory
+export PNPM_HOME="${HOME}/.local/share/pnpm"
 
 # Vim as default editor (portable across SSH sessions)
 if has nvim; then
