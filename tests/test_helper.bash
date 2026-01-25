@@ -43,6 +43,13 @@ load_jsh_functions() {
     source "${JSH_DIR}/src/functions.sh"
 }
 
+load_jsh_j() {
+    unset _JSH_J_LOADED
+    export J_NO_HOOK=1
+    export J_DATA="${JSH_TEST_TEMP}/j.db"
+    source "${JSH_DIR}/src/j.sh"
+}
+
 load_jsh() {
     # Load the main jsh script (for function testing)
     source "${JSH_DIR}/jsh"
