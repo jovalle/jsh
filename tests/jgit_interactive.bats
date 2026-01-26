@@ -149,6 +149,46 @@ setup() {
 }
 
 # =============================================================================
+# Precision Detection Tests
+# =============================================================================
+
+@test "timestamp: _ts_detect_precision detects hour precision" {
+    local result
+
+    result=$(_ts_detect_precision "+1h")
+    assert_equals "hour" "$result"
+
+    result=$(_ts_detect_precision "-2d")
+    assert_equals "hour" "$result"
+
+    result=$(_ts_detect_precision "+1w")
+    assert_equals "hour" "$result"
+}
+
+@test "timestamp: _ts_detect_precision detects minute precision" {
+    local result
+
+    result=$(_ts_detect_precision "+30m")
+    assert_equals "minute" "$result"
+
+    result=$(_ts_detect_precision "+1h30m")
+    assert_equals "minute" "$result"
+}
+
+@test "timestamp: _ts_detect_precision detects full precision" {
+    local result
+
+    result=$(_ts_detect_precision "+30s")
+    assert_equals "full" "$result"
+
+    result=$(_ts_detect_precision "+1h30m45s")
+    assert_equals "full" "$result"
+
+    result=$(_ts_detect_precision "2024-01-15 14:30:00")
+    assert_equals "full" "$result"
+}
+
+# =============================================================================
 # Preset Tests
 # =============================================================================
 
