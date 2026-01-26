@@ -11,8 +11,8 @@ _JSH_ALIASES_LOADED=1
 # =============================================================================
 
 alias p='j'
-alias jj='j profile'
-alias projects='j -l -v'
+alias jj='gitx profile'
+alias projects='gitx list -v'
 
 # -----------------------------------------------------------------------------
 # Navigation

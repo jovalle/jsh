@@ -1,5 +1,5 @@
-# lib/jgit/jgit-interactive.sh - Interactive flows for commit and push
-# Main orchestration layer for jgit interactive mode
+# lib/gitx/gitx-interactive.sh - Interactive flows for commit and push
+# Main orchestration layer for gitx interactive mode
 # shellcheck shell=bash
 
 # =============================================================================
@@ -9,18 +9,18 @@
 JSH_DIR="${JSH_DIR:-${HOME}/.jsh}"
 
 # Source libraries if not already loaded
-[[ -z "${_UI_RESET:-}" ]] && source "${JSH_DIR}/lib/jgit/jgit-ui.sh"
+[[ -z "${_UI_RESET:-}" ]] && source "${JSH_DIR}/lib/gitx/gitx-ui.sh"
 # Check if timestamp library is loaded (associative array exists and has entries)
 if ! declare -p _TS_PRESETS &>/dev/null; then
-    source "${JSH_DIR}/lib/jgit/jgit-timestamp.sh"
+    source "${JSH_DIR}/lib/gitx/gitx-timestamp.sh"
 fi
 
 # =============================================================================
 # Global State
 # =============================================================================
 
-declare -g JGIT_DRY_RUN="${JGIT_DRY_RUN:-0}"
-declare -g JGIT_VERBOSE="${JGIT_VERBOSE:-0}"
+declare -g GITX_DRY_RUN="${GITX_DRY_RUN:-0}"
+declare -g GITX_VERBOSE="${GITX_VERBOSE:-0}"
 
 # =============================================================================
 # Utility Functions
@@ -28,7 +28,7 @@ declare -g JGIT_VERBOSE="${JGIT_VERBOSE:-0}"
 
 # Execute or simulate command based on dry-run mode
 _execute() {
-    if [[ "$JGIT_DRY_RUN" == "1" ]]; then
+    if [[ "$GITX_DRY_RUN" == "1" ]]; then
         printf '%s[dry-run]%s %s\n' "$_UI_DIM" "$_UI_RESET" "$*"
         return 0
     else
@@ -36,9 +36,20 @@ _execute() {
     fi
 }
 
+# Execute git push with profile SSH key (if set)
+_execute_push() {
+    local ssh_cmd
+    ssh_cmd=$(_get_profile_ssh_command)
+    if [[ -n "$ssh_cmd" ]]; then
+        GIT_SSH_COMMAND="$ssh_cmd" _execute git push "$@"
+    else
+        _execute git push "$@"
+    fi
+}
+
 # Debug logging
 _verbose() {
-    [[ "$JGIT_VERBOSE" == "1" ]] && printf '%s[debug]%s %s\n' "$_UI_DIM" "$_UI_RESET" "$*" >&2
+    [[ "$GITX_VERBOSE" == "1" ]] && printf '%s[debug]%s %s\n' "$_UI_DIM" "$_UI_RESET" "$*" >&2
 }
 
 # =============================================================================
@@ -52,7 +63,7 @@ _backup_create() {
     local desc="${1:-manual}"
     local timestamp
     timestamp=$(date +%Y%m%d-%H%M%S)
-    local ref="refs/jgit-backup/${timestamp}-${desc}"
+    local ref="refs/gitx-backup/${timestamp}-${desc}"
 
     if _execute git update-ref "$ref" HEAD; then
         _verbose "Backup created: $ref"
@@ -87,10 +98,10 @@ _backup_list() {
     printf '%s' "$_UI_RESET"
 
     git for-each-ref --sort=-creatordate --format='  %(refname:short)  %(creatordate:relative)' \
-        'refs/jgit-backup/' 2>/dev/null | head -10
+        'refs/gitx-backup/' 2>/dev/null | head -10
 
     local count
-    count=$(git for-each-ref --format='x' 'refs/jgit-backup/' 2>/dev/null | wc -l | tr -d ' ')
+    count=$(git for-each-ref --format='x' 'refs/gitx-backup/' 2>/dev/null | wc -l | tr -d ' ')
     if [[ "$count" -gt 10 ]]; then
         printf '%s  ... and %d more%s\n' "$_UI_DIM" "$((count - 10))" "$_UI_RESET"
     fi
@@ -175,11 +186,11 @@ cmd_commit_interactive() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --dry-run)
-                JGIT_DRY_RUN=1
+                GITX_DRY_RUN=1
                 shift
                 ;;
             --verbose|-v)
-                JGIT_VERBOSE=1
+                GITX_VERBOSE=1
                 shift
                 ;;
             --amend)
@@ -437,11 +448,11 @@ cmd_push_interactive() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --dry-run)
-                JGIT_DRY_RUN=1
+                GITX_DRY_RUN=1
                 shift
                 ;;
             --verbose|-v)
-                JGIT_VERBOSE=1
+                GITX_VERBOSE=1
                 shift
                 ;;
             *)
@@ -473,7 +484,7 @@ cmd_push_interactive() {
     if [[ "$commit_count" -eq 0 ]]; then
         _ui_info "No unpushed commits"
         _ui_info "Running: git push ${passthrough_args[*]}"
-        _execute git push "${passthrough_args[@]}"
+        _execute_push "${passthrough_args[@]}"
         return $?
     fi
 
@@ -514,7 +525,7 @@ cmd_push_interactive() {
     case "$operation" in
         0)  # Push as-is
             _check_protected_branch || return 1
-            _execute git push "${passthrough_args[@]}"
+            _execute_push "${passthrough_args[@]}"
             return $?
             ;;
         1)  # Rewrite timestamps
@@ -538,7 +549,7 @@ cmd_push_interactive() {
         _check_protected_branch || return 1
 
         # Use force-with-lease for safety after rewrite
-        if _execute git push --force-with-lease "${passthrough_args[@]}"; then
+        if _execute_push --force-with-lease "${passthrough_args[@]}"; then
             _ui_success "Pushed successfully"
             return 0
         else
@@ -817,7 +828,7 @@ _rewrite_commits() {
 
     # Execute rewrite
     local result=0
-    if [[ "$JGIT_DRY_RUN" == "1" ]]; then
+    if [[ "$GITX_DRY_RUN" == "1" ]]; then
         _ui_spinner_stop
         printf '%s[dry-run]%s Would rewrite %d commits\n' "$_UI_DIM" "$_UI_RESET" "$count"
     else
@@ -843,7 +854,7 @@ _rewrite_commits() {
 
 _interactive_help() {
     cat << 'EOF'
-jgit commit -i [options]
+gitx commit -i [options]
   Interactive commit with timestamp control
 
   Options:
@@ -851,7 +862,7 @@ jgit commit -i [options]
     --dry-run     Show what would happen without making changes
     -v, --verbose Show debug information
 
-jgit push -i [options]
+gitx push -i [options]
   Interactive push with timestamp rewriting
 
   Options:

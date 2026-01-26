@@ -19,7 +19,7 @@
 
 [commit]
     verbose = true
-    # gpgsign = true  # Enable via jgit profile or ~/.gitconfig.local
+    # gpgsign = true  # Enable via gitx profile or ~/.gitconfig.local
 
 [push]
     default = current
@@ -285,7 +285,7 @@
 # =============================================================================
 # User Identity & Signing
 # =============================================================================
-# Configure via ~/.gitconfig.local or jgit profile:
+# Configure via ~/.gitconfig.local or gitx profile:
 #
 #   [user]
 #       name = Your Name

@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# Tests for jgit interactive mode
+# Tests for gitx interactive mode
 # Tests timestamp parsing, UI utilities, and command routing
 
 load test_helper
@@ -13,8 +13,8 @@ setup() {
     mkdir -p "${JSH_TEST_TEMP}"
 
     # Source libraries
-    source "${JSH_DIR}/lib/jgit/jgit-timestamp.sh"
-    source "${JSH_DIR}/lib/jgit/jgit-ui.sh"
+    source "${JSH_DIR}/lib/gitx/gitx-timestamp.sh"
+    source "${JSH_DIR}/lib/gitx/gitx-ui.sh"
 }
 
 # =============================================================================
@@ -334,11 +334,11 @@ setup() {
 }
 
 # =============================================================================
-# jgit Command Routing Tests
+# gitx Command Routing Tests
 # =============================================================================
 
-@test "jgit: help shows interactive options" {
-    run "${JSH_DIR}/bin/jgit" --help
+@test "gitx: help shows interactive options" {
+    run "${JSH_DIR}/bin/gitx" --help
 
     # Help shows "(use -i for interactive)" format
     assert_contains "$output" "-i"
@@ -347,22 +347,22 @@ setup() {
     assert_contains "$output" "push"
 }
 
-@test "jgit: help shows core commands" {
-    run "${JSH_DIR}/bin/jgit" --help
+@test "gitx: help shows core commands" {
+    run "${JSH_DIR}/bin/gitx" --help
 
     assert_contains "$output" "update"
     assert_contains "$output" "profile"
     assert_contains "$output" "backup"
 }
 
-@test "jgit: help shows usage examples" {
-    run "${JSH_DIR}/bin/jgit" --help
+@test "gitx: help shows usage examples" {
+    run "${JSH_DIR}/bin/gitx" --help
 
     assert_contains "$output" "EXAMPLES"
-    assert_contains "$output" "jgit commit -i"
+    assert_contains "$output" "gitx commit -i"
 }
 
-@test "jgit: commit without -i passes through to git" {
+@test "gitx: commit without profile shows error" {
     skip_if_no_git
 
     local repo_dir
@@ -373,13 +373,14 @@ setup() {
     echo "new line" >> README.md
     git add README.md
 
-    # Commit without -i should work like regular git commit
-    run "${JSH_DIR}/bin/jgit" commit -m "Test commit"
+    # Commit without profile should fail with helpful message
+    run "${JSH_DIR}/bin/gitx" commit -m "Test commit"
 
-    [[ "$status" -eq 0 ]] || fail "Expected success, got: $output"
+    [[ "$status" -ne 0 ]] || fail "Expected failure without profile"
+    assert_contains "$output" "No profile assigned"
 }
 
-@test "jgit: push without -i passes through to git" {
+@test "gitx: push without -i passes through to git" {
     skip_if_no_git
 
     local repo_dir
@@ -387,7 +388,7 @@ setup() {
     cd "$repo_dir" || fail "Failed to cd to test repo"
 
     # Push without remote should fail with git's error
-    run "${JSH_DIR}/bin/jgit" push 2>&1
+    run "${JSH_DIR}/bin/gitx" push 2>&1
 
     # Should fail because no remote (but proves it passed through to git)
     [[ "$status" -ne 0 ]]
@@ -395,14 +396,14 @@ setup() {
     assert_contains "$output" "remote"
 }
 
-@test "jgit: backup list works" {
+@test "gitx: backup list works" {
     skip_if_no_git
 
     local repo_dir
     repo_dir=$(create_test_repo)
     cd "$repo_dir" || fail "Failed to cd to test repo"
 
-    run "${JSH_DIR}/bin/jgit" backup list
+    run "${JSH_DIR}/bin/gitx" backup list
 
     # Should succeed even with no backups
     [[ "$status" -eq 0 ]]
@@ -414,7 +415,7 @@ setup() {
 # =============================================================================
 
 @test "integration: interactive libraries load without error" {
-    source "${JSH_DIR}/lib/jgit/jgit-interactive.sh"
+    source "${JSH_DIR}/lib/gitx/gitx-interactive.sh"
 
     # Should have defined functions
     declare -f cmd_commit_interactive >/dev/null
@@ -429,7 +430,7 @@ setup() {
     repo_dir=$(create_test_repo)
     cd "$repo_dir" || fail "Failed to cd to test repo"
 
-    source "${JSH_DIR}/lib/jgit/jgit-interactive.sh"
+    source "${JSH_DIR}/lib/gitx/gitx-interactive.sh"
 
     # Get original HEAD
     local original_head

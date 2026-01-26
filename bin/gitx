@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# @name jgit
+# @name gitx
 # @version 1.0.0
 # @desc Git project and repository management (jsh flavor)
-# @usage jgit [command] [args...]
+# @usage gitx [command] [args...]
 #
 # @cmd (none)              In repo: detailed view | Not in repo: list all
+# @cmd clone <url>         Clone repo with smart SSH key selection (via shell wrapper)
+# @cmd create <name>       Create project with profile selection (via shell wrapper)
 # @cmd update              Safe pull: stash → rebase → apply
 # @cmd profile             Show/apply git identity profiles (leak check)
 # @cmd list                List all projects with status
@@ -12,7 +14,8 @@
 # @cmd commit              Identity-enforced commit (requires profile)
 # @cmd amend               Amend last commit's timestamp
 # @cmd push                Push commits (use -i for interactive)
-# @cmd backup              Manage jgit backup refs
+# @cmd backup              Manage gitx backup refs
+# @cmd remote <name>       Open remote project in VS Code (via shell wrapper)
 # @cmd <other>             Passthrough to git
 #
 # @sub profile:list        List all profiles with key/signing info
@@ -26,18 +29,18 @@
 # @option -v,--verbose      Verbose output (for list command)
 # @option -h,--help         Show this help message
 #
-# @env JGIT_DEFAULT_PLATFORM   Default git host for owner/repo shorthand (default: github.com)
-# @env JGIT_FALLBACK_PLATFORMS Comma-separated fallback hosts if default fails (default: github.com)
+# @env GITX_DEFAULT_PLATFORM   Default git host for owner/repo shorthand (default: github.com)
+# @env GITX_FALLBACK_PLATFORMS Comma-separated fallback hosts if default fails (default: github.com)
 #
-# @example jgit
-# @example jgit update
-# @example jgit profile work
-# @example jgit list -v
-# @example jgit commit -i
-# @example jgit commit -t "+1h" -m "feature"
-# @example jgit amend -t "+30m"
-# @example jgit amend -t "now-1h"
-# @example jgit add TEAM/project           # tries default platform, then fallbacks
+# @example gitx
+# @example gitx update
+# @example gitx profile work
+# @example gitx list -v
+# @example gitx commit -i
+# @example gitx commit -t "+1h" -m "feature"
+# @example gitx amend -t "+30m"
+# @example gitx amend -t "now-1h"
+# @example gitx clone TEAM/project         # tries default platform, then fallbacks
 #
 # Supported URL formats:
 #   git@host:owner/repo.git                                    (SSH)
@@ -45,13 +48,13 @@
 #   ssh://git@host[:port]/owner/repo.git                       (SSH with port)
 #   https://host/scm/PROJECT/repo.git                          (Bitbucket Server)
 #   https://host/projects/PROJECT/repos/REPO/browse            (Bitbucket Server browse → auto-converted)
-#   owner/repo                                                 (shorthand → tries JGIT_DEFAULT_PLATFORM first)
+#   owner/repo                                                 (shorthand → tries GITX_DEFAULT_PLATFORM first)
 #
 # shellcheck shell=bash
 #
-# Note: Use 'project' wrapper for add/create commands (enables auto-cd):
-#   project add <url>       Clone repo and cd into it
-#   project create <name>   Create project and cd into it
+# Note: Use 'gitx' shell function for clone/create commands (enables auto-cd):
+#   gitx clone <url>     Clone repo and cd into it
+#   gitx create <name>   Create project and cd into it
 
 [[ -n $DEBUG ]] && set -x
 
@@ -67,12 +70,12 @@ JSH_PROFILES="${JSH_PROFILES:-${JSH_DIR}/local/profiles.json}"
 _PROJECTS_DEFAULT_PATHS="${HOME}/.jsh,${HOME}/projects/*"
 
 # Default git platform for shorthand URLs (e.g., owner/repo)
-# Override with JGIT_DEFAULT_PLATFORM environment variable
-JGIT_DEFAULT_PLATFORM="${JGIT_DEFAULT_PLATFORM:-github.com}"
+# Override with GITX_DEFAULT_PLATFORM environment variable
+GITX_DEFAULT_PLATFORM="${GITX_DEFAULT_PLATFORM:-github.com}"
 
 # Fallback platforms to try if default fails (comma-separated)
-# Example: JGIT_FALLBACK_PLATFORMS="github.com,gitlab.com"
-JGIT_FALLBACK_PLATFORMS="${JGIT_FALLBACK_PLATFORMS:-github.com}"
+# Example: GITX_FALLBACK_PLATFORMS="github.com,gitlab.com"
+GITX_FALLBACK_PLATFORMS="${GITX_FALLBACK_PLATFORMS:-github.com}"
 
 # =============================================================================
 # Dependencies
@@ -266,7 +269,7 @@ _git_normalize_bitbucket_url() {
 #   - https://host/scm/PROJECT/repo.git (Bitbucket Server HTTPS)
 #   - ssh://git@host[:port]/PROJECT/repo.git (Bitbucket Server SSH)
 #   - https://host/projects/PROJECT/repos/REPO/browse (Bitbucket Server browse)
-#   - owner/repo (shorthand, uses JGIT_DEFAULT_PLATFORM)
+#   - owner/repo (shorthand, uses GITX_DEFAULT_PLATFORM)
 _git_parse_url() {
     local url="$1"
     local platform="" owner="" repo=""
@@ -327,7 +330,7 @@ _git_parse_url() {
 
     elif [[ "$url" == */* ]] && [[ "$url" != *:* ]] && [[ "$url" != *.* ]]; then
         # Shorthand format: owner/repo (use configured default platform)
-        platform="$JGIT_DEFAULT_PLATFORM"
+        platform="$GITX_DEFAULT_PLATFORM"
         owner="${url%%/*}"
         repo="${url#*/}"
         repo="${repo%.git}"
@@ -355,8 +358,8 @@ _git_parse_url_debug() {
     echo "${C_CYAN}URL Type Detection:${C_RESET}"
     if _is_shorthand_url "$url"; then
         echo "  ✓ Shorthand format (owner/repo)"
-        echo "  → Will use JGIT_DEFAULT_PLATFORM: ${C_YELLOW}${JGIT_DEFAULT_PLATFORM}${C_RESET}"
-        echo "  → Fallbacks: ${C_DIM}${JGIT_FALLBACK_PLATFORMS}${C_RESET}"
+        echo "  → Will use GITX_DEFAULT_PLATFORM: ${C_YELLOW}${GITX_DEFAULT_PLATFORM}${C_RESET}"
+        echo "  → Fallbacks: ${C_DIM}${GITX_FALLBACK_PLATFORMS}${C_RESET}"
     elif [[ "$url" == git@* ]]; then
         echo "  ✓ SSH format (git@host:path)"
     elif [[ "$url" == https://* ]]; then
@@ -436,7 +439,7 @@ _profile_find_by_user() {
 # Get SSH host for a profile (explicit or derived)
 _profile_ssh_host() {
     local profile_name="$1"
-    local fallback_platform="${2:-$JGIT_DEFAULT_PLATFORM}"
+    local fallback_platform="${2:-$GITX_DEFAULT_PLATFORM}"
 
     local profile_data ssh_host host user
     profile_data="$(_profiles_get "$profile_name")"
@@ -558,6 +561,53 @@ _projects_name_from_url() {
     printf '%s\n' "${name}"
 }
 
+# Extract owner/org from git URL
+_projects_owner_from_url() {
+    local url="$1"
+    local parsed owner
+    parsed="$(_git_parse_url "$url")"
+    owner="${parsed#*|}"
+    owner="${owner%%|*}"
+    printf '%s\n' "$owner"
+}
+
+# Resolve target directory, trying variant name on conflict
+# Sets: resolved_dir, resolved_name
+_projects_resolve_target_dir() {
+    local base_name="$1"
+    local owner="$2"
+    local base_dir
+    base_dir="$(_projects_default_dir)"
+
+    local primary_dir="${base_dir}/${base_name}"
+
+    if [[ ! -d "$primary_dir" ]]; then
+        resolved_dir="$primary_dir"
+        resolved_name="$base_name"
+        return 0
+    fi
+
+    # Primary exists - try variant: repo-owner
+    if [[ -n "$owner" ]]; then
+        local variant_name="${base_name}-${owner}"
+        local variant_dir="${base_dir}/${variant_name}"
+
+        if [[ ! -d "$variant_dir" ]]; then
+            resolved_dir="$variant_dir"
+            resolved_name="$variant_name"
+            return 0
+        fi
+
+        error "Directory already exists: $primary_dir"
+        error "Variant also exists: $variant_dir"
+        error "Specify a custom name: gitx clone <url> <name>"
+        return 1
+    fi
+
+    error "Directory already exists: $primary_dir"
+    return 1
+}
+
 # =============================================================================
 # Git Helpers
 # =============================================================================
@@ -671,7 +721,7 @@ _profiles_apply() {
     # Set SSH command for key isolation (standard URLs, specific key)
     local expanded_ssh_key
     expanded_ssh_key="$(_expand_tilde "$ssh_key")"
-    git -C "$dir" config --local core.sshCommand "ssh -i ${expanded_ssh_key} -o IdentitiesOnly=yes"
+    git -C "$dir" config --local core.sshCommand "ssh -i ${expanded_ssh_key} -o IdentitiesOnly=yes -o IdentityAgent=none"
 
     # Handle signing configuration
     if [[ -n "$signingkey" ]]; then
@@ -700,7 +750,7 @@ _profiles_apply() {
         # Detect old-style SSH host aliases (e.g., github-jovalle)
         if [[ -n "$url_host" ]] && [[ "$url_host" != *.* ]]; then
             # Non-FQDN host = SSH alias, migrate to standard host
-            local standard_host="${host:-$JGIT_DEFAULT_PLATFORM}"
+            local standard_host="${host:-$GITX_DEFAULT_PLATFORM}"
             local new_origin_url="git@${standard_host}:${user}/${repo_name}.git"
             git -C "$dir" remote set-url origin "$new_origin_url"
             info "Migrated remote: ${url_host} → ${standard_host} (using core.sshCommand)"
@@ -708,6 +758,23 @@ _profiles_apply() {
     fi
 
     return 0
+}
+
+# Get GIT_SSH_COMMAND for active profile (if any)
+# Returns: SSH command string or empty if no profile/key
+_get_profile_ssh_command() {
+    local profile ssh_key profile_data
+
+    profile=$(git config --local jsh.profile 2>/dev/null) || return 0
+    [[ -z "$profile" ]] && return 0
+
+    profile_data=$(_profiles_get "$profile") || return 0
+    ssh_key=$(_profile_field "$profile_data" "ssh_key")
+    [[ -z "$ssh_key" ]] && return 0
+
+    local expanded_ssh_key
+    expanded_ssh_key="$(_expand_tilde "$ssh_key")"
+    echo "ssh -i ${expanded_ssh_key} -o IdentitiesOnly=yes -o IdentityAgent=none"
 }
 
 # Detect which profile matches a git repo's config
@@ -827,7 +894,7 @@ cmd_profile_status() {
     fi
 
     if [[ "$has_leak" == "true" ]]; then
-        printf '\n  %b⚠ jgit commit will override these env vars with profile values.%b\n' "$C_YELLOW" "$C_RESET"
+        printf '\n  %b⚠ gitx commit will override these env vars with profile values.%b\n' "$C_YELLOW" "$C_RESET"
     fi
 }
 
@@ -890,7 +957,7 @@ cmd_profile_apply() {
     local profile_name="$1"
 
     if [[ -z "$profile_name" ]]; then
-        printf '%s\n' "Usage: jgit profile <name>" >&2
+        printf '%s\n' "Usage: gitx profile <name>" >&2
         printf '\n%s\n' "Available profiles:" >&2
         _profiles_list | while read -r p; do printf '%s\n' "  $p" >&2; done
         return 1
@@ -977,7 +1044,7 @@ cmd_profile() {
         migrate)       cmd_profile_migrate ;;
         -h|--help|help)
             cat << EOF
-Usage: jgit profile [command] [args]
+Usage: gitx profile [command] [args]
 
 Commands:
   (none)        Show current profile for this repo
@@ -993,7 +1060,7 @@ EOF
                 cmd_profile_apply "$subcmd"
             else
                 error "Unknown profile: $subcmd"
-                printf '%s\n' "Use 'jgit profile list' to see available profiles." >&2
+                printf '%s\n' "Use 'gitx profile list' to see available profiles." >&2
                 return 1
             fi
             ;;
@@ -1229,14 +1296,20 @@ cmd_update() {
     # Check for uncommitted changes
     if ! git diff --quiet || ! git diff --cached --quiet || [[ -n "$(git ls-files --others --exclude-standard)" ]]; then
         has_changes=true
-        stash_name="jgit-update-$(date +%Y%m%d-%H%M%S)"
+        stash_name="gitx-update-$(date +%Y%m%d-%H%M%S)"
         info "Stashing changes as: $stash_name"
         git stash push -u -m "$stash_name" || abort "Failed to stash changes"
     fi
 
-    # Fetch from origin
+    # Fetch from origin (with profile SSH key if set)
     info "Fetching from origin..."
-    git fetch origin || abort "Failed to fetch"
+    local ssh_cmd
+    ssh_cmd=$(_get_profile_ssh_command)
+    if [[ -n "$ssh_cmd" ]]; then
+        GIT_SSH_COMMAND="$ssh_cmd" git fetch origin || abort "Failed to fetch"
+    else
+        git fetch origin || abort "Failed to fetch"
+    fi
 
     # Identify default branch (main > master > develop)
     local default_branch=""
@@ -1290,7 +1363,7 @@ cmd_path() {
     local name_lower matches=()
 
     if [[ -z "$name" ]]; then
-        error "Usage: jgit path <name>"
+        error "Usage: gitx path <name>"
         return 1
     fi
 
@@ -1323,6 +1396,17 @@ cmd_path() {
             printf '%s\n' "${matches[0]}"
             ;;
     esac
+}
+
+# Check if path (default: PWD) is a registered project
+cmd_is_project() {
+    local check_path="${1:-$PWD}"
+    check_path="$(cd "$check_path" 2>/dev/null && pwd -P)" || return 1
+
+    while IFS= read -r dir; do
+        [[ "${dir}" == "${check_path}" ]] && return 0
+    done < <(_projects_get_all)
+    return 1
 }
 
 # List all projects with git status
@@ -1391,8 +1475,8 @@ cmd_list() {
 }
 
 # Clone with smart SSH fallback
-# Called via: project add <url> [name]
-cmd_add() {
+# Called via: gitx clone <url> [name]
+cmd_clone() {
     local url=""
     local name=""
     local debug=false
@@ -1415,24 +1499,24 @@ cmd_add() {
 
     if [[ -z "$url" ]]; then
         cat << 'EOF' >&2
-Usage: project add [-d|--debug] <git-url|owner/repo> [name]
+Usage: gitx clone [-d|--debug] <git-url|owner/repo> [name]
 
 Clone a git repository with smart SSH key selection.
 Automatically selects SSH key based on repo owner matching profile user.
 
 For shorthand format (owner/repo), tries platforms in order:
-  1. JGIT_DEFAULT_PLATFORM (default: github.com)
-  2. JGIT_FALLBACK_PLATFORMS (comma-separated list)
+  1. GITX_DEFAULT_PLATFORM (default: github.com)
+  2. GITX_FALLBACK_PLATFORMS (comma-separated list)
 
 Options:
   -d, --debug    Show URL parsing details and clone attempts
 
 Examples:
-  project add git@github.com:user/repo.git
-  project add https://github.com/user/repo.git
-  project add user/repo                        # tries default platform first
-  project add TEAM/project myproject           # shorthand with custom name
-  project add --debug JAY/myrepo               # show parsing details
+  gitx clone git@github.com:user/repo.git
+  gitx clone https://github.com/user/repo.git
+  gitx clone user/repo                        # tries default platform first
+  gitx clone TEAM/project myproject           # shorthand with custom name
+  gitx clone --debug JAY/myrepo               # show parsing details
 EOF
         return 1
     fi
@@ -1460,12 +1544,25 @@ EOF
         return 1
     fi
 
-    local target_dir
-    target_dir="$(_projects_default_dir)/${name}"
+    # Get owner for variant naming
+    local owner=""
+    if [[ "$is_shorthand" == true ]]; then
+        owner="$shorthand_owner"
+    else
+        owner="$(_projects_owner_from_url "$url")"
+    fi
 
-    if [[ -d "$target_dir" ]]; then
-        error "Directory already exists: $target_dir"
+    # Resolve target directory with conflict resolution
+    local resolved_dir="" resolved_name=""
+    if ! _projects_resolve_target_dir "$name" "$owner"; then
         return 1
+    fi
+
+    local target_dir="$resolved_dir"
+
+    # Inform user if using variant name
+    if [[ "$resolved_name" != "$name" ]]; then
+        info "Using variant name: ${C_CYAN}${resolved_name}${C_RESET} (${name} already exists)"
     fi
 
     # Create parent directory
@@ -1486,13 +1583,13 @@ EOF
     local -a platforms_to_try=()
     if [[ "$is_shorthand" == true ]]; then
         # For shorthand, try default platform first, then fallbacks
-        platforms_to_try+=("$JGIT_DEFAULT_PLATFORM")
-        IFS=',' read -ra fallbacks <<< "$JGIT_FALLBACK_PLATFORMS"
+        platforms_to_try+=("$GITX_DEFAULT_PLATFORM")
+        IFS=',' read -ra fallbacks <<< "$GITX_FALLBACK_PLATFORMS"
         for fb in "${fallbacks[@]}"; do
             fb="${fb## }"  # trim leading space
             fb="${fb%% }"  # trim trailing space
             # Don't duplicate the default platform
-            [[ "$fb" != "$JGIT_DEFAULT_PLATFORM" ]] && platforms_to_try+=("$fb")
+            [[ "$fb" != "$GITX_DEFAULT_PLATFORM" ]] && platforms_to_try+=("$fb")
         done
     fi
 
@@ -1518,7 +1615,7 @@ EOF
                 if [[ -n "$ssh_key" ]]; then
                     local expanded_ssh_key="${ssh_key/#\~/${HOME}}"
                     if [[ -f "$expanded_ssh_key" ]]; then
-                        git_ssh_cmd="ssh -i ${expanded_ssh_key} -o IdentitiesOnly=yes"
+                        git_ssh_cmd="ssh -i ${expanded_ssh_key} -o IdentitiesOnly=yes -o IdentityAgent=none"
                         info "Using SSH key for profile: ${C_CYAN}${matched_profile}${C_RESET}"
                     fi
                 fi
@@ -1557,7 +1654,7 @@ EOF
 
             if git clone "$https_url" "$target_dir" 2>/dev/null; then
                 success "Cloned from ${try_platform} (HTTPS): $(_projects_display_name "$target_dir")"
-                warn "Cloned via HTTPS. Run 'jgit profile <name>' to set up SSH."
+                warn "Cloned via HTTPS. Run 'gitx profile <name>' to set up SSH."
                 _output_cd_info
                 return 0
             fi
@@ -1597,7 +1694,7 @@ EOF
         if [[ -n "$ssh_key" ]]; then
             local expanded_ssh_key="${ssh_key/#\~/${HOME}}"
             if [[ -f "$expanded_ssh_key" ]]; then
-                git_ssh_cmd="ssh -i ${expanded_ssh_key} -o IdentitiesOnly=yes"
+                git_ssh_cmd="ssh -i ${expanded_ssh_key} -o IdentitiesOnly=yes -o IdentityAgent=none"
                 info "Using SSH key for profile: ${C_CYAN}${matched_profile}${C_RESET}"
             fi
         fi
@@ -1641,7 +1738,7 @@ EOF
         warn "Trying HTTPS fallback..."
         if git clone "$https_url" "$target_dir"; then
             success "Cloned to: $(_projects_display_name "$target_dir")"
-            warn "Cloned via HTTPS. Run 'jgit profile <name>' to set up SSH."
+            warn "Cloned via HTTPS. Run 'gitx profile <name>' to set up SSH."
             _output_cd_info
             return 0
         fi
@@ -1652,12 +1749,12 @@ EOF
 }
 
 # Create new project with profile selection
-# Called via: project create <name>
+# Called via: gitx create <name>
 cmd_create() {
     local name="${1:-}"
 
     if [[ -z "$name" ]]; then
-        error "Usage: project create <name>"
+        error "Usage: gitx create <name>"
         return 1
     fi
 
@@ -1740,7 +1837,7 @@ cmd_create() {
             elif [[ -n "$phost" ]]; then
                 ssh_target="$(_ssh_derive_host "$phost" "$puser")"
             else
-                ssh_target="$(_ssh_derive_host "$JGIT_DEFAULT_PLATFORM" "$puser")"
+                ssh_target="$(_ssh_derive_host "$GITX_DEFAULT_PLATFORM" "$puser")"
             fi
             origin_url="git@${ssh_target}:${puser}/${name}.git"
             git remote add origin "$origin_url"
@@ -1838,10 +1935,10 @@ EOF
 # Source interactive library (lazy load)
 _source_interactive() {
     if [[ -z "${_UI_RESET:-}" ]]; then
-        if [[ -f "${JSH_DIR}/lib/jgit/jgit-interactive.sh" ]]; then
-            source "${JSH_DIR}/lib/jgit/jgit-interactive.sh"
+        if [[ -f "${JSH_DIR}/lib/gitx/gitx-interactive.sh" ]]; then
+            source "${JSH_DIR}/lib/gitx/gitx-interactive.sh"
         else
-            abort "Interactive library not found: ${JSH_DIR}/lib/jgit/jgit-interactive.sh"
+            abort "Interactive library not found: ${JSH_DIR}/lib/gitx/gitx-interactive.sh"
         fi
     fi
 }
@@ -1918,7 +2015,7 @@ cmd_commit() {
     local profile_name
     profile_name=$(git config --local jsh.profile 2>/dev/null) || true
     if [[ -z "$profile_name" ]]; then
-        error "No profile assigned. Run: jgit profile <name>"
+        error "No profile assigned. Run: gitx profile <name>"
         printf '%s\n' "Available profiles:" >&2
         _profiles_list | while read -r p; do printf '%s\n' "  $p" >&2; done
         return 1
@@ -1958,7 +2055,7 @@ cmd_commit() {
     # Handle timestamp if provided
     if [[ -n "$timestamp_arg" ]]; then
         # Source timestamp library for parsing
-        source "${JSH_DIR}/lib/jgit/jgit-timestamp.sh"
+        source "${JSH_DIR}/lib/gitx/gitx-timestamp.sh"
 
         # Determine base epoch: "now" prefix uses current time, otherwise use last commit
         local base_epoch parsed_epoch
@@ -2022,7 +2119,7 @@ cmd_commit() {
     GIT_AUTHOR_EMAIL="$email" \
     GIT_COMMITTER_NAME="$p_name" \
     GIT_COMMITTER_EMAIL="$email" \
-    GIT_SSH_COMMAND="ssh -i ${ssh_key} -o IdentitiesOnly=yes" \
+    GIT_SSH_COMMAND="ssh -i ${ssh_key} -o IdentitiesOnly=yes -o IdentityAgent=none" \
     git -c "user.name=${p_name}" \
         -c "user.email=${email}" \
         "${git_args[@]}" \
@@ -2083,7 +2180,7 @@ cmd_amend() {
     fi
 
     # Source timestamp library
-    source "${JSH_DIR}/lib/jgit/jgit-timestamp.sh"
+    source "${JSH_DIR}/lib/gitx/gitx-timestamp.sh"
 
     # Determine base epoch: "now" prefix uses current time, otherwise use last commit
     local base_epoch parsed_epoch
@@ -2146,7 +2243,13 @@ cmd_push() {
         done < <(_strip_interactive_flag "$@")
         cmd_push_interactive "${args[@]}"
     else
-        exec git push "$@"
+        local ssh_cmd
+        ssh_cmd=$(_get_profile_ssh_command)
+        if [[ -n "$ssh_cmd" ]]; then
+            GIT_SSH_COMMAND="$ssh_cmd" exec git push "$@"
+        else
+            exec git push "$@"
+        fi
     fi
 }
 
@@ -2165,7 +2268,7 @@ cmd_backup() {
             ;;
         restore)
             if [[ -z "${1:-}" ]]; then
-                error "Usage: jgit backup restore <ref>"
+                error "Usage: gitx backup restore <ref>"
                 return 1
             fi
             _source_interactive
@@ -2173,7 +2276,7 @@ cmd_backup() {
             ;;
         *)
             error "Unknown backup command: $subcmd"
-            printf '%s\n' "Usage: jgit backup [list|restore <ref>]"
+            printf '%s\n' "Usage: gitx backup [list|restore <ref>]"
             return 1
             ;;
     esac
@@ -2189,20 +2292,27 @@ cmd_backup() {
 
 case "${1:-}" in
     # Project commands
-    path)      shift; cmd_path "$@" ;;
-    list|-l)   shift; cmd_list "$@" ;;
+    path)       shift; cmd_path "$@" ;;
+    is-project) shift; cmd_is_project "$@" ;;
+    list|-l)    shift; cmd_list "$@" ;;
 
-    # Commands that require the project wrapper for cd
-    add)
+    # Commands that require the shell wrapper for cd
+    clone)
         if [[ -z "${JSH_WRAPPER:-}" ]]; then
-            error "Use 'project add <url>' instead (enables auto-cd)"
+            error "Use 'gitx clone <url>' via shell function (enables auto-cd)"
             exit 1
         fi
-        shift; cmd_add "$@"
+        shift; cmd_clone "$@"
+        ;;
+    add)
+        # Migration helper: 'add' was renamed to 'clone'
+        error "'jgit add' has been renamed to 'gitx clone'"
+        info "Run: gitx clone $2"
+        exit 1
         ;;
     create)
         if [[ -z "${JSH_WRAPPER:-}" ]]; then
-            error "Use 'project create <name>' instead (enables auto-cd)"
+            error "Use 'gitx create <name>' via shell function (enables auto-cd)"
             exit 1
         fi
         shift; cmd_create "$@"

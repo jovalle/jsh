@@ -1,5 +1,5 @@
-# lib/jgit/jgit-ui.sh - Claude-style tabbed interview UI framework
-# Sourced by lib/jgit/jgit-interactive.sh
+# lib/gitx/gitx-ui.sh - Claude-style tabbed interview UI framework
+# Sourced by lib/gitx/gitx-interactive.sh
 # shellcheck shell=bash
 
 # =============================================================================
@@ -525,7 +525,7 @@ _ui_timestamp_input() {
     fi
 
     # Source timestamp library if not already
-    [[ -z "${_TS_PRESETS[irl]:-}" ]] && source "${JSH_DIR:-$HOME/.jsh}/lib/jgit/jgit-timestamp.sh"
+    [[ -z "${_TS_PRESETS[irl]:-}" ]] && source "${JSH_DIR:-$HOME/.jsh}/lib/gitx/gitx-timestamp.sh"
 
     _get_ref_label() {
         if [[ "$ref_mode" -eq 0 ]]; then
