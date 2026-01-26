@@ -26,6 +26,9 @@
 # @option -v,--verbose      Verbose output (for list command)
 # @option -h,--help         Show this help message
 #
+# @env JGIT_DEFAULT_PLATFORM   Default git host for owner/repo shorthand (default: github.com)
+# @env JGIT_FALLBACK_PLATFORMS Comma-separated fallback hosts if default fails (default: github.com)
+#
 # @example jgit
 # @example jgit update
 # @example jgit profile work
@@ -34,6 +37,15 @@
 # @example jgit commit -t "+1h" -m "feature"
 # @example jgit amend -t "+30m"
 # @example jgit amend -t "now-1h"
+# @example jgit add TEAM/project           # tries default platform, then fallbacks
+#
+# Supported URL formats:
+#   git@host:owner/repo.git                                    (SSH)
+#   https://host/owner/repo.git                                (HTTPS)
+#   ssh://git@host[:port]/owner/repo.git                       (SSH with port)
+#   https://host/scm/PROJECT/repo.git                          (Bitbucket Server)
+#   https://host/projects/PROJECT/repos/REPO/browse            (Bitbucket Server browse → auto-converted)
+#   owner/repo                                                 (shorthand → tries JGIT_DEFAULT_PLATFORM first)
 #
 # shellcheck shell=bash
 #
@@ -53,6 +65,14 @@ IFS=$'\n\t'
 JSH_DIR="${JSH_DIR:-${HOME}/.jsh}"
 JSH_PROFILES="${JSH_PROFILES:-${JSH_DIR}/local/profiles.json}"
 _PROJECTS_DEFAULT_PATHS="${HOME}/.jsh,${HOME}/projects/*"
+
+# Default git platform for shorthand URLs (e.g., owner/repo)
+# Override with JGIT_DEFAULT_PLATFORM environment variable
+JGIT_DEFAULT_PLATFORM="${JGIT_DEFAULT_PLATFORM:-github.com}"
+
+# Fallback platforms to try if default fails (comma-separated)
+# Example: JGIT_FALLBACK_PLATFORMS="github.com,gitlab.com"
+JGIT_FALLBACK_PLATFORMS="${JGIT_FALLBACK_PLATFORMS:-github.com}"
 
 # =============================================================================
 # Dependencies
@@ -206,11 +226,55 @@ _ssh_derive_host() {
     printf '%s-%s' "$platform" "$user"
 }
 
+# Normalize Bitbucket Server browse URLs to clone URLs
+# Input: https://bitbucket.example.com/projects/PROJ/repos/REPO/browse
+# Output: https://bitbucket.example.com/scm/PROJ/REPO.git
+_git_normalize_bitbucket_url() {
+    local url="$1"
+    local clone_type="${2:-https}"  # https or ssh
+    local ssh_port="${3:-}"         # Optional SSH port (e.g., 7999 or 8000)
+
+    # Match Bitbucket Server browse URL pattern
+    if [[ "$url" =~ ^https://([^/]+)/projects/([^/]+)/repos/([^/]+)(/browse.*)?$ ]]; then
+        local host="${BASH_REMATCH[1]}"
+        local project="${BASH_REMATCH[2]}"
+        local repo="${BASH_REMATCH[3]}"
+
+        if [[ "$clone_type" == "ssh" ]]; then
+            if [[ -n "$ssh_port" ]]; then
+                printf 'ssh://git@%s:%s/%s/%s.git' "$host" "$ssh_port" "$project" "$repo"
+            else
+                printf 'ssh://git@%s/%s/%s.git' "$host" "$project" "$repo"
+            fi
+        else
+            printf 'https://%s/scm/%s/%s.git' "$host" "$project" "$repo"
+        fi
+        return 0
+    fi
+
+    # Not a Bitbucket Server browse URL
+    printf '%s' "$url"
+    return 1
+}
+
 # Parse a git URL and extract components
 # Output: platform|owner|repo (pipe-separated)
+# Supports:
+#   - git@host:owner/repo.git (SSH)
+#   - https://host/owner/repo.git (HTTPS)
+#   - ssh://git@host[:port]/owner/repo.git (SSH with port)
+#   - https://host/scm/PROJECT/repo.git (Bitbucket Server HTTPS)
+#   - ssh://git@host[:port]/PROJECT/repo.git (Bitbucket Server SSH)
+#   - https://host/projects/PROJECT/repos/REPO/browse (Bitbucket Server browse)
+#   - owner/repo (shorthand, uses JGIT_DEFAULT_PLATFORM)
 _git_parse_url() {
     local url="$1"
     local platform="" owner="" repo=""
+
+    # First, normalize Bitbucket Server browse URLs
+    if [[ "$url" =~ /projects/[^/]+/repos/[^/]+(/browse)?$ ]]; then
+        url="$(_git_normalize_bitbucket_url "$url" "https")"
+    fi
 
     if [[ "$url" == git@* ]]; then
         local host_part="${url#git@}"
@@ -231,25 +295,121 @@ _git_parse_url() {
         local host_part="${url#https://}"
         platform="${host_part%%/*}"
         local path_part="${host_part#*/}"
+
+        # Handle Bitbucket Server /scm/ path
+        if [[ "$path_part" == scm/* ]]; then
+            path_part="${path_part#scm/}"
+        fi
+
         owner="${path_part%%/*}"
         repo="${path_part#*/}"
         repo="${repo%.git}"
+        # Strip any trailing path segments (e.g., /browse)
+        repo="${repo%%/*}"
 
     elif [[ "$url" == ssh://* ]]; then
+        # ssh://git@host[:port]/path/repo.git
         local host_part="${url#ssh://git@}"
-        platform="${host_part%%/*}"
+        # Extract host (may include port)
+        local host_with_port="${host_part%%/*}"
+        # Strip port if present
+        platform="${host_with_port%%:*}"
         local path_part="${host_part#*/}"
+
+        # Handle Bitbucket Server /scm/ path or direct project path
+        if [[ "$path_part" == scm/* ]]; then
+            path_part="${path_part#scm/}"
+        fi
+
         owner="${path_part%%/*}"
         repo="${path_part#*/}"
         repo="${repo%.git}"
 
     elif [[ "$url" == */* ]] && [[ "$url" != *:* ]] && [[ "$url" != *.* ]]; then
-        # Shorthand format: owner/repo (assume github.com)
-        platform="github.com"
+        # Shorthand format: owner/repo (use configured default platform)
+        platform="$JGIT_DEFAULT_PLATFORM"
         owner="${url%%/*}"
         repo="${url#*/}"
         repo="${repo%.git}"
     fi
+
+    printf '%s|%s|%s' "$platform" "$owner" "$repo"
+}
+
+# Check if input is shorthand format (owner/repo without host)
+_is_shorthand_url() {
+    local url="$1"
+    [[ "$url" == */* ]] && [[ "$url" != *:* ]] && [[ "$url" != *.* ]] && [[ "$url" != http* ]] && [[ "$url" != ssh://* ]]
+}
+
+# Debug URL parsing - shows all detection logic
+_git_parse_url_debug() {
+    local url="$1"
+    local original_url="$url"
+
+    echo "${C_BOLD}=== URL Parse Debug ===${C_RESET}"
+    echo "${C_DIM}Input:${C_RESET} $original_url"
+    echo
+
+    # Check URL type
+    echo "${C_CYAN}URL Type Detection:${C_RESET}"
+    if _is_shorthand_url "$url"; then
+        echo "  ✓ Shorthand format (owner/repo)"
+        echo "  → Will use JGIT_DEFAULT_PLATFORM: ${C_YELLOW}${JGIT_DEFAULT_PLATFORM}${C_RESET}"
+        echo "  → Fallbacks: ${C_DIM}${JGIT_FALLBACK_PLATFORMS}${C_RESET}"
+    elif [[ "$url" == git@* ]]; then
+        echo "  ✓ SSH format (git@host:path)"
+    elif [[ "$url" == https://* ]]; then
+        echo "  ✓ HTTPS format"
+    elif [[ "$url" == ssh://* ]]; then
+        echo "  ✓ SSH URL format (ssh://)"
+    else
+        echo "  ? Unknown format"
+    fi
+    echo
+
+    # Bitbucket Server detection
+    echo "${C_CYAN}Bitbucket Server Detection:${C_RESET}"
+    if [[ "$url" =~ /projects/[^/]+/repos/[^/]+(/browse)?$ ]]; then
+        echo "  ✓ Matched: /projects/*/repos/* pattern (browse URL)"
+        local normalized
+        normalized="$(_git_normalize_bitbucket_url "$url" "https")"
+        echo "  → Normalized to: ${C_GREEN}${normalized}${C_RESET}"
+        url="$normalized"
+    elif [[ "$url" == */scm/* ]]; then
+        echo "  ✓ Matched: /scm/ path (Bitbucket Server clone URL)"
+    else
+        echo "  ✗ Not a Bitbucket Server URL"
+    fi
+    echo
+
+    # Parse components
+    local parsed platform owner repo
+    parsed="$(_git_parse_url "$original_url")"
+    platform="${parsed%%|*}"
+    owner="${parsed#*|}"
+    owner="${owner%%|*}"
+    repo="${parsed##*|}"
+
+    echo "${C_CYAN}Parsed Components:${C_RESET}"
+    echo "  Platform: ${C_GREEN}${platform:-<empty>}${C_RESET}"
+    echo "  Owner:    ${C_GREEN}${owner:-<empty>}${C_RESET}"
+    echo "  Repo:     ${C_GREEN}${repo:-<empty>}${C_RESET}"
+    echo
+
+    # Show generated URLs
+    echo "${C_CYAN}Generated Clone URLs:${C_RESET}"
+    if [[ -n "$platform" ]] && [[ -n "$owner" ]] && [[ -n "$repo" ]]; then
+        echo "  SSH:   git@${platform}:${owner}/${repo}.git"
+        echo "  HTTPS: https://${platform}/${owner}/${repo}.git"
+        if [[ "$url" == */scm/* ]] || [[ "$original_url" =~ /projects/ ]]; then
+            echo "  BB SSH:   ssh://git@${platform}/${owner}/${repo}.git"
+            echo "  BB HTTPS: https://${platform}/scm/${owner}/${repo}.git"
+        fi
+    else
+        echo "  ${C_RED}Cannot generate URLs - missing components${C_RESET}"
+    fi
+    echo
 
     printf '%s|%s|%s' "$platform" "$owner" "$repo"
 }
@@ -276,7 +436,7 @@ _profile_find_by_user() {
 # Get SSH host for a profile (explicit or derived)
 _profile_ssh_host() {
     local profile_name="$1"
-    local fallback_platform="${2:-github.com}"
+    local fallback_platform="${2:-$JGIT_DEFAULT_PLATFORM}"
 
     local profile_data ssh_host host user
     profile_data="$(_profiles_get "$profile_name")"
@@ -540,7 +700,7 @@ _profiles_apply() {
         # Detect old-style SSH host aliases (e.g., github-jovalle)
         if [[ -n "$url_host" ]] && [[ "$url_host" != *.* ]]; then
             # Non-FQDN host = SSH alias, migrate to standard host
-            local standard_host="${host:-github.com}"
+            local standard_host="${host:-$JGIT_DEFAULT_PLATFORM}"
             local new_origin_url="git@${standard_host}:${user}/${repo_name}.git"
             git -C "$dir" remote set-url origin "$new_origin_url"
             info "Migrated remote: ${url_host} → ${standard_host} (using core.sshCommand)"
@@ -1233,22 +1393,64 @@ cmd_list() {
 # Clone with smart SSH fallback
 # Called via: project add <url> [name]
 cmd_add() {
-    local url="$1"
-    local name="${2:-}"
+    local url=""
+    local name=""
+    local debug=false
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -d|--debug) debug=true; shift ;;
+            -*) error "Unknown option: $1"; return 1 ;;
+            *)
+                if [[ -z "$url" ]]; then
+                    url="$1"
+                else
+                    name="$1"
+                fi
+                shift
+                ;;
+        esac
+    done
 
     if [[ -z "$url" ]]; then
         cat << 'EOF' >&2
-Usage: project add <git-url> [name]
+Usage: project add [-d|--debug] <git-url|owner/repo> [name]
 
 Clone a git repository with smart SSH key selection.
 Automatically selects SSH key based on repo owner matching profile user.
 
+For shorthand format (owner/repo), tries platforms in order:
+  1. JGIT_DEFAULT_PLATFORM (default: github.com)
+  2. JGIT_FALLBACK_PLATFORMS (comma-separated list)
+
+Options:
+  -d, --debug    Show URL parsing details and clone attempts
+
 Examples:
   project add git@github.com:user/repo.git
   project add https://github.com/user/repo.git
-  project add git@github.com:user/repo.git myrepo
+  project add user/repo                        # tries default platform first
+  project add TEAM/project myproject           # shorthand with custom name
+  project add --debug JAY/myrepo               # show parsing details
 EOF
         return 1
+    fi
+
+    # Debug mode: show parsing details
+    if [[ "$debug" == true ]]; then
+        _git_parse_url_debug "$url"
+        echo "${C_BOLD}=== Clone Attempt ===${C_RESET}"
+    fi
+
+    # Check if shorthand format - enable multi-platform fallback
+    local is_shorthand=false
+    local shorthand_owner="" shorthand_repo=""
+    if _is_shorthand_url "$url"; then
+        is_shorthand=true
+        shorthand_owner="${url%%/*}"
+        shorthand_repo="${url#*/}"
+        shorthand_repo="${shorthand_repo%.git}"
     fi
 
     [[ -z "$name" ]] && name="$(_projects_name_from_url "$url")"
@@ -1268,6 +1470,88 @@ EOF
 
     # Create parent directory
     mkdir -p "$(dirname "$target_dir")" || abort "Failed to create directory"
+
+    # Helper to output cd info
+    _output_cd_info() {
+        if [[ -n "${JSH_CD_FILE:-}" ]]; then
+            printf '%s' "$target_dir" > "${JSH_CD_FILE}"
+        elif [[ -n "${JSH_WRAPPER:-}" ]]; then
+            printf 'CD:%s\n' "$target_dir"
+        else
+            printf '\n  %s→%s cd %s\n' "$C_CYAN" "$C_RESET" "$(_projects_display_name "$target_dir")"
+        fi
+    }
+
+    # Build list of platforms to try
+    local -a platforms_to_try=()
+    if [[ "$is_shorthand" == true ]]; then
+        # For shorthand, try default platform first, then fallbacks
+        platforms_to_try+=("$JGIT_DEFAULT_PLATFORM")
+        IFS=',' read -ra fallbacks <<< "$JGIT_FALLBACK_PLATFORMS"
+        for fb in "${fallbacks[@]}"; do
+            fb="${fb## }"  # trim leading space
+            fb="${fb%% }"  # trim trailing space
+            # Don't duplicate the default platform
+            [[ "$fb" != "$JGIT_DEFAULT_PLATFORM" ]] && platforms_to_try+=("$fb")
+        done
+    fi
+
+    # Try cloning with platform fallback for shorthand URLs
+    if [[ "$is_shorthand" == true ]]; then
+        [[ "$debug" == true ]] && echo "Platforms to try: ${platforms_to_try[*]}"
+
+        for try_platform in "${platforms_to_try[@]}"; do
+            local try_url="git@${try_platform}:${shorthand_owner}/${shorthand_repo}.git"
+
+            printf '%b\n' "Trying ${C_CYAN}${try_platform}${C_RESET}..."
+
+            # Try to find matching profile for SSH host
+            local clone_url="$try_url"
+            local matched_profile ssh_host
+
+            if matched_profile="$(_profile_find_by_user "$shorthand_owner")"; then
+                ssh_host="$(_profile_ssh_host "$matched_profile" "$try_platform")"
+                if [[ -n "$ssh_host" ]] && _ssh_host_exists "$ssh_host"; then
+                    clone_url="git@${ssh_host}:${shorthand_owner}/${shorthand_repo}.git"
+                    info "Using SSH key for profile: ${C_CYAN}${matched_profile}${C_RESET}"
+                fi
+            fi
+
+            [[ "$debug" == true ]] && echo "  ${C_DIM}SSH URL:${C_RESET} $clone_url"
+
+            # Try SSH clone
+            if git clone "$clone_url" "$target_dir" 2>/dev/null; then
+                success "Cloned from ${try_platform}: $(_projects_display_name "$target_dir")"
+                _output_cd_info
+                return 0
+            fi
+
+            [[ "$debug" == true ]] && echo "  ${C_RED}SSH failed${C_RESET}"
+
+            # Try HTTPS fallback for this platform
+            local https_url="https://${try_platform}/${shorthand_owner}/${shorthand_repo}.git"
+            [[ "$debug" == true ]] && echo "  ${C_DIM}HTTPS URL:${C_RESET} $https_url"
+
+            if git clone "$https_url" "$target_dir" 2>/dev/null; then
+                success "Cloned from ${try_platform} (HTTPS): $(_projects_display_name "$target_dir")"
+                warn "Cloned via HTTPS. Run 'jgit profile <name>' to set up SSH."
+                _output_cd_info
+                return 0
+            fi
+
+            [[ "$debug" == true ]] && echo "  ${C_RED}HTTPS failed${C_RESET}"
+
+            # Clean up failed attempt
+            rm -rf "$target_dir" 2>/dev/null
+        done
+
+        error "Failed to clone ${shorthand_owner}/${shorthand_repo} from any platform"
+        error "Tried: ${platforms_to_try[*]}"
+        return 1
+    fi
+
+    # Non-shorthand URL: original logic
+    printf '%b\n' "Cloning ${C_CYAN}${name}${C_RESET}..."
 
     # Parse URL
     local parsed platform owner repo
@@ -1290,23 +1574,9 @@ EOF
         fi
     fi
 
-    printf '%b\n' "Cloning ${C_CYAN}${name}${C_RESET}..."
-
-    # Helper to output cd info
-    _output_cd_info() {
-        if [[ -n "${JSH_CD_FILE:-}" ]]; then
-            # Write to temp file for shell wrapper to read
-            printf '%s' "$target_dir" > "${JSH_CD_FILE}"
-        elif [[ -n "${JSH_WRAPPER:-}" ]]; then
-            printf 'CD:%s\n' "$target_dir"
-        else
-            printf '\n  %s→%s cd %s\n' "$C_CYAN" "$C_RESET" "$(_projects_display_name "$target_dir")"
-        fi
-    }
-
     # Try smart SSH URL first
     if git clone "$clone_url" "$target_dir" 2>/dev/null; then
-        success "cloned to: $(_projects_display_name "$target_dir")"
+        success "Cloned to: $(_projects_display_name "$target_dir")"
         _output_cd_info
         return 0
     fi
@@ -1315,7 +1585,7 @@ EOF
     if [[ "$clone_url" != "$url" ]]; then
         warn "SSH clone failed, trying original URL..."
         if git clone "$url" "$target_dir" 2>/dev/null; then
-            success "cloned to: $(_projects_display_name "$target_dir")"
+            success "Cloned to: $(_projects_display_name "$target_dir")"
             _output_cd_info
             return 0
         fi
@@ -1326,7 +1596,7 @@ EOF
         local https_url="https://${platform}/${owner}/${repo}.git"
         warn "Trying HTTPS fallback..."
         if git clone "$https_url" "$target_dir"; then
-            success "cloned to: $(_projects_display_name "$target_dir")"
+            success "Cloned to: $(_projects_display_name "$target_dir")"
             warn "Cloned via HTTPS. Run 'jgit profile <name>' to set up SSH."
             _output_cd_info
             return 0
@@ -1426,7 +1696,7 @@ cmd_create() {
             elif [[ -n "$phost" ]]; then
                 ssh_target="$(_ssh_derive_host "$phost" "$puser")"
             else
-                ssh_target="$(_ssh_derive_host "github.com" "$puser")"
+                ssh_target="$(_ssh_derive_host "$JGIT_DEFAULT_PLATFORM" "$puser")"
             fi
             origin_url="git@${ssh_target}:${puser}/${name}.git"
             git remote add origin "$origin_url"
