@@ -682,8 +682,8 @@ cmd_profile_list() {
     local current_profile
     current_profile=$(git config --local jsh.profile 2>/dev/null) || true
 
-    printf '%b%-15s %-28s %-20s %s%b\n' "$C_DIM" "PROFILE" "EMAIL" "SSH KEY" "SIGNING" "$C_RESET"
-    printf '%s\n' "$(printf '%80s' '' | tr ' ' '─')"
+    printf '%b  %-15s %-28s %-20s %s%b\n' "$C_DIM" "PROFILE" "EMAIL" "SSH KEY" "SIGNING" "$C_RESET"
+    printf '%s\n' "$(printf '%82s' '' | tr ' ' '─')"
 
     while IFS= read -r profile_name; do
         [[ -z "$profile_name" ]] && continue
@@ -695,12 +695,17 @@ cmd_profile_list() {
         signingkey=$(_profile_field "$profile_data" "signingkey")
         signingformat=$(_profile_field "$profile_data" "signingformat")
 
-        # SSH key display
+        # SSH key display (plain text for proper column alignment)
+        local ssh_color=""
         if [[ -n "$ssh_key" ]]; then
             ssh_display="${ssh_key##*/}"
         else
-            ssh_display="${C_RED}✗ missing${C_RESET}"
+            ssh_display="✗ missing"
+            ssh_color="$C_RED"
         fi
+        # Manually pad ssh_display to 20 visual chars (zsh ${#} counts chars, not bytes)
+        local pad=$((20 - ${#ssh_display}))
+        (( pad > 0 )) && ssh_display="${ssh_display}$(printf '%*s' "$pad" '')"
 
         # Signing display
         if [[ -n "$signingkey" ]]; then
@@ -715,7 +720,8 @@ cmd_profile_list() {
             marker="  "
         fi
 
-        printf '%s%b%-15s%b %-28s %-20s %s\n' "$marker" "$C_CYAN" "$profile_name" "$C_RESET" "$email" "$ssh_display" "$signing_display"
+        # Use separate color wrapping to maintain column alignment
+        printf '%s%b%-15s%b %-28s %b%s%b %s\n' "$marker" "$C_CYAN" "$profile_name" "$C_RESET" "$email" "$ssh_color" "$ssh_display" "$C_RESET" "$signing_display"
     done < <(_profiles_list)
 }
 
