@@ -286,9 +286,9 @@ run_gnome_inhibit() {
     [[ "${display}" == "true" ]] && what="${what}:idle"
 
     local args=(
-        --app-id="${SCRIPT_NAME}"
-        --reason="${reason}"
-        --inhibit="${what}"
+        --app-id "${SCRIPT_NAME}"
+        --reason "${reason}"
+        --inhibit "${what}"
     )
 
     if [[ ${#cmd[@]} -gt 0 ]]; then
@@ -409,8 +409,8 @@ run_inhibit() {
             command -v caffeinate &>/dev/null && methods+=(caffeinate)
             ;;
         Linux)
-            command -v systemd-inhibit &>/dev/null && methods+=(systemd-inhibit)
             command -v gnome-session-inhibit &>/dev/null && methods+=(gnome-session-inhibit)
+            command -v systemd-inhibit &>/dev/null && methods+=(systemd-inhibit)
             command -v xdg-screensaver &>/dev/null && methods+=(xdg-screensaver)
             ;;
     esac
@@ -463,8 +463,8 @@ get_primary_method() {
             command -v caffeinate &>/dev/null && { printf 'caffeinate'; return; }
             ;;
         Linux)
-            command -v systemd-inhibit &>/dev/null && { printf 'systemd-inhibit'; return; }
             command -v gnome-session-inhibit &>/dev/null && { printf 'gnome-session-inhibit'; return; }
+            command -v systemd-inhibit &>/dev/null && { printf 'systemd-inhibit'; return; }
             command -v xdg-screensaver &>/dev/null && { printf 'xdg-screensaver'; return; }
             ;;
     esac
