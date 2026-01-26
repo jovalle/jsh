@@ -287,8 +287,19 @@ if [[ -f "${JSH_DIR}/lib/fzf-tab/fzf-tab.plugin.zsh" ]]; then
     zstyle ':fzf-tab:complete:cd:*' fzf-preview 'ls -1 --color=always $realpath'
     # Disable sort for git checkout
     zstyle ':completion:*:git-checkout:*' sort false
-    # Use tmux popup if in tmux
-    zstyle ':fzf-tab:*' fzf-command ftb-tmux-popup
+    # Use tmux popup if in tmux AND tmux version >= 3.2 (popup introduced in 3.2)
+    # Graceful fallback to standard fzf-tab behavior for older tmux versions
+    if [[ -n "${TMUX:-}" ]]; then
+        _jsh_tmux_version=$(tmux -V 2>/dev/null | sed -n 's/^tmux \([0-9]*\)\.\([0-9]*\).*/\1.\2/p')
+        if [[ -n "${_jsh_tmux_version}" ]]; then
+            _jsh_tmux_major=${_jsh_tmux_version%%.*}
+            _jsh_tmux_minor=${_jsh_tmux_version#*.}
+            if (( _jsh_tmux_major > 3 || (_jsh_tmux_major == 3 && _jsh_tmux_minor >= 2) )); then
+                zstyle ':fzf-tab:*' fzf-command ftb-tmux-popup
+            fi
+        fi
+        unset _jsh_tmux_version _jsh_tmux_major _jsh_tmux_minor
+    fi
     # Disable group headers (Homebrew's "internal commands" categorization is confusing)
     zstyle ':fzf-tab:*' show-group none
     # Remove redundant dot prefix on completion items

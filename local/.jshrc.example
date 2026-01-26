@@ -26,6 +26,10 @@
 # export BAT_THEME="Monokai Extended"
 # export EDITOR="vim"
 
+# Example: Override tmux default shell (used by .tmux.conf)
+# export JSH_TMUX_SHELL="/bin/zsh"
+# export JSH_TMUX_SHELL="/opt/homebrew/bin/zsh"
+
 # =============================================================================
 # Local Aliases
 # =============================================================================
