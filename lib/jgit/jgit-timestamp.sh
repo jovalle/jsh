@@ -225,6 +225,34 @@ _ts_parse() {
     _ts_parse_absolute "$input"
 }
 
+# Detect precision from a relative time string
+# Args: relative_time_string (e.g., "+1h", "+30m", "+1h30m45s")
+# Output: "hour" | "minute" | "second" | "full"
+# Returns: 0 on success, 1 if not a relative time
+_ts_detect_precision() {
+    local input="$1"
+
+    # Not a relative time
+    if ! _ts_is_relative "$input"; then
+        echo "full"
+        return 0
+    fi
+
+    # Strip leading sign
+    local remaining="${input#[+-]}"
+
+    # Check which units are present (smallest unit determines precision)
+    if [[ "$remaining" =~ [0-9]+s ]]; then
+        echo "full"  # Seconds specified = no randomization
+    elif [[ "$remaining" =~ [0-9]+m ]]; then
+        echo "minute"  # Minutes specified = randomize seconds
+    elif [[ "$remaining" =~ [0-9]+[hdwMy] ]]; then
+        echo "hour"  # Hours or larger = randomize minutes and seconds
+    else
+        echo "full"  # Unknown, don't randomize
+    fi
+}
+
 # =============================================================================
 # Randomization
 # =============================================================================

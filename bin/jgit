@@ -10,6 +10,7 @@
 # @cmd list                List all projects with status
 # @cmd path <name>         Output path for shell cd wrapper
 # @cmd commit              Identity-enforced commit (requires profile)
+# @cmd amend               Amend last commit's timestamp
 # @cmd push                Push commits (use -i for interactive)
 # @cmd backup              Manage jgit backup refs
 # @cmd <other>             Passthrough to git
@@ -21,6 +22,7 @@
 # @sub backup:restore      Restore from backup ref
 #
 # @option -i,--interactive  Enable interactive mode (commit, push)
+# @option -t,--timestamp    Set timestamp (relative to last commit, or use now+1h)
 # @option -v,--verbose      Verbose output (for list command)
 # @option -h,--help         Show this help message
 #
@@ -29,6 +31,9 @@
 # @example jgit profile work
 # @example jgit list -v
 # @example jgit commit -i
+# @example jgit commit -t "+1h" -m "feature"
+# @example jgit amend -t "+30m"
+# @example jgit amend -t "now-1h"
 #
 # shellcheck shell=bash
 #
@@ -1546,6 +1551,33 @@ _strip_interactive_flag() {
 # =============================================================================
 
 cmd_commit() {
+    # Check for -t/--timestamp flag first (before interactive check)
+    local timestamp_arg=""
+    local -a remaining_args=()
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -t|--timestamp)
+                if [[ -n "${2:-}" ]] && [[ "$2" != -* ]]; then
+                    timestamp_arg="$2"
+                    shift 2
+                else
+                    error "Option $1 requires a timestamp argument"
+                    return 1
+                fi
+                ;;
+            -t=*|--timestamp=*)
+                timestamp_arg="${1#*=}"
+                shift
+                ;;
+            *)
+                remaining_args+=("$1")
+                shift
+                ;;
+        esac
+    done
+    set -- "${remaining_args[@]}"
+
     if _has_interactive_flag "$@"; then
         _source_interactive
         local -a args=()
@@ -1585,12 +1617,13 @@ cmd_commit() {
     fi
 
     # Step 3: Extract fields
-    local p_name email ssh_key signingkey signingformat
+    local p_name email ssh_key signingkey signingformat gpgsign
     p_name=$(_profile_field "$profile_data" "name")
     email=$(_profile_field "$profile_data" "email")
     ssh_key=$(_profile_field "$profile_data" "ssh_key")
     signingkey=$(_profile_field "$profile_data" "signingkey")
     signingformat=$(_profile_field "$profile_data" "signingformat")
+    gpgsign=$(_profile_field "$profile_data" "gpgsign")
 
     # Expand paths
     ssh_key="$(_expand_tilde "$ssh_key")"
@@ -1600,9 +1633,63 @@ cmd_commit() {
     # git-level args go before "commit", commit-level args go after
     local -a git_args=()
     local -a sign_args=()
+    local -a date_args=()
 
-    # Handle signing
-    if [[ -n "$signingkey" ]]; then
+    # Handle timestamp if provided
+    if [[ -n "$timestamp_arg" ]]; then
+        # Source timestamp library for parsing
+        source "${JSH_DIR}/lib/jgit/jgit-timestamp.sh"
+
+        # Determine base epoch: "now" prefix uses current time, otherwise use last commit
+        local base_epoch parsed_epoch
+        if [[ "$timestamp_arg" == now* ]]; then
+            base_epoch=$(_ts_now)
+            # Strip "now" prefix, keep the rest (e.g., "now+1h" -> "+1h", "now" -> "")
+            timestamp_arg="${timestamp_arg#now}"
+            if [[ -z "$timestamp_arg" ]]; then
+                # Just "now" with no offset
+                parsed_epoch="$base_epoch"
+            else
+                if ! parsed_epoch=$(_ts_parse "$timestamp_arg" "$base_epoch"); then
+                    error "Invalid timestamp: now$timestamp_arg"
+                    printf '%s\n' "Formats: now, now+30m, +1h (relative to last commit)" >&2
+                    return 1
+                fi
+            fi
+        else
+            # Relative to last commit
+            base_epoch=$(git log -1 --format='%at' 2>/dev/null) || base_epoch=$(_ts_now)
+            if ! parsed_epoch=$(_ts_parse "$timestamp_arg" "$base_epoch"); then
+                error "Invalid timestamp: $timestamp_arg"
+                printf '%s\n' "Formats: +30m, -2h, +1h30m, now, now+1h" >&2
+                return 1
+            fi
+        fi
+
+        # Detect precision and randomize unspecified components
+        local precision
+        precision=$(_ts_detect_precision "$timestamp_arg")
+        parsed_epoch=$(_ts_randomize "$parsed_epoch" "$precision")
+
+        # Convert to git format
+
+        # Convert to git format
+        local git_date
+        git_date=$(_ts_to_git_format "$parsed_epoch")
+        date_args+=(--date="$git_date")
+
+        # Also set environment variables for committer date
+        export GIT_AUTHOR_DATE="$git_date"
+        export GIT_COMMITTER_DATE="$git_date"
+    fi
+
+    # Handle signing - respect gpgsign setting (defaults to true when signingkey is set)
+    local should_sign=false
+    if [[ -n "$signingkey" ]] && [[ "$gpgsign" != "false" ]]; then
+        should_sign=true
+    fi
+
+    if [[ "$should_sign" == "true" ]]; then
         git_args+=("-c" "user.signingkey=${signingkey}")
         git_args+=("-c" "gpg.format=${signingformat:-ssh}")
         sign_args+=("--gpg-sign=${signingkey}")
@@ -1619,7 +1706,111 @@ cmd_commit() {
     git -c "user.name=${p_name}" \
         -c "user.email=${email}" \
         "${git_args[@]}" \
-        commit "${sign_args[@]}" "$@"
+        commit "${sign_args[@]}" "${date_args[@]}" "$@"
+}
+
+# =============================================================================
+# Amend Command (timestamp modification)
+# =============================================================================
+
+cmd_amend() {
+    # Parse arguments
+    local timestamp_arg=""
+    local -a remaining_args=()
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -t|--timestamp)
+                if [[ -n "${2:-}" ]] && [[ "$2" != -* ]]; then
+                    timestamp_arg="$2"
+                    shift 2
+                else
+                    error "Option $1 requires a timestamp argument"
+                    return 1
+                fi
+                ;;
+            -t=*|--timestamp=*)
+                timestamp_arg="${1#*=}"
+                shift
+                ;;
+            *)
+                remaining_args+=("$1")
+                shift
+                ;;
+        esac
+    done
+
+    if ! git rev-parse --git-dir &>/dev/null; then
+        error "Not in a git repository"
+        return 1
+    fi
+
+    # Get last commit info
+    local last_hash last_epoch
+    last_hash=$(git rev-parse HEAD 2>/dev/null)
+    if [[ -z "$last_hash" ]]; then
+        error "No commits in repository"
+        return 1
+    fi
+    last_epoch=$(git log -1 --format='%at' 2>/dev/null)
+
+    # If no timestamp provided, show current and prompt (or use interactive)
+    if [[ -z "$timestamp_arg" ]]; then
+        # Launch interactive amend mode
+        _source_interactive
+        _commit_amend_timestamp
+        return $?
+    fi
+
+    # Source timestamp library
+    source "${JSH_DIR}/lib/jgit/jgit-timestamp.sh"
+
+    # Determine base epoch: "now" prefix uses current time, otherwise use last commit
+    local base_epoch parsed_epoch
+    if [[ "$timestamp_arg" == now* ]]; then
+        base_epoch=$(_ts_now)
+        # Strip "now" prefix, keep the rest (e.g., "now+1h" -> "+1h", "now" -> "")
+        timestamp_arg="${timestamp_arg#now}"
+        if [[ -z "$timestamp_arg" ]]; then
+            # Just "now" with no offset
+            parsed_epoch="$base_epoch"
+        else
+            if ! parsed_epoch=$(_ts_parse "$timestamp_arg" "$base_epoch"); then
+                error "Invalid timestamp: now$timestamp_arg"
+                printf '%s\n' "Formats: now, now+30m, now-2h, +1h (relative to last commit)" >&2
+                return 1
+            fi
+        fi
+    else
+        # Relative to last commit
+        base_epoch="$last_epoch"
+        if ! parsed_epoch=$(_ts_parse "$timestamp_arg" "$base_epoch"); then
+            error "Invalid timestamp: $timestamp_arg"
+            printf '%s\n' "Formats: +30m, -2h, +1h30m, now, now+1h" >&2
+            return 1
+        fi
+    fi
+
+    # Detect precision and randomize unspecified components
+    local precision
+    precision=$(_ts_detect_precision "$timestamp_arg")
+    parsed_epoch=$(_ts_randomize "$parsed_epoch" "$precision")
+
+    # Convert to git format
+    local git_date
+    git_date=$(_ts_to_git_format "$parsed_epoch")
+
+    # Show what we're doing
+    local old_date new_date_display
+    old_date=$(git log -1 --format='%ai')
+    new_date_display=$(_ts_to_display "$parsed_epoch")
+    printf '%s\n' "Amending commit timestamp:"
+    printf '  %s → %s\n' "$old_date" "$new_date_display"
+
+    # Perform amend
+    GIT_AUTHOR_DATE="$git_date" \
+    GIT_COMMITTER_DATE="$git_date" \
+    git commit --amend --no-edit --date="$git_date" "${remaining_args[@]}"
 }
 
 # =============================================================================
@@ -1705,6 +1896,7 @@ case "${1:-}" in
 
     # Interactive-enabled commands
     commit)    shift; cmd_commit "$@" ;;
+    amend)     shift; cmd_amend "$@" ;;
     push)      shift; cmd_push "$@" ;;
 
     # Backup management

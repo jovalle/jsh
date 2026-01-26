@@ -336,9 +336,11 @@ _commit_interview() {
                 ;;
             1)  # Timestamp
                 printf '\n'
-                local now_epoch
+                local now_epoch last_commit_epoch
                 now_epoch=$(_ts_now)
-                if ! _ui_timestamp_input "Timestamp" "$now_epoch" "commit_timestamp"; then
+                # Get last commit epoch for reference toggle (if commits exist)
+                last_commit_epoch=$(_git_commit_epoch HEAD 2>/dev/null)
+                if ! _ui_timestamp_input "Timestamp" "$now_epoch" "commit_timestamp" "$last_commit_epoch"; then
                     _ui_info "Cancelled"
                     return 1
                 fi
@@ -575,7 +577,14 @@ _push_rewrite_individual() {
 
         _ui_kv "Current" "$(_ts_to_display "$current_epoch")"
 
-        if ! _ui_timestamp_input "New timestamp" "$current_epoch" "ts_$i"; then
+        # For first commit, use current epoch as base; for subsequent commits,
+        # allow toggling between current epoch and previous commit's new timestamp
+        local ref_epoch=""
+        if [[ "$i" -gt 0 ]]; then
+            ref_epoch="$prev_epoch"
+        fi
+
+        if ! _ui_timestamp_input "New timestamp" "$current_epoch" "ts_$i" "$ref_epoch"; then
             _UI_CANCELLED=1
             return 1
         fi
@@ -710,10 +719,13 @@ _push_apply_preset() {
     printf '\n'
 
     # Get base timestamp for oldest commit
+    # Allow toggling between "now" and the oldest commit's current time
     local oldest_epoch="${epochs_ref[0]}"
+    local now_epoch
+    now_epoch=$(_ts_now)
     _ui_info "Configure starting point for oldest commit"
 
-    if ! _ui_timestamp_input "Base timestamp" "$oldest_epoch" "base_timestamp"; then
+    if ! _ui_timestamp_input "Base timestamp" "$now_epoch" "base_timestamp" "$oldest_epoch"; then
         _UI_CANCELLED=1
         return 1
     fi

@@ -498,13 +498,15 @@ _ui_input() {
 # Timestamp Input (Specialized)
 # =============================================================================
 
-# Timestamp input with live preview
-# Args: prompt, base_epoch, result_key
+# Timestamp input with live preview and reference mode toggle
+# Args: prompt, base_epoch, result_key, [last_commit_epoch]
+# If last_commit_epoch is provided, user can toggle between "now" and "last commit" as reference
 # Returns: 0 on confirm, 1 on cancel
 _ui_timestamp_input() {
     local prompt="$1"
     local base_epoch="$2"
     local result_key="$3"
+    local last_commit_epoch="${4:-}"
 
     local value=""
     local cursor_pos=0
@@ -512,16 +514,45 @@ _ui_timestamp_input() {
     local preview_epoch=""
     local error_msg=""
 
+    # Reference mode: 0 = base_epoch (typically "now"), 1 = last commit
+    local ref_mode=0
+    local has_ref_toggle=0
+    local current_ref_epoch="$base_epoch"
+
+    # Enable reference toggle if we have a different last_commit_epoch
+    if [[ -n "$last_commit_epoch" ]] && [[ "$last_commit_epoch" != "$base_epoch" ]]; then
+        has_ref_toggle=1
+    fi
+
     # Source timestamp library if not already
     [[ -z "${_TS_PRESETS[irl]:-}" ]] && source "${JSH_DIR:-$HOME/.jsh}/lib/jgit/jgit-timestamp.sh"
 
+    _get_ref_label() {
+        if [[ "$ref_mode" -eq 0 ]]; then
+            echo "now"
+        else
+            echo "last commit"
+        fi
+    }
+
+    _update_ref_epoch() {
+        if [[ "$ref_mode" -eq 0 ]]; then
+            current_ref_epoch="$base_epoch"
+        else
+            current_ref_epoch="$last_commit_epoch"
+        fi
+    }
+
     _update_preview() {
+        local ref_label
+        ref_label=$(_get_ref_label)
+
         if [[ -z "$value" ]]; then
-            preview_epoch="$base_epoch"
-            preview=$(_ts_to_display "$base_epoch")
-            preview+=" (now)"
+            preview_epoch="$current_ref_epoch"
+            preview=$(_ts_to_display "$current_ref_epoch")
+            preview+=" ($ref_label)"
         elif _ts_is_relative "$value"; then
-            preview_epoch=$(_ts_parse "$value" "$base_epoch" 2>/dev/null)
+            preview_epoch=$(_ts_parse "$value" "$current_ref_epoch" 2>/dev/null)
             if [[ -n "$preview_epoch" ]]; then
                 # Randomize seconds for relative times
                 preview_epoch=$(_ts_randomize_seconds "$preview_epoch")
@@ -564,7 +595,34 @@ _ui_timestamp_input() {
         fi
 
         printf '%s' "$_UI_CLEAR_LINE"
+        if [[ "$has_ref_toggle" -eq 1 ]]; then
+            # Show reference mode selector
+            local now_style last_style
+            if [[ "$ref_mode" -eq 0 ]]; then
+                now_style="${_UI_CYAN}${_UI_BOLD}"
+                last_style="${_UI_DIM}"
+            else
+                now_style="${_UI_DIM}"
+                last_style="${_UI_CYAN}${_UI_BOLD}"
+            fi
+            printf '  %sRelative to:%s %s⏱ now%s │ %s📌 last commit%s  %s(Tab to switch)%s\n' \
+                "$_UI_DIM" "$_UI_RESET" \
+                "$now_style" "$_UI_RESET" \
+                "$last_style" "$_UI_RESET" \
+                "$_UI_DIM" "$_UI_RESET"
+        fi
+
+        printf '%s' "$_UI_CLEAR_LINE"
         printf '%s  Formats: +30m, -2h, 2024-01-15 14:30, 14:30, now%s\n' "$_UI_DIM" "$_UI_RESET"
+    }
+
+    # Calculate number of lines to move up (depends on whether toggle is shown)
+    _get_ui_lines() {
+        if [[ "$has_ref_toggle" -eq 1 ]]; then
+            echo 4
+        else
+            echo 3
+        fi
     }
 
     _update_preview
@@ -582,17 +640,24 @@ _ui_timestamp_input() {
                 fi
 
                 # Clear and move past our UI
-                _ui_move_up 3
+                _ui_move_up "$(_get_ui_lines)"
                 _ui_clear_below
 
                 _UI_ANSWERS["$result_key"]="$preview_epoch"
                 return 0
                 ;;
             ESC)
-                _ui_move_up 3
+                _ui_move_up "$(_get_ui_lines)"
                 _ui_clear_below
                 _UI_CANCELLED=1
                 return 1
+                ;;
+            TAB|SHIFT_TAB)
+                # Toggle reference mode if available
+                if [[ "$has_ref_toggle" -eq 1 ]]; then
+                    ref_mode=$(( 1 - ref_mode ))
+                    _update_ref_epoch
+                fi
                 ;;
             BACKSPACE)
                 if [[ "$cursor_pos" -gt 0 ]]; then
@@ -612,7 +677,7 @@ _ui_timestamp_input() {
             END)
                 cursor_pos=${#value}
                 ;;
-            UP|DOWN|TAB|SHIFT_TAB|PGUP|PGDN|UNKNOWN)
+            UP|DOWN|PGUP|PGDN|UNKNOWN)
                 ;;
             *)
                 if [[ ${#key} -eq 1 ]]; then
@@ -623,7 +688,7 @@ _ui_timestamp_input() {
         esac
 
         _update_preview
-        _ui_move_up 3
+        _ui_move_up "$(_get_ui_lines)"
         _render
     done
 }
