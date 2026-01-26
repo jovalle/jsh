@@ -1,5 +1,5 @@
-# lib/jgit/jgit-timestamp.sh - Timestamp parsing, arithmetic, and randomization
-# Sourced by lib/jgit/jgit-interactive.sh
+# lib/gitx/gitx-timestamp.sh - Timestamp parsing, arithmetic, and randomization
+# Sourced by lib/gitx/gitx-interactive.sh
 # shellcheck shell=bash
 
 # =============================================================================

@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# Tests for j.sh - Smart directory jumping
+# Tests for j.sh - Smart frecency-based directory jumping
 # shellcheck disable=SC2030,SC2031
 
 load test_helper
@@ -13,10 +13,10 @@ setup() {
     mkdir -p "${JSH_TEST_TEMP}/dotfiles"
     mkdir -p "${JSH_TEST_TEMP}/deep/nested/path"
 
-    # Mock jgit to prevent hangs (exits with no output)
+    # Mock gitx to prevent hangs (exits with no output)
     mkdir -p "${JSH_TEST_TEMP}/bin"
-    printf '#!/bin/bash\nexit 1\n' > "${JSH_TEST_TEMP}/bin/jgit"
-    chmod +x "${JSH_TEST_TEMP}/bin/jgit"
+    printf '#!/bin/bash\nexit 1\n' > "${JSH_TEST_TEMP}/bin/gitx"
+    chmod +x "${JSH_TEST_TEMP}/bin/gitx"
     export PATH="${JSH_TEST_TEMP}/bin:${PATH}"
 
     # Load j with isolated database
@@ -174,5 +174,5 @@ EOF
 @test "j --help shows usage" {
     run j --help
     assert_equals 0 "${status}"
-    assert_contains "${output}" "Smart directory jumping"
+    assert_contains "${output}" "Smart frecency-based directory jumping"
 }

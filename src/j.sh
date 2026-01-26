@@ -7,7 +7,7 @@
 #
 # Features:
 #   - Frecency-based ranking (frequency + recency)
-#   - Integration with jsh projects (jgit)
+#   - Fallback to gitx projects for unvisited directories
 #   - Fuzzy matching with multiple keywords
 #   - FZF interactive selection (with fallback)
 #   - Automatic tracking via cd hook
@@ -19,20 +19,19 @@
 #   j -            Jump to previous directory
 #   j -v [query]   Verbose mode (show search steps)
 #   j -c [query]   Jump and open in VS Code
-#   j -r <name>    Open remote project in VS Code
-#
-# Project Management:
-#   j add <url> [name]   Clone repository and cd into it
-#   j create <name>      Create project directory and cd into it
-#   j profile [cmd]      Git profile management
-#   j update             Safe pull with stash and rebase
-#   j -l|--list [-v]     List all projects (via jgit list)
 #
 # Database Management:
 #   j --db         Show frecency database with scores
 #   j -a|--add     Add current directory to frecency database
 #   j --remove     Remove current directory from database
 #   j --clean      Remove non-existent directories
+#
+# For git/project management, use gitx:
+#   gitx clone <url>    Clone repository and cd into it
+#   gitx create <name>  Create project and cd into it
+#   gitx list           List all projects
+#   gitx profile        Git profile management
+#   gitx remote <name>  Open remote project in VS Code
 #
 # Environment:
 #   J_DATA        Path to data file (default: ~/.jsh/local/j.db)
@@ -49,9 +48,6 @@ _JSH_J_LOADED=1
 # Data file location (in jsh local directory, not tracked by git)
 J_DATA="${J_DATA:-${JSH_DIR:-${HOME}/.jsh}/local/j.db}"
 
-# Remote projects config file
-_J_REMOTE_CONFIG="${JSH_DIR:-${HOME}/.jsh}/local/projects.json"
-
 # Directories to exclude from tracking (colon-separated)
 J_EXCLUDE="${J_EXCLUDE:-${HOME}}"
 
@@ -64,6 +60,9 @@ _J_MIN_SCORE=0.01
 
 # Previous directory for `j -`
 _J_PREV_DIR=""
+
+# VS Code command (cached for performance)
+_J_CODE_CMD=""
 
 # =============================================================================
 # Shell Compatibility Layer
@@ -79,6 +78,123 @@ if [[ "${_J_SHELL}" == "zsh" ]]; then
 else
     _j_lowercase() { printf '%s' "${1,,}"; }
 fi
+
+# Find code command (cached to avoid repeated lookups)
+# Checks common paths to avoid shell hash table issues
+_j_find_code() {
+    # Return cached value if available
+    if [[ -n "${_J_CODE_CMD}" ]]; then
+        printf '%s' "${_J_CODE_CMD}"
+        return 0
+    fi
+
+    local cmd
+
+    # Check common local code locations FIRST (most common case)
+    local code_paths=(
+        "/opt/homebrew/bin/code" # macOS Homebrew (Apple Silicon)
+        "/usr/local/bin/code"    # macOS Homebrew (Intel)
+        "/usr/bin/code"          # Linux system
+    )
+
+    for cmd in "${code_paths[@]}"; do
+        if [[ -x "${cmd}" ]]; then
+            _J_CODE_CMD="${cmd}"
+            printf '%s' "${cmd}"
+            return 0
+        fi
+    done
+
+    # Fallback to PATH lookup
+    if command -v code &>/dev/null; then
+        cmd="$(command -v code)"
+        _J_CODE_CMD="${cmd}"
+        printf '%s' "${cmd}"
+        return 0
+    fi
+
+    # Last resort: Check VS Code Server (remote SSH sessions)
+    # Use explicit directory check to avoid glob issues with zsh configs
+    local vscode_server_dir="$HOME/.vscode-server/bin"
+    if [[ -d "${vscode_server_dir}" ]]; then
+        # Find most recent code binary without glob-in-subshell
+        cmd=""
+        for dir in "${vscode_server_dir}"/*/; do
+            if [[ -x "${dir}bin/code" ]]; then
+                cmd="${dir}bin/code"
+            fi
+        done
+        if [[ -n "${cmd}" ]] && [[ -x "${cmd}" ]]; then
+            _J_CODE_CMD="${cmd}"
+            printf '%s' "${cmd}"
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+# Open code in current directory
+_j_open_code() {
+    local code_cmd
+    code_cmd="$(_j_find_code)"
+    if [[ -n "${code_cmd}" ]]; then
+        "${code_cmd}" .
+    else
+        printf '%s!%s VS Code command not found.\n' "${C_WARN:-}" "${RST:-}" >&2
+        return 1
+    fi
+}
+
+# Check if current directory is a registered gitx project
+_j_is_gitx_project() {
+    command -v gitx &>/dev/null || return 1
+    gitx is-project 2>/dev/null
+}
+
+# Get all gitx project paths (one per line, with ~ notation)
+# Used as fallback when frecency database is empty
+_j_get_gitx_projects() {
+    command -v gitx &>/dev/null || return 1
+    # Skip header lines, extract just the path column
+    gitx list 2>/dev/null | awk 'NR>2 && /^~/ {print $1}'
+}
+
+# Interactive selection of remote projects
+_j_select_remote() {
+    local remotes=()
+
+    while IFS= read -r name; do
+        [[ -n "${name}" ]] && remotes+=("${name}")
+    done < <(_gitx_list_remotes)
+
+    if [[ ${#remotes[@]} -eq 0 ]]; then
+        printf '%s!%s No remote projects configured.\n' "${C_WARN:-}" "${RST:-}" >&2
+        printf '%sAdd remotes to:%s %s\n' "${DIM:-}" "${RST:-}" "${_GITX_REMOTE_CONFIG:-~/.jsh/local/projects.json}" >&2
+        return 1
+    fi
+
+    local selected
+    if command -v fzf &>/dev/null; then
+        selected=$(printf '%s\n' "${remotes[@]}" | fzf --height=40% --reverse --prompt='remote> ')
+    else
+        # Fallback: numbered list
+        printf '%sSelect remote project:%s\n' "${DIM:-}" "${RST:-}" >&2
+        local i=1
+        for name in "${remotes[@]}"; do
+            printf '  %s[%d]%s %s%s%s\n' "${C_GIT:-}" "${i}" "${RST:-}" "${CYN:-}" "${name}" "${RST:-}" >&2
+            (( i += 1 ))
+        done
+        printf '%sEnter number (1-%d):%s ' "${DIM:-}" "$(( i - 1 ))" "${RST:-}" >&2
+        local choice
+        read -r choice
+        if [[ "${choice}" =~ ^[0-9]+$ ]] && [[ "${choice}" -ge 1 ]] && [[ "${choice}" -lt "${i}" ]]; then
+            selected="${remotes[$(( choice - 1 ))]}"
+        fi
+    fi
+
+    [[ -n "${selected}" ]] && printf '%s' "${selected}"
+}
 
 # =============================================================================
 # Database Functions (file-based, no associative arrays for portability)
@@ -176,87 +292,6 @@ _j_clean() {
         printf '%s✓%s Database is clean (%s%d%s directories)\n' \
             "${C_OK:-}" "${RST:-}" "${C_GIT:-}" "${total}" "${RST:-}"
     fi
-}
-
-# =============================================================================
-# Remote Project Functions
-# =============================================================================
-
-# Get remote project info from config
-# Arguments:
-#   $1 - Project name
-# Output: JSON object with host, path, user, etc. or empty if not found
-_j_get_remote() {
-    local name="$1"
-
-    if [[ ! -f "${_J_REMOTE_CONFIG}" ]]; then
-        return 1
-    fi
-
-    if ! command -v jq &>/dev/null; then
-        printf 'jq is required for remote projects\n' >&2
-        return 1
-    fi
-
-    jq -r --arg name "${name}" '.remotes[$name] // empty' "${_J_REMOTE_CONFIG}" 2>/dev/null || true
-}
-
-# List all remote project names
-# Output: Project names, one per line
-_j_list_remotes() {
-    if [[ ! -f "${_J_REMOTE_CONFIG}" ]]; then
-        return 0
-    fi
-
-    if ! command -v jq &>/dev/null; then
-        return 0
-    fi
-
-    jq -r '.remotes | keys[]' "${_J_REMOTE_CONFIG}" 2>/dev/null || true
-}
-
-# Open a remote project in VS Code Remote SSH
-# Arguments:
-#   $1 - Project name
-# Returns: 0 on success, 1 on failure
-_j_open_remote() {
-    local name="$1"
-    local remote_info host remote_path user ssh_key
-
-    remote_info="$(_j_get_remote "${name}")"
-
-    if [[ -z "${remote_info}" ]]; then
-        printf '%s✗%s No remote project found: %s%s%s\n' "${C_ERR:-}" "${RST:-}" "${C_GIT:-}" "${name}" "${RST:-}" >&2
-        printf '\n%sAvailable remote projects:%s\n' "${DIM:-}" "${RST:-}" >&2
-        _j_list_remotes | while read -r proj; do
-            printf '  %s%s%s\n' "${CYN:-}" "${proj}" "${RST:-}" >&2
-        done
-        return 1
-    fi
-
-    host=$(printf '%s' "${remote_info}" | jq -r '.host')
-    remote_path=$(printf '%s' "${remote_info}" | jq -r '.path')
-    user=$(printf '%s' "${remote_info}" | jq -r '.user // empty')
-    ssh_key=$(printf '%s' "${remote_info}" | jq -r '.ssh_key // empty')
-
-    if [[ -z "${host}" ]] || [[ -z "${remote_path}" ]]; then
-        printf '%s✗%s Invalid remote project config for: %s%s%s\n' "${C_ERR:-}" "${RST:-}" "${C_GIT:-}" "${name}" "${RST:-}" >&2
-        return 1
-    fi
-
-    # Build SSH target (user@host or just host)
-    local ssh_target="${host}"
-    [[ -n "${user}" ]] && ssh_target="${user}@${host}"
-
-    # Open in VS Code Remote SSH
-    printf '%sOpening remote:%s %s%s%s (%s%s%s:%s%s%s)\n' \
-        "${C_INFO:-}" "${RST:-}" \
-        "${C_GIT:-}" "${name}" "${RST:-}" \
-        "${C_MUTED:-}" "${ssh_target}" "${RST:-}" \
-        "${CYN:-}" "${remote_path}" "${RST:-}"
-    [[ -n "${ssh_key}" ]] && printf '  %sKey:%s %s\n' "${DIM:-}" "${RST:-}" "${ssh_key}"
-
-    code --remote "ssh-remote+${ssh_target}" "${remote_path}"
 }
 
 # =============================================================================
@@ -375,9 +410,14 @@ _j_list() {
 # =============================================================================
 
 # Interactive directory selection with fzf
+# Parameters:
+#   $@ - optional query terms to filter
+#   _J_INTERACTIVE_INCLUDE_CURRENT - set to path to prepend "(current)" option
 _j_interactive() {
     local entries=() paths=() count=0
+    local include_current="${_J_INTERACTIVE_INCLUDE_CURRENT:-}"
 
+    # Collect frecency entries (already sorted by score, highest first)
     while IFS= read -r line; do
         [[ -z "${line}" ]] && continue
         entries+=("${line}")
@@ -385,20 +425,72 @@ _j_interactive() {
         (( count += 1 ))
     done < <(_j_query "$@")
 
+    # Collect gitx projects not already in frecency list
+    local -A frecency_set=()
+    local p
+    for p in "${paths[@]}"; do
+        frecency_set["${p}"]=1
+    done
+
+    local extra_paths=()
+    while IFS= read -r gpath; do
+        [[ -z "${gpath}" ]] && continue
+        # Expand ~ to absolute path for internal use
+        local abs_path="${gpath/#\~/$HOME}"
+        [[ ! -d "${abs_path}" ]] && continue
+        [[ "${abs_path}" == "${PWD}" ]] && continue
+        # Skip if already in frecency list
+        [[ -n "${frecency_set["${abs_path}"]:-}" ]] && continue
+        # Filter by query if provided
+        if [[ $# -eq 0 ]] || _j_matches "${abs_path}" "$@"; then
+            extra_paths+=("${abs_path}")
+        fi
+    done < <(_j_get_gitx_projects)
+
+    # Sort extra paths alphabetically and append to paths
+    if [[ ${#extra_paths[@]} -gt 0 ]]; then
+        while IFS= read -r sorted_path; do
+            paths+=("${sorted_path}")
+            (( count += 1 ))
+        done < <(printf '%s\n' "${extra_paths[@]}" | sort)
+    fi
+
+    # No entries from either source
     if [[ ${count} -eq 0 ]]; then
-        printf '%s!%s No matching directories found.\n' "${C_WARN:-}" "${RST:-}" >&2
+        printf '%s!%s No directories found.\n' "${C_WARN:-}" "${RST:-}" >&2
+        printf '%sStart navigating with cd to build your frecency database,%s\n' "${DIM:-}" "${RST:-}" >&2
+        printf '%sor add projects with: gitx clone <url>%s\n' "${DIM:-}" "${RST:-}" >&2
         return 1
+    fi
+
+    # Prepend "(current)" option if requested and we have a path
+    local current_marker=""
+    if [[ -n "${include_current}" ]]; then
+        current_marker="(current) $(_j_display_path "${include_current}")"
     fi
 
     local selected
     if command -v fzf &>/dev/null; then
-        # FZF with preview
-        selected=$(printf '%s\n' "${paths[@]}" | while read -r p; do
+        # Build display list
+        local display_list=""
+        [[ -n "${current_marker}" ]] && display_list="${current_marker}"$'\n'
+
+        display_list+="$(printf '%s\n' "${paths[@]}" | while read -r p; do
             _j_display_path "$p"
-        done | fzf --height=40% --reverse --no-sort \
-            --preview='ls -la {}' \
-            --preview-window='right:50%:wrap' \
-            --prompt='j> ')
+            printf '\n'
+        done)"
+
+        # FZF selection
+        local prompt="j> "
+
+        selected=$(printf '%s' "${display_list}" | fzf --height=40% --reverse --no-sort \
+            --prompt="${prompt}")
+
+        # Handle "(current)" selection
+        if [[ "${selected}" == "(current)"* ]]; then
+            printf 'CURRENT:%s' "${include_current}"
+            return 0
+        fi
 
         # Convert back to absolute path if we displayed with ~
         if [[ "${selected}" == "~"* ]]; then
@@ -406,15 +498,26 @@ _j_interactive() {
         fi
     else
         # Fallback: numbered list selection
-        printf '%sSelect directory:%s\n' "${DIM:-}" "${RST:-}" >&2
-        local i=1 entry
+        printf '%s%sSelect directory:%s\n' "${DIM:-}" "" "${RST:-}" >&2
+
+        local i=1
         local -a display_paths=()
-        for entry in "${entries[@]}"; do
-            [[ -z "${entry}" ]] && continue
-            [[ ${i} -gt 10 ]] && break
-            display_paths+=("${entry#*|}")
+
+        # Show "(current)" option first if requested
+        if [[ -n "${current_marker}" ]]; then
+            display_paths+=("CURRENT:${include_current}")
             printf '  %s[%d]%s %s%s%s\n' "${C_GIT:-}" "${i}" "${RST:-}" \
-                "${CYN:-}" "$(_j_display_path "${entry#*|}")" "${RST:-}" >&2
+                "${CYN:-}" "${current_marker}" "${RST:-}" >&2
+            (( i += 1 ))
+        fi
+
+        local p
+        for p in "${paths[@]}"; do
+            [[ -z "${p}" ]] && continue
+            [[ ${i} -gt 10 ]] && break
+            display_paths+=("${p}")
+            printf '  %s[%d]%s %s%s%s\n' "${C_GIT:-}" "${i}" "${RST:-}" \
+                "${CYN:-}" "$(_j_display_path "${p}")" "${RST:-}" >&2
             (( i += 1 ))
         done
 
@@ -424,7 +527,7 @@ _j_interactive() {
 
         if [[ "${choice}" =~ ^[0-9]+$ ]] && [[ "${choice}" -ge 1 ]] && [[ "${choice}" -lt "${i}" ]]; then
             # Use loop to find nth entry (portable across bash/zsh indexing)
-            local n=0 p
+            local n=0
             for p in "${display_paths[@]}"; do
                 [[ -z "${p}" ]] && continue
                 (( n += 1 ))
@@ -515,10 +618,6 @@ j() {
                 open_code=true
                 shift
                 ;;
-            -r|--remote)
-                open_remote=true
-                shift
-                ;;
             -a|--add)
                 _j_add "${PWD}"
                 printf '%s✓%s Added: %s%s%s\n' "${C_OK:-}" "${RST:-}" "${CYN:-}" "$(_j_display_path "${PWD}")" "${RST:-}"
@@ -533,11 +632,6 @@ j() {
                 fi
                 return 0
                 ;;
-            -l|--list)
-                shift
-                jgit list "$@"
-                return $?
-                ;;
             --db)
                 _j_list
                 return 0
@@ -546,9 +640,20 @@ j() {
                 _j_clean
                 return 0
                 ;;
+            -l|--list)
+                # Migration: -l moved to gitx list
+                printf '%s!%s "j -l" has moved to "gitx list"\n' "${C_WARN:-}" "${RST:-}" >&2
+                shift
+                printf '  %sRun:%s gitx list %s\n' "${DIM:-}" "${RST:-}" "$*" >&2
+                return 1
+                ;;
+            -r|--remote)
+                open_remote=true
+                shift
+                ;;
             -h|--help)
                 cat << 'EOF'
-j - Smart directory jumping + project management
+j - Smart frecency-based directory jumping
 
 Usage:
   j              Interactive directory selection (fzf)
@@ -556,15 +661,8 @@ Usage:
   j <q1> <q2>    Multiple keywords (all must match)
   j -            Jump to previous directory
   j -v [query]   Verbose mode (show search steps)
-  j -c [query]   Jump and open in VS Code
-  j -r <name>    Open remote project in VS Code (no cd)
-
-Project Management:
-  j add <url> [name]   Clone repository and cd into it
-  j create <name>      Create project directory and cd into it
-  j profile [cmd]      Git profile management
-  j update             Safe pull with stash and rebase
-  j -l|--list [-v]     List all projects (via jgit list)
+  j -c [query]   Jump and open in VS Code (skip cd if already in project)
+  j -r [query]   Open remote project in VS Code via SSH
 
 Database Management:
   j --db         Show frecency database with scores
@@ -573,16 +671,21 @@ Database Management:
   j --clean      Remove non-existent directories
   j -h|--help    Show this help
 
+For git/project management, use gitx:
+  gitx clone <url>    Clone repository and cd into it
+  gitx create <name>  Create project and cd into it
+  gitx list           List all projects
+  gitx profile        Git profile management
+
 Aliases:
   p              Same as j
-  jj             Same as j profile
 
 Environment:
   J_DATA         Path to data file (default: ~/.jsh/local/j.db)
   J_EXCLUDE      Colon-separated paths to exclude from tracking
   J_NO_HOOK      Set to disable automatic cd tracking
 
-Remote projects are configured in ~/.jsh/local/projects.json
+Remote projects are configured in ~/.jsh/local/projects.json under "remotes".
 
 The 'j' command learns from your navigation patterns. Directories you
 visit frequently and recently will rank higher in search results.
@@ -593,7 +696,7 @@ EOF
                 # Jump to previous directory
                 if [[ -n "${_J_PREV_DIR}" ]] && [[ -d "${_J_PREV_DIR}" ]]; then
                     _j_cd_hook "${_J_PREV_DIR}"
-                    [[ "${open_code}" == true ]] && code .
+                    [[ "${open_code}" == true ]] && _j_open_code
                 else
                     printf '%s!%s No previous directory\n' "${C_WARN:-}" "${RST:-}" >&2
                     return 1
@@ -610,61 +713,47 @@ EOF
         esac
     done
 
-    # Handle remote project mode (-r flag with name)
+    # Handle -r (remote) - always uses remote picker, never cd
     if [[ "${open_remote}" == true ]]; then
-        if [[ $# -eq 0 ]]; then
-            printf '%sUsage:%s j -r <project-name>\n' "${DIM:-}" "${RST:-}" >&2
-            printf '\n%sAvailable remote projects:%s\n' "${DIM:-}" "${RST:-}" >&2
-            _j_list_remotes | while read -r proj; do
-                printf '  %s%s%s\n' "${CYN:-}" "${proj}" "${RST:-}" >&2
-            done
-            return 1
+        local remote_name
+        if [[ $# -gt 0 ]]; then
+            remote_name="$1"
+        else
+            remote_name="$(_j_select_remote)"
         fi
-        _j_open_remote "$1"
+        if [[ -n "${remote_name}" ]]; then
+            _gitx_open_remote "${remote_name}"
+        fi
         return $?
     fi
-
-    # Subcommand handling (project management)
-    case "${1:-}" in
-        add|create)
-            # Clone/create project then cd into it via temp file
-            local cd_file
-            cd_file=$(mktemp "${TMPDIR:-/tmp}/jgit-cd.XXXXXX")
-
-            JSH_WRAPPER=1 JSH_CD_FILE="${cd_file}" jgit "$@"
-            local ret=$?
-
-            if [[ $ret -eq 0 && -f "${cd_file}" ]]; then
-                local target_dir
-                target_dir=$(cat "${cd_file}")
-                if [[ -n "${target_dir}" && -d "${target_dir}" ]]; then
-                    _j_cd_hook "${target_dir}" || ret=1
-                    [[ "${open_code}" == true ]] && code .
-                fi
-            fi
-
-            rm -f "${cd_file}"
-            return $ret
-            ;;
-        profile)
-            shift
-            jgit profile "$@"
-            return $?
-            ;;
-        update)
-            shift
-            jgit update "$@"
-            return $?
-            ;;
-    esac
 
     # No arguments - interactive selection
     if [[ $# -eq 0 ]]; then
         local selected
+
+        # Include "(current)" option when using -c and already in a gitx project
+        if [[ "${open_code}" == true ]] && _j_is_gitx_project; then
+            _J_INTERACTIVE_INCLUDE_CURRENT="${PWD}"
+        else
+            _J_INTERACTIVE_INCLUDE_CURRENT=""
+        fi
+
         selected="$(_j_interactive)"
+        unset _J_INTERACTIVE_INCLUDE_CURRENT
+
         if [[ -n "${selected}" ]]; then
-            _j_cd_hook "${selected}"
-            [[ "${open_code}" == true ]] && code .
+            # Handle "(current)" selection - open VS Code in current dir
+            if [[ "${selected}" == "CURRENT:"* ]]; then
+                _j_open_code
+            elif [[ "${open_code}" == true ]] && _j_is_gitx_project; then
+                # Already in project - open selected in VS Code without cd
+                local code_cmd
+                code_cmd="$(_j_find_code)"
+                [[ -n "${code_cmd}" ]] && "${code_cmd}" "${selected}"
+            else
+                _j_cd_hook "${selected}"
+                [[ "${open_code}" == true ]] && _j_open_code
+            fi
         fi
         return 0
     fi
@@ -684,8 +773,15 @@ EOF
         local path="${best#*|}"
         [[ "${verbose}" == true ]] && printf '%s[j]%s Found %d match(es) in database, best: %s%s%s\n' \
             "${DIM:-}" "${RST:-}" "${count}" "${CYN:-}" "$(_j_display_path "${path}")" "${RST:-}" >&2
-        _j_cd_hook "${path}"
-        [[ "${open_code}" == true ]] && code .
+        if [[ "${open_code}" == true ]] && _j_is_gitx_project; then
+            # Already in project - open target in VS Code without cd
+            local code_cmd
+            code_cmd="$(_j_find_code)"
+            [[ -n "${code_cmd}" ]] && "${code_cmd}" "${path}"
+        else
+            _j_cd_hook "${path}"
+            [[ "${open_code}" == true ]] && _j_open_code
+        fi
         return 0
     fi
 
@@ -699,21 +795,33 @@ EOF
         if [[ -n "${resolved}" ]] && [[ -d "${resolved}" ]]; then
             [[ "${verbose}" == true ]] && printf '%s[j]%s Resolved path: %s%s%s\n' \
                 "${DIM:-}" "${RST:-}" "${CYN:-}" "$(_j_display_path "${resolved}")" "${RST:-}" >&2
-            _j_cd_hook "${resolved}"
-            [[ "${open_code}" == true ]] && code .
+            if [[ "${open_code}" == true ]] && _j_is_gitx_project; then
+                local code_cmd
+                code_cmd="$(_j_find_code)"
+                [[ -n "${code_cmd}" ]] && "${code_cmd}" "${resolved}"
+            else
+                _j_cd_hook "${resolved}"
+                [[ "${open_code}" == true ]] && _j_open_code
+            fi
             return 0
         fi
 
-        # Fallback 2: Try as jgit project name (fast - single lookup)
-        if command -v jgit &>/dev/null; then
-            [[ "${verbose}" == true ]] && printf '%s[j]%s Trying jgit project lookup for "%s"...\n' "${DIM:-}" "${RST:-}" "$1" >&2
+        # Fallback 2: Try as gitx project name (fast - single lookup)
+        if command -v gitx &>/dev/null; then
+            [[ "${verbose}" == true ]] && printf '%s[j]%s Trying gitx project lookup for "%s"...\n' "${DIM:-}" "${RST:-}" "$1" >&2
             local project_path
-            project_path=$(jgit path "$1" 2>/dev/null)
+            project_path=$(gitx path "$1" 2>/dev/null)
             if [[ -n "${project_path}" ]] && [[ -d "${project_path}" ]]; then
                 [[ "${verbose}" == true ]] && printf '%s[j]%s Found project: %s%s%s\n' \
                     "${DIM:-}" "${RST:-}" "${CYN:-}" "$(_j_display_path "${project_path}")" "${RST:-}" >&2
-                _j_cd_hook "${project_path}"
-                [[ "${open_code}" == true ]] && code .
+                if [[ "${open_code}" == true ]] && _j_is_gitx_project; then
+                    local code_cmd
+                    code_cmd="$(_j_find_code)"
+                    [[ -n "${code_cmd}" ]] && "${code_cmd}" "${project_path}"
+                else
+                    _j_cd_hook "${project_path}"
+                    [[ "${open_code}" == true ]] && _j_open_code
+                fi
                 return 0
             fi
         fi
@@ -817,16 +925,13 @@ _j_migrate_marks
 if [[ -n "${BASH_VERSION:-}" ]]; then
     _j_completions() {
         local cur="${COMP_WORDS[COMP_CWORD]}"
-        local first="${COMP_WORDS[1]:-}"
 
         local completions=""
 
         if [[ ${COMP_CWORD} -eq 1 ]]; then
-            # First arg: subcommands + project names + flags
-            completions="add create profile update"
-            completions+=" $(jgit list 2>/dev/null | awk '{print $1}' | tr '\n' ' ')"
-        elif [[ "${first}" == "profile" ]]; then
-            completions="list status check docs $(jgit profile list 2>/dev/null | awk 'NR>2 {print $1}' | tr '\n' ' ')"
+            # First arg: flags + project names from gitx for fallback
+            completions="--db --clean"
+            completions+=" $(gitx list 2>/dev/null | awk '{print $1}' | tr '\n' ' ')"
         fi
 
         # shellcheck disable=SC2207
@@ -834,14 +939,4 @@ if [[ -n "${BASH_VERSION:-}" ]]; then
     }
     complete -F _j_completions j
     complete -F _j_completions p
-
-    # jj is 'j profile' - complete with profile args directly
-    _jj_completions() {
-        local cur="${COMP_WORDS[COMP_CWORD]}"
-        local completions="list status check docs"
-        completions+=" $(jgit profile list 2>/dev/null | awk 'NR>2 {print $1}' | tr '\n' ' ')"
-        # shellcheck disable=SC2207
-        COMPREPLY=($(compgen -W "${completions}" -- "${cur}"))
-    }
-    complete -F _jj_completions jj
 fi

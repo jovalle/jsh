@@ -37,7 +37,7 @@ load_jsh_cli() {
     source "${JSH_DIR}/lib/cli.sh"
 }
 
-# Note: project() function is now in functions.sh, calling bin/jgit
+# Note: project() function is now in functions.sh, calling bin/gitx
 load_jsh_functions() {
     load_jsh_core
     source "${JSH_DIR}/src/functions.sh"
@@ -196,6 +196,13 @@ assert_exit_code() {
         echo "  Actual exit code: ${actual}"
         return 1
     }
+}
+
+# Fail with message (standard bats helper)
+fail() {
+    local msg="${1:-Test failed}"
+    echo "# ${msg}" >&2
+    return 1
 }
 
 # =============================================================================

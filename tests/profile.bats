@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# Tests for jgit profile management and commit enforcement
+# Tests for gitx profile management and commit enforcement
 # shellcheck disable=SC2034,SC2154
 
 load test_helper
@@ -122,7 +122,7 @@ teardown() {
 
 @test "profile apply: sets jsh.profile in local git config" {
     cd "${TEST_REPO}"
-    run jgit profile personal
+    run gitx profile personal
     [ "$status" -eq 0 ]
 
     local stored_profile
@@ -132,7 +132,7 @@ teardown() {
 
 @test "profile apply: sets core.sshCommand with correct key" {
     cd "${TEST_REPO}"
-    run jgit profile personal
+    run gitx profile personal
     [ "$status" -eq 0 ]
 
     local ssh_cmd
@@ -143,7 +143,7 @@ teardown() {
 
 @test "profile apply: sets signing config when signingkey present" {
     cd "${TEST_REPO}"
-    run jgit profile work
+    run gitx profile work
     [ "$status" -eq 0 ]
 
     local signingkey gpgsign format
@@ -158,7 +158,7 @@ teardown() {
 
 @test "profile apply: disables signing when signingkey absent" {
     cd "${TEST_REPO}"
-    run jgit profile nosigning
+    run gitx profile nosigning
     [ "$status" -eq 0 ]
 
     local gpgsign
@@ -168,21 +168,21 @@ teardown() {
 
 @test "profile apply: errors on missing required fields (user)" {
     cd "${TEST_REPO}"
-    run jgit profile incomplete
+    run gitx profile incomplete
     [ "$status" -ne 0 ]
     assert_contains "$output" "missing required field"
 }
 
 @test "profile apply: errors on nonexistent SSH key file" {
     cd "${TEST_REPO}"
-    run jgit profile nosshkey
+    run gitx profile nosshkey
     [ "$status" -ne 0 ]
     assert_contains "$output" "SSH key not found"
 }
 
 @test "profile apply: errors on nonexistent profile" {
     cd "${TEST_REPO}"
-    run jgit profile doesnotexist
+    run gitx profile doesnotexist
     [ "$status" -ne 0 ]
 }
 
@@ -190,7 +190,7 @@ teardown() {
     cd "${TEST_REPO}"
     git remote add origin "git@github-jovalle:jovalle/testrepo.git"
 
-    run jgit profile personal
+    run gitx profile personal
     [ "$status" -eq 0 ]
 
     local origin_url
@@ -209,19 +209,19 @@ teardown() {
     echo "change" >> README.md
     git add README.md
 
-    run jgit commit -m "test commit"
+    run gitx commit -m "test commit"
     [ "$status" -ne 0 ]
     assert_contains "$output" "No profile assigned"
 }
 
 @test "commit: uses profile identity for author/committer" {
     cd "${TEST_REPO}"
-    jgit profile personal
+    gitx profile personal
 
     echo "change" >> README.md
     git add README.md
 
-    run jgit commit -m "test commit"
+    run gitx commit -m "test commit"
     [ "$status" -eq 0 ]
 
     local author_name author_email
@@ -234,12 +234,12 @@ teardown() {
 
 @test "commit: uses profile identity for committer" {
     cd "${TEST_REPO}"
-    jgit profile personal
+    gitx profile personal
 
     echo "change" >> README.md
     git add README.md
 
-    run jgit commit -m "test commit"
+    run gitx commit -m "test commit"
     [ "$status" -eq 0 ]
 
     local committer_name committer_email
@@ -252,7 +252,7 @@ teardown() {
 
 @test "commit: overrides GIT_AUTHOR_NAME env var with profile" {
     cd "${TEST_REPO}"
-    jgit profile personal
+    gitx profile personal
 
     echo "change" >> README.md
     git add README.md
@@ -261,7 +261,7 @@ teardown() {
     export GIT_AUTHOR_NAME="LEAKED_NAME"
     export GIT_AUTHOR_EMAIL="leaked@evil.com"
 
-    run jgit commit -m "test commit"
+    run gitx commit -m "test commit"
     [ "$status" -eq 0 ]
 
     local author_name author_email
@@ -276,7 +276,7 @@ teardown() {
 
 @test "commit: overrides GIT_COMMITTER_NAME env var with profile" {
     cd "${TEST_REPO}"
-    jgit profile personal
+    gitx profile personal
 
     echo "change" >> README.md
     git add README.md
@@ -284,7 +284,7 @@ teardown() {
     export GIT_COMMITTER_NAME="LEAKED_COMMITTER"
     export GIT_COMMITTER_EMAIL="leaked_committer@evil.com"
 
-    run jgit commit -m "test commit"
+    run gitx commit -m "test commit"
     [ "$status" -eq 0 ]
 
     local committer_name committer_email
@@ -303,13 +303,13 @@ teardown() {
     git config --global user.signingkey "/some/global/key"
     git config --global commit.gpgsign true
 
-    jgit profile nosigning
+    gitx profile nosigning
 
     echo "change" >> README.md
     git add README.md
 
     # Should succeed without signing (--no-gpg-sign)
-    run jgit commit -m "test commit"
+    run gitx commit -m "test commit"
     [ "$status" -eq 0 ]
 
     git config --global --unset user.signingkey 2>/dev/null || true
@@ -318,12 +318,12 @@ teardown() {
 
 @test "commit: passes through all git commit args" {
     cd "${TEST_REPO}"
-    jgit profile personal
+    gitx profile personal
 
     echo "change" >> README.md
     git add README.md
 
-    run jgit commit -m "custom message" --no-verify
+    run gitx commit -m "custom message" --no-verify
     [ "$status" -eq 0 ]
 
     local msg
@@ -339,7 +339,7 @@ teardown() {
     echo "change" >> README.md
     git add README.md
 
-    run jgit commit -m "test"
+    run gitx commit -m "test"
     [ "$status" -ne 0 ]
     assert_contains "$output" "missing required field"
 }
@@ -351,19 +351,19 @@ teardown() {
     echo "change" >> README.md
     git add README.md
 
-    run jgit commit -m "test"
+    run gitx commit -m "test"
     [ "$status" -ne 0 ]
     assert_contains "$output" "SSH key not found"
 }
 
 @test "commit: sets GIT_SSH_COMMAND with profile ssh_key" {
     cd "${TEST_REPO}"
-    jgit profile personal
+    gitx profile personal
 
     echo "change" >> README.md
     git add README.md
 
-    run jgit commit -m "test commit"
+    run gitx commit -m "test commit"
     [ "$status" -eq 0 ]
 
     # Verify core.sshCommand is set in local config
@@ -379,19 +379,19 @@ teardown() {
 
 @test "profile status: shows assigned profile name" {
     cd "${TEST_REPO}"
-    jgit profile personal
+    gitx profile personal
 
-    run jgit profile
+    run gitx profile
     [ "$status" -eq 0 ]
     assert_contains "$output" "personal"
 }
 
 @test "profile status: warns about conflicting env vars" {
     cd "${TEST_REPO}"
-    jgit profile personal
+    gitx profile personal
 
     export GIT_AUTHOR_NAME="LEAKED"
-    run jgit profile
+    run gitx profile
     [ "$status" -eq 0 ]
     assert_contains "$output" "OVERRIDES"
     unset GIT_AUTHOR_NAME
@@ -399,9 +399,9 @@ teardown() {
 
 @test "profile status: shows ssh key status" {
     cd "${TEST_REPO}"
-    jgit profile personal
+    gitx profile personal
 
-    run jgit profile
+    run gitx profile
     [ "$status" -eq 0 ]
     assert_contains "$output" "id_personal"
 }
@@ -411,7 +411,7 @@ teardown() {
 # =============================================================================
 
 @test "profile list: shows ssh_key and signing columns" {
-    run jgit profile list
+    run gitx profile list
     [ "$status" -eq 0 ]
     assert_contains "$output" "SSH KEY"
     assert_contains "$output" "SIGNING"
@@ -447,7 +447,7 @@ EOF
 EOF
 
     export HOME="${JSH_TEST_TEMP}"
-    run jgit profile migrate
+    run gitx profile migrate
     [ "$status" -eq 0 ]
     assert_contains "$output" "ssh_key"
 }

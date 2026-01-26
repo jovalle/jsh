@@ -10,14 +10,14 @@
     "signingkey": "(optional) Path to signing key (SSH or GPG)",
     "gpgsign": "(optional) Enable commit signing (default: true when signingkey set)",
     "signingformat": "(optional) Signing format: ssh or openpgp (default: ssh)",
-    "_deprecated_ssh_host": "Use ssh_key instead. Run: jgit profile migrate"
+    "_deprecated_ssh_host": "Use ssh_key instead. Run: gitx profile migrate"
   },
   "_usage": {
-    "apply": "jgit profile <name>     — assign profile to current repo",
-    "commit": "jgit commit [args...]   — identity-enforced commit (no leakage)",
-    "status": "jgit profile            — show profile + identity leak check",
-    "list": "jgit profile list       — list all profiles with key/signing info",
-    "migrate": "jgit profile migrate    — migrate ssh_host → ssh_key"
+    "apply": "gitx profile <name>     — assign profile to current repo",
+    "commit": "gitx commit [args...]   — identity-enforced commit (no leakage)",
+    "status": "gitx profile            — show profile + identity leak check",
+    "list": "gitx profile list       — list all profiles with key/signing info",
+    "migrate": "gitx profile migrate    — migrate ssh_host → ssh_key"
   },
   "profiles": {
     "personal": {

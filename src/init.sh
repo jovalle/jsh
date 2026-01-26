@@ -122,7 +122,7 @@ source_if "${JSH_DIR}/src/deps.sh"
 path_prepend "${JSH_DIR}/bin"                           # Bundled utilities
 path_prepend "${JSH_DIR}/bin/${JSH_PLATFORM}"           # Platform binaries (fzf, jq)
 path_prepend "${JSH_DIR}"                               # jsh CLI itself
-path_prepend "${JSH_DIR}/ssh"                           # jssh
+path_prepend "${JSH_DIR}/local/bin"                     # Prototypes
 
 # User local binaries
 path_prepend "${HOME}/.local/bin"
@@ -142,8 +142,11 @@ _source_module "aliases.sh"
 # 4. Functions (shell utilities)
 _source_module "functions.sh"
 
-# 4b. Smart directory jumping + project management (j command)
+# 4b. Smart directory jumping (j command)
 _source_module "j.sh"
+
+# 4c. Git project management shell wrapper (gitx shell function)
+_source_module "gitx.sh"
 
 # 5. Git status functions (for prompt)
 _source_module "gitstatus.sh"
