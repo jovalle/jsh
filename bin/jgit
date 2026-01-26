@@ -1505,22 +1505,45 @@ EOF
 
             printf '%b\n' "Trying ${C_CYAN}${try_platform}${C_RESET}..."
 
-            # Try to find matching profile for SSH host
+            # Try to find matching profile for SSH key or host
             local clone_url="$try_url"
-            local matched_profile ssh_host
+            local matched_profile ssh_host ssh_key git_ssh_cmd=""
 
             if matched_profile="$(_profile_find_by_user "$shorthand_owner")"; then
-                ssh_host="$(_profile_ssh_host "$matched_profile" "$try_platform")"
-                if [[ -n "$ssh_host" ]] && _ssh_host_exists "$ssh_host"; then
-                    clone_url="git@${ssh_host}:${shorthand_owner}/${shorthand_repo}.git"
-                    info "Using SSH key for profile: ${C_CYAN}${matched_profile}${C_RESET}"
+                local profile_data
+                profile_data="$(_profiles_get "$matched_profile")"
+
+                # First check for ssh_key (preferred - works without ssh config entry)
+                ssh_key=$(_profile_field "$profile_data" "ssh_key")
+                if [[ -n "$ssh_key" ]]; then
+                    local expanded_ssh_key="${ssh_key/#\~/${HOME}}"
+                    if [[ -f "$expanded_ssh_key" ]]; then
+                        git_ssh_cmd="ssh -i ${expanded_ssh_key} -o IdentitiesOnly=yes"
+                        info "Using SSH key for profile: ${C_CYAN}${matched_profile}${C_RESET}"
+                    fi
+                fi
+
+                # Fall back to ssh_host if no ssh_key
+                if [[ -z "$git_ssh_cmd" ]]; then
+                    ssh_host="$(_profile_ssh_host "$matched_profile" "$try_platform")"
+                    if [[ -n "$ssh_host" ]] && _ssh_host_exists "$ssh_host"; then
+                        clone_url="git@${ssh_host}:${shorthand_owner}/${shorthand_repo}.git"
+                        info "Using SSH host for profile: ${C_CYAN}${matched_profile}${C_RESET}"
+                    fi
                 fi
             fi
 
             [[ "$debug" == true ]] && echo "  ${C_DIM}SSH URL:${C_RESET} $clone_url"
+            [[ "$debug" == true ]] && [[ -n "$git_ssh_cmd" ]] && echo "  ${C_DIM}SSH CMD:${C_RESET} $git_ssh_cmd"
 
-            # Try SSH clone
-            if git clone "$clone_url" "$target_dir" 2>/dev/null; then
+            # Try SSH clone (with custom SSH command if profile has ssh_key)
+            if [[ -n "$git_ssh_cmd" ]]; then
+                if GIT_SSH_COMMAND="$git_ssh_cmd" git clone "$clone_url" "$target_dir" 2>/dev/null; then
+                    success "Cloned from ${try_platform}: $(_projects_display_name "$target_dir")"
+                    _output_cd_info
+                    return 0
+                fi
+            elif git clone "$clone_url" "$target_dir" 2>/dev/null; then
                 success "Cloned from ${try_platform}: $(_projects_display_name "$target_dir")"
                 _output_cd_info
                 return 0
@@ -1561,21 +1584,42 @@ EOF
     owner="${owner%%|*}"
     repo="${parsed##*|}"
 
-    # Try to find matching profile for SSH host
+    # Try to find matching profile for SSH key or host
     local clone_url="$url"
-    local matched_profile ssh_host
+    local matched_profile ssh_host ssh_key git_ssh_cmd=""
 
     if matched_profile="$(_profile_find_by_user "$owner")"; then
-        ssh_host="$(_profile_ssh_host "$matched_profile" "$platform")"
+        local profile_data
+        profile_data="$(_profiles_get "$matched_profile")"
 
-        if [[ -n "$ssh_host" ]] && _ssh_host_exists "$ssh_host"; then
-            clone_url="git@${ssh_host}:${owner}/${repo}.git"
-            info "Using SSH key for profile: ${C_CYAN}${matched_profile}${C_RESET}"
+        # First check for ssh_key (preferred - works without ssh config entry)
+        ssh_key=$(_profile_field "$profile_data" "ssh_key")
+        if [[ -n "$ssh_key" ]]; then
+            local expanded_ssh_key="${ssh_key/#\~/${HOME}}"
+            if [[ -f "$expanded_ssh_key" ]]; then
+                git_ssh_cmd="ssh -i ${expanded_ssh_key} -o IdentitiesOnly=yes"
+                info "Using SSH key for profile: ${C_CYAN}${matched_profile}${C_RESET}"
+            fi
+        fi
+
+        # Fall back to ssh_host if no ssh_key
+        if [[ -z "$git_ssh_cmd" ]]; then
+            ssh_host="$(_profile_ssh_host "$matched_profile" "$platform")"
+            if [[ -n "$ssh_host" ]] && _ssh_host_exists "$ssh_host"; then
+                clone_url="git@${ssh_host}:${owner}/${repo}.git"
+                info "Using SSH host for profile: ${C_CYAN}${matched_profile}${C_RESET}"
+            fi
         fi
     fi
 
-    # Try smart SSH URL first
-    if git clone "$clone_url" "$target_dir" 2>/dev/null; then
+    # Try smart SSH URL first (with custom SSH command if profile has ssh_key)
+    if [[ -n "$git_ssh_cmd" ]]; then
+        if GIT_SSH_COMMAND="$git_ssh_cmd" git clone "$clone_url" "$target_dir" 2>/dev/null; then
+            success "Cloned to: $(_projects_display_name "$target_dir")"
+            _output_cd_info
+            return 0
+        fi
+    elif git clone "$clone_url" "$target_dir" 2>/dev/null; then
         success "Cloned to: $(_projects_display_name "$target_dir")"
         _output_cd_info
         return 0
