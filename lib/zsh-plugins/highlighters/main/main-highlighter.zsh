@@ -254,9 +254,10 @@ _zsh_highlight_main__is_runnable() {
 _zsh_highlight_main__is_redirection() {
   # A redirection operator token:
   # - starts with an optional single-digit number;
-  # - is one of the tokens listed in zshmisc(1)
-  # - however (z) normalizes ! to |
-  [[ ${1#[0-9]} == (\<|\<\>|(\>|\>\>)(|\|)|\<\<(|-)|\<\<\<|\<\&|\&\<|(\>|\>\>)\&(|\|)|\&(\>|\>\>)(|\||\!)) ]]
+  # - then, has a '<' or '>' character;
+  # - is not a process substitution [<(...) or >(...)].
+  # - is not a numeric glob <->
+  [[ $1 == (<0-9>|)(\<|\>)* ]] && [[ $1 != (\<|\>)$'\x28'* ]] && [[ $1 != *'<'*'-'*'>'* ]]
 }
 
 # Resolve alias.
@@ -435,7 +436,7 @@ _zsh_highlight_highlighter_main_paint()
 }
 
 # Try to expand $1, if it's possible to do so safely.
-#
+# 
 # Uses two parameters from the caller: $parameter_name_pattern and $res.
 #
 # If expansion was done, set $reply to the expansion and return true.
@@ -461,7 +462,7 @@ _zsh_highlight_main_highlighter__try_expand_parameter()
       else
         parameter_name=${arg:1}
       fi
-      if [[ $res == none ]] &&
+      if [[ $res == none ]] && 
          [[ ${parameter_name} =~ ^${~parameter_name_pattern}$ ]] &&
          [[ ${(tP)MATCH} != *special* ]]
       then
@@ -784,7 +785,7 @@ _zsh_highlight_main_highlighter_highlight_list()
     if (( ! in_redirection )); then
       if [[ $this_word == *':sudo_opt:'* ]]; then
         if [[ -n $flags_with_argument ]] &&
-           {
+           { 
              # Trenary
              if [[ -n $flags_sans_argument ]]
              then [[ $arg == '-'[$flags_sans_argument]#[$flags_with_argument] ]]
@@ -812,7 +813,7 @@ _zsh_highlight_main_highlighter_highlight_list()
           this_word=':sudo_opt:'
           next_word+=':start:'
           next_word+=':sudo_opt:'
-        elif [[ -n $flags_solo ]] &&
+        elif [[ -n $flags_solo ]] && 
              {
                # Trenary
                if [[ -n $flags_sans_argument ]]
@@ -870,7 +871,7 @@ _zsh_highlight_main_highlighter_highlight_list()
       elif [[ $this_word == *':start:'* ]] && [[ $arg == $'\n' ]]; then
         style=commandseparator
       elif [[ $this_word == *':start:'* ]] && [[ $arg == ';' ]] && (( $#in_alias )); then
-        style=commandseparator
+        style=commandseparator 
       else
         # Empty commands (semicolon follows nothing) are valid syntax.
         # However, in interactive use they are likely to be erroneous;
@@ -879,7 +880,7 @@ _zsh_highlight_main_highlighter_highlight_list()
         # Alias definitions are exempted from this check to allow multiline aliases
         # with explicit (redundant) semicolons: «alias foo=$'bar;\nbaz'» (issue #677).
         #
-        # See also #691 about possibly changing the style used here.
+        # See also #691 about possibly changing the style used here. 
         style=unknown-token
       fi
 
@@ -1034,7 +1035,7 @@ _zsh_highlight_main_highlighter_highlight_list()
                           else
                             # assignment to a scalar parameter.
                             # (For array assignments, the command doesn't start until the ")" token.)
-                            #
+                            # 
                             # Discard  :start_of_pipeline:, if present, as '!' is not valid
                             # after assignments.
                             next_word+=':start:'

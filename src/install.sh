@@ -38,16 +38,14 @@ _install_detect_type() {
 
     case "${package}" in
         @*/*|*@*)
-            # npm scoped package or package@version
-            echo "npm"
-            ;;
-        *-cli|create-*)
-            # Common npm CLI patterns
+            # npm scoped package or package@version - these are npm-only
             echo "npm"
             ;;
         *)
-            # Try to auto-detect
-            if npm view "${package}" >/dev/null 2>&1; then
+            # Auto-detect: prioritize brew, then npm, then pip
+            if command -v brew >/dev/null 2>&1 && brew info "${package}" >/dev/null 2>&1; then
+                echo "system"  # Use system PM (brew) for brew packages
+            elif npm view "${package}" >/dev/null 2>&1; then
                 echo "npm"
             elif pip3 show "${package}" >/dev/null 2>&1 || pip show "${package}" >/dev/null 2>&1; then
                 echo "pip"
@@ -72,6 +70,18 @@ _install_brew() {
 
     info "Installing ${package} via Homebrew..."
     brew install "${package}"
+}
+
+_install_cask() {
+    local package="$1"
+
+    if ! command -v brew >/dev/null 2>&1; then
+        error "Homebrew is not installed"
+        return 1
+    fi
+
+    info "Installing ${package} via Homebrew Cask..."
+    brew install --cask "${package}"
 }
 
 _install_npm() {
@@ -633,20 +643,27 @@ _install_all_from_configs() {
 # =============================================================================
 
 # @jsh-cmd install Install packages (brew, npm, pip, cargo)
-# @jsh-opt --brew Force installation via Homebrew
+# @jsh-opt --brew Force installation via Homebrew formula
+# @jsh-opt --cask Force installation via Homebrew Cask
 # @jsh-opt --npm Force installation via npm
 # @jsh-opt --pip Force installation via pip
 # @jsh-opt --cargo Force installation via cargo
+# @jsh-opt -y,--yes Skip confirmation prompt (auto-detect)
 # @jsh-opt --track Add package to pkg config after installation
 cmd_install() {
     local package=""
     local force_pm=""
     local track=false
+    local skip_confirm=false
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --brew)
                 force_pm="brew"
+                shift
+                ;;
+            --cask)
+                force_pm="cask"
                 shift
                 ;;
             --npm)
@@ -661,6 +678,10 @@ cmd_install() {
                 force_pm="cargo"
                 shift
                 ;;
+            -y|--yes)
+                skip_confirm=true
+                shift
+                ;;
             --track|-t)
                 track=true
                 shift
@@ -673,10 +694,12 @@ cmd_install() {
                 echo "    jsh install              # Install from config files"
                 echo ""
                 echo "${BOLD}OPTIONS:${RST}"
-                echo "    --brew      Force installation via Homebrew"
+                echo "    --brew      Force installation via Homebrew formula"
+                echo "    --cask      Force installation via Homebrew Cask"
                 echo "    --npm       Force installation via npm"
                 echo "    --pip       Force installation via pip"
                 echo "    --cargo     Force installation via cargo"
+                echo "    -y, --yes   Skip confirmation prompt (auto-detect)"
                 echo "    --track     Add package to pkg config after installation"
                 echo ""
                 echo "${BOLD}CONFIG FILES:${RST}"
@@ -690,8 +713,10 @@ cmd_install() {
                 echo ""
                 echo "${BOLD}EXAMPLES:${RST}"
                 echo "    jsh install               # Install all from configs"
-                echo "    jsh install ripgrep       # Auto-detect package manager"
-                echo "    jsh install fd --brew     # Force Homebrew"
+                echo "    jsh install ripgrep       # Auto-detect (with confirmation)"
+                echo "    jsh install ripgrep -y    # Auto-detect (no confirmation)"
+                echo "    jsh install fd --brew     # Force Homebrew formula"
+                echo "    jsh install firefox --cask  # Force Homebrew Cask"
                 echo "    jsh install eslint --npm  # Force npm"
                 echo ""
                 return 0
@@ -715,7 +740,9 @@ cmd_install() {
 
     # Determine package manager
     local pm="${force_pm}"
+    local auto_detected=false
     if [[ -z "${pm}" ]]; then
+        auto_detected=true
         # Auto-detect
         local detected_type
         detected_type=$(_install_detect_type "${package}")
@@ -732,10 +759,39 @@ cmd_install() {
         esac
     fi
 
+    # Format manager name for display
+    local pm_display="${pm}"
+    case "${pm}" in
+        brew)    pm_display="Homebrew" ;;
+        cask)    pm_display="Homebrew Cask" ;;
+        npm)     pm_display="npm" ;;
+        pip)     pm_display="pip" ;;
+        cargo)   pm_display="cargo" ;;
+        apt)     pm_display="apt" ;;
+        dnf)     pm_display="dnf" ;;
+    esac
+
+    # Confirm with user if auto-detected (unless -y flag)
+    if [[ "${auto_detected}" == true ]] && [[ "${skip_confirm}" == false ]]; then
+        read -r -p "Install ${BOLD}${package}${RST} via ${CYN}${pm_display}${RST}? [Y/n] " confirm
+        if [[ "${confirm}" =~ ^[Nn] ]]; then
+            info "Installation cancelled"
+            echo ""
+            echo "To install with a specific manager:"
+            echo "  jsh install ${package} --brew   # Homebrew formula"
+            echo "  jsh install ${package} --cask   # Homebrew Cask"
+            echo "  jsh install ${package} --npm    # npm"
+            echo "  jsh install ${package} --pip    # pip"
+            echo "  jsh install ${package} --cargo  # cargo"
+            return 0
+        fi
+    fi
+
     # Install package
     local install_result=0
     case "${pm}" in
         brew)   _install_brew "${package}" || install_result=$? ;;
+        cask)   _install_cask "${package}" || install_result=$? ;;
         npm)    _install_npm "${package}" || install_result=$? ;;
         pip)    _install_pip "${package}" || install_result=$? ;;
         cargo)  _install_cargo "${package}" || install_result=$? ;;
