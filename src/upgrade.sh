@@ -155,32 +155,24 @@ cmd_upgrade() {
 
     # Homebrew upgrades (macOS only)
     if [[ "${skip_brew}" != true ]] && [[ "$(uname)" == "Darwin" ]] && has brew; then
-        info "Checking Homebrew dependencies..."
+        info "Checking Homebrew packages..."
 
-        local brew_deps=("bash" "fzf" "jq" "fd" "ripgrep" "bat" "eza")
-        local outdated=()
+        local outdated
+        outdated=$(brew outdated --quiet 2>/dev/null)
 
-        for dep in "${brew_deps[@]}"; do
-            if brew list "${dep}" &>/dev/null; then
-                if brew outdated "${dep}" &>/dev/null; then
-                    outdated+=("${dep}")
-                fi
-            fi
-        done
-
-        if [[ ${#outdated[@]} -gt 0 ]]; then
-            prefix_info "Outdated: ${outdated[*]}"
+        if [[ -n "${outdated}" ]]; then
+            prefix_info "Outdated: $(echo "${outdated}" | tr '\n' ' ')"
             if [[ "${check_only}" == true ]]; then
-                prefix_info "[dry-run] Would run: brew upgrade ${outdated[*]}"
+                prefix_info "[dry-run] Would run: brew upgrade"
             else
-                if brew upgrade "${outdated[@]}" 2>/dev/null; then
-                    prefix_success "Upgraded: ${outdated[*]}"
+                if brew upgrade 2>/dev/null; then
+                    prefix_success "Homebrew packages upgraded"
                 else
                     prefix_warn "Some upgrades may have failed"
                 fi
             fi
         else
-            prefix_success "All Homebrew dependencies up to date"
+            prefix_success "All Homebrew packages up to date"
         fi
         echo ""
     fi

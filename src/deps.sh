@@ -55,6 +55,42 @@ else
 fi
 
 # =============================================================================
+# Timing Utilities (uv-style summaries)
+# =============================================================================
+
+# Get current time in milliseconds (pattern from profiler.sh)
+_deps_now_ms() {
+    if [[ -n "${EPOCHREALTIME:-}" ]]; then
+        awk "BEGIN {printf \"%.0f\", ${EPOCHREALTIME} * 1000}"
+    elif [[ "$(uname -s)" == "Darwin" ]]; then
+        perl -MTime::HiRes=time -e 'printf "%.0f\n", time * 1000' 2>/dev/null || echo "$(($(date +%s) * 1000))"
+    else
+        echo "$(($(date +%s) * 1000))"
+    fi
+}
+
+# Format milliseconds as human-readable duration
+_deps_format_duration() {
+    local ms="$1"
+    if [[ ${ms} -ge 1000 ]]; then
+        awk "BEGIN {printf \"%.1fs\", ${ms} / 1000}"
+    else
+        echo "${ms}ms"
+    fi
+}
+
+# Print uv-style summary line
+_deps_summary() {
+    local count="$1" start_ms="$2" label="${3:-Installed}"
+    local end_ms duration item_word
+    end_ms=$(_deps_now_ms)
+    duration=$(_deps_format_duration $((end_ms - start_ms)))
+    item_word="packages"
+    [[ ${count} -eq 1 ]] && item_word="package"
+    [[ ${count} -gt 0 ]] && echo "${label} ${count} ${item_word} in ${duration}"
+}
+
+# =============================================================================
 # Output Helpers (consistent with jsh CLI)
 # =============================================================================
 
@@ -67,6 +103,10 @@ prefix_info()    { echo "  ${BLUE}◆${RST} $*"; }
 prefix_success() { echo "  ${GREEN}✓${RST} $*"; }
 prefix_warn()    { echo "  ${YELLOW}⚠${RST} $*" >&2; }
 prefix_error()   { echo "  ${RED}✘${RST} $*" >&2; }
+
+# uv-style prefixes for add/remove actions
+prefix_add()    { echo " ${GREEN}+${RST} $*"; }
+prefix_remove() { echo " ${RED}-${RST} $*"; }
 
 has() { command -v "$1" >/dev/null 2>&1; }
 
@@ -224,21 +264,19 @@ download_binary() {
 
     # Check if already exists
     if [[ -x "${target}" ]]; then
-        prefix_success "${tool} v${version} (cached)"
+        prefix_success "${tool}==${version} ${DIM}(cached)${RST}"
         return 0
     fi
 
     # Create directory
     mkdir -p "${bin_dir}"
 
-    prefix_info "${tool} v${version} downloading..."
-
     case "${tool}" in
         jq)
             # jq is a single binary - direct download
             if download_file "${url}" "${target}"; then
                 chmod +x "${target}"
-                prefix_success "${tool} v${version}"
+                prefix_add "${tool}==${version}"
                 return 0
             else
                 prefix_error "${tool}: download failed"
@@ -254,7 +292,7 @@ download_binary() {
                 mv "${tmp_dir}/fzf" "${target}"
                 chmod +x "${target}"
                 rm -rf "${tmp_dir}"
-                prefix_success "${tool} v${version}"
+                prefix_add "${tool}==${version}"
                 return 0
             else
                 rm -rf "${tmp_dir}"
@@ -283,7 +321,7 @@ download_binary() {
                 rm -rf "${tmp_dir}"
                 # Create symlink in bin/<platform>/
                 ln -sf "${nvim_install_dir}/bin/nvim" "${target}"
-                prefix_success "${tool} v${version}"
+                prefix_add "${tool}==${version}"
                 return 0
             else
                 rm -rf "${tmp_dir}"
@@ -477,7 +515,7 @@ download_zsh_autosuggestions() {
     target="${LIB_DIR}/zsh-plugins/zsh-autosuggestions.zsh"
 
     if [[ -f "${target}" ]] && [[ -z "${FORCE_DOWNLOAD:-}" ]]; then
-        prefix_success "zsh-autosuggestions"
+        prefix_success "zsh-autosuggestions==${version} ${DIM}(cached)${RST}"
         return 0
     fi
 
@@ -493,14 +531,13 @@ download_zsh_autosuggestions() {
 
     mkdir -p "${LIB_DIR}/zsh-plugins"
 
-    prefix_info "zsh-autosuggestions v${version} downloading..."
     local tmp_dir url
     tmp_dir=$(mktemp -d)
     url="https://github.com/zsh-users/zsh-autosuggestions/archive/refs/tags/v${version}.tar.gz"
     if download_tarball "${url}" "${tmp_dir}"; then
         cp "${tmp_dir}/zsh-autosuggestions-${version}/zsh-autosuggestions.zsh" "${target}"
         rm -rf "${tmp_dir}"
-        prefix_success "zsh-autosuggestions v${version}"
+        prefix_add "zsh-autosuggestions==${version}"
     else
         rm -rf "${tmp_dir}"
         prefix_error "zsh-autosuggestions: download failed"
@@ -514,7 +551,7 @@ download_zsh_syntax_highlighting() {
     target="${LIB_DIR}/zsh-plugins/zsh-syntax-highlighting.zsh"
 
     if [[ -f "${target}" ]] && [[ -z "${FORCE_DOWNLOAD:-}" ]]; then
-        prefix_success "zsh-syntax-highlighting"
+        prefix_success "zsh-syntax-highlighting==${version} ${DIM}(cached)${RST}"
         return 0
     fi
 
@@ -530,7 +567,6 @@ download_zsh_syntax_highlighting() {
 
     mkdir -p "${LIB_DIR}/zsh-plugins/highlighters"
 
-    prefix_info "zsh-syntax-highlighting v${version} downloading..."
     local tmp_dir url
     tmp_dir=$(mktemp -d)
     url="https://github.com/zsh-users/zsh-syntax-highlighting/archive/refs/tags/${version}.tar.gz"
@@ -540,7 +576,7 @@ download_zsh_syntax_highlighting() {
         cp -r "${tmp_dir}/zsh-syntax-highlighting-${version}/highlighters" "${LIB_DIR}/zsh-plugins/"
         echo "${version}" > "${LIB_DIR}/zsh-plugins/.version"
         rm -rf "${tmp_dir}"
-        prefix_success "zsh-syntax-highlighting v${version}"
+        prefix_add "zsh-syntax-highlighting==${version}"
     else
         rm -rf "${tmp_dir}"
         prefix_error "zsh-syntax-highlighting: download failed"
@@ -554,7 +590,7 @@ download_zsh_history_substring_search() {
     target="${LIB_DIR}/zsh-plugins/zsh-history-substring-search.zsh"
 
     if [[ -f "${target}" ]] && [[ -z "${FORCE_DOWNLOAD:-}" ]]; then
-        prefix_success "zsh-history-substring-search"
+        prefix_success "zsh-history-substring-search==${version} ${DIM}(cached)${RST}"
         return 0
     fi
 
@@ -570,14 +606,13 @@ download_zsh_history_substring_search() {
 
     mkdir -p "${LIB_DIR}/zsh-plugins"
 
-    prefix_info "zsh-history-substring-search v${version} downloading..."
     local tmp_dir url
     tmp_dir=$(mktemp -d)
     url="https://github.com/zsh-users/zsh-history-substring-search/archive/refs/tags/v${version}.tar.gz"
     if download_tarball "${url}" "${tmp_dir}"; then
         cp "${tmp_dir}/zsh-history-substring-search-${version}/zsh-history-substring-search.zsh" "${target}"
         rm -rf "${tmp_dir}"
-        prefix_success "zsh-history-substring-search v${version}"
+        prefix_add "zsh-history-substring-search==${version}"
     else
         rm -rf "${tmp_dir}"
         prefix_error "zsh-history-substring-search: download failed"
@@ -703,19 +738,44 @@ main() {
     info "Current platform: ${current_platform}"
     echo ""
 
-    local errors=0
+    local errors=0 installed=0
+    local start_ms
+    start_ms=$(_deps_now_ms)
 
     # Download ZSH plugins (platform-independent)
+    # Track installs by checking return and whether file existed before
     echo "${CYAN}ZSH Plugins:${RST}"
-    download_zsh_autosuggestions || ((errors++))
-    download_zsh_syntax_highlighting || ((errors++))
-    download_zsh_history_substring_search || ((errors++))
+
+    local plugin_existed
+    plugin_existed=$([[ -f "${LIB_DIR}/zsh-plugins/zsh-autosuggestions.zsh" ]] && echo 1 || echo 0)
+    if download_zsh_autosuggestions; then
+        [[ "${plugin_existed}" == "0" || -n "${FORCE_DOWNLOAD:-}" ]] && ((installed++)) || true
+    else
+        ((errors++))
+    fi
+
+    plugin_existed=$([[ -f "${LIB_DIR}/zsh-plugins/zsh-syntax-highlighting.zsh" ]] && echo 1 || echo 0)
+    if download_zsh_syntax_highlighting; then
+        [[ "${plugin_existed}" == "0" || -n "${FORCE_DOWNLOAD:-}" ]] && ((installed++)) || true
+    else
+        ((errors++))
+    fi
+
+    plugin_existed=$([[ -f "${LIB_DIR}/zsh-plugins/zsh-history-substring-search.zsh" ]] && echo 1 || echo 0)
+    if download_zsh_history_substring_search; then
+        [[ "${plugin_existed}" == "0" || -n "${FORCE_DOWNLOAD:-}" ]] && ((installed++)) || true
+    else
+        ((errors++))
+    fi
     echo ""
 
     # Verify plugins
     echo "${CYAN}Verification:${RST}"
     verify_plugins || ((errors++))
     echo ""
+
+    # uv-style summary
+    _deps_summary "${installed}" "${start_ms}"
 
     # Summary
     if [[ ${errors} -eq 0 ]]; then
