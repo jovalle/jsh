@@ -7,6 +7,7 @@
 # @option -a,--add <kubeconfig>  Merge kubeconfig file into main config
 # @option -c,--current           Show the current context name
 # @option -d,--delete <NAME>     Delete context with cleanup
+# @option -e,--external [NAME]   Use system CA trust store (removes embedded CA)
 # @option -u,--unset             Unset the current context
 # @option -h,--help              Show this help message
 #
@@ -55,6 +56,7 @@ USAGE:
   $SELF -a, --add <kubeconfig> : merge kubeconfig file into main config
   $SELF -c, --current          : show the current context name
   $SELF -d, --delete <NAME>    : delete context with cleanup (removes unused cluster/user)
+  $SELF -e, --external [NAME]  : use system CA trust store for context (current if no NAME)
   $SELF -u, --unset            : unset the current context
   $SELF <NEW_NAME>=.           : rename current-context to <NEW_NAME>
   $SELF <NEW_NAME>=<NAME>      : rename context <NAME> to <NEW_NAME>
@@ -223,6 +225,55 @@ choose_contexts_to_delete_interactive() {
 unset_context() {
   echo "Unsetting current context." >&2
   $KUBECTL config unset current-context
+}
+
+# Get cluster name for a context
+get_cluster_for_context() {
+  local context="${1}"
+  $KUBECTL config view -o jsonpath="{.contexts[?(@.name==\"${context}\")].context.cluster}"
+}
+
+# Check if cluster has embedded certificate-authority-data
+has_embedded_ca() {
+  local cluster="${1}"
+  local ca_data
+  ca_data=$($KUBECTL config view --raw -o jsonpath="{.clusters[?(@.name==\"${cluster}\")].cluster.certificate-authority-data}")
+  [[ -n "${ca_data}" ]]
+}
+
+# Backup CA data before removal (for potential restore)
+backup_ca_data() {
+  local cluster="${1}"
+  local backup_dir="${XDG_CACHE_HOME:-$HOME/.cache}/kubectx/ca-backup"
+  mkdir -p "${backup_dir}"
+
+  local ca_data
+  ca_data=$($KUBECTL config view --raw -o jsonpath="{.clusters[?(@.name==\"${cluster}\")].cluster.certificate-authority-data}")
+  [[ -n "${ca_data}" ]] && printf '%s' "${ca_data}" > "${backup_dir}/${cluster}.ca-data"
+}
+
+# Remove embedded CA to use system trust store
+use_external_ca() {
+  local context="${1:-}"
+  [[ -z "${context}" ]] && context=$(current_context)
+  [[ -z "${context}" ]] && exit_err "error: no current context set"
+
+  context_exists "${context}" || { error "Context '${context}' does not exist"; exit 1; }
+
+  local cluster
+  cluster=$(get_cluster_for_context "${context}")
+  [[ -z "${cluster}" ]] && { error "No cluster found for context '${context}'"; exit 1; }
+
+  info "Context: ${context}, Cluster: ${cluster}"
+
+  if has_embedded_ca "${cluster}"; then
+    backup_ca_data "${cluster}"
+    $KUBECTL config unset "clusters.${cluster}.certificate-authority-data"
+    success "Removed embedded CA from cluster '${cluster}'"
+    info "kubectl will now use the system CA trust store"
+  else
+    warn "Cluster '${cluster}' has no embedded CA - already using system trust store"
+  fi
 }
 
 # Source shared library for output helpers
@@ -420,6 +471,12 @@ main() {
       fi
     else
       delete_context_with_cleanup "${2}"
+    fi
+  elif [[ "${1}" == "-e" || "${1}" == "--external" ]]; then
+    if [[ "$#" -ge 2 && "${2}" != -* ]]; then
+      use_external_ca "${2}"
+    else
+      use_external_ca ""
     fi
   elif [[ "$#" -gt 1 ]]; then
     echo "error: too many arguments" >&2
