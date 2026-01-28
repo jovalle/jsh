@@ -154,6 +154,9 @@ _source_module "gitstatus.sh"
 # 6. Tool integrations (FZF, direnv - shell-agnostic)
 _source_module "tools.sh"
 
+# 6b. External tool completions (cross-shell, cached)
+_source_module "completion.sh"
+
 # 7. Shell-specific configuration (zsh.sh or bash.sh)
 if [[ "${JSH_SHELL}" == "zsh" ]]; then
     _source_module "zsh.sh"
