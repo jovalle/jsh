@@ -10,3 +10,4 @@
 [submodule "lib/lazyvim"]
 	path = lib/lazyvim
 	url = https://github.com/LazyVim/starter.git
+	ignore = dirty
