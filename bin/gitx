@@ -1474,6 +1474,12 @@ cmd_list() {
     printf '%b%d projects%b\n' "$C_DIM" "$total" "$C_RESET"
 }
 
+# Apply matched profile to cloned repo (persist identity, SSH key, signing)
+_clone_apply_profile() {
+    local matched_profile="$1" target_dir="$2"
+    [[ -n "$matched_profile" ]] && _profiles_apply "$matched_profile" "$target_dir"
+}
+
 # Clone with smart SSH fallback
 # Called via: gitx clone <url> [name]
 cmd_clone() {
@@ -1637,11 +1643,13 @@ EOF
             if [[ -n "$git_ssh_cmd" ]]; then
                 if GIT_SSH_COMMAND="$git_ssh_cmd" git clone "$clone_url" "$target_dir" 2>/dev/null; then
                     success "Cloned from ${try_platform}: $(_projects_display_name "$target_dir")"
+                    _clone_apply_profile "$matched_profile" "$target_dir"
                     _output_cd_info
                     return 0
                 fi
             elif git clone "$clone_url" "$target_dir" 2>/dev/null; then
                 success "Cloned from ${try_platform}: $(_projects_display_name "$target_dir")"
+                _clone_apply_profile "$matched_profile" "$target_dir"
                 _output_cd_info
                 return 0
             fi
@@ -1654,7 +1662,8 @@ EOF
 
             if git clone "$https_url" "$target_dir" 2>/dev/null; then
                 success "Cloned from ${try_platform} (HTTPS): $(_projects_display_name "$target_dir")"
-                warn "Cloned via HTTPS. Run 'gitx profile <name>' to set up SSH."
+                _clone_apply_profile "$matched_profile" "$target_dir"
+                [[ -z "$matched_profile" ]] && warn "Cloned via HTTPS. Run 'gitx profile <name>' to set up SSH."
                 _output_cd_info
                 return 0
             fi
@@ -1713,11 +1722,13 @@ EOF
     if [[ -n "$git_ssh_cmd" ]]; then
         if GIT_SSH_COMMAND="$git_ssh_cmd" git clone "$clone_url" "$target_dir" 2>/dev/null; then
             success "Cloned to: $(_projects_display_name "$target_dir")"
+            _clone_apply_profile "$matched_profile" "$target_dir"
             _output_cd_info
             return 0
         fi
     elif git clone "$clone_url" "$target_dir" 2>/dev/null; then
         success "Cloned to: $(_projects_display_name "$target_dir")"
+        _clone_apply_profile "$matched_profile" "$target_dir"
         _output_cd_info
         return 0
     fi
@@ -1727,6 +1738,7 @@ EOF
         warn "SSH clone failed, trying original URL..."
         if git clone "$url" "$target_dir" 2>/dev/null; then
             success "Cloned to: $(_projects_display_name "$target_dir")"
+            _clone_apply_profile "$matched_profile" "$target_dir"
             _output_cd_info
             return 0
         fi
@@ -1738,7 +1750,8 @@ EOF
         warn "Trying HTTPS fallback..."
         if git clone "$https_url" "$target_dir"; then
             success "Cloned to: $(_projects_display_name "$target_dir")"
-            warn "Cloned via HTTPS. Run 'gitx profile <name>' to set up SSH."
+            _clone_apply_profile "$matched_profile" "$target_dir"
+            [[ -z "$matched_profile" ]] && warn "Cloned via HTTPS. Run 'gitx profile <name>' to set up SSH."
             _output_cd_info
             return 0
         fi
@@ -1814,34 +1827,23 @@ cmd_create() {
     cd "$target_dir" || return 1
     git init -q || abort "Failed to initialize git repository"
 
-    # Build origin URL from profile
+    # Apply profile: set origin with FQDN, delegate config to _profiles_apply
     local origin_url=""
     if [[ -n "$selected_profile" ]]; then
-        local profile_data pname pemail puser phost pssh_host
+        local profile_data puser phost
         profile_data="$(_profiles_get "$selected_profile")"
-        pname=$(_profile_field "$profile_data" "name")
-        pemail=$(_profile_field "$profile_data" "email")
         puser=$(_profile_field "$profile_data" "user")
         phost=$(_profile_field "$profile_data" "host")
-        pssh_host=$(_profile_field "$profile_data" "ssh_host")
 
-        # Set git user config
-        [[ -n "$pname" ]] && git config user.name "$pname"
-        [[ -n "$pemail" ]] && git config user.email "$pemail"
-
-        # Construct origin URL
+        # Add origin with standard FQDN (core.sshCommand handles SSH key selection)
         if [[ -n "$puser" ]]; then
-            local ssh_target
-            if [[ -n "$pssh_host" ]]; then
-                ssh_target="$pssh_host"
-            elif [[ -n "$phost" ]]; then
-                ssh_target="$(_ssh_derive_host "$phost" "$puser")"
-            else
-                ssh_target="$(_ssh_derive_host "$GITX_DEFAULT_PLATFORM" "$puser")"
-            fi
-            origin_url="git@${ssh_target}:${puser}/${name}.git"
+            local host="${phost:-$GITX_DEFAULT_PLATFORM}"
+            origin_url="git@${host}:${puser}/${name}.git"
             git remote add origin "$origin_url"
         fi
+
+        # Apply full profile (identity, SSH key, signing, jsh.profile tracking)
+        _profiles_apply "$selected_profile"
     fi
 
     # Create README.md
@@ -2087,8 +2089,6 @@ cmd_commit() {
         local precision
         precision=$(_ts_detect_precision "$timestamp_arg")
         parsed_epoch=$(_ts_randomize "$parsed_epoch" "$precision")
-
-        # Convert to git format
 
         # Convert to git format
         local git_date
