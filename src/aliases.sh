@@ -212,6 +212,14 @@ fi
 # =============================================================================
 
 # -----------------------------------------------------------------------------
+# Claude
+# -----------------------------------------------------------------------------
+if has claude; then
+  alias claude-mem=bun "$HOME/.claude/plugins/marketplaces/thedotmack/plugin/scripts/worker-service.cjs"
+  alias claudia='claude --permission-mode plan --allow-dangerously-skip-permissions'
+fi
+
+# -----------------------------------------------------------------------------
 # Docker
 # -----------------------------------------------------------------------------
 if has docker; then
@@ -417,10 +425,6 @@ fi
 
 if has k9s; then
   alias k9='k9s'
-fi
-
-if has claude; then
-  alias claudia='claude --dangerously-skip-permissions'
 fi
 
 # -----------------------------------------------------------------------------
