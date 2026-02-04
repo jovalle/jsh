@@ -1,0 +1,7 @@
+# Homebrew Bundle - Linux-specific packages
+# Managed by jsh pkg
+# Common packages are in ../Brewfile
+
+# Flatpak
+flatpak "com.brave.Browser"
+flatpak "dev.vencord.Vesktop"

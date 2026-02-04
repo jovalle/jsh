@@ -1,0 +1,46 @@
+# Homebrew Bundle - macOS-specific packages
+# Managed by jsh pkg
+# Common packages are in ../Brewfile
+
+# Taps
+tap "oug-t/difi"
+
+# Formulae (macOS-only)
+brew "bash-completion"
+brew "coreutils"
+brew "curl"
+brew "diffutils"
+brew "gawk"
+brew "gnu-sed"
+brew "gnupg"
+brew "grep"
+brew "make"
+brew "mas"
+brew "netcat"
+brew "nmap"
+brew "opencode"
+brew "oug-t/difi/difi"
+brew "readline"
+brew "sshpass"
+brew "xz"
+
+# Casks (macOS-only)
+cask "brave-browser"
+cask "caffeine"
+cask "discord"
+cask "ghostty"
+cask "google-chrome"
+cask "istat-menus"
+cask "raycast"
+cask "rectangle"
+cask "signal"
+cask "todoist-app"
+cask "visual-studio-code"
+cask "zoom"
+
+# Mac App Store
+mas "Tailscale", id: 1475387142
+
+# Services (macOS brew services)
+brew "atuin", restart_service: true
+brew "syncthing", restart_service: true
