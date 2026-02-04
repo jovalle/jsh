@@ -86,6 +86,9 @@ export JSH_PLATFORM
 # =============================================================================
 
 _jsh_has_color() {
+    # Respect common no-color and plain output toggles.
+    [[ -n "${NO_COLOR:-}" ]] && return 1
+    [[ "${JSH_PLAIN_OUTPUT:-0}" == "1" ]] && return 1
     # Check if terminal supports colors (don't require -t 1, as stdout may not
     # be a TTY during shell init, but we still want colors defined for later use)
     [[ -n "${TERM:-}" ]] && [[ "${TERM}" != "dumb" ]]
@@ -246,6 +249,22 @@ P_BBLK="$(_p "${BBLK}")"
 
 # Log levels
 JSH_LOG_LEVEL="${JSH_LOG_LEVEL:-1}"  # 0=off, 1=normal, 2=verbose, 3=debug
+JSH_PLAIN_OUTPUT="${JSH_PLAIN_OUTPUT:-0}"
+
+# Output glyphs can be forced to ASCII for screen readers / plain logs.
+if [[ "${JSH_PLAIN_OUTPUT}" == "1" ]]; then
+    _JSH_SYM_INFO="i"
+    _JSH_SYM_SUCCESS="OK"
+    _JSH_SYM_WARN="WARN"
+    _JSH_SYM_ERROR="ERR"
+    _JSH_SYM_DEBUG="DBG"
+else
+    _JSH_SYM_INFO="·"
+    _JSH_SYM_SUCCESS="✓"
+    _JSH_SYM_WARN="!"
+    _JSH_SYM_ERROR="✗"
+    _JSH_SYM_DEBUG="?"
+fi
 
 _log() {
     local level="$1" prefix="$2" color="$3"
@@ -254,11 +273,11 @@ _log() {
     printf "%b%s%b %s\n" "${color}" "${prefix}" "${RST}" "$*" >&2
 }
 
-info()    { _log 1 "·" "${C_INFO}" "$@"; }
-success() { _log 1 "✓" "${C_OK}" "$@"; }
-warn()    { _log 1 "!" "${C_WARN}" "$@"; }
-error()   { _log 1 "✗" "${C_ERR}" "$@"; }
-debug()   { _log 3 "?" "${C_MUTED}" "$@"; }
+info()    { _log 1 "${_JSH_SYM_INFO}" "${C_INFO}" "$@"; }
+success() { _log 1 "${_JSH_SYM_SUCCESS}" "${C_OK}" "$@"; }
+warn()    { _log 1 "${_JSH_SYM_WARN}" "${C_WARN}" "$@"; }
+error()   { _log 1 "${_JSH_SYM_ERROR}" "${C_ERR}" "$@"; }
+debug()   { _log 3 "${_JSH_SYM_DEBUG}" "${C_MUTED}" "$@"; }
 
 die() {
     error "$@"
@@ -324,21 +343,122 @@ spinner_stop() {
 # Print Functions (colored output for interactive/terminal use)
 # =============================================================================
 
-# Plain colored output
-print_info()    { echo "${C_INFO}$*${RST}"; }
-print_success() { echo "${C_OK}$*${RST}"; }
-print_warn()    { echo "${C_WARN}$*${RST}" >&2; }
-print_error()   { echo "${C_ERR}$*${RST}" >&2; }
-
 # Prefixed output (for status lists, validation results)
-prefix_info()    { echo "${BLU}◆${RST} $*"; }
-prefix_success() { echo "${GRN}✓${RST} $*"; }
-prefix_warn()    { echo "${YLW}⚠${RST} $*" >&2; }
-prefix_error()   { echo "${RED}✘${RST} $*" >&2; }
+prefix_info() {
+    local mark="◆"
+    [[ "${JSH_PLAIN_OUTPUT}" == "1" ]] && mark="i"
+    echo "${BLU}${mark}${RST} $*"
+}
+prefix_success() {
+    local mark="✓"
+    [[ "${JSH_PLAIN_OUTPUT}" == "1" ]] && mark="OK"
+    echo "${GRN}${mark}${RST} $*"
+}
+prefix_warn() {
+    local mark="⚠"
+    [[ "${JSH_PLAIN_OUTPUT}" == "1" ]] && mark="WARN"
+    echo "${YLW}${mark}${RST} $*" >&2
+}
+prefix_error() {
+    local mark="✘"
+    [[ "${JSH_PLAIN_OUTPUT}" == "1" ]] && mark="ERR"
+    echo "${RED}${mark}${RST} $*" >&2
+}
+
+# =============================================================================
+# Optional Gum UI Helpers (with shell fallbacks)
+# =============================================================================
+
+ui_has_gum() {
+    [[ "${JSH_NO_GUM:-0}" != "1" ]] || return 1
+    has gum || return 1
+    [[ -t 0 ]] && [[ -t 1 ]]
+}
+
+# Prompt for free-form input.
+# Usage: ui_input "<prompt>" [default]
+# Output: input value on stdout
+ui_input() {
+    local prompt="$1"
+    local default="${2:-}"
+    local response=""
+
+    if ui_has_gum; then
+        if [[ -n "${default}" ]]; then
+            response=$(gum input --prompt "${prompt}" --value "${default}") || return 1
+        else
+            response=$(gum input --prompt "${prompt}") || return 1
+        fi
+    else
+        read -r -p "${prompt}" response || return 1
+    fi
+
+    if [[ -z "${response}" ]]; then
+        response="${default}"
+    fi
+
+    printf '%s\n' "${response}"
+}
+
+# Prompt for yes/no confirmation.
+# Usage: ui_confirm "<question>" [default: n]
+# Returns: 0=yes, 1=no
+ui_confirm() {
+    local question="$1"
+    local default="${2:-n}"
+    local response=""
+
+    if ui_has_gum; then
+        gum confirm "${question}"
+        return $?
+    fi
+
+    local yn_prompt
+    if [[ "${default}" == "y" ]]; then
+        yn_prompt="[Y/n]"
+    else
+        yn_prompt="[y/N]"
+    fi
+
+    read -r -p "${question} ${yn_prompt} " response || return 1
+
+    case "${response}" in
+        [yY]|[yY][eE][sS]) return 0 ;;
+        [nN]|[nN][oO]) return 1 ;;
+        "")
+            [[ "${default}" == "y" ]]
+            return $?
+            ;;
+        *) return 1 ;;
+    esac
+}
+
+# Prompt for typed token confirmation (e.g. "yes" or "force").
+# Usage: ui_confirm_token "<prompt>" "<token>"
+# Returns: 0 if typed token matches exactly.
+ui_confirm_token() {
+    local prompt="$1"
+    local token="$2"
+    local response=""
+
+    if ui_has_gum; then
+        response=$(gum input --prompt "${prompt} ") || return 1
+    else
+        read -r -p "${prompt} " response || return 1
+    fi
+
+    [[ "${response}" == "${token}" ]]
+}
 
 # =============================================================================
 # Utility Functions
 # =============================================================================
+
+# Canonical package config path.
+jsh_packages_dir() {
+    local base="${JSH_DIR:-${HOME}/.jsh}"
+    echo "${base}/config"
+}
 
 # Check if command exists
 has() {
@@ -349,14 +469,6 @@ has() {
 source_if() {
     [[ -r "$1" ]] && source "$1"
     return 0
-}
-
-# Execute only if command exists
-try_eval() {
-    local cmd="$1"
-    shift
-    # shellcheck disable=SC2294
-    has "${cmd}" && eval "$@"
 }
 
 # Ensure directory exists
@@ -376,39 +488,6 @@ path_prepend() {
     esac
 }
 
-path_append() {
-    [[ -d "$1" ]] || return 0
-    case ":${PATH}:" in
-        *":$1:"*) ;;
-        *) PATH="${PATH}:$1" ;;
-    esac
-}
-
-path_remove() {
-    PATH="${PATH//:$1:/:}"
-    PATH="${PATH/#$1:/}"
-    PATH="${PATH/%:$1/}"
-}
-
-# =============================================================================
-# String Utilities
-# =============================================================================
-
-trim() {
-    local var="$*"
-    var="${var#"${var%%[![:space:]]*}"}"
-    var="${var%"${var##*[![:space:]]}"}"
-    printf '%s' "$var"
-}
-
-is_empty() {
-    [[ -z "${1// /}" ]]
-}
-
-# =============================================================================
-# Timing Utilities (for prompt performance)
-# =============================================================================
-
 _jsh_now_ms() {
     if has gdate; then
         gdate +%s%3N
@@ -418,18 +497,6 @@ _jsh_now_ms() {
     else
         date +%s%3N 2>/dev/null || date +%s000
     fi
-}
-
-# Track command execution time
-_jsh_timer_start() {
-    _JSH_CMD_START="${_JSH_CMD_START:-$(_jsh_now_ms)}"
-}
-
-_jsh_timer_stop() {
-    local now end_time
-    now="$(_jsh_now_ms)"
-    _JSH_CMD_DURATION="$(( now - ${_JSH_CMD_START:-$now} ))"
-    unset _JSH_CMD_START
 }
 
 # =============================================================================

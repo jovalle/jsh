@@ -70,6 +70,11 @@ confirm() {
     local default="${2:-n}"
     local yn_prompt response
 
+    if [[ "${JSH_NO_GUM:-0}" != "1" ]] && command -v gum >/dev/null 2>&1 && [[ -t 0 ]] && [[ -t 1 ]]; then
+        gum confirm "${prompt}"
+        return $?
+    fi
+
     if [[ "${default}" == "y" ]]; then
         yn_prompt="[Y/n]"
     else

@@ -86,49 +86,6 @@ load test_helper
 }
 
 # =============================================================================
-# String Utility Tests
-# =============================================================================
-
-@test "core: trim() removes leading whitespace" {
-    load_jsh_core
-    result=$(trim "   hello")
-    assert_equals "hello" "$result"
-}
-
-@test "core: trim() removes trailing whitespace" {
-    load_jsh_core
-    result=$(trim "hello   ")
-    assert_equals "hello" "$result"
-}
-
-@test "core: trim() removes both leading and trailing whitespace" {
-    load_jsh_core
-    result=$(trim "   hello world   ")
-    assert_equals "hello world" "$result"
-}
-
-@test "core: trim() handles tabs" {
-    load_jsh_core
-    result=$(trim $'\t\thello\t\t')
-    assert_equals "hello" "$result"
-}
-
-@test "core: is_empty() returns true for empty string" {
-    load_jsh_core
-    is_empty ""
-}
-
-@test "core: is_empty() returns true for whitespace-only string" {
-    load_jsh_core
-    is_empty "   "
-}
-
-@test "core: is_empty() returns false for non-empty string" {
-    load_jsh_core
-    ! is_empty "hello"
-}
-
-# =============================================================================
 # Path Utility Tests
 # =============================================================================
 
@@ -167,19 +124,6 @@ load test_helper
     path_prepend "/this/directory/does/not/exist"
 
     assert_equals "$original_path" "$PATH" "PATH should not change for non-existent directory"
-}
-
-@test "core: path_append adds to end of PATH" {
-    load_jsh_core
-    local test_dir="${JSH_TEST_TEMP}/bin"
-    mkdir -p "$test_dir"
-
-    local original_path="$PATH"
-    path_append "$test_dir"
-
-    assert_matches "$PATH" ":${test_dir}$" "Directory should be appended to PATH"
-
-    PATH="$original_path"
 }
 
 # =============================================================================
@@ -224,6 +168,38 @@ load test_helper
     load_jsh_core
     run bash -c 'source '"${JSH_DIR}"'/src/core.sh && prefix_success "done" 2>&1'
     assert_contains "$output" "done"
+}
+
+# =============================================================================
+# Optional UI Helper Tests
+# =============================================================================
+
+@test "core: ui_confirm accepts yes response in fallback mode" {
+    load_jsh_core
+    run bash -c 'source '"${JSH_DIR}"'/src/core.sh && JSH_NO_GUM=1 && printf "y\n" | ui_confirm "Proceed?" "n"'
+    [ "$status" -eq 0 ]
+}
+
+@test "core: ui_confirm honors default yes on empty response" {
+    load_jsh_core
+    run bash -c 'source '"${JSH_DIR}"'/src/core.sh && JSH_NO_GUM=1 && printf "\n" | ui_confirm "Proceed?" "y"'
+    [ "$status" -eq 0 ]
+}
+
+@test "core: ui_confirm_token requires exact token" {
+    load_jsh_core
+    run bash -c 'source '"${JSH_DIR}"'/src/core.sh && JSH_NO_GUM=1 && printf "force\n" | ui_confirm_token "Type force:" "force"'
+    [ "$status" -eq 0 ]
+
+    run bash -c 'source '"${JSH_DIR}"'/src/core.sh && JSH_NO_GUM=1 && printf "nope\n" | ui_confirm_token "Type force:" "force"'
+    [ "$status" -eq 1 ]
+}
+
+@test "core: ui_input returns default when empty in fallback mode" {
+    load_jsh_core
+    run bash -c 'source '"${JSH_DIR}"'/src/core.sh && JSH_NO_GUM=1 && printf "\n" | ui_input "Editor: " "vim"'
+    [ "$status" -eq 0 ]
+    assert_equals "vim" "$output"
 }
 
 # =============================================================================
