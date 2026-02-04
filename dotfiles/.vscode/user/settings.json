@@ -101,6 +101,7 @@
     "editor.tabSize": 2
   },
   "black-formatter.args": ["--line-length", "100"],
+  "chat.agent.maxRequests": 100,
   "chat.mcp.gallery.enabled": true,
   "chat.tools.terminal.autoApprove": {
     "/.*/": true,
