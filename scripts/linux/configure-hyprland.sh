@@ -57,7 +57,7 @@ for entry in "${configs[@]}"; do
     tgt_name="${rest%%|*}"
     required="${rest#*|}"
 
-    src_dir="${JSH_DIR}/.config/${src_name}"
+    src_dir="${JSH_DIR}/dotfiles/.config/${src_name}"
     if [[ ! -d "${src_dir}" ]]; then
         if [[ "${required}" == "true" ]]; then
             log_error "Required config missing: ${src_dir}"
@@ -70,7 +70,7 @@ done
 
 if [[ "${missing_required}" == "true" ]]; then
     log_error "Missing required Hyprland configs in jsh"
-    log_info "Ensure ${JSH_DIR}/.config/hypr and ${JSH_DIR}/.config/waybar exist"
+    log_info "Ensure ${JSH_DIR}/dotfiles/.config/hypr and ${JSH_DIR}/dotfiles/.config/waybar exist"
     exit 1
 fi
 
@@ -85,7 +85,7 @@ for entry in "${configs[@]}"; do
     rest="${entry#*|}"
     tgt_name="${rest%%|*}"
 
-    src_dir="${JSH_DIR}/.config/${src_name}"
+    src_dir="${JSH_DIR}/dotfiles/.config/${src_name}"
     tgt_dir="${XDG_CONFIG_HOME}/${tgt_name}"
 
     if [[ ! -d "${src_dir}" ]]; then

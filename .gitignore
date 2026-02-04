@@ -237,7 +237,7 @@ lib/vim-config/plugged/
 lib/nvim/
 
 # Keep nvim config but don't track (user may want it locally)
-.config/nvim/
+dotfiles/.config/nvim/
 
 # Archive
 archive/
