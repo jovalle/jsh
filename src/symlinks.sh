@@ -9,6 +9,10 @@
 [[ -n "${_JSH_SYMLINKS_LOADED:-}" ]] && return 0
 _JSH_SYMLINKS_LOADED=1
 
+_symlink_is_dry_run() {
+    [[ "${JSH_DRY_RUN:-0}" == "1" ]]
+}
+
 # =============================================================================
 # Symlink Rules DSL
 # =============================================================================
@@ -33,29 +37,29 @@ _JSH_SYMLINKS_LOADED=1
 get_symlink_rules() {
     cat << 'RULES'
 # Home Dotfiles
-file .zshrc
-file .bashrc
-file .bash_profile
-file .gitconfig
-file .inputrc
-file .tmux.conf
-file .vimrc
-file .editorconfig
-file .shellcheckrc
-file .markdownlint.jsonc
-file .prettierrc.json
-file .eslintrc.json
-file .pylintrc
-file .czrc
-file .ripgreprc
+file dotfiles/.zshrc -> $HOME/.zshrc
+file dotfiles/.bashrc -> $HOME/.bashrc
+file dotfiles/.bash_profile -> $HOME/.bash_profile
+file dotfiles/.gitconfig -> $HOME/.gitconfig
+file dotfiles/.inputrc -> $HOME/.inputrc
+file dotfiles/.tmux.conf -> $HOME/.tmux.conf
+file dotfiles/.vimrc -> $HOME/.vimrc
+file dotfiles/.editorconfig -> $HOME/.editorconfig
+file dotfiles/.shellcheckrc -> $HOME/.shellcheckrc
+file dotfiles/.markdownlint.jsonc -> $HOME/.markdownlint.jsonc
+file dotfiles/.prettierrc.json -> $HOME/.prettierrc.json
+file dotfiles/.eslintrc.json -> $HOME/.eslintrc.json
+file dotfiles/.pylintrc -> $HOME/.pylintrc
+file dotfiles/.czrc -> $HOME/.czrc
+file dotfiles/.ripgreprc -> $HOME/.ripgreprc
 
 # XDG Config (link each subdirectory)
-children .config -> $XDG_CONFIG
+children dotfiles/.config -> $XDG_CONFIG
 
 # Note: Neovim/LazyVim symlink is created during nvim installation (not here)
 
 # VSCode (platform-specific destination)
-children .vscode/user -> $VSCODE_USER
+children dotfiles/.vscode/user -> $VSCODE_USER
 RULES
 }
 
@@ -199,29 +203,44 @@ _link_file() {
     local backup_dir="$3"
     local src="${JSH_DIR}/${src_rel}"
     local display_name="${src_rel}"
+    local src_resolved=""
 
     [[ -e "${src}" ]] || { prefix_warn "${display_name} source not found, skipping"; return 0; }
+    src_resolved=$(cd "$(dirname "${src}")" && pwd -P)/$(basename "${src}")
 
     if [[ -L "${dest}" ]]; then
-        local current
+        local current current_resolved=""
         current=$(readlink "${dest}")
-        if [[ "${current}" == "${src}" ]]; then
+        current_resolved=$(readlink -f "${dest}" 2>/dev/null || true)
+        if [[ "${current}" == "${src}" ]] || [[ -n "${current_resolved}" && "${current_resolved}" == "${src_resolved}" ]]; then
             prefix_info "${display_name} already linked"
             return 0
         fi
-        rm "${dest}"
-    elif [[ -e "${dest}" ]]; then
-        mkdir -p "${backup_dir}"
-        if ! mv "${dest}" "${backup_dir}/" 2>/dev/null; then
-            prefix_warn "${display_name} cannot be moved (immutable or permission denied), skipping"
-            return 0
+        if _symlink_is_dry_run; then
+            prefix_info "Would remove existing symlink ${dest}"
+        else
+            rm "${dest}"
         fi
-        prefix_info "Backed up ${display_name} to ${backup_dir}/"
+    elif [[ -e "${dest}" ]]; then
+        if _symlink_is_dry_run; then
+            prefix_info "Would back up ${display_name} to ${backup_dir}/"
+        else
+            mkdir -p "${backup_dir}"
+            if ! mv "${dest}" "${backup_dir}/" 2>/dev/null; then
+                prefix_warn "${display_name} cannot be moved (immutable or permission denied), skipping"
+                return 0
+            fi
+            prefix_info "Backed up ${display_name} to ${backup_dir}/"
+        fi
     fi
 
-    mkdir -p "$(dirname "${dest}")"
-    ln -s "${src}" "${dest}"
-    prefix_success "Linked ${display_name}"
+    if _symlink_is_dry_run; then
+        prefix_info "Would link ${display_name} -> ${dest}"
+    else
+        mkdir -p "$(dirname "${dest}")"
+        ln -s "${src}" "${dest}"
+        prefix_success "Linked ${display_name}"
+    fi
 }
 
 # Link all children of a directory
@@ -234,7 +253,11 @@ _link_directory_children() {
 
     [[ -d "${src_dir}" ]] || { prefix_warn "${src_rel}/ source directory not found, skipping"; return 0; }
 
-    mkdir -p "${dest_dir}"
+    if _symlink_is_dry_run; then
+        prefix_info "Would ensure directory ${dest_dir}"
+    else
+        mkdir -p "${dest_dir}"
+    fi
 
     for child in "${src_dir}"/*; do
         [[ -e "${child}" ]] || continue
@@ -242,26 +265,41 @@ _link_directory_children() {
         child_name=$(basename "${child}")
         local child_dest="${dest_dir}/${child_name}"
         local child_src_rel="${src_rel}/${child_name}"
+        local child_resolved
+        child_resolved=$(cd "$(dirname "${child}")" && pwd -P)/$(basename "${child}")
 
         if [[ -L "${child_dest}" ]]; then
-            local current
+            local current current_resolved=""
             current=$(readlink "${child_dest}")
-            if [[ "${current}" == "${child}" ]]; then
+            current_resolved=$(readlink -f "${child_dest}" 2>/dev/null || true)
+            if [[ "${current}" == "${child}" ]] || [[ -n "${current_resolved}" && "${current_resolved}" == "${child_resolved}" ]]; then
                 prefix_info "${child_src_rel} already linked"
                 continue
             fi
-            rm "${child_dest}"
-        elif [[ -e "${child_dest}" ]]; then
-            mkdir -p "${backup_dir}"
-            if ! mv "${child_dest}" "${backup_dir}/" 2>/dev/null; then
-                prefix_warn "${child_src_rel} cannot be moved (immutable or permission denied), skipping"
-                continue
+            if _symlink_is_dry_run; then
+                prefix_info "Would remove existing symlink ${child_dest}"
+            else
+                rm "${child_dest}"
             fi
-            prefix_info "Backed up ${child_src_rel} to ${backup_dir}/"
+        elif [[ -e "${child_dest}" ]]; then
+            if _symlink_is_dry_run; then
+                prefix_info "Would back up ${child_src_rel} to ${backup_dir}/"
+            else
+                mkdir -p "${backup_dir}"
+                if ! mv "${child_dest}" "${backup_dir}/" 2>/dev/null; then
+                    prefix_warn "${child_src_rel} cannot be moved (immutable or permission denied), skipping"
+                    continue
+                fi
+                prefix_info "Backed up ${child_src_rel} to ${backup_dir}/"
+            fi
         fi
 
-        ln -s "${child}" "${child_dest}"
-        prefix_success "Linked ${child_src_rel}"
+        if _symlink_is_dry_run; then
+            prefix_info "Would link ${child_src_rel} -> ${child_dest}"
+        else
+            ln -s "${child}" "${child_dest}"
+            prefix_success "Linked ${child_src_rel}"
+        fi
     done
 }
 
@@ -277,14 +315,14 @@ _status_single() {
         # Canonicalize JSH_DIR for comparison (handles paths like /foo/tests/..)
         jsh_dir_resolved=$(cd "${JSH_DIR}" && pwd -P)
         if [[ "${resolved}" == "${jsh_dir_resolved}/"* ]] || [[ "${resolved}" == "${jsh_dir_resolved}" ]]; then
-            echo "  ${GRN}✓${RST} ${display_name} -> ${link_target}"
+            echo "${GRN}✓${RST} ${display_name} -> ${link_target}"
         else
-            echo "  ${YLW}~${RST} ${display_name} -> ${link_target}"
+            echo "${YLW}~${RST} ${display_name} -> ${link_target}"
         fi
     elif [[ -e "${dest}" ]]; then
-        echo "  ${YLW}~${RST} ${display_name} (exists, not linked)"
+        echo "${YLW}~${RST} ${display_name} (exists, not linked)"
     else
-        echo "  ${DIM}-${RST} ${display_name}"
+        echo "${DIM}-${RST} ${display_name}"
     fi
 }
 
@@ -306,19 +344,31 @@ _link_directory() {
             prefix_info "${display_name}/ already linked"
             return 0
         fi
-        rm "${dest}"
-    elif [[ -e "${dest}" ]]; then
-        mkdir -p "${backup_dir}"
-        if ! mv "${dest}" "${backup_dir}/" 2>/dev/null; then
-            prefix_warn "${display_name}/ cannot be moved (immutable or permission denied), skipping"
-            return 0
+        if _symlink_is_dry_run; then
+            prefix_info "Would remove existing symlink ${dest}"
+        else
+            rm "${dest}"
         fi
-        prefix_info "Backed up ${display_name}/ to ${backup_dir}/"
+    elif [[ -e "${dest}" ]]; then
+        if _symlink_is_dry_run; then
+            prefix_info "Would back up ${display_name}/ to ${backup_dir}/"
+        else
+            mkdir -p "${backup_dir}"
+            if ! mv "${dest}" "${backup_dir}/" 2>/dev/null; then
+                prefix_warn "${display_name}/ cannot be moved (immutable or permission denied), skipping"
+                return 0
+            fi
+            prefix_info "Backed up ${display_name}/ to ${backup_dir}/"
+        fi
     fi
 
-    mkdir -p "$(dirname "${dest}")"
-    ln -s "${src}" "${dest}"
-    prefix_success "Linked ${display_name}/"
+    if _symlink_is_dry_run; then
+        prefix_info "Would link ${display_name}/ -> ${dest}"
+    else
+        mkdir -p "$(dirname "${dest}")"
+        ln -s "${src}" "${dest}"
+        prefix_success "Linked ${display_name}/"
+    fi
 }
 
 # Unlink a single file or directory
