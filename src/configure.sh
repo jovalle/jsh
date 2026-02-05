@@ -16,64 +16,27 @@ JSH_SCRIPTS_DIR="${JSH_DIR:-${HOME}/.jsh}/scripts"
 # Configuration Modules
 # =============================================================================
 
-# List of available configuration modules
-declare -gA CONFIG_MODULES
+_configure_module_rows() {
+    cat <<'ROWS'
+macos|darwin|macOS system defaults
+dock|darwin|macOS Dock settings
+apps|all|Application configs (VSCode)
+linux|linux|GNOME settings
+sudoers|linux|Sudoers configuration
+systemd|linux|Systemd user services
+hyprland|linux|Hyprland/Wayland environment
+repos|linux|DNF repositories (COPR)
+ROWS
+}
 
-CONFIG_MODULES[macos]="macOS system defaults|darwin|macos/defaults.sh"
-CONFIG_MODULES[dock]="macOS Dock settings|darwin|macos/dock.sh"
-CONFIG_MODULES[finder]="macOS Finder settings|darwin|macos/finder.sh"
-CONFIG_MODULES[apps]="Application configs (VSCode)|all|apps/vscode.sh"
-CONFIG_MODULES[linux]="GNOME settings|linux|linux/configure-settings.sh"
-CONFIG_MODULES[sudoers]="Sudoers configuration|linux|linux/configure-sudoers.sh"
-CONFIG_MODULES[systemd]="Systemd user services|linux|linux/configure-systemd.sh"
-CONFIG_MODULES[hyprland]="Hyprland/Wayland environment|linux|linux/configure-hyprland.sh"
-CONFIG_MODULES[repos]="DNF repositories (COPR)|linux|linux/configure-repos.sh"
-
-# =============================================================================
-# Helper Functions
-# =============================================================================
-
-# Check if a module is applicable to current platform
-_configure_module_applicable() {
-    local module="$1"
-    local def="${CONFIG_MODULES[$module]:-}"
-
-    [[ -z "${def}" ]] && return 1
-
-    local platform
-    IFS='|' read -r _ platform _ <<< "${def}"
-
+_configure_platform_applicable() {
+    local platform="$1"
     case "${platform}" in
         all) return 0 ;;
         darwin) [[ "$(uname -s)" == "Darwin" ]] && return 0 ;;
         linux) [[ "$(uname -s)" == "Linux" ]] && return 0 ;;
     esac
-
     return 1
-}
-
-# Get module description
-_configure_module_desc() {
-    local module="$1"
-    local def="${CONFIG_MODULES[$module]:-}"
-
-    [[ -z "${def}" ]] && return 1
-
-    local desc
-    IFS='|' read -r desc _ _ <<< "${def}"
-    echo "${desc}"
-}
-
-# Get module script path
-_configure_module_script() {
-    local module="$1"
-    local def="${CONFIG_MODULES[$module]:-}"
-
-    [[ -z "${def}" ]] && return 1
-
-    local script
-    IFS='|' read -r _ _ script <<< "${def}"
-    echo "${JSH_SCRIPTS_DIR}/${script}"
 }
 
 # =============================================================================
@@ -82,97 +45,40 @@ _configure_module_script() {
 
 _configure_macos_defaults() {
     local dry_run="${1:-false}"
+    local script_path="${JSH_SCRIPTS_DIR}/macos/configure-settings.sh"
 
-    echo "${BOLD}macOS System Defaults${RST}"
-    echo ""
+    jsh_section "macOS System Defaults"
 
-    local changes=(
-        # Finder
-        "defaults write com.apple.finder AppleShowAllFiles -bool true|Show hidden files in Finder"
-        "defaults write com.apple.finder ShowPathbar -bool true|Show path bar in Finder"
-        "defaults write com.apple.finder ShowStatusBar -bool true|Show status bar in Finder"
-        "defaults write NSGlobalDomain AppleShowAllExtensions -bool true|Show all file extensions"
+    if [[ "${dry_run}" == true ]]; then
+        echo "${DIM}[dry-run] Would run: ${script_path}${RST}"
+        return 0
+    fi
 
-        # Keyboard
-        "defaults write NSGlobalDomain KeyRepeat -int 2|Fast key repeat rate"
-        "defaults write NSGlobalDomain InitialKeyRepeat -int 15|Short delay before key repeat"
-        "defaults write NSGlobalDomain ApplePressAndHoldEnabled -bool false|Disable press-and-hold for accents"
-
-        # Trackpad
-        "defaults write com.apple.driver.AppleBluetoothMultitouch.trackpad Clicking -bool true|Enable tap to click"
-        "defaults write NSGlobalDomain com.apple.swipescrolldirection -bool false|Natural scrolling off"
-
-        # Screenshots
-        "defaults write com.apple.screencapture location -string '${HOME}/Desktop'|Screenshots to Desktop"
-        "defaults write com.apple.screencapture type -string 'png'|Screenshot format: PNG"
-        "defaults write com.apple.screencapture disable-shadow -bool true|Disable screenshot shadows"
-
-        # Dock
-        "defaults write com.apple.dock autohide -bool true|Auto-hide Dock"
-        "defaults write com.apple.dock autohide-delay -float 0|No Dock reveal delay"
-        "defaults write com.apple.dock show-recents -bool false|Don't show recent apps in Dock"
-        "defaults write com.apple.dock mineffect -string 'scale'|Minimize with scale effect"
-
-        # Mission Control
-        "defaults write com.apple.dock mru-spaces -bool false|Don't rearrange spaces by recent use"
-
-        # Security
-        "defaults write com.apple.screensaver askForPassword -int 1|Require password after screensaver"
-        "defaults write com.apple.screensaver askForPasswordDelay -int 0|Require password immediately"
-    )
-
-    for entry in "${changes[@]}"; do
-        local cmd="${entry%%|*}"
-        local desc="${entry#*|}"
-
-        if [[ "${dry_run}" == true ]]; then
-            printf "  ${DIM}[dry-run]${RST} %s\n" "${desc}"
-        else
-            printf "  Setting: %s..." "${desc}"
-            if eval "${cmd}" 2>/dev/null; then
-                echo " ${GRN}done${RST}"
-            else
-                echo " ${YLW}skipped${RST}"
-            fi
-        fi
-    done
-
-    if [[ "${dry_run}" != true ]]; then
-        echo ""
-        info "Restarting affected services..."
-        killall Finder 2>/dev/null || true
-        killall Dock 2>/dev/null || true
-        killall SystemUIServer 2>/dev/null || true
+    if [[ -x "${script_path}" ]]; then
+        bash "${script_path}"
+    else
+        warn "Script not found or not executable: ${script_path}"
+        return 1
     fi
 }
 
 _configure_dock() {
     local dry_run="${1:-false}"
+    local script_path="${JSH_SCRIPTS_DIR}/macos/configure-dock.sh"
 
-    echo "${BOLD}macOS Dock Configuration${RST}"
-    echo ""
+    jsh_section "macOS Dock Configuration"
 
     if [[ "${dry_run}" == true ]]; then
-        echo "  ${DIM}[dry-run] Would configure Dock settings${RST}"
+        echo "${DIM}[dry-run] Would run: ${script_path}${RST}"
         return 0
     fi
 
-    # Dock settings
-    defaults write com.apple.dock autohide -bool true
-    defaults write com.apple.dock autohide-delay -float 0
-    defaults write com.apple.dock autohide-time-modifier -float 0.5
-    defaults write com.apple.dock show-recents -bool false
-    defaults write com.apple.dock tilesize -int 48
-    defaults write com.apple.dock magnification -bool false
-    defaults write com.apple.dock largesize -int 64
-    defaults write com.apple.dock orientation -string "bottom"
-    defaults write com.apple.dock minimize-to-application -bool true
-    defaults write com.apple.dock mineffect -string "scale"
-
-    # Restart Dock
-    killall Dock
-
-    prefix_success "Dock configured"
+    if [[ -x "${script_path}" ]]; then
+        bash "${script_path}"
+    else
+        warn "Script not found or not executable: ${script_path}"
+        return 1
+    fi
 }
 
 # =============================================================================
@@ -182,8 +88,7 @@ _configure_dock() {
 _configure_vscode() {
     local dry_run="${1:-false}"
 
-    echo "${BOLD}VS Code Configuration${RST}"
-    echo ""
+    jsh_section "VS Code Configuration"
 
     local vscode_settings_dir
     if [[ "$(uname -s)" == "Darwin" ]]; then
@@ -193,7 +98,7 @@ _configure_vscode() {
     fi
 
     if [[ "${dry_run}" == true ]]; then
-        echo "  ${DIM}[dry-run] Would configure VS Code at: ${vscode_settings_dir}${RST}"
+        echo "${DIM}[dry-run] Would configure VS Code at: ${vscode_settings_dir}${RST}"
         return 0
     fi
 
@@ -203,7 +108,7 @@ _configure_vscode() {
     fi
 
     # Link our VS Code settings if they exist
-    local jsh_vscode_dir="${JSH_DIR:-${HOME}/.jsh}/.vscode/user"
+    local jsh_vscode_dir="${JSH_DIR:-${HOME}/.jsh}/dotfiles/.vscode/user"
     if [[ -d "${jsh_vscode_dir}" ]]; then
         for file in "${jsh_vscode_dir}"/*; do
             [[ -f "${file}" ]] || continue
@@ -232,13 +137,12 @@ _configure_vscode() {
 _configure_linux() {
     local dry_run="${1:-false}"
 
-    echo "${BOLD}Linux System Configuration (GNOME)${RST}"
-    echo ""
+    jsh_section "Linux System Configuration (GNOME)"
 
     local script_path="${JSH_SCRIPTS_DIR}/linux/configure-settings.sh"
 
     if [[ "${dry_run}" == true ]]; then
-        echo "  ${DIM}[dry-run] Would run: ${script_path}${RST}"
+        echo "${DIM}[dry-run] Would run: ${script_path}${RST}"
         return 0
     fi
 
@@ -253,13 +157,12 @@ _configure_linux() {
 _configure_systemd() {
     local dry_run="${1:-false}"
 
-    echo "${BOLD}Systemd User Services${RST}"
-    echo ""
+    jsh_section "Systemd User Services"
 
     local script_path="${JSH_SCRIPTS_DIR}/linux/configure-systemd.sh"
 
     if [[ "${dry_run}" == true ]]; then
-        echo "  ${DIM}[dry-run] Would run: ${script_path}${RST}"
+        echo "${DIM}[dry-run] Would run: ${script_path}${RST}"
         return 0
     fi
 
@@ -274,13 +177,12 @@ _configure_systemd() {
 _configure_hyprland() {
     local dry_run="${1:-false}"
 
-    echo "${BOLD}Hyprland/Wayland Environment${RST}"
-    echo ""
+    jsh_section "Hyprland/Wayland Environment"
 
     local script_path="${JSH_SCRIPTS_DIR}/linux/configure-hyprland.sh"
 
     if [[ "${dry_run}" == true ]]; then
-        echo "  ${DIM}[dry-run] Would run: ${script_path}${RST}"
+        echo "${DIM}[dry-run] Would run: ${script_path}${RST}"
         return 0
     fi
 
@@ -295,13 +197,12 @@ _configure_hyprland() {
 _configure_repos() {
     local dry_run="${1:-false}"
 
-    echo "${BOLD}DNF Repositories (COPR)${RST}"
-    echo ""
+    jsh_section "DNF Repositories (COPR)"
 
     local script_path="${JSH_SCRIPTS_DIR}/linux/configure-repos.sh"
 
     if [[ "${dry_run}" == true ]]; then
-        echo "  ${DIM}[dry-run] Would run: ${script_path}${RST}"
+        echo "${DIM}[dry-run] Would run: ${script_path}${RST}"
         return 0
     fi
 
@@ -318,38 +219,26 @@ _configure_repos() {
 # =============================================================================
 
 cmd_configure_list() {
-    echo ""
-    echo "${BOLD}Available Configuration Modules${RST}"
-    echo ""
+    jsh_section "Available Configuration Modules"
 
-    local os_type
-    os_type=$(uname -s)
-
-    for module in "${!CONFIG_MODULES[@]}"; do
-        local desc
-        desc=$(_configure_module_desc "${module}")
-
-        if _configure_module_applicable "${module}"; then
-            printf "  ${GRN}✓${RST} %-12s %s\n" "${module}" "${desc}"
+    while IFS='|' read -r module platform desc; do
+        [[ -z "${module}" ]] && continue
+        if _configure_platform_applicable "${platform}"; then
+            printf "%b %-12s %s\n" "${GRN}✓${RST}" "${module}" "${desc}"
         else
-            printf "  ${DIM}-${RST} %-12s %s ${DIM}(not applicable)${RST}\n" "${module}" "${desc}"
+            printf "%b %-12s %s %b\n" "${DIM}-${RST}" "${module}" "${desc}" "${DIM}(not applicable)${RST}"
         fi
-    done | sort
-
-    echo ""
+    done < <(_configure_module_rows)
 }
 
 cmd_configure_all() {
     local dry_run="${1:-false}"
     local skip_confirm="${2:-false}"
 
-    echo ""
-    echo "${BOLD}jsh configure all${RST}"
-    echo ""
+    jsh_section "jsh configure all"
 
     if [[ "${skip_confirm}" != true ]] && [[ "${dry_run}" != true ]]; then
-        read -r -p "Run all applicable configurations? [y/N] " confirm
-        if [[ ! "${confirm}" =~ ^[Yy] ]]; then
+        if ! ui_confirm "Run all applicable configurations?" "n"; then
             info "Cancelled"
             return 0
         fi
@@ -384,7 +273,6 @@ cmd_configure_all() {
 # @jsh-sub all Run all applicable configurations
 # @jsh-sub macos macOS system defaults
 # @jsh-sub dock macOS Dock settings
-# @jsh-sub finder macOS Finder settings
 # @jsh-sub apps Application configs (VS Code)
 # @jsh-sub linux Linux system settings
 # @jsh-sub list Show available configurations
@@ -470,7 +358,7 @@ cmd_configure() {
             fi
             local script_path="${JSH_SCRIPTS_DIR}/linux/configure-sudoers.sh"
             if [[ "${dry_run}" == true ]]; then
-                echo "  ${DIM}[dry-run] Would run: ${script_path}${RST}"
+                echo "${DIM}[dry-run] Would run: ${script_path}${RST}"
             elif [[ -x "${script_path}" ]]; then
                 bash "${script_path}"
             else
@@ -481,37 +369,34 @@ cmd_configure() {
             cmd_configure_list
             ;;
         -h|--help|help)
-            echo "${BOLD}jsh configure${RST} - System and application configuration"
-            echo ""
-            echo "${BOLD}USAGE:${RST}"
-            echo "    jsh configure [command] [options]"
-            echo ""
-            echo "${BOLD}COMMANDS:${RST}"
-            echo "    ${CYAN}all${RST}           Run all applicable configurations (default)"
-            echo "    ${CYAN}macos${RST}         macOS system defaults"
-            echo "    ${CYAN}dock${RST}          macOS Dock settings"
-            echo "    ${CYAN}apps${RST}          Application configs (VS Code)"
-            echo "    ${CYAN}linux${RST}         GNOME desktop settings"
-            echo "    ${CYAN}systemd${RST}       Systemd user services"
-            echo "    ${CYAN}hyprland${RST}      Hyprland/Wayland environment"
-            echo "    ${CYAN}repos${RST}         DNF repositories (COPR)"
-            echo "    ${CYAN}sudoers${RST}       Sudoers configuration"
-            echo "    ${CYAN}list${RST}          Show available configurations"
-            echo ""
-            echo "${BOLD}OPTIONS:${RST}"
-            echo "    --check, -n   Dry run - show what would be changed"
-            echo "    --yes, -y     Skip confirmation prompts"
-            echo ""
-            echo "${BOLD}EXAMPLES:${RST}"
-            echo "    jsh configure                # Run all (with confirmation)"
-            echo "    jsh configure --check        # Preview all changes"
-            echo "    jsh configure macos          # macOS defaults only"
-            echo "    jsh configure dock           # Dock settings only"
-            echo "    jsh configure linux          # GNOME settings (Linux)"
-            echo "    jsh configure hyprland       # Hyprland/Wayland setup (Linux)"
-            echo "    jsh configure systemd        # Enable user services (Linux)"
-            echo "    jsh configure repos          # Enable COPR repos (Linux)"
-            echo "    jsh configure list           # List available modules"
+            jsh_section "jsh configure"
+            jsh_note "System and application configuration"
+            jsh_section "Usage"
+            echo "jsh configure [command] [options]"
+            jsh_section "Commands"
+            echo "${CYN}all${RST} Run all applicable configurations (default)"
+            echo "${CYN}macos${RST} macOS system defaults"
+            echo "${CYN}dock${RST} macOS Dock settings"
+            echo "${CYN}apps${RST} Application configs (VS Code)"
+            echo "${CYN}linux${RST} GNOME desktop settings"
+            echo "${CYN}systemd${RST} Systemd user services"
+            echo "${CYN}hyprland${RST} Hyprland/Wayland environment"
+            echo "${CYN}repos${RST} DNF repositories (COPR)"
+            echo "${CYN}sudoers${RST} Sudoers configuration"
+            echo "${CYN}list${RST} Show available configurations"
+            jsh_section "Options"
+            echo "--check, -n Dry run - show what would be changed"
+            echo "--yes, -y Skip confirmation prompts"
+            jsh_section "Examples"
+            echo "jsh configure # Run all (with confirmation)"
+            echo "jsh configure --check # Preview all changes"
+            echo "jsh configure macos # macOS defaults only"
+            echo "jsh configure dock # Dock settings only"
+            echo "jsh configure linux # GNOME settings (Linux)"
+            echo "jsh configure hyprland # Hyprland/Wayland setup (Linux)"
+            echo "jsh configure systemd # Enable user services (Linux)"
+            echo "jsh configure repos # Enable COPR repos (Linux)"
+            echo "jsh configure list # List available modules"
             ;;
         *)
             error "Unknown command: ${subcmd}"

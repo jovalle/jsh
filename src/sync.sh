@@ -78,6 +78,10 @@ _sync_check() {
     local branch
     branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
 
+    jsh_section "Sync Status"
+    echo "${CYN}${repo_dir}${RST}"
+    echo "Branch: ${branch}"
+
     # Check for remote tracking
     local upstream
     upstream=$(git rev-parse --abbrev-ref "@{u}" 2>/dev/null) || {
@@ -102,29 +106,23 @@ _sync_check() {
     unstaged=$(git diff --name-only | wc -l | tr -d ' ')
     untracked=$(git ls-files --others --exclude-standard | wc -l | tr -d ' ')
 
-    echo ""
-    echo "${BOLD}Sync Status: ${CYN}${repo_dir}${RST}"
-    echo ""
-    echo "  Branch:   ${branch} -> ${upstream}"
-    echo ""
+    echo "Tracking: ${upstream}"
 
     if [[ ${ahead} -gt 0 ]] || [[ ${behind} -gt 0 ]]; then
-        echo "  Remote:"
-        [[ ${ahead} -gt 0 ]] && echo "    ${GRN}↑${RST} ${ahead} commit(s) ahead (need push)"
-        [[ ${behind} -gt 0 ]] && echo "    ${YLW}↓${RST} ${behind} commit(s) behind (need pull)"
+        jsh_milestone "Remote"
+        [[ ${ahead} -gt 0 ]] && echo "${GRN}↑${RST} ${ahead} commit(s) ahead (need push)"
+        [[ ${behind} -gt 0 ]] && echo "${YLW}↓${RST} ${behind} commit(s) behind (need pull)"
     else
-        echo "  Remote:   ${GRN}✓${RST} Up to date"
+        echo "Remote: ${GRN}✓${RST} Up to date"
     fi
 
-    echo ""
-
     if [[ ${staged} -gt 0 ]] || [[ ${unstaged} -gt 0 ]] || [[ ${untracked} -gt 0 ]]; then
-        echo "  Local changes:"
-        [[ ${staged} -gt 0 ]] && echo "    ${GRN}*${RST} ${staged} staged"
-        [[ ${unstaged} -gt 0 ]] && echo "    ${YLW}!${RST} ${unstaged} modified"
-        [[ ${untracked} -gt 0 ]] && echo "    ${RED}?${RST} ${untracked} untracked"
+        jsh_milestone "Local Changes"
+        [[ ${staged} -gt 0 ]] && echo "${GRN}*${RST} ${staged} staged"
+        [[ ${unstaged} -gt 0 ]] && echo "${YLW}!${RST} ${unstaged} modified"
+        [[ ${untracked} -gt 0 ]] && echo "${RED}?${RST} ${untracked} untracked"
     else
-        echo "  Local:    ${GRN}✓${RST} Clean working tree"
+        echo "Local: ${GRN}✓${RST} Clean working tree"
     fi
 
     echo ""
@@ -157,23 +155,13 @@ _sync_pull() {
 
     # Track configs before pull to detect changes
     local configs_before=""
-    if [[ -d "configs/packages" ]]; then
-        configs_before=$(git log -1 --format=%H -- configs/packages 2>/dev/null || true)
+    if [[ -d "config" ]]; then
+        configs_before=$(git log -1 --format=%H -- config 2>/dev/null || true)
     fi
 
     # Pull with rebase
     if git pull --rebase --quiet 2>/dev/null; then
         prefix_success "Pulled and rebased successfully"
-
-        # Check if package configs changed
-        if [[ -d "configs/packages" ]]; then
-            local configs_after
-            configs_after=$(git log -1 --format=%H -- configs/packages 2>/dev/null || true)
-            if [[ -n "${configs_before}" ]] && [[ "${configs_before}" != "${configs_after}" ]]; then
-                echo ""
-                info "Package configs changed. Run '${CYN}jsh pkg sync${RST}' to install new packages."
-            fi
-        fi
 
         # Restore stash if we created one
         [[ -n "${stash_msg}" ]] && _sync_stash_pop "${stash_msg}"
@@ -187,12 +175,10 @@ _sync_pull() {
             prefix_info "Your changes are preserved in stash: ${stash_msg}"
         fi
 
-        echo ""
-        echo "${YLW}Recovery steps:${RST}"
-        echo "  1. git stash list    # Find your stash"
-        echo "  2. git pull          # Pull with merge instead"
-        echo "  3. git stash pop     # Restore your changes"
-        echo ""
+        jsh_section "Recovery Steps"
+        echo "1. git stash list # Find your stash"
+        echo "2. git pull # Pull with merge instead"
+        echo "3. git stash pop # Restore your changes"
 
         return 1
     fi
@@ -298,20 +284,15 @@ _sync_force() {
     local current_commit
     current_commit=$(git rev-parse HEAD 2>/dev/null)
 
-    echo ""
-    echo "${RED}${BOLD}WARNING: Force sync will reset to remote state${RST}"
-    echo ""
-    echo "  Branch: ${branch}"
-    echo "  Current commit: ${current_commit}"
-    echo ""
-    echo "  ${YLW}This will discard all local commits not on remote!${RST}"
-    echo ""
-    echo "  Recovery: git reflog | head"
-    echo "            git reset --hard ${current_commit}"
-    echo ""
+    jsh_section "${RED}Force Sync Warning${RST}"
+    echo "Branch: ${branch}"
+    echo "Current commit: ${current_commit}"
+    echo "${YLW}This discards all local commits not on remote.${RST}"
+    jsh_milestone "Recovery"
+    echo "git reflog | head"
+    echo "git reset --hard ${current_commit}"
 
-    read -r -p "Type 'force' to confirm: " confirm
-    if [[ "${confirm}" != "force" ]]; then
+    if ! ui_confirm_token "Type 'force' to confirm:" "force"; then
         info "Cancelled"
         return 0
     fi
@@ -346,11 +327,9 @@ _sync_force() {
 # @jsh-opt -c,--check Dry run - show sync status
 # @jsh-opt -f,--force Force sync (requires confirmation)
 # @jsh-opt --no-stash Fail if local changes exist
-# @jsh-opt --with-packages Auto-sync packages after pull
 cmd_sync() {
     local mode="full"
     local no_stash=false
-    local with_packages=false
     local repo_dir=""
 
     while [[ $# -gt 0 ]]; do
@@ -375,32 +354,23 @@ cmd_sync() {
                 no_stash=true
                 shift
                 ;;
-            --with-packages|-p)
-                with_packages=true
-                shift
-                ;;
             -h|--help)
-                echo "${BOLD}jsh sync${RST} - Safe bidirectional git sync"
-                echo ""
-                echo "${BOLD}USAGE:${RST}"
-                echo "    jsh sync [options]"
-                echo ""
-                echo "${BOLD}OPTIONS:${RST}"
-                echo "    --pull            Pull only (rebase)"
-                echo "    --push            Push only"
-                echo "    --check, -c       Dry run - show sync status"
-                echo "    --force, -f       Force sync (requires confirmation)"
-                echo "    --no-stash        Fail if local changes exist"
-                echo "    --with-packages   Auto-sync packages after pull"
-                echo ""
-                echo "${BOLD}SAFETY:${RST}"
-                echo "    • All local changes are auto-stashed before operations"
-                echo "    • On conflict: rebase aborts, stash preserved"
-                echo "    • Force mode requires typing 'force' to confirm"
-                echo ""
-                echo "${BOLD}TARGET:${RST}"
-                echo "    Current git repo, or \$JSH_DIR if not in a repo"
-                echo ""
+                jsh_section "jsh sync"
+                jsh_note "Safe bidirectional git sync"
+                jsh_section "Usage"
+                echo "jsh sync [options]"
+                jsh_section "Options"
+                echo "--pull Pull only (rebase)"
+                echo "--push Push only"
+                echo "--check, -c Dry run - show sync status"
+                echo "--force, -f Force sync (requires confirmation)"
+                echo "--no-stash Fail if local changes exist"
+                jsh_section "Safety"
+                echo "• All local changes are auto-stashed before operations"
+                echo "• On conflict: rebase aborts, stash preserved"
+                echo "• Force mode requires typing 'force' to confirm"
+                jsh_section "Target"
+                echo "Current git repo, or \$JSH_DIR if not in a repo"
                 return 0
                 ;;
             *)
@@ -440,19 +410,6 @@ cmd_sync() {
         force)  _sync_force "${repo_dir}" || sync_result=$? ;;
         full)   _sync_full "${repo_dir}" || sync_result=$? ;;
     esac
-
-    # Auto-sync packages if requested and sync succeeded
-    if [[ "${with_packages}" == true ]] && [[ ${sync_result} -eq 0 ]]; then
-        if [[ "${mode}" == "pull" || "${mode}" == "full" ]]; then
-            if declare -f _pkg_sync >/dev/null 2>&1; then
-                echo ""
-                info "Syncing packages..."
-                _pkg_sync
-            else
-                warn "Package sync not available (pkg.sh not loaded)"
-            fi
-        fi
-    fi
 
     return ${sync_result}
 }

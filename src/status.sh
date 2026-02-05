@@ -140,16 +140,16 @@ cmd_status() {
   show_banner
 
   # Installation info
-  echo "${CYN}Installation:${RST}"
-  echo "  Directory: ${JSH_DIR}"
-  echo "  Version:   ${VERSION}"
+  jsh_section "Installation"
+  echo "Directory: ${JSH_DIR}"
+  echo "Version: ${VERSION}"
 
   if [[ -d "${JSH_DIR}/.git" ]]; then
     local branch commit remote_status
     branch=$(git -C "${JSH_DIR}" branch --show-current 2>/dev/null || echo "unknown")
     commit=$(git -C "${JSH_DIR}" rev-parse --short HEAD 2>/dev/null || echo "unknown")
-    echo "  Branch:    ${branch}"
-    echo "  Commit:    ${commit}"
+    echo "Branch: ${branch}"
+    echo "Commit: ${commit}"
 
     # Check if ahead/behind remote
     local ahead behind
@@ -159,32 +159,29 @@ cmd_status() {
       remote_status=""
       [[ "${ahead}" -gt 0 ]] && remote_status+="${GRN}↑${ahead}${RST}"
       [[ "${behind}" -gt 0 ]] && remote_status+="${RED}↓${behind}${RST}"
-      echo "  Remote:    ${remote_status}"
+      echo "Remote: ${remote_status}"
     fi
   fi
 
   # Platform info
-  echo ""
-  echo "${CYN}Platform:${RST}"
+  jsh_section "Platform"
   local platform="${JSH_PLATFORM:-unknown}"
-  echo "  OS:        ${JSH_OS:-$(uname -s | tr '[:upper:]' '[:lower:]')}"
-  echo "  Arch:      ${JSH_ARCH:-$(uname -m)}"
-  echo "  Platform:  ${platform}"
-  echo "  Shell:     ${SHELL##*/} (${JSH_SHELL:-unknown})"
-  echo "  EDITOR:    ${EDITOR:-not set}"
+  echo "OS: ${JSH_OS:-$(uname -s | tr '[:upper:]' '[:lower:]')}"
+  echo "Arch: ${JSH_ARCH:-$(uname -m)}"
+  echo "Platform: ${platform}"
+  echo "Shell: ${SHELL##*/} (${JSH_SHELL:-unknown})"
+  echo "EDITOR: ${EDITOR:-not set}"
 
   # Detailed symlink status
-  echo ""
-  echo "${CYN}Symlinks:${RST}"
+  jsh_section "Symlinks"
   _process_symlink_rules "" "status"
 
   # Tool checks - Requirements
-  echo ""
-  echo "${CYN}Requirements:${RST}"
+  jsh_section "Requirements"
   local issues=0
 
   # Required tools with versions
-  echo "  ${DIM}Required:${RST}"
+  jsh_milestone "Required"
   local required=("git" "curl")
   for tool in "${required[@]}"; do
     if has "${tool}"; then
@@ -193,9 +190,9 @@ cmd_status() {
       git) ver=$(git --version 2>/dev/null | cut -d' ' -f3) ;;
       curl) ver=$(curl --version 2>/dev/null | head -1 | cut -d' ' -f2) ;;
       esac
-      echo "    ${GRN}✓${RST} ${tool} ${DIM}${ver}${RST}"
+      echo "${GRN}✓${RST} ${tool} ${DIM}${ver}${RST}"
     else
-      echo "    ${RED}✘${RST} ${tool} ${DIM}(required)${RST}"
+      echo "${RED}✘${RST} ${tool} ${DIM}(required)${RST}"
       ((issues++))
     fi
   done
@@ -205,22 +202,22 @@ cmd_status() {
   bash_ver="${BASH_VERSION:-$(bash --version 2>/dev/null | head -1 | sed 's/.*version \([0-9.]*\).*/\1/')}"
   bash_major="${bash_ver%%.*}"
   if [[ "${bash_major}" -ge 4 ]]; then
-    echo "    ${GRN}✓${RST} bash ${DIM}${bash_ver}${RST}"
+    echo "${GRN}✓${RST} bash ${DIM}${bash_ver}${RST}"
   else
-    echo "    ${RED}✘${RST} bash ${DIM}${bash_ver} (need 4.0+, run: jsh deps fix-bash)${RST}"
+    echo "${RED}✘${RST} bash ${DIM}${bash_ver} (need 4.0+, install modern bash via your package manager)${RST}"
     ((issues++))
   fi
 
   if has zsh; then
     local zsh_ver
     zsh_ver=$(zsh --version 2>/dev/null | cut -d' ' -f2)
-    echo "    ${GRN}✓${RST} zsh ${DIM}${zsh_ver}${RST}"
+    echo "${GRN}✓${RST} zsh ${DIM}${zsh_ver}${RST}"
   else
-    echo "    ${YLW}⚠${RST} zsh ${DIM}(recommended)${RST}"
+    echo "${YLW}⚠${RST} zsh ${DIM}(recommended)${RST}"
   fi
 
   # Optional tools
-  echo "  ${DIM}Optional:${RST}"
+  jsh_milestone "Optional"
   local recommended=("fzf" "fd" "rg" "bat" "eza" "tmux" "jq")
   for tool in "${recommended[@]}"; do
     if has "${tool}"; then
@@ -234,51 +231,52 @@ cmd_status() {
       tmux) ver=$("${tool}" -V 2>/dev/null | cut -d' ' -f2) ;;
       jq) ver=$("${tool}" --version 2>/dev/null) ;;
       esac
-      echo "    ${GRN}✓${RST} ${tool} ${DIM}${ver}${RST}"
+      echo "${GRN}✓${RST} ${tool} ${DIM}${ver}${RST}"
     else
-      echo "    ${DIM}-${RST} ${tool}"
+      echo "${DIM}-${RST} ${tool}"
     fi
   done
 
   # Bundled binaries (downloaded via `make download-tools`)
-  echo ""
-  echo "${CYN}Bundled Binaries:${RST}"
+  jsh_section "Bundled Binaries"
   local bin_dir="${JSH_DIR}/bin/${platform}"
 
   if [[ "${platform}" == "unknown" ]]; then
-    echo "  ${YLW}⚠${RST} Unknown platform, cannot check bundled binaries"
+    echo "${YLW}⚠${RST} Unknown platform, cannot check bundled binaries"
   elif [[ ! -d "${bin_dir}" ]]; then
-    echo "  ${DIM}-${RST} No bundled binaries (optional)"
-    echo "  ${DIM}  Download: make download-tools${RST}"
-    echo "  ${DIM}  Or install: brew install jq fzf${RST}"
+    echo "${DIM}-${RST} No bundled binaries (optional)"
+    echo "${DIM}Download: make download-tools${RST}"
+    echo "${DIM}Or install: brew install jq fzf${RST}"
   else
     local key_deps=("fzf" "jq")
     for dep in "${key_deps[@]}"; do
       local result status_type status_detail
-      result=$(_check_bundled_binary "${dep}" "${bin_dir}")
+      # _check_bundled_binary returns non-zero for non-healthy states.
+      # Avoid set -e exits so we can render a full status report.
+      result=$(_check_bundled_binary "${dep}" "${bin_dir}" || true)
       status_type="${result%%:*}"
       status_detail="${result#*:}"
 
       case "${status_type}" in
       healthy)
-        echo "  ${GRN}✓${RST} ${dep}: ${status_detail}"
+        echo "${GRN}✓${RST} ${dep}: ${status_detail}"
         ;;
       not_bundled)
-        echo "  ${DIM}-${RST} ${dep} (not bundled for ${platform})"
+        echo "${DIM}-${RST} ${dep} (not bundled for ${platform})"
         ;;
       not_in_path)
-        echo "  ${RED}✘${RST} ${dep}: bundled but not in PATH"
-        echo "      ${DIM}Expected: ${bin_dir}/${dep}${RST}"
+        echo "${RED}✘${RST} ${dep}: bundled but not in PATH"
+        echo "${DIM}Expected: ${bin_dir}/${dep}${RST}"
         ((issues++))
         ;;
       wrong_path)
-        echo "  ${YLW}⚠${RST} ${dep}: using system version"
-        echo "      ${DIM}Active:   ${status_detail}${RST}"
-        echo "      ${DIM}Bundled:  ${bin_dir}/${dep}${RST}"
+        echo "${YLW}⚠${RST} ${dep}: using system version"
+        echo "${DIM}Active: ${status_detail}${RST}"
+        echo "${DIM}Bundled: ${bin_dir}/${dep}${RST}"
         ;;
       runtime_error)
-        echo "  ${RED}✘${RST} ${dep}: ${status_detail}"
-        echo "      ${DIM}Binary: ${bin_dir}/${dep}${RST}"
+        echo "${RED}✘${RST} ${dep}: ${status_detail}"
+        echo "${DIM}Binary: ${bin_dir}/${dep}${RST}"
         ((issues++))
         ;;
       esac
@@ -286,16 +284,15 @@ cmd_status() {
   fi
 
   # ZSH Plugins
-  echo ""
-  echo "${CYN}ZSH Plugins:${RST}"
+  jsh_section "ZSH Plugins"
   local plugins_dir="${JSH_DIR}/lib/zsh-plugins"
   local plugins=("zsh-autosuggestions" "zsh-syntax-highlighting" "zsh-history-substring-search")
   for plugin in "${plugins[@]}"; do
     local plugin_file="${plugins_dir}/${plugin}.zsh"
     if [[ -f "${plugin_file}" ]]; then
-      echo "  ${GRN}✓${RST} ${plugin}"
+      echo "${GRN}✓${RST} ${plugin}"
     else
-      echo "  ${YLW}⚠${RST} ${plugin} ${DIM}(not installed)${RST}"
+      echo "${YLW}⚠${RST} ${plugin} ${DIM}(not installed)${RST}"
     fi
   done
 
@@ -303,12 +300,11 @@ cmd_status() {
   if [[ -d "${plugins_dir}/highlighters" ]]; then
     local highlighter_count
     highlighter_count=$(find "${plugins_dir}/highlighters" -name "*.zsh" 2>/dev/null | wc -l | tr -d ' ')
-    echo "  ${GRN}✓${RST} highlighters ${DIM}(${highlighter_count} files)${RST}"
+    echo "${GRN}✓${RST} highlighters ${DIM}(${highlighter_count} files)${RST}"
   fi
 
   # Submodules
-  echo ""
-  echo "${CYN}Submodules:${RST}"
+  jsh_section "Submodules"
   local gitmodules="${JSH_DIR}/.gitmodules"
   if [[ -f "${gitmodules}" ]]; then
     while IFS= read -r line; do
@@ -317,41 +313,39 @@ cmd_status() {
         local full_path="${JSH_DIR}/${submod_path}"
 
         if [[ ! -d "${full_path}" ]]; then
-          echo "  ${RED}✘${RST} ${submod_path} ${DIM}(not cloned)${RST}"
+          echo "${RED}✘${RST} ${submod_path} ${DIM}(not cloned)${RST}"
           ((issues++))
         elif [[ -z "$(ls -A "${full_path}" 2>/dev/null)" ]]; then
-          echo "  ${YLW}○${RST} ${submod_path} ${DIM}(not initialized)${RST}"
+          echo "${YLW}○${RST} ${submod_path} ${DIM}(not initialized)${RST}"
         else
           local sub_commit
           sub_commit=$(git -C "${full_path}" rev-parse --short HEAD 2>/dev/null || echo "?")
-          echo "  ${GRN}✓${RST} ${submod_path} ${DIM}(${sub_commit})${RST}"
+          echo "${GRN}✓${RST} ${submod_path} ${DIM}(${sub_commit})${RST}"
         fi
       fi
     done <"${gitmodules}"
   else
-    echo "  ${DIM}No submodules configured${RST}"
+    echo "${DIM}No submodules configured${RST}"
   fi
 
   # Dependency versions (from versions.json)
   local versions_file="${JSH_DIR}/lib/versions.json"
   if [[ -f "${versions_file}" ]]; then
-    echo ""
-    echo "${CYN}Configured Versions:${RST}"
+    jsh_section "Configured Versions"
     if has jq; then
-      jq -r 'to_entries[] | "  \(.key): v\(.value)"' "${versions_file}" 2>/dev/null
+      jq -r 'to_entries[] | "\(.key): v\(.value)"' "${versions_file}" 2>/dev/null
     else
       # Fallback without jq
       while IFS= read -r line; do
         if [[ "${line}" =~ \"([^\"]+)\":\ *\"([^\"]+)\" ]]; then
-          echo "  ${BASH_REMATCH[1]}: v${BASH_REMATCH[2]}"
+          echo "${BASH_REMATCH[1]}: v${BASH_REMATCH[2]}"
         fi
       done <"${versions_file}"
     fi
   fi
 
   # Broken symlinks check
-  echo ""
-  echo "${CYN}Broken symlinks:${RST}"
+  jsh_section "Broken Symlinks"
   local xdg_config="${XDG_CONFIG_HOME:-${HOME}/.config}"
   local broken_links=()
 
@@ -368,16 +362,16 @@ cmd_status() {
   done < <(_find_broken_symlinks "${xdg_config}" 2)
 
   if [[ ${#broken_links[@]} -eq 0 ]]; then
-    echo "  ${GRN}✓${RST} None found"
+    echo "${GRN}✓${RST} None found"
   else
     for link in "${broken_links[@]}"; do
       local target
       target=$(readlink "${link}" 2>/dev/null || echo "unknown")
       if [[ "${fix_issues}" == true ]]; then
         rm -f "${link}"
-        echo "  ${GRN}✓${RST} Fixed: ${link}"
+        echo "${GRN}✓${RST} Fixed: ${link}"
       else
-        echo "  ${RED}✘${RST} ${link} -> ${target}"
+        echo "${RED}✘${RST} ${link} -> ${target}"
         ((issues++))
       fi
     done

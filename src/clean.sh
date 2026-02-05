@@ -202,26 +202,23 @@ cmd_clean() {
                 shift
                 ;;
             -h|--help)
-                echo "${BOLD}jsh clean${RST} - Clean caches and temporary files"
-                echo ""
-                echo "${BOLD}USAGE:${RST}"
-                echo "    jsh clean [options]"
-                echo ""
-                echo "${BOLD}OPTIONS:${RST}"
-                echo "    --dry-run, -n   Show what would be cleaned without doing it"
-                echo "    -y, --yes       Skip confirmation prompts"
-                echo ""
-                echo "${BOLD}CLEANS:${RST}"
-                echo "    • Homebrew cache (brew cleanup)"
-                echo "    • npm cache"
-                echo "    • pip cache"
-                echo "    • cargo registry cache"
-                echo "    • Go build cache"
-                echo "    • Vim undo files"
-                echo "    • Sync-conflict files in \$JSH_DIR"
-                echo "    • Broken symlinks in \$HOME"
-                echo "    • Docker unused data"
-                echo ""
+                jsh_section "jsh clean"
+                jsh_note "Clean caches and temporary files"
+                jsh_section "Usage"
+                echo "jsh clean [options]"
+                jsh_section "Options"
+                echo "--dry-run, -n Show what would be cleaned without doing it"
+                echo "-y, --yes Skip confirmation prompts"
+                jsh_section "Cleans"
+                echo "• Homebrew cache (brew cleanup)"
+                echo "• npm cache"
+                echo "• pip cache"
+                echo "• cargo registry cache"
+                echo "• Go build cache"
+                echo "• Vim undo files"
+                echo "• Sync-conflict files in \$JSH_DIR"
+                echo "• Broken symlinks in \$HOME"
+                echo "• Docker unused data"
                 return 0
                 ;;
             *)
@@ -230,9 +227,7 @@ cmd_clean() {
         esac
     done
 
-    echo ""
-    echo "${BOLD}jsh clean${RST}"
-    echo ""
+    jsh_section "jsh clean"
 
     # Define all cleanup targets
     local -a targets=(
@@ -250,8 +245,7 @@ cmd_clean() {
     local -a available_targets=()
 
     # Check which targets are available
-    echo "${CYAN}Scanning for cleanup targets...${RST}"
-    echo ""
+    jsh_milestone "Scanning cleanup targets"
 
     for target in "${targets[@]}"; do
         local name="${target%%:*}"
@@ -263,13 +257,12 @@ cmd_clean() {
             local size
             size=$(${size_func} 2>/dev/null)
             available_targets+=("${name}")
-            printf "  ${GRN}✓${RST} %-25s %s\n" "${desc}" "${DIM}(${size})${RST}"
+            printf "${GRN}✓${RST} %-25s %s\n" "${desc}" "${DIM}(${size})${RST}"
         fi
     done
 
     if [[ ${#available_targets[@]} -eq 0 ]]; then
-        echo "  ${DIM}No cleanup targets found${RST}"
-        echo ""
+        echo "${DIM}No cleanup targets found${RST}"
         return 0
     fi
 
@@ -277,14 +270,12 @@ cmd_clean() {
 
     if [[ "${dry_run}" == true ]]; then
         info "Dry run - no changes will be made"
-        echo ""
         return 0
     fi
 
     # Confirm unless -y flag
     if [[ "${skip_confirm}" != true ]]; then
-        read -r -p "Clean all targets? [y/N] " confirm
-        if [[ ! "${confirm}" =~ ^[Yy] ]]; then
+        if ! ui_confirm "Clean all targets?" "n"; then
             info "Cancelled"
             return 0
         fi
@@ -292,8 +283,7 @@ cmd_clean() {
     fi
 
     # Run cleanup
-    echo "${CYAN}Cleaning...${RST}"
-    echo ""
+    jsh_milestone "Cleaning"
 
     local errors=0
     for name in "${available_targets[@]}"; do
@@ -308,11 +298,11 @@ cmd_clean() {
             fi
         done
 
-        printf "  Cleaning %-25s" "${desc}..."
+        printf "Cleaning %-25s " "${desc}..."
         if ${clean_func} 2>/dev/null; then
-            echo " ${GRN}done${RST}"
+            echo "${GRN}done${RST}"
         else
-            echo " ${YLW}skipped${RST}"
+            echo "${YLW}skipped${RST}"
         fi
     done
 
