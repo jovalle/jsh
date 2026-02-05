@@ -109,9 +109,6 @@ _source_module() {
 # 1. Core utilities (colors, logging, platform detection)
 _source_module "core.sh"
 
-# 1b. Dependency management (optional, requires jq for full functionality)
-source_if "${JSH_DIR}/src/deps.sh"
-
 # =============================================================================
 # PATH Setup (must be before zsh.sh/bash.sh for fzf detection)
 # =============================================================================
@@ -132,6 +129,7 @@ path_prepend "${HOME}/.cargo/bin"         # Rust
 path_prepend "${HOME}/go/bin"             # Go
 path_prepend "${HOME}/.npm-global/bin"    # Node global
 path_prepend "${HOME}/.local/share/pnpm"  # pnpm global
+path_prepend "${HOME}/.cache/.bun/bin"    # bun global
 
 # 2. Vi-mode configuration (before shell-specific, affects keybindings)
 _source_module "vi-mode.sh"
@@ -151,10 +149,7 @@ _source_module "gitx.sh"
 # 5. Git status functions (for prompt)
 _source_module "gitstatus.sh"
 
-# 6. Tool integrations (FZF, direnv - shell-agnostic)
-_source_module "tools.sh"
-
-# 6b. External tool completions (cross-shell, cached)
+# 6. External tool completions (cross-shell, cached)
 _source_module "completion.sh"
 
 # 7. Shell-specific configuration (zsh.sh or bash.sh)
@@ -212,8 +207,8 @@ GPG_TTY=$(tty)
 # Detect jssh session mode
 if [[ "${JSH_ENV:-}" == "ssh" ]]; then
     debug "Jsh SSH mode: ${JSH_MODE:-unknown}"
-    debug "  Payload: ${JSSH_PAYLOAD_DIR:-$JSH_DIR}"
-    debug "  Session: ${JSH_SESSION:-none}"
+    debug "Payload: ${JSSH_PAYLOAD_DIR:-$JSH_DIR}"
+    debug "Session: ${JSH_SESSION:-none}"
 
     # In shared mode, session cleanup is handled by the parent shell script
     # In ephemeral mode (legacy), we still clean up on exit
