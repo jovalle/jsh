@@ -66,7 +66,6 @@ tramp
 *[Cc][Ll][Aa][Uu][Dd][Ee]*
 *[Gg][Ee][Mm][Ii][Nn][Ii]*
 .github/prompts/
-.planning/
 
 # =============================================================================
 # Environment & Secrets
@@ -141,6 +140,7 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 .npm/
+.nvimlog
 .cache/
 .parcel-cache/
 .eslintcache
@@ -223,6 +223,8 @@ jsh.yaml
 *.local
 local/*
 !local/*.example
+/.*.sh
+/docs/
 
 # Keep example files
 !*.example
@@ -244,5 +246,3 @@ archive/
 
 # Local copies
 * copy.*
-docs/
-.commit-strategy.sh
