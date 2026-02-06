@@ -20,6 +20,9 @@ _source_files() {
     for f in "${JSH_DIR}/src/"*.sh; do
         [[ -f "$f" ]] && echo "$f"
     done
+    for f in "${JSH_DIR}/src/commands/"*.sh; do
+        [[ -f "$f" ]] && echo "$f"
+    done
 }
 
 # Extract all top-level commands from @jsh-cmd tags

@@ -65,6 +65,45 @@ _jsh_cached_completion() {
 }
 
 # =============================================================================
+# Dynamic completion: just (loads on first tab press)
+# =============================================================================
+# Registers a stub that loads `just --completions zsh` on first tab-complete.
+# This avoids any startup cost - completion is fetched only when needed.
+
+_jsh_setup_just_completion() {
+    command -v just &>/dev/null || return 0
+
+    if [[ -n "${ZSH_VERSION:-}" ]]; then
+        # Zsh: register stub that loads real completion on first use
+        _jsh_just_stub() {
+            unfunction _jsh_just_stub 2>/dev/null
+            local _just_completions
+            _just_completions="$(just --completions zsh 2>/dev/null)"
+            # Patch: replace showing full recipe body with completing other commands
+            # The upstream script shows `just --show $recipe` which dumps the whole recipe
+            _just_completions="${_just_completions//_message \"\`just --show \$recipe\`\"/_arguments -s -S \$common \'*:: :_just_commands\'}"
+            eval "${_just_completions}"
+            _just "$@"
+        }
+        compdef _jsh_just_stub just
+    elif [[ -n "${BASH_VERSION:-}" ]]; then
+        # Bash: use complete -F with lazy loader
+        _jsh_just_stub() {
+            eval "$(just --completions bash 2>/dev/null)"
+            _just
+        }
+        complete -F _jsh_just_stub just
+    fi
+}
+
+# Defer just completion setup until compdef is available (after compinit)
+if [[ -n "${ZSH_VERSION:-}" ]]; then
+    _JSH_DEFERRED_COMPLETIONS+=("_jsh_setup_just_completion")
+else
+    _jsh_setup_just_completion
+fi
+
+# =============================================================================
 # Load completions for installed tools
 # =============================================================================
 
