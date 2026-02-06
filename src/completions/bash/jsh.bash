@@ -30,6 +30,42 @@ _jsh_completion() {
     # Get the main command
     local cmd="${words[1]}"
 
+    # Complete options for main commands.
+    if [[ "$cur" == -* ]]; then
+        local options
+        options=$("$jsh_completion" options "$cmd" 2>/dev/null | cut -d: -f1 | tr '\n' ' ')
+        COMPREPLY=($(compgen -W "$options" -- "$cur"))
+        [[ ${#COMPREPLY[@]} -gt 0 ]] && return
+    fi
+
+    # setup supports file-path arguments for --adopt / --decom.
+    if [[ "$cmd" == "setup" ]]; then
+        if [[ "$prev" == "--adopt" || "$prev" == "--decom" ]]; then
+            COMPREPLY=($(compgen -f -- "$cur"))
+            return
+        fi
+        if [[ "$cur" == --adopt=* ]]; then
+            local prefix="${cur%%=*}="
+            local value="${cur#*=}"
+            local matches
+            COMPREPLY=()
+            while IFS= read -r match; do
+                COMPREPLY+=("${prefix}${match}")
+            done < <(compgen -f -- "$value")
+            return
+        fi
+        if [[ "$cur" == --decom=* ]]; then
+            local prefix="${cur%%=*}="
+            local value="${cur#*=}"
+            local matches
+            COMPREPLY=()
+            while IFS= read -r match; do
+                COMPREPLY+=("${prefix}${match}")
+            done < <(compgen -f -- "$value")
+            return
+        fi
+    fi
+
     # Get subcommands for this command (options available via --help)
     local subcommands
     subcommands=$("$jsh_completion" subcommands "$cmd" 2>/dev/null | cut -d: -f1 | tr '\n' ' ')
@@ -42,27 +78,6 @@ _jsh_completion() {
 
     # No further completions
     COMPREPLY=()
-
-    # Handle special dynamic completions (positional arguments only)
-    case "$cmd" in
-        host)
-            if [[ "${words[2]}" =~ ^(status|refresh|reset)$ ]] && [[ $cword -eq 3 ]]; then
-                _jsh_host_names
-            fi
-            ;;
-    esac
-}
-
-# Dynamic completion: remote host names
-_jsh_host_names() {
-    local hosts_dir="${JSH_DIR:-${HOME}/.jsh}/local/hosts"
-    local hosts=""
-
-    if [[ -d "$hosts_dir" ]]; then
-        hosts=$(find "$hosts_dir" -maxdepth 1 -name '*.json' -exec basename {} .json \; 2>/dev/null | tr '\n' ' ')
-    fi
-
-    COMPREPLY=($(compgen -W "$hosts" -- "${COMP_WORDS[COMP_CWORD]}"))
 }
 
 # Register completion

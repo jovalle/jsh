@@ -22,8 +22,26 @@ _jsh() {
             _describe -t commands 'jsh commands' commands
             ;;
         args)
-            local cmd="${words[1]}"
+            local cmd="${words[2]}"
+            local prev_word="${words[CURRENT-1]}"
+            local cur_word="${words[CURRENT]}"
             local -a subcommands
+
+            # setup supports file-path arguments for --adopt / --decom.
+            if [[ "${cmd}" == "setup" ]]; then
+                if [[ "${prev_word}" == "--adopt" || "${prev_word}" == "--decom" ]]; then
+                    _files
+                    return
+                fi
+                if [[ "${cur_word}" == -* ]]; then
+                    local -a options
+                    if [[ -x "$jsh_completion" ]]; then
+                        options=(${(f)"$("$jsh_completion" options "$cmd" 2>/dev/null)"})
+                        _describe -t options "${cmd} options" options
+                        return
+                    fi
+                fi
+            fi
 
             # Get subcommands for this command (options available via --help)
             if [[ -x "$jsh_completion" ]]; then
@@ -34,71 +52,8 @@ _jsh() {
             if [[ ${#words[@]} -eq 2 ]] && [[ ${#subcommands[@]} -gt 0 ]]; then
                 _describe -t subcommands "${cmd} subcommands" subcommands
             fi
-
-            # Handle special dynamic completions
-            case "$cmd" in
-                cli)
-                    # CLI helper subcommands
-                    if [[ ${#words[@]} -eq 2 ]]; then
-                        local -a cli_commands
-                        cli_commands=(
-                            'discover:Find all scripts with @name metadata'
-                            'completions:Generate shell completions for discovered scripts'
-                            'help:Show help for a specific script'
-                        )
-                        _describe -t cli-commands 'cli commands' cli_commands
-                    elif [[ ${#words[@]} -eq 3 ]] && [[ "${words[2]}" == "help" ]]; then
-                        # Complete script names for 'jsh cli help <name>'
-                        _jsh_cli_script_names
-                    fi
-                    ;;
-                host)
-                    if [[ "${words[2]}" =~ ^(status|refresh|reset)$ ]] && [[ ${#words[@]} -eq 3 ]]; then
-                        _jsh_host_names
-                    fi
-                    ;;
-            esac
             ;;
     esac
-}
-
-# Dynamic completion: remote host names
-_jsh_host_names() {
-    local hosts_dir="${JSH_DIR:-${HOME}/.jsh}/local/hosts"
-    local -a hosts
-
-    if [[ -d "$hosts_dir" ]]; then
-        hosts=(${(f)"$(find "$hosts_dir" -maxdepth 1 -name '*.json' 2>/dev/null | xargs -I {} basename {} .json)"})
-    fi
-
-    if [[ ${#hosts[@]} -gt 0 ]]; then
-        _describe -t hosts 'remote hosts' hosts
-    fi
-}
-
-# Dynamic completion: CLI script names (for jsh cli help)
-_jsh_cli_script_names() {
-    local jsh_dir="${JSH_DIR:-${HOME}/.jsh}"
-    local bin_dir="${jsh_dir}/bin"
-    local -a scripts
-
-    if [[ -d "$bin_dir" ]]; then
-        # Find scripts with @name metadata
-        for script in "$bin_dir"/*; do
-            [[ -x "$script" ]] || continue
-            local name
-            name=$(head -50 "$script" 2>/dev/null | grep -m1 "^# @name " | sed 's/^# @name //')
-            if [[ -n "$name" ]]; then
-                local desc
-                desc=$(head -50 "$script" 2>/dev/null | grep -m1 "^# @desc " | sed 's/^# @desc //')
-                scripts+=("${name}:${desc:-No description}")
-            fi
-        done
-    fi
-
-    if [[ ${#scripts[@]} -gt 0 ]]; then
-        _describe -t scripts 'available scripts' scripts
-    fi
 }
 
 _jsh "$@"
