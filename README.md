@@ -14,7 +14,7 @@
 ## Quick Start
 
 ```bash
-git clone --depth 1 https://github.com/jovalle/jsh ~/.jsh
+git clone https://github.com/jovalle/.jsh ~/.jsh
 ~/.jsh/jsh setup
 ```
 
