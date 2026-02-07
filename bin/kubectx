@@ -204,7 +204,7 @@ choose_contexts_to_delete_interactive() {
     # Confirm deletion
     echo "You selected the following contexts for deletion:"
     for ctx in "${contexts_to_delete[@]}"; do
-      echo "  - $ctx"
+      echo "- $ctx"
     done
     echo -n "Are you sure you want to delete these contexts? [y/N]: "
     read -r confirmation

@@ -500,9 +500,9 @@ else
         echo "Directories in ${dir}:"
         while IFS= read -r d; do
             dirs+=("$d")
-            printf "  %3d) %s\n" "$i" "$d"
+            printf "%d) %s\n" "$i" "$d"
             ((i++))
-            [[ $i -gt 50 ]] && { echo "  ... (limited to 50)"; break; }
+            [[ $i -gt 50 ]] && { echo "... (limited to 50)"; break; }
         done < <(find "${dir}" -maxdepth 3 -type d 2>/dev/null | head -50)
 
         [[ ${#dirs[@]} -eq 0 ]] && { echo "No directories found"; return 1; }
@@ -527,9 +527,9 @@ else
         echo "Files in current directory:"
         while IFS= read -r f; do
             files+=("$f")
-            printf "  %3d) %s\n" "$i" "$f"
+            printf "%d) %s\n" "$i" "$f"
             ((i++))
-            [[ $i -gt 50 ]] && { echo "  ... (limited to 50)"; break; }
+            [[ $i -gt 50 ]] && { echo "... (limited to 50)"; break; }
         done < <(find . -maxdepth 2 -type f 2>/dev/null | head -50)
 
         [[ ${#files[@]} -eq 0 ]] && { echo "No files found"; return 1; }
@@ -560,7 +560,7 @@ else
             [[ -z "$cmd" ]] && continue
             [[ -n "$pattern" ]] && [[ "$cmd" != *"$pattern"* ]] && continue
             cmds+=("$cmd")
-            printf "  %3d) %s\n" "$i" "${cmd:0:80}"
+            printf "%d) %s\n" "$i" "${cmd:0:80}"
             ((i++))
             [[ $i -gt 30 ]] && break
         done < <(history | tail -100)
@@ -587,8 +587,8 @@ else
         local i=1
 
         echo "Running processes${pattern:+ matching '$pattern'}:"
-        echo "  PID   USER     COMMAND"
-        echo "  ---   ----     -------"
+        echo "PID USER COMMAND"
+        echo "--- ---- -------"
 
         while IFS= read -r line; do
             [[ $i -eq 1 ]] && { ((i++)); continue; }  # Skip header
@@ -599,7 +599,7 @@ else
 
             [[ -n "$pattern" ]] && [[ "$cmd" != *"$pattern"* ]] && continue
             pids+=("$pid")
-            printf "  %3d) %-6s %-8s %s\n" "${#pids[@]}" "$pid" "$user" "${cmd:0:60}"
+            printf "%d) %-6s %-8s %s\n" "${#pids[@]}" "$pid" "$user" "${cmd:0:60}"
             [[ ${#pids[@]} -ge 30 ]] && break
         done < <(ps aux)
 
@@ -630,9 +630,9 @@ else
             [[ -z "$branch" ]] && continue
             [[ "$branch" == "HEAD"* ]] && continue
             branches+=("$branch")
-            printf "  %3d) %s\n" "$i" "$branch"
+            printf "%d) %s\n" "$i" "$branch"
             ((i++))
-            [[ $i -gt 30 ]] && { echo "  ... (limited to 30)"; break; }
+            [[ $i -gt 30 ]] && { echo "... (limited to 30)"; break; }
         done < <(git branch -a 2>/dev/null)
 
         [[ ${#branches[@]} -eq 0 ]] && { echo "No branches found (not a git repo?)"; return 1; }
@@ -660,7 +660,7 @@ else
             sha=$(echo "$line" | awk '{print $1}')
             msg=$(echo "$line" | cut -d' ' -f2-)
             commits+=("$sha")
-            printf "  %3d) %s %s\n" "$i" "${sha:0:7}" "${msg:0:65}"
+            printf "%d) %s %s\n" "$i" "${sha:0:7}" "${msg:0:65}"
             ((i++))
             [[ $i -gt 30 ]] && break
         done < <(git log --oneline -30 2>/dev/null)
