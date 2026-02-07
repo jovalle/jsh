@@ -357,32 +357,32 @@ _git_parse_url_debug() {
     # Check URL type
     echo "${C_CYAN}URL Type Detection:${C_RESET}"
     if _is_shorthand_url "$url"; then
-        echo "  ✓ Shorthand format (owner/repo)"
-        echo "  → Will use GITX_DEFAULT_PLATFORM: ${C_YELLOW}${GITX_DEFAULT_PLATFORM}${C_RESET}"
-        echo "  → Fallbacks: ${C_DIM}${GITX_FALLBACK_PLATFORMS}${C_RESET}"
+        echo "✓ Shorthand format (owner/repo)"
+        echo "→ Will use GITX_DEFAULT_PLATFORM: ${C_YELLOW}${GITX_DEFAULT_PLATFORM}${C_RESET}"
+        echo "→ Fallbacks: ${C_DIM}${GITX_FALLBACK_PLATFORMS}${C_RESET}"
     elif [[ "$url" == git@* ]]; then
-        echo "  ✓ SSH format (git@host:path)"
+        echo "✓ SSH format (git@host:path)"
     elif [[ "$url" == https://* ]]; then
-        echo "  ✓ HTTPS format"
+        echo "✓ HTTPS format"
     elif [[ "$url" == ssh://* ]]; then
-        echo "  ✓ SSH URL format (ssh://)"
+        echo "✓ SSH URL format (ssh://)"
     else
-        echo "  ? Unknown format"
+        echo "? Unknown format"
     fi
     echo
 
     # Bitbucket Server detection
     echo "${C_CYAN}Bitbucket Server Detection:${C_RESET}"
     if [[ "$url" =~ /projects/[^/]+/repos/[^/]+(/browse)?$ ]]; then
-        echo "  ✓ Matched: /projects/*/repos/* pattern (browse URL)"
+        echo "✓ Matched: /projects/*/repos/* pattern (browse URL)"
         local normalized
         normalized="$(_git_normalize_bitbucket_url "$url" "https")"
-        echo "  → Normalized to: ${C_GREEN}${normalized}${C_RESET}"
+        echo "→ Normalized to: ${C_GREEN}${normalized}${C_RESET}"
         url="$normalized"
     elif [[ "$url" == */scm/* ]]; then
-        echo "  ✓ Matched: /scm/ path (Bitbucket Server clone URL)"
+        echo "✓ Matched: /scm/ path (Bitbucket Server clone URL)"
     else
-        echo "  ✗ Not a Bitbucket Server URL"
+        echo "✗ Not a Bitbucket Server URL"
     fi
     echo
 
@@ -395,22 +395,22 @@ _git_parse_url_debug() {
     repo="${parsed##*|}"
 
     echo "${C_CYAN}Parsed Components:${C_RESET}"
-    echo "  Platform: ${C_GREEN}${platform:-<empty>}${C_RESET}"
-    echo "  Owner:    ${C_GREEN}${owner:-<empty>}${C_RESET}"
-    echo "  Repo:     ${C_GREEN}${repo:-<empty>}${C_RESET}"
+    echo "Platform: ${C_GREEN}${platform:-<empty>}${C_RESET}"
+    echo "Owner: ${C_GREEN}${owner:-<empty>}${C_RESET}"
+    echo "Repo: ${C_GREEN}${repo:-<empty>}${C_RESET}"
     echo
 
     # Show generated URLs
     echo "${C_CYAN}Generated Clone URLs:${C_RESET}"
     if [[ -n "$platform" ]] && [[ -n "$owner" ]] && [[ -n "$repo" ]]; then
-        echo "  SSH:   git@${platform}:${owner}/${repo}.git"
-        echo "  HTTPS: https://${platform}/${owner}/${repo}.git"
+        echo "SSH: git@${platform}:${owner}/${repo}.git"
+        echo "HTTPS: https://${platform}/${owner}/${repo}.git"
         if [[ "$url" == */scm/* ]] || [[ "$original_url" =~ /projects/ ]]; then
-            echo "  BB SSH:   ssh://git@${platform}/${owner}/${repo}.git"
-            echo "  BB HTTPS: https://${platform}/scm/${owner}/${repo}.git"
+            echo "BB SSH: ssh://git@${platform}/${owner}/${repo}.git"
+            echo "BB HTTPS: https://${platform}/scm/${owner}/${repo}.git"
         fi
     else
-        echo "  ${C_RED}Cannot generate URLs - missing components${C_RESET}"
+        echo "${C_RED}Cannot generate URLs - missing components${C_RESET}"
     fi
     echo
 
@@ -650,10 +650,10 @@ _git_submodules() {
         path="${path%% *}"
 
         case "$status" in
-            '-') printf '  %s%s%s @ %s (not initialized)\n' "$C_DIM" "$path" "$C_RESET" "$sha" ;;
-            '+') printf '  %s%s%s @ %s (dirty)\n' "$C_YELLOW" "$path" "$C_RESET" "$sha" ;;
-            'U') printf '  %s%s%s @ %s (conflict)\n' "$C_RED" "$path" "$C_RESET" "$sha" ;;
-            *)   printf '  %s @ %s\n' "$path" "$sha" ;;
+            '-') printf '%s%s%s @ %s (not initialized)\n' "$C_DIM" "$path" "$C_RESET" "$sha" ;;
+            '+') printf '%s%s%s @ %s (dirty)\n' "$C_YELLOW" "$path" "$C_RESET" "$sha" ;;
+            'U') printf '%s%s%s @ %s (conflict)\n' "$C_RED" "$path" "$C_RESET" "$sha" ;;
+            *)   printf '%s @ %s\n' "$path" "$sha" ;;
         esac
     done
 }
@@ -747,8 +747,8 @@ _profiles_apply() {
         url_host="${parsed%%|*}"
         repo_name="${parsed##*|}"
 
-        # Detect old-style SSH host aliases (e.g., github-jovalle)
-        if [[ -n "$url_host" ]] && [[ "$url_host" != *.* ]]; then
+        # Detect old-style SSH host aliases (e.g., github-jovalle, github.com-user)
+        if [[ -n "$url_host" ]] && { [[ "$url_host" != *.* ]] || [[ "$url_host" == *-"${user}" ]]; }; then
             # Non-FQDN host = SSH alias, migrate to standard host
             local standard_host="${host:-$GITX_DEFAULT_PLATFORM}"
             local new_origin_url="git@${standard_host}:${user}/${repo_name}.git"
@@ -866,35 +866,35 @@ cmd_profile_status() {
     local has_leak=false
 
     if [[ -n "${GIT_AUTHOR_NAME:-}" ]]; then
-        printf '  GIT_AUTHOR_NAME ...... %b⚠ "%s" OVERRIDES profile!%b\n' "$C_YELLOW" "$GIT_AUTHOR_NAME" "$C_RESET"
+        printf 'GIT_AUTHOR_NAME ...... %b⚠ "%s" OVERRIDES profile!%b\n' "$C_YELLOW" "$GIT_AUTHOR_NAME" "$C_RESET"
         has_leak=true
     else
-        printf '  GIT_AUTHOR_NAME ...... %bok%b\n' "$C_GREEN" "$C_RESET"
+        printf 'GIT_AUTHOR_NAME ...... %bok%b\n' "$C_GREEN" "$C_RESET"
     fi
 
     if [[ -n "${GIT_AUTHOR_EMAIL:-}" ]]; then
-        printf '  GIT_AUTHOR_EMAIL ..... %b⚠ "%s" OVERRIDES profile!%b\n' "$C_YELLOW" "$GIT_AUTHOR_EMAIL" "$C_RESET"
+        printf 'GIT_AUTHOR_EMAIL ..... %b⚠ "%s" OVERRIDES profile!%b\n' "$C_YELLOW" "$GIT_AUTHOR_EMAIL" "$C_RESET"
         has_leak=true
     else
-        printf '  GIT_AUTHOR_EMAIL ..... %bok%b\n' "$C_GREEN" "$C_RESET"
+        printf 'GIT_AUTHOR_EMAIL ..... %bok%b\n' "$C_GREEN" "$C_RESET"
     fi
 
     if [[ -n "${GIT_COMMITTER_NAME:-}" ]]; then
-        printf '  GIT_COMMITTER_NAME ... %b⚠ "%s" OVERRIDES profile!%b\n' "$C_YELLOW" "$GIT_COMMITTER_NAME" "$C_RESET"
+        printf 'GIT_COMMITTER_NAME ... %b⚠ "%s" OVERRIDES profile!%b\n' "$C_YELLOW" "$GIT_COMMITTER_NAME" "$C_RESET"
         has_leak=true
     else
-        printf '  GIT_COMMITTER_NAME ... %bok%b\n' "$C_GREEN" "$C_RESET"
+        printf 'GIT_COMMITTER_NAME ... %bok%b\n' "$C_GREEN" "$C_RESET"
     fi
 
     if [[ -n "${GIT_COMMITTER_EMAIL:-}" ]]; then
-        printf '  GIT_COMMITTER_EMAIL .. %b⚠ "%s" OVERRIDES profile!%b\n' "$C_YELLOW" "$GIT_COMMITTER_EMAIL" "$C_RESET"
+        printf 'GIT_COMMITTER_EMAIL .. %b⚠ "%s" OVERRIDES profile!%b\n' "$C_YELLOW" "$GIT_COMMITTER_EMAIL" "$C_RESET"
         has_leak=true
     else
-        printf '  GIT_COMMITTER_EMAIL .. %bok%b\n' "$C_GREEN" "$C_RESET"
+        printf 'GIT_COMMITTER_EMAIL .. %bok%b\n' "$C_GREEN" "$C_RESET"
     fi
 
     if [[ "$has_leak" == "true" ]]; then
-        printf '\n  %b⚠ gitx commit will override these env vars with profile values.%b\n' "$C_YELLOW" "$C_RESET"
+        printf '\n%b⚠ gitx commit will override these env vars with profile values.%b\n' "$C_YELLOW" "$C_RESET"
     fi
 }
 
@@ -1084,11 +1084,11 @@ _banner() {
         if [[ -n "$banner" ]]; then
             printf '%b' "$C_BOLD$C_CYAN"
             while IFS= read -r line; do
-                printf '  %s\n' "$line"
+                printf '%s\n' "$line"
             done <<< "$banner"
             printf '%b' "$C_RESET"
             if [[ -n "$profile" ]]; then
-                printf '%b  profile: %s%b\n' "$C_DIM" "$profile" "$C_RESET"
+                printf '%bprofile: %s%b\n' "$C_DIM" "$profile" "$C_RESET"
             fi
             return 0
         fi
@@ -1636,8 +1636,8 @@ EOF
                 fi
             fi
 
-            [[ "$debug" == true ]] && echo "  ${C_DIM}SSH URL:${C_RESET} $clone_url"
-            [[ "$debug" == true ]] && [[ -n "$git_ssh_cmd" ]] && echo "  ${C_DIM}SSH CMD:${C_RESET} $git_ssh_cmd"
+            [[ "$debug" == true ]] && echo "${C_DIM}SSH URL:${C_RESET} $clone_url"
+            [[ "$debug" == true ]] && [[ -n "$git_ssh_cmd" ]] && echo "${C_DIM}SSH CMD:${C_RESET} $git_ssh_cmd"
 
             # Try SSH clone (with custom SSH command if profile has ssh_key)
             if [[ -n "$git_ssh_cmd" ]]; then
@@ -1654,11 +1654,11 @@ EOF
                 return 0
             fi
 
-            [[ "$debug" == true ]] && echo "  ${C_RED}SSH failed${C_RESET}"
+            [[ "$debug" == true ]] && echo "${C_RED}SSH failed${C_RESET}"
 
             # Try HTTPS fallback for this platform
             local https_url="https://${try_platform}/${shorthand_owner}/${shorthand_repo}.git"
-            [[ "$debug" == true ]] && echo "  ${C_DIM}HTTPS URL:${C_RESET} $https_url"
+            [[ "$debug" == true ]] && echo "${C_DIM}HTTPS URL:${C_RESET} $https_url"
 
             if git clone "$https_url" "$target_dir" 2>/dev/null; then
                 success "Cloned from ${try_platform} (HTTPS): $(_projects_display_name "$target_dir")"
@@ -1668,7 +1668,7 @@ EOF
                 return 0
             fi
 
-            [[ "$debug" == true ]] && echo "  ${C_RED}HTTPS failed${C_RESET}"
+            [[ "$debug" == true ]] && echo "${C_RED}HTTPS failed${C_RESET}"
 
             # Clean up failed attempt
             rm -rf "$target_dir" 2>/dev/null
@@ -1797,10 +1797,10 @@ cmd_create() {
             printf '\nSelect a profile for this project:\n'
             local i=1
             for idx in "${!profiles[@]}"; do
-                printf '  %s%d)%s %s - %s\n' "$C_CYAN" "$i" "$C_RESET" "${profiles[$idx]}" "${profile_info[$idx]}"
+                printf '%s%d)%s %s - %s\n' "$C_CYAN" "$i" "$C_RESET" "${profiles[$idx]}" "${profile_info[$idx]}"
                 ((i++))
             done
-            printf '  %ss)%s Skip (no profile)\n' "$C_DIM" "$C_RESET"
+            printf '%ss)%s Skip (no profile)\n' "$C_DIM" "$C_RESET"
             printf '\n'
 
             local choice
@@ -1911,13 +1911,13 @@ EOF
 
     # Output in requested order
     printf '\n'
-    printf '  %s✓%s %s\n' "$C_GREEN" "$C_RESET" "$(_projects_display_name "$target_dir")"
-    printf '  %s✓%s README.md\n' "$C_GREEN" "$C_RESET"
-    printf '  %s✓%s .gitignore\n' "$C_GREEN" "$C_RESET"
+    printf '%s✓%s %s\n' "$C_GREEN" "$C_RESET" "$(_projects_display_name "$target_dir")"
+    printf '%s✓%s README.md\n' "$C_GREEN" "$C_RESET"
+    printf '%s✓%s .gitignore\n' "$C_GREEN" "$C_RESET"
     if [[ -n "$origin_url" ]]; then
-        printf '  %s✓%s .git initialized %s→%s %s\n' "$C_GREEN" "$C_RESET" "$C_DIM" "$C_RESET" "$origin_url"
+        printf '%s✓%s .git initialized %s→%s %s\n' "$C_GREEN" "$C_RESET" "$C_DIM" "$C_RESET" "$origin_url"
     else
-        printf '  %s✓%s .git initialized\n' "$C_GREEN" "$C_RESET"
+        printf '%s✓%s .git initialized\n' "$C_GREEN" "$C_RESET"
     fi
     printf '\n'
 
@@ -2222,7 +2222,7 @@ cmd_amend() {
     old_date=$(git log -1 --format='%ai')
     new_date_display=$(_ts_to_display "$parsed_epoch")
     printf '%s\n' "Amending commit timestamp:"
-    printf '  %s → %s\n' "$old_date" "$new_date_display"
+    printf '%s → %s\n' "$old_date" "$new_date_display"
 
     # Perform amend
     GIT_AUTHOR_DATE="$git_date" \

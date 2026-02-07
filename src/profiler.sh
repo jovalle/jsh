@@ -199,8 +199,8 @@ _profile_report_json() {
     local total_time="$1"
 
     echo "{"
-    echo "  \"total_ms\": ${total_time},"
-    echo "  \"sections\": ["
+    echo "\"total_ms\": ${total_time},"
+    echo "\"sections\": ["
 
     local i duration first=true
     for ((i=_PROFILE_IDX_START; i<${#_PROFILE_NAMES[@]}+_PROFILE_IDX_START; i++)); do
@@ -211,14 +211,14 @@ _profile_report_json() {
         if [[ -n "${end}" ]]; then
             duration=$(awk "BEGIN {printf \"%.3f\", ${end} - ${start}}")
             [[ "${first}" != "true" ]] && echo ","
-            printf "    {\"name\": \"%s\", \"duration_ms\": %s}" "${name}" "${duration}"
+            printf "{\"name\": \"%s\", \"duration_ms\": %s}" "${name}" "${duration}"
             first=false
         fi
     done
 
     echo ""
-    echo "  ],"
-    echo "  \"marks\": ["
+    echo "],"
+    echo "\"marks\": ["
 
     first=true
     for mark in "${_PROFILE_MARKS[@]}"; do
@@ -231,12 +231,12 @@ _profile_report_json() {
             offset="0"
         fi
         [[ "${first}" != "true" ]] && echo ","
-        printf "    {\"name\": \"%s\", \"offset_ms\": %s}" "${mark_name}" "${offset}"
+        printf "{\"name\": \"%s\", \"offset_ms\": %s}" "${mark_name}" "${offset}"
         first=false
     done
 
     echo ""
-    echo "  ]"
+    echo "]"
     echo "}"
 }
 

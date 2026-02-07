@@ -142,11 +142,11 @@ log_section "Repository Status"
 
 echo ""
 echo "COPR repositories:"
-dnf copr list 2>/dev/null | head -10 || echo "  (none)"
+dnf copr list 2>/dev/null | head -10 || echo "(none)"
 
 echo ""
 echo "Flatpak remotes:"
-flatpak remote-list 2>/dev/null || echo "  (none)"
+flatpak remote-list 2>/dev/null || echo "(none)"
 
 echo ""
 log_info "Repository configuration complete!"

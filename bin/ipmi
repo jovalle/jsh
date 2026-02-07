@@ -135,8 +135,8 @@ setup_wizard() {
 
     # Get password method
     printf "\nHow would you like to store the password?\n"
-    printf "  1) Password file (recommended)\n"
-    printf "  2) Environment variable in config\n"
+    printf "1) Password file (recommended)\n"
+    printf "2) Environment variable in config\n"
     printf "Choice [1]: "
     read -r choice
     choice="${choice:-1}"

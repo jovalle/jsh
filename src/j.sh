@@ -182,7 +182,7 @@ _j_select_remote() {
         printf '%sSelect remote project:%s\n' "${DIM:-}" "${RST:-}" >&2
         local i=1
         for name in "${remotes[@]}"; do
-            printf '  %s[%d]%s %s%s%s\n' "${C_GIT:-}" "${i}" "${RST:-}" "${CYN:-}" "${name}" "${RST:-}" >&2
+            printf '%s[%d]%s %s%s%s\n' "${C_GIT:-}" "${i}" "${RST:-}" "${CYN:-}" "${name}" "${RST:-}" >&2
             (( i += 1 ))
         done
         printf '%sEnter number (1-%d):%s ' "${DIM:-}" "$(( i - 1 ))" "${RST:-}" >&2
@@ -506,7 +506,7 @@ _j_interactive() {
         # Show "(current)" option first if requested
         if [[ -n "${current_marker}" ]]; then
             display_paths+=("CURRENT:${include_current}")
-            printf '  %s[%d]%s %s%s%s\n' "${C_GIT:-}" "${i}" "${RST:-}" \
+            printf '%s[%d]%s %s%s%s\n' "${C_GIT:-}" "${i}" "${RST:-}" \
                 "${CYN:-}" "${current_marker}" "${RST:-}" >&2
             (( i += 1 ))
         fi
@@ -516,7 +516,7 @@ _j_interactive() {
             [[ -z "${p}" ]] && continue
             [[ ${i} -gt 10 ]] && break
             display_paths+=("${p}")
-            printf '  %s[%d]%s %s%s%s\n' "${C_GIT:-}" "${i}" "${RST:-}" \
+            printf '%s[%d]%s %s%s%s\n' "${C_GIT:-}" "${i}" "${RST:-}" \
                 "${CYN:-}" "$(_j_display_path "${p}")" "${RST:-}" >&2
             (( i += 1 ))
         done
@@ -644,7 +644,7 @@ j() {
                 # Migration: -l moved to gitx list
                 printf '%s!%s "j -l" has moved to "gitx list"\n' "${C_WARN:-}" "${RST:-}" >&2
                 shift
-                printf '  %sRun:%s gitx list %s\n' "${DIM:-}" "${RST:-}" "$*" >&2
+                printf '%sRun:%s gitx list %s\n' "${DIM:-}" "${RST:-}" "$*" >&2
                 return 1
                 ;;
             -r|--remote)

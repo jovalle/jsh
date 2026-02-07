@@ -76,7 +76,7 @@ function print_run {
   for ((i = "$1"; i < "$1" + "$2" && i < printable_colours; i++)); do
     print_colour "$i"
   done
-  printf "  "
+  printf "%s" " "
 }
 
 # Print blocks of colours

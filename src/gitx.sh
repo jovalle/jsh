@@ -72,7 +72,7 @@ _gitx_open_remote() {
         printf '%s✗%s No remote project found: %s%s%s\n' "${C_ERR:-}" "${RST:-}" "${C_GIT:-}" "${name}" "${RST:-}" >&2
         printf '\n%sAvailable remote projects:%s\n' "${DIM:-}" "${RST:-}" >&2
         _gitx_list_remotes | while read -r proj; do
-            printf '  %s%s%s\n' "${CYN:-}" "${proj}" "${RST:-}" >&2
+            printf '%s%s%s\n' "${CYN:-}" "${proj}" "${RST:-}" >&2
         done
         return 1
     fi
@@ -97,7 +97,7 @@ _gitx_open_remote() {
         "${C_GIT:-}" "${name}" "${RST:-}" \
         "${C_MUTED:-}" "${ssh_target}" "${RST:-}" \
         "${CYN:-}" "${remote_path}" "${RST:-}"
-    [[ -n "${ssh_key}" ]] && printf '  %sKey:%s %s\n' "${DIM:-}" "${RST:-}" "${ssh_key}"
+    [[ -n "${ssh_key}" ]] && printf '%sKey:%s %s\n' "${DIM:-}" "${RST:-}" "${ssh_key}"
 
     code --remote "ssh-remote+${ssh_target}" "${remote_path}"
 }
@@ -161,7 +161,7 @@ gitx() {
                 printf '%sUsage:%s gitx remote <project-name>\n' "${DIM:-}" "${RST:-}" >&2
                 printf '\n%sAvailable remote projects:%s\n' "${DIM:-}" "${RST:-}" >&2
                 _gitx_list_remotes | while read -r proj; do
-                    printf '  %s%s%s\n' "${CYN:-}" "${proj}" "${RST:-}" >&2
+                    printf '%s%s%s\n' "${CYN:-}" "${proj}" "${RST:-}" >&2
                 done
                 return 1
             fi

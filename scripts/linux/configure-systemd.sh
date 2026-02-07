@@ -86,7 +86,7 @@ fi
 
 # Add SSH_AUTH_SOCK to environment if not already set
 SSH_AGENT_ENV_FILE="${HOME}/.config/environment.d/ssh-agent.conf"
-SSH_AGENT_ENV_LINE='SSH_AUTH_SOCK="${XDG_RUNTIME_DIR}/ssh-agent.socket"'
+SSH_AGENT_ENV_LINE="SSH_AUTH_SOCK=\"\${XDG_RUNTIME_DIR}/ssh-agent.socket\""
 if [[ -f "${SSH_AGENT_ENV_FILE}" ]] && grep -qxF "${SSH_AGENT_ENV_LINE}" "${SSH_AGENT_ENV_FILE}" 2>/dev/null; then
   log_info "SSH_AUTH_SOCK environment already configured"
 else
@@ -145,7 +145,7 @@ if command -v podman &>/dev/null; then
 
   # Set DOCKER_HOST for Docker CLI compatibility
   PODMAN_ENV_FILE="${HOME}/.config/environment.d/podman.conf"
-  PODMAN_ENV_LINE='DOCKER_HOST="unix://${XDG_RUNTIME_DIR}/podman/podman.sock"'
+  PODMAN_ENV_LINE="DOCKER_HOST=\"unix://\${XDG_RUNTIME_DIR}/podman/podman.sock\""
   if [[ -f "${PODMAN_ENV_FILE}" ]] && grep -qxF "${PODMAN_ENV_LINE}" "${PODMAN_ENV_FILE}" 2>/dev/null; then
     log_info "DOCKER_HOST environment already configured"
   else
@@ -169,11 +169,11 @@ echo ""
 
 for service in ssh-agent.service gpg-agent.socket podman.socket; do
   if systemctl --user is-active "${service}" &>/dev/null 2>&1; then
-    echo -e "  ${GREEN}●${NC} ${service} (running)"
+    echo -e "${GREEN}●${NC} ${service} (running)"
   elif systemctl --user is-enabled "${service}" &>/dev/null 2>&1; then
-    echo -e "  ${YELLOW}○${NC} ${service} (enabled, not running)"
+    echo -e "${YELLOW}○${NC} ${service} (enabled, not running)"
   else
-    echo -e "  ${RED}○${NC} ${service} (not configured)"
+    echo -e "${RED}○${NC} ${service} (not configured)"
   fi
 done
 
