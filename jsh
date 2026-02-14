@@ -88,6 +88,7 @@ source_if "${JSH_DIR}/src/clean.sh"
 source_if "${JSH_DIR}/src/sync.sh"
 source_if "${JSH_DIR}/src/configure.sh"
 source_if "${JSH_DIR}/src/commands/common.sh"
+source_if "${JSH_DIR}/src/commands/brew.sh"
 source_if "${JSH_DIR}/src/commands/setup.sh"
 
 # =============================================================================
@@ -115,6 +116,7 @@ ${CYN}doctor${RST} Comprehensive health check with diagnostics and fixes
 
 ${BOLD}MAINTENANCE:${RST}
 ${CYN}clean${RST} Clean caches and temporary files
+${CYN}brew${RST} Run brew commands (delegates on Linux root)
 
 ${BOLD}CONFIGURATION:${RST}
 ${CYN}sync${RST} Sync git repo with remote (safe bidirectional)
@@ -151,6 +153,7 @@ jsh teardown --full # Remove everything
 ${BOLD}ENVIRONMENT:${RST}
 JSH_DIR Jsh installation directory (default: ~/.jsh)
 JSH_NO_GUM Disable optional gum UI integration (set to 1)
+JSH_BREW_DELEGATE_USER Delegate user for brew commands when running as root
 
 HELP
 }
@@ -205,6 +208,9 @@ main() {
     ;;
   clean)
     cmd_clean "$@"
+    ;;
+  brew)
+    cmd_brew "$@"
     ;;
   sync)
     cmd_sync "$@"

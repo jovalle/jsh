@@ -404,6 +404,7 @@ teardown() {
     run gitx profile
     [ "$status" -eq 0 ]
     assert_contains "$output" "id_personal"
+    assert_contains "$output" "SHA256:"
 }
 
 # =============================================================================

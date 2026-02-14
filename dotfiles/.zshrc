@@ -11,17 +11,6 @@ if [[ -z "${PATH:-}" ]] || [[ ":${PATH}:" != *":/usr/bin:"* ]]; then
     export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin${PATH:+:$PATH}"
 fi
 
-# Homebrew/Linuxbrew PATH - must be early so modern tools are found first
-# macOS: /opt/homebrew (Apple Silicon) or /usr/local (Intel)
-# Linux: /home/linuxbrew/.linuxbrew
-if [[ -x "/opt/homebrew/bin/brew" ]]; then
-    eval "$(/opt/homebrew/bin/brew shellenv)"
-elif [[ -x "/usr/local/bin/brew" ]]; then
-    eval "$(/usr/local/bin/brew shellenv)"
-elif [[ -x "/home/linuxbrew/.linuxbrew/bin/brew" ]]; then
-    eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-fi
-
 # Ensure UTF-8 locale is set early (required for Unicode prompt icons)
 # VS Code terminals may not inherit LANG from the parent environment
 # Customize via JSH_LANG (e.g., de_DE.UTF-8, ja_JP.UTF-8, pt_BR.UTF-8)

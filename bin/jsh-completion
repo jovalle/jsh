@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # @name jsh-completion
-# @desc Dynamic completion helper for jsh - parses @jsh-* metadata comments
+# @desc Dynamic completion helper for jsh
 #
-# This script extracts command metadata from jsh source files to provide
-# shell completion data. It implements Phase 2 of the dynamic completions plan.
+# This script extracts command metadata from live CLI dispatch and command
+# source files so completions stay in sync with real commands.
 #
 # Usage:
 #   jsh-completion commands              # List all commands with descriptions
@@ -14,29 +14,67 @@ set -euo pipefail
 
 JSH_DIR="${JSH_DIR:-${HOME}/.jsh}"
 
-# Get all source files that may contain metadata
-_source_files() {
-    echo "${JSH_DIR}/jsh"
-    for f in "${JSH_DIR}/src/"*.sh; do
-        [[ -f "$f" ]] && echo "$f"
-    done
-    for f in "${JSH_DIR}/src/commands/"*.sh; do
-        [[ -f "$f" ]] && echo "$f"
-    done
+# Extract top-level commands from jsh dispatch case block.
+# This avoids stale completions when @jsh-cmd comments drift.
+_dispatch_commands() {
+    local jsh_file="${JSH_DIR}/jsh"
+    [[ -f "${jsh_file}" ]] || return 1
+
+    awk '
+        /^[[:space:]]*case[[:space:]]+"\$\{cmd\}"[[:space:]]+in[[:space:]]*$/ { in_case=1; next }
+        in_case && /^[[:space:]]*esac[[:space:]]*$/ { exit }
+        in_case {
+            if ($0 ~ /^[[:space:]]*[^#].*\)[[:space:]]*$/) {
+                patterns = $0
+                sub(/^[[:space:]]*/, "", patterns)
+                sub(/\)[[:space:]]*$/, "", patterns)
+                gsub(/[[:space:]]+/, "", patterns)
+                if (patterns == "*") next
+
+                count = split(patterns, parts, "|")
+                for (i = 1; i <= count; i++) {
+                    cmd = parts[i]
+                    if (cmd ~ /^[a-z][a-z0-9-]*$/) {
+                        print cmd
+                    }
+                }
+            }
+        }
+    ' "${jsh_file}" | sort -u
 }
 
-# Extract all top-level commands from @jsh-cmd tags
+_cmd_help_output() {
+    local cmd="$1"
+    local jsh_cmd="${JSH_DIR}/jsh"
+
+    [[ -x "${jsh_cmd}" ]] || return 1
+    "${jsh_cmd}" "${cmd}" --help 2>/dev/null | sed -E 's/\x1B\[[0-9;]*[A-Za-z]//g' || true
+}
+
+_extract_help_section() {
+    local section="$1"
+
+    awk -v section="${section}" '
+        $0 == section { in_section=1; next }
+        in_section {
+            if ($0 == "") {
+                if (seen_line) exit
+                next
+            }
+            if ($0 ~ /^[A-Z][A-Za-z[:space:]]*$/) exit
+            print
+            seen_line=1
+        }
+    '
+}
+
+# Extract all top-level commands.
 # Output format: "command:description" (for zsh _describe)
 cmd_commands() {
-    local files
-    files=$(_source_files)
-
-    # shellcheck disable=SC2086
-    grep -hE '^# @jsh-cmd [a-z]' $files 2>/dev/null | \
-        sed 's/^# @jsh-cmd //' | \
-        while read -r name desc; do
-            echo "${name}:${desc}"
-        done | sort -u
+    local cmd
+    while IFS= read -r cmd; do
+        [[ -n "${cmd}" ]] && echo "${cmd}:${cmd}"
+    done < <(_dispatch_commands)
 }
 
 # Extract subcommands for a given command from @jsh-sub tags
@@ -44,25 +82,20 @@ cmd_commands() {
 # Output format: "subcommand:description"
 cmd_subcommands() {
     local cmd="$1"
-    local files in_cmd=false
-    files=$(_source_files)
+    local all_cmds
+    all_cmds="$(_dispatch_commands | tr '\n' ' ')"
+    [[ " ${all_cmds} " == *" ${cmd} "* ]] || return 0
 
-    # shellcheck disable=SC2086
-    grep -hE '^# @jsh-(cmd|sub) ' $files 2>/dev/null | \
-        while read -r line; do
-            if [[ "$line" =~ ^#\ @jsh-cmd\ ([a-z]+) ]]; then
-                if [[ "${BASH_REMATCH[1]}" == "$cmd" ]]; then
-                    in_cmd=true
-                else
-                    in_cmd=false
-                fi
-            elif [[ "$in_cmd" == true ]] && [[ "$line" =~ ^#\ @jsh-sub\ (.+) ]]; then
-                local rest="${BASH_REMATCH[1]}"
-                local name="${rest%% *}"
-                local desc="${rest#* }"
-                echo "${name}:${desc}"
-            fi
-        done
+    local help_output
+    help_output="$(_cmd_help_output "${cmd}")"
+    [[ -n "${help_output}" ]] || return 0
+
+    while IFS= read -r line; do
+        [[ -z "${line}" ]] && continue
+        if [[ "${line}" =~ ^[[:space:]]*([a-z][a-z0-9_-]*)[[:space:]]+(.+)$ ]]; then
+            echo "${BASH_REMATCH[1]}:${BASH_REMATCH[2]}"
+        fi
+    done < <(printf '%s\n' "${help_output}" | _extract_help_section "Commands")
 }
 
 # Extract options for a given command from @jsh-opt tags
@@ -70,25 +103,33 @@ cmd_subcommands() {
 # Output format: "-s,--long:description" or "--long:description"
 cmd_options() {
     local cmd="$1"
-    local files in_cmd=false
-    files=$(_source_files)
+    local all_cmds
+    all_cmds="$(_dispatch_commands | tr '\n' ' ')"
+    [[ " ${all_cmds} " == *" ${cmd} "* ]] || return 0
 
-    # shellcheck disable=SC2086
-    grep -hE '^# @jsh-(cmd|opt) ' $files 2>/dev/null | \
-        while read -r line; do
-            if [[ "$line" =~ ^#\ @jsh-cmd\ ([a-z]+) ]]; then
-                if [[ "${BASH_REMATCH[1]}" == "$cmd" ]]; then
-                    in_cmd=true
-                else
-                    in_cmd=false
-                fi
-            elif [[ "$in_cmd" == true ]] && [[ "$line" =~ ^#\ @jsh-opt\ (.+) ]]; then
-                local rest="${BASH_REMATCH[1]}"
-                local opt="${rest%% *}"
-                local desc="${rest#* }"
-                echo "${opt}:${desc}"
-            fi
+    local help_output
+    help_output="$(_cmd_help_output "${cmd}")"
+    [[ -n "${help_output}" ]] || return 0
+
+    while IFS= read -r line; do
+        [[ -z "${line}" ]] && continue
+        local rest option_desc option
+        local -a parsed_options=()
+
+        rest="${line#${line%%[![:space:]]*}}"
+        while [[ "${rest}" =~ ^(-{1,2}[^[:space:],]+(=[^[:space:],]+)?),?[[:space:]]*(.*)$ ]]; do
+            parsed_options+=("${BASH_REMATCH[1]}")
+            rest="${BASH_REMATCH[3]}"
         done
+
+        option_desc="${rest#${rest%%[![:space:]]*}}"
+        [[ ${#parsed_options[@]} -eq 0 ]] && continue
+        [[ -z "${option_desc}" ]] && continue
+
+        for option in "${parsed_options[@]}"; do
+            echo "${option}:${option_desc}"
+        done
+    done < <(printf '%s\n' "${help_output}" | _extract_help_section "Options")
 }
 
 # Main dispatch
