@@ -52,18 +52,65 @@ deps: ## Install contributor dependencies
 	@printf "$(BLUE)==>$(RESET) Installing contributor dependencies...\\n"
 ifeq ($(OS),darwin)
 	@$(call require_cmd,brew)
-	@for tool in shellcheck bats-core pre-commit jq yamllint bash; do \
-		if brew list "$$tool" >/dev/null 2>&1; then \
+	@brew_cmd="brew"; \
+	if [ "$$(id -u)" = "0" ]; then \
+		delegate_user="$${JSH_BREW_DELEGATE_USER:-$$(id -nu 1000 2>/dev/null || getent passwd 1000 2>/dev/null | cut -d: -f1)}"; \
+		if [ -n "$$delegate_user" ]; then \
+			if command -v runuser >/dev/null 2>&1; then \
+				brew_cmd="runuser -u $$delegate_user -- brew"; \
+			elif command -v sudo >/dev/null 2>&1; then \
+				brew_cmd="sudo -H -u $$delegate_user brew"; \
+			fi; \
+		else \
+			printf "$(YELLOW)⚠$(RESET) Running as root without a brew delegate user; brew commands may fail\\n"; \
+		fi; \
+	fi; \
+	for tool in shellcheck bats-core pre-commit jq yamllint bash; do \
+		if $$brew_cmd list "$$tool" >/dev/null 2>&1; then \
 			printf "$(GREEN)✓$(RESET) $$tool (already installed)\\n"; \
 		else \
 			printf "$(BLUE)↓$(RESET) Installing $$tool...\\n"; \
-			brew install "$$tool" >/dev/null 2>&1 && \
+			$$brew_cmd install "$$tool" >/dev/null 2>&1 && \
 				printf "$(GREEN)✓$(RESET) $$tool installed\\n" || \
 				printf "$(RED)✘$(RESET) Failed to install $$tool\\n"; \
 		fi; \
 	done
 else ifeq ($(OS),linux)
-	@if command -v apt-get >/dev/null 2>&1; then \
+	@if command -v brew >/dev/null 2>&1; then \
+		printf "$(CYAN)Detected:$(RESET) brew\n"; \
+		run_brew() { \
+			if [ "$$(id -u)" = "0" ]; then \
+				local delegate_user delegate_home; \
+				delegate_user="$${JSH_BREW_DELEGATE_USER:-$$(id -nu 1000 2>/dev/null || getent passwd 1000 2>/dev/null | cut -d: -f1)}"; \
+				if [ -z "$$delegate_user" ]; then \
+					printf "$(YELLOW)⚠$(RESET) Running as root without a brew delegate user; brew commands may fail\n"; \
+					return 1; \
+				fi; \
+				delegate_home="$$(getent passwd "$$delegate_user" 2>/dev/null | cut -d: -f6)"; \
+				[ -n "$$delegate_home" ] || delegate_home="/home/$$delegate_user"; \
+				if command -v runuser >/dev/null 2>&1; then \
+					runuser -u "$$delegate_user" -- env HOME="$$delegate_home" XDG_CACHE_HOME="$$delegate_home/.cache" bash -lc "cd '$$delegate_home' && /home/linuxbrew/.linuxbrew/bin/brew $$*"; \
+				elif command -v sudo >/dev/null 2>&1; then \
+					sudo -H -u "$$delegate_user" /home/linuxbrew/.linuxbrew/bin/brew "$$@"; \
+				else \
+					printf "$(RED)✘$(RESET) Need runuser or sudo to run brew as non-root\n"; \
+					return 1; \
+				fi; \
+			else \
+				brew "$$@"; \
+			fi; \
+		}; \
+		for tool in shellcheck bats-core pre-commit jq yamllint bash; do \
+			if run_brew list "$$tool" >/dev/null 2>&1; then \
+				printf "$(GREEN)✓$(RESET) $$tool (already installed)\n"; \
+			else \
+				printf "$(BLUE)↓$(RESET) Installing $$tool...\n"; \
+				run_brew install "$$tool" >/dev/null 2>&1 && \
+					printf "$(GREEN)✓$(RESET) $$tool installed\n" || \
+					printf "$(RED)✘$(RESET) Failed to install $$tool\n"; \
+			fi; \
+		done; \
+	elif command -v apt-get >/dev/null 2>&1; then \
 		printf "$(CYAN)Detected:$(RESET) apt\\n"; \
 		sudo apt-get update -qq; \
 		sudo apt-get install -y -qq shellcheck bats jq python3-pip >/dev/null 2>&1; \
@@ -89,7 +136,6 @@ endif
 	else \
 		printf "$(YELLOW)⚠$(RESET) pre-commit not installed; skipping hook installation\\n"; \
 	fi
-	@printf "$(GREEN)✓$(RESET) Dependency setup complete\\n"
 
 lint: ## Run shell lint checks
 	@$(call require_cmd,shellcheck)

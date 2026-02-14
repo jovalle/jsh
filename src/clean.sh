@@ -30,6 +30,85 @@ _clean_dir_size_bytes() {
     fi
 }
 
+# Convert a human-readable size string (e.g., 3.5GB, 120MB, 0B) to bytes
+_clean_size_to_bytes() {
+    local value number unit multiplier
+    value=$(echo "$1" | tr -d '[:space:]')
+
+    [[ -z "${value}" ]] && {
+        echo "0"
+        return 0
+    }
+
+    number="${value%%[!0-9.]*}"
+    unit="${value#${number}}"
+    unit=$(echo "${unit}" | tr '[:lower:]' '[:upper:]')
+
+    [[ -z "${number}" ]] && {
+        echo "0"
+        return 0
+    }
+
+    case "${unit}" in
+        ""|"B")
+            multiplier=1
+            ;;
+        "K"|"KB"|"KIB")
+            multiplier=1024
+            ;;
+        "M"|"MB"|"MIB")
+            multiplier=$((1024 ** 2))
+            ;;
+        "G"|"GB"|"GIB")
+            multiplier=$((1024 ** 3))
+            ;;
+        "T"|"TB"|"TIB")
+            multiplier=$((1024 ** 4))
+            ;;
+        "P"|"PB"|"PIB")
+            multiplier=$((1024 ** 5))
+            ;;
+        "E"|"EB"|"EIB")
+            multiplier=$((1024 ** 6))
+            ;;
+        *)
+            echo "0"
+            return 0
+            ;;
+    esac
+
+    awk -v n="${number}" -v m="${multiplier}" 'BEGIN { printf "%.0f\n", n * m }'
+}
+
+# Convert bytes to a human-readable size string
+_clean_bytes_to_human() {
+    local bytes="$1"
+
+    awk -v b="${bytes}" '
+        BEGIN {
+            n = b + 0
+            if (n <= 0) {
+                print "0B"
+                exit
+            }
+
+            split("B KB MB GB TB PB EB", units, " ")
+            i = 1
+
+            while (n >= 1024 && i < 7) {
+                n = n / 1024
+                i++
+            }
+
+            if (n >= 10 || i == 1) {
+                printf "%.0f%s\n", n, units[i]
+            } else {
+                printf "%.1f%s\n", n, units[i]
+            }
+        }
+    '
+}
+
 # =============================================================================
 # Cleanup Definitions
 # =============================================================================
@@ -173,7 +252,32 @@ _clean_check_docker() {
 }
 
 _clean_size_docker() {
-    docker system df --format '{{.Size}}' 2>/dev/null | head -1 || echo "?"
+    local dangling_bytes stopped_bytes buildcache_bytes total_bytes
+    local buildcache_reclaimable="0B"
+
+    dangling_bytes=$(docker image ls --filter dangling=true --format '{{.Size}}' 2>/dev/null | while IFS= read -r value; do
+        _clean_size_to_bytes "${value}"
+    done | awk '{sum += $1} END {printf "%.0f", sum}')
+
+    stopped_bytes=$(docker ps -a --filter status=exited --size --format '{{.Size}}' 2>/dev/null | while IFS= read -r value; do
+        value="${value%% *}"
+        _clean_size_to_bytes "${value}"
+    done | awk '{sum += $1} END {printf "%.0f", sum}')
+
+    buildcache_reclaimable=$(docker system df --format '{{.Type}}|{{.Reclaimable}}' 2>/dev/null | while IFS= read -r row; do
+        local type reclaimable
+        type="${row%%|*}"
+        reclaimable="${row#*|}"
+        reclaimable=$(echo "${reclaimable}" | sed -E 's/ \([^)]+\)$//')
+        if [[ "${type}" == "Build Cache" ]]; then
+            echo "${reclaimable}"
+            return 0
+        fi
+    done)
+    buildcache_bytes=$(_clean_size_to_bytes "${buildcache_reclaimable:-0B}")
+
+    total_bytes=$(( ${dangling_bytes:-0} + ${stopped_bytes:-0} + ${buildcache_bytes:-0} ))
+    _clean_bytes_to_human "${total_bytes}"
 }
 
 _clean_run_docker() {

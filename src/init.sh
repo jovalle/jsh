@@ -57,6 +57,23 @@ export JSH_DIR
 # Source profiler first for timing (defines no-op stubs when JSH_PROFILE!=1)
 [[ -f "${JSH_DIR}/src/profiler.sh" ]] && source "${JSH_DIR}/src/profiler.sh"
 
+# Bootstrap brew delegate env early (before brew.sh runs)
+_jsh_bootstrap_brew_delegate() {
+    local _delegate_file _delegate_user
+
+    for _delegate_file in "${JSH_DIR}/local/.jshrc" "${HOME}/.jshrc.local"; do
+        [[ -r "${_delegate_file}" ]] || continue
+
+        _delegate_user=$(grep -E '^[[:space:]]*export[[:space:]]+JSH_BREW_DELEGATE_USER=' "${_delegate_file}" 2>/dev/null | tail -1 | sed -E 's/^[[:space:]]*export[[:space:]]+JSH_BREW_DELEGATE_USER=//' | sed -E 's/^"(.*)"$/\1/')
+        if [[ -n "${_delegate_user}" ]]; then
+            export JSH_BREW_DELEGATE_USER="${_delegate_user}"
+            return 0
+        fi
+    done
+}
+
+_jsh_bootstrap_brew_delegate
+
 # =============================================================================
 # Homebrew Environment (cached for performance)
 # =============================================================================

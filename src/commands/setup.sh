@@ -4,6 +4,260 @@
 [[ -n "${_JSH_SETUP_LOADED:-}" ]] && return 0
 _JSH_SETUP_LOADED=1
 
+# Install fzf binary from submodule into bin/${JSH_PLATFORM}/
+_setup_install_fzf() {
+  local dry_run="${1:-false}"
+
+  if [[ ! -f "${JSH_DIR}/lib/fzf/install" ]]; then
+    prefix_warn "fzf submodule not initialized, skipping fzf install"
+    return 0
+  fi
+
+  local platform="${JSH_PLATFORM:-}"
+  if [[ -z "${platform}" ]]; then
+    prefix_warn "JSH_PLATFORM not set, skipping fzf install"
+    return 0
+  fi
+
+  local bin_dir="${JSH_DIR}/bin/${platform}"
+  local fzf_bin="${JSH_DIR}/lib/fzf/bin/fzf"
+
+  if [[ -x "${bin_dir}/fzf" ]]; then
+    local ver
+    ver=$("${bin_dir}/fzf" --version 2>/dev/null | awk '{print $1}')
+    prefix_success "fzf ${ver:+$ver }(bundled)"
+    _setup_verify_fzf_path "${bin_dir}"
+    return 0
+  fi
+
+  if [[ "${dry_run}" == true ]]; then
+    prefix_info "Would download fzf binary via lib/fzf/install --bin"
+    prefix_info "Would symlink ${bin_dir}/fzf -> lib/fzf/bin/fzf"
+    return 0
+  fi
+
+  info "Installing fzf binary..."
+  if bash "${JSH_DIR}/lib/fzf/install" --bin 2>/dev/null; then
+    if [[ -x "${fzf_bin}" ]]; then
+      mkdir -p "${bin_dir}"
+      ln -sf "${fzf_bin}" "${bin_dir}/fzf"
+      prefix_success "fzf installed ($("${fzf_bin}" --version 2>/dev/null | awk '{print $1}'))"
+      _setup_verify_fzf_path "${bin_dir}"
+    else
+      prefix_warn "fzf download succeeded but binary not found at ${fzf_bin}"
+    fi
+  else
+    prefix_warn "Failed to download fzf binary (no network or unsupported platform)"
+  fi
+}
+
+# Verify fzf is accessible in PATH after install
+_setup_verify_fzf_path() {
+  local bin_dir="$1"
+
+  # Already in PATH — nothing to report
+  if command -v fzf &>/dev/null; then
+    return 0
+  fi
+
+  # Check if the bin dir is in PATH at all
+  if [[ ":${PATH}:" != *":${bin_dir}:"* ]]; then
+    prefix_warn "fzf not in PATH — reload your shell: exec \$SHELL"
+  fi
+}
+
+_setup_is_linux_root() {
+  [[ "${JSH_PLATFORM:-$(uname -s | tr '[:upper:]' '[:lower:]')}" == "linux" ]] && [[ "${EUID:-$(id -u)}" == "0" ]]
+}
+
+_setup_uid1000_user() {
+  if command -v getent >/dev/null 2>&1; then
+    getent passwd 1000 2>/dev/null | cut -d: -f1
+  else
+    awk -F: '$3 == 1000 {print $1; exit}' /etc/passwd 2>/dev/null
+  fi
+}
+
+_setup_user_home() {
+  local username="$1"
+  [[ -z "${username}" ]] && return 1
+
+  if command -v getent >/dev/null 2>&1; then
+    getent passwd "${username}" 2>/dev/null | cut -d: -f6
+  else
+    awk -F: -v user="${username}" '$1 == user {print $6; exit}' /etc/passwd 2>/dev/null
+  fi
+}
+
+_setup_get_local_export() {
+  local var_name="$1"
+  local local_rc="${JSH_DIR}/local/.jshrc"
+
+  [[ -f "${local_rc}" ]] || return 1
+  grep -E "^export ${var_name}=" "${local_rc}" 2>/dev/null | tail -1 | sed -E "s/^export ${var_name}=//" | sed -E 's/^"(.*)"$/\1/'
+}
+
+_setup_set_local_export() {
+  local var_name="$1"
+  local var_value="$2"
+  local dry_run="${3:-false}"
+  local local_rc="${JSH_DIR}/local/.jshrc"
+
+  if [[ "${dry_run}" == true ]]; then
+    prefix_info "Would set ${var_name}=\"${var_value}\" in ${local_rc}"
+    return 0
+  fi
+
+  mkdir -p "${JSH_DIR}/local"
+  touch "${local_rc}" || {
+    warn "Could not write ${local_rc}"
+    return 1
+  }
+
+  local tmp_file replaced line
+  tmp_file="$(mktemp)"
+  replaced=0
+
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    if [[ "${line}" =~ ^export[[:space:]]+${var_name}= ]]; then
+      printf 'export %s="%s"\n' "${var_name}" "${var_value}" >>"${tmp_file}"
+      replaced=1
+    else
+      printf '%s\n' "${line}" >>"${tmp_file}"
+    fi
+  done <"${local_rc}"
+
+  if [[ "${replaced}" == "0" ]]; then
+    printf 'export %s="%s"\n' "${var_name}" "${var_value}" >>"${tmp_file}"
+  fi
+
+  mv "${tmp_file}" "${local_rc}"
+}
+
+_setup_find_linuxbrew_prefix() {
+  if [[ -x "/home/linuxbrew/.linuxbrew/bin/brew" ]]; then
+    echo "/home/linuxbrew/.linuxbrew"
+    return 0
+  fi
+
+  local delegate_user="${JSH_BREW_DELEGATE_USER:-}"
+  if [[ -n "${delegate_user}" ]]; then
+    local delegate_home
+    delegate_home="$(_setup_user_home "${delegate_user}")"
+    if [[ -n "${delegate_home}" ]] && [[ -x "${delegate_home}/.linuxbrew/bin/brew" ]]; then
+      echo "${delegate_home}/.linuxbrew"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+_setup_prepare_brew_delegate() {
+  local skip_confirm="${1:-false}"
+  local dry_run="${2:-false}"
+
+  _setup_is_linux_root || return 0
+
+  local delegate_user="${JSH_BREW_DELEGATE_USER:-}"
+  if [[ -n "${delegate_user}" ]]; then
+    if id -u "${delegate_user}" >/dev/null 2>&1; then
+      prefix_info "Using brew delegate from environment: ${delegate_user}"
+      return 0
+    fi
+    warn "JSH_BREW_DELEGATE_USER='${delegate_user}' does not exist; brew delegation disabled"
+    return 0
+  fi
+
+  local configured_user
+  configured_user="$(_setup_get_local_export "JSH_BREW_DELEGATE_USER" 2>/dev/null || true)"
+  if [[ -n "${configured_user}" ]] && id -u "${configured_user}" >/dev/null 2>&1; then
+    export JSH_BREW_DELEGATE_USER="${configured_user}"
+    prefix_info "Using configured brew delegate user: ${configured_user}"
+    return 0
+  fi
+
+  local candidate
+  candidate="$(_setup_uid1000_user 2>/dev/null || true)"
+  if [[ -z "${candidate}" ]] || ! id -u "${candidate}" >/dev/null 2>&1; then
+    warn "Linux root detected; brew integration requires a delegate user (UID 1000 not found)"
+    return 0
+  fi
+
+  local accept_default=false
+  if [[ "${skip_confirm}" == true ]]; then
+    accept_default=true
+  elif [[ ! -t 0 ]]; then
+    prefix_info "Non-interactive setup detected; auto-selecting brew delegate user '${candidate}'"
+    accept_default=true
+  elif ui_confirm "Linux root detected. Use '${candidate}' for brew delegation?" "y"; then
+    accept_default=true
+  fi
+
+  if [[ "${accept_default}" != true ]]; then
+    warn "Brew delegate user not configured; brew integration will be skipped"
+    return 0
+  fi
+
+  export JSH_BREW_DELEGATE_USER="${candidate}"
+  _setup_set_local_export "JSH_BREW_DELEGATE_USER" "${candidate}" "${dry_run}" || return 0
+  prefix_success "Configured brew delegate user: ${candidate}"
+}
+
+_setup_install_linuxbrew_delegate() {
+  local dry_run="${1:-false}"
+
+  _setup_is_linux_root || return 0
+
+  local existing_prefix
+  existing_prefix="$(_setup_find_linuxbrew_prefix 2>/dev/null || true)"
+  if [[ -n "${existing_prefix}" ]]; then
+    prefix_success "Linuxbrew detected at ${existing_prefix}"
+    return 0
+  fi
+
+  local delegate_user="${JSH_BREW_DELEGATE_USER:-}"
+  if [[ -z "${delegate_user}" ]]; then
+    warn "Linux root detected; Linuxbrew install skipped (no delegate user configured)"
+    return 0
+  fi
+
+  if [[ "${dry_run}" == true ]]; then
+    prefix_info "Would install Linuxbrew as '${delegate_user}'"
+    return 0
+  fi
+
+  if ! has curl; then
+    warn "curl is required to install Linuxbrew; skipping"
+    return 0
+  fi
+
+  info "Installing Linuxbrew as '${delegate_user}'..."
+  local install_cmd='NONINTERACTIVE=1 CI=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+
+  if command -v runuser >/dev/null 2>&1; then
+    runuser -u "${delegate_user}" -- bash -lc "${install_cmd}" >/dev/null 2>&1 || {
+      warn "Linuxbrew installation failed for delegate user '${delegate_user}'"
+      return 0
+    }
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo -H -u "${delegate_user}" bash -lc "${install_cmd}" >/dev/null 2>&1 || {
+      warn "Linuxbrew installation failed for delegate user '${delegate_user}'"
+      return 0
+    }
+  else
+    warn "Cannot install Linuxbrew as delegate user (missing runuser/sudo)"
+    return 0
+  fi
+
+  existing_prefix="$(_setup_find_linuxbrew_prefix 2>/dev/null || true)"
+  if [[ -n "${existing_prefix}" ]]; then
+    prefix_success "Linuxbrew installed at ${existing_prefix}"
+  else
+    warn "Linuxbrew install command completed, but brew binary was not detected"
+  fi
+}
+
 # Attempt to change default shell to zsh
 set_default_shell_zsh() {
   local zsh_path
@@ -130,6 +384,9 @@ export JSH_VI_MODE=$([[ "${vi_mode,,}" =~ ^y ]] && echo 1 || echo 0)
 EOF
 
   prefix_success "Configuration saved to local/.jshrc"
+
+  _setup_prepare_brew_delegate false false
+  _setup_install_linuxbrew_delegate false
   echo ""
 
   info "Continuing with setup..."
@@ -139,6 +396,9 @@ EOF
     info "Initializing submodules..."
     git -C "${JSH_DIR}" submodule update --init --depth 1 -- lib/fzf lib/fzf-tab lib/zsh-completions 2>/dev/null || warn "Failed to init submodules"
   fi
+
+  # Install fzf binary
+  _setup_install_fzf
 
   # Create symlinks
   cmd_link
@@ -387,6 +647,28 @@ cmd_setup() {
   local adopt_path=""
   local decom_path=""
 
+  if [[ "${1:-}" == "-h" ]] || [[ "${1:-}" == "--help" ]]; then
+    jsh_section "jsh setup"
+    jsh_note "Setup jsh environment"
+    jsh_section "Usage"
+    echo "jsh setup [options]"
+    jsh_section "Options"
+    echo "-i, --interactive Run interactive setup wizard"
+    echo "--no-git Skip git operations (submodule init)"
+    echo "--links Create only managed dotfile symlinks"
+    echo "--adopt=PATH Move PATH into dotfiles and link it back"
+    echo "--decom=PATH Undo adopted symlink and restore original path"
+    echo "-y, --yes Skip confirmation for --decom"
+    echo "-n, --dry-run Preview actions without making changes"
+    jsh_section "Examples"
+    echo "jsh setup"
+    echo "jsh setup --interactive"
+    echo "jsh setup --links"
+    echo "jsh setup --adopt ~/.wezterm.lua"
+    echo "jsh setup --decom ~/.wezterm.lua"
+    return 0
+  fi
+
   while [[ $# -gt 0 ]]; do
     case "$1" in
     -i | --interactive)
@@ -516,6 +798,13 @@ cmd_setup() {
     fi
   fi
 
+  # Install fzf binary
+  if [[ "${dry_run}" == true ]]; then
+    _setup_install_fzf true
+  else
+    _setup_install_fzf
+  fi
+
   # Create symlinks
   if [[ "${dry_run}" == true ]]; then
     cmd_link --dry-run
@@ -529,6 +818,9 @@ cmd_setup() {
   else
     mkdir -p "${JSH_DIR}/local"
   fi
+
+  _setup_prepare_brew_delegate "${skip_confirm}" "${dry_run}"
+  _setup_install_linuxbrew_delegate "${dry_run}"
 
   # Attempt to set zsh as default shell
   if [[ "${dry_run}" == true ]]; then
@@ -556,6 +848,24 @@ cmd_teardown() {
   local restore_backup=""
   local skip_confirm=false
   local links_only=false
+
+  if [[ "${1:-}" == "-h" ]] || [[ "${1:-}" == "--help" ]]; then
+    jsh_section "jsh teardown"
+    jsh_note "Remove jsh symlinks and optionally the entire installation"
+    jsh_section "Usage"
+    echo "jsh teardown [options]"
+    jsh_section "Options"
+    echo "--full Remove entire Jsh directory"
+    echo "--restore Restore backed up dotfiles"
+    echo "--restore=NAME Restore from a specific backup name"
+    echo "-y, --yes Skip confirmation prompt"
+    echo "--links Remove only managed dotfile symlinks"
+    jsh_section "Examples"
+    echo "jsh teardown --links"
+    echo "jsh teardown --links --restore"
+    echo "jsh teardown --full"
+    return 0
+  fi
 
   while [[ $# -gt 0 ]]; do
     case "$1" in

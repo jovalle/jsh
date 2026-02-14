@@ -229,6 +229,15 @@ _ssh_derive_host() {
     printf '%s-%s' "$platform" "$user"
 }
 
+# Get SSH key fingerprint from a public key file
+# Output: fingerprint (e.g. SHA256:abc...) or empty on failure
+_ssh_key_fingerprint() {
+    local key_file="$1"
+    command -v ssh-keygen &>/dev/null || return 1
+
+    ssh-keygen -lf "$key_file" 2>/dev/null | awk '{print $2}'
+}
+
 # Normalize Bitbucket Server browse URLs to clone URLs
 # Input: https://bitbucket.example.com/projects/PROJ/repos/REPO/browse
 # Output: https://bitbucket.example.com/scm/PROJ/REPO.git
@@ -836,12 +845,23 @@ cmd_profile_status() {
 
     # Show SSH key info
     if [[ -n "$ssh_cmd" ]]; then
-        local key_path
+        local key_path key_pub_path
         key_path=$(printf '%s' "$ssh_cmd" | sed -n 's/.*-i \([^ ]*\).*/\1/p')
         if [[ -n "$key_path" ]]; then
             local key_name="${key_path##*/}"
             if [[ -f "$key_path" ]]; then
-                printf 'SSH Key:  %s %b✓%b\n' "$key_name" "$C_GREEN" "$C_RESET"
+                local fingerprint=""
+                key_pub_path="$key_path"
+                if [[ "$key_path" != *.pub ]] && [[ -f "${key_path}.pub" ]]; then
+                    key_pub_path="${key_path}.pub"
+                fi
+                fingerprint="$(_ssh_key_fingerprint "$key_pub_path")" || true
+
+                if [[ -n "$fingerprint" ]]; then
+                    printf 'SSH Key:  %s %b✓%b (%s)\n' "$key_name" "$C_GREEN" "$C_RESET" "$fingerprint"
+                else
+                    printf 'SSH Key:  %s %b✓%b\n' "$key_name" "$C_GREEN" "$C_RESET"
+                fi
             else
                 printf 'SSH Key:  %s %b✗ NOT FOUND%b\n' "$key_name" "$C_RED" "$C_RESET"
             fi

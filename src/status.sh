@@ -121,6 +121,17 @@ cmd_status() {
   local fix_issues=false
   local verbose=false
 
+  if [[ "${1:-}" == "-h" ]] || [[ "${1:-}" == "--help" ]]; then
+    jsh_section "jsh status"
+    jsh_note "Show installation status, symlinks, and check for issues"
+    jsh_section "Usage"
+    echo "jsh status [options]"
+    jsh_section "Options"
+    echo "--fix, -f Fix issues (remove broken symlinks)"
+    echo "--verbose, -v Show verbose output"
+    return 0
+  fi
+
   while [[ $# -gt 0 ]]; do
     case "$1" in
     --fix | -f)
