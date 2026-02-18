@@ -58,6 +58,18 @@
 
 [[ -n $DEBUG ]] && set -x
 
+# Require bash 4+ (associative arrays, declare -g)
+if ((BASH_VERSINFO[0] < 4)); then
+    for _bash in /opt/homebrew/bin/bash /usr/local/bin/bash; do
+        if [[ -x "$_bash" ]] && "$_bash" -c '((BASH_VERSINFO[0] >= 4))' 2>/dev/null; then
+            exec "$_bash" "$0" "$@"
+        fi
+    done
+    echo "gitx: requires bash 4+ (found $BASH_VERSION)" >&2
+    echo "  install with: brew install bash" >&2
+    exit 1
+fi
+
 set -eou pipefail
 IFS=$'\n\t'
 
@@ -1787,16 +1799,33 @@ cmd_create() {
     local name="${1:-}"
 
     if [[ -z "$name" ]]; then
-        error "Usage: gitx create <name>"
-        return 1
+        # In a non-git directory with a tty: offer to init here
+        if ! git rev-parse --git-dir &>/dev/null && [[ -t 0 ]]; then
+            local cwd="${PWD##*/}"
+            printf 'Initialize %s%s%s as a new git project? [Y/n] ' "$C_BOLD" "$cwd" "$C_RESET"
+            local answer
+            read -r answer
+            case "${answer:-y}" in
+                [Yy]|[Yy]es) name="$cwd" ;;
+                *) return 0 ;;
+            esac
+            # Use current directory instead of creating under projects dir
+            local use_cwd=true
+        else
+            error "Usage: gitx create <name>"
+            return 1
+        fi
     fi
 
     local target_dir
-    target_dir="$(_projects_default_dir)/${name}"
-
-    if [[ -d "$target_dir" ]]; then
-        error "Directory already exists: $target_dir"
-        return 1
+    if [[ "${use_cwd:-}" == true ]]; then
+        target_dir="$PWD"
+    else
+        target_dir="$(_projects_default_dir)/${name}"
+        if [[ -d "$target_dir" ]]; then
+            error "Directory already exists: $target_dir"
+            return 1
+        fi
     fi
 
     # Interactive profile selection
@@ -1842,9 +1871,11 @@ cmd_create() {
         info "no profiles configured (add to $JSH_PROFILES)"
     fi
 
-    # Create project directory and initialize git
-    mkdir -p "$target_dir" || abort "Failed to create directory"
-    cd "$target_dir" || return 1
+    # Create project directory (or use current) and initialize git
+    if [[ "${use_cwd:-}" != true ]]; then
+        mkdir -p "$target_dir" || abort "Failed to create directory"
+        cd "$target_dir" || return 1
+    fi
     git init -q || abort "Failed to initialize git repository"
 
     # Apply profile: set origin with FQDN, delegate config to _profiles_apply
@@ -1866,8 +1897,9 @@ cmd_create() {
         _profiles_apply "$selected_profile"
     fi
 
-    # Create README.md
-    cat > README.md << EOF
+    # Create README.md (skip if exists)
+    if [[ ! -f README.md ]]; then
+        cat > README.md << EOF
 # ${name}
 
 ## Description
@@ -1884,9 +1916,11 @@ A brief description of this project.
 
 MIT
 EOF
+    fi
 
-    # Create .gitignore
-    cat > .gitignore << 'EOF'
+    # Create .gitignore (skip if exists)
+    if [[ ! -f .gitignore ]]; then
+        cat > .gitignore << 'EOF'
 # Dependencies
 node_modules/
 vendor/
@@ -1925,6 +1959,7 @@ logs/
 coverage/
 .nyc_output/
 EOF
+    fi
 
     git add -A
     git commit -q -m "Initial commit"

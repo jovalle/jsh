@@ -1,4 +1,4 @@
-# shellcheck shell=zsh
+# shellcheck shell=bash
 # zsh.sh - Zsh-specific configuration
 # No plugins required, pure zsh
 # shellcheck disable=SC2034,SC1090,SC2154
@@ -70,15 +70,15 @@ SAVEHIST=50000
 # =============================================================================
 
 # Add custom completions (jsh, make)
-[[ -d "${JSH_DIR}/src/completions" ]] && fpath=("${JSH_DIR}/src/completions" $fpath)
+[[ -d "${JSH_DIR}/src/completions" ]] && fpath=("${JSH_DIR}/src/completions" "${fpath[@]}")
 
 # Add zsh-completions (submodule preferred, core fallback for offline)
 if [[ -d "${JSH_DIR}/lib/zsh-completions/src" ]]; then
     # Full zsh-completions submodule available
-    fpath=("${JSH_DIR}/lib/zsh-completions/src" $fpath)
+    fpath=("${JSH_DIR}/lib/zsh-completions/src" "${fpath[@]}")
 elif [[ -d "${JSH_DIR}/lib/zsh-plugins/completions-core" ]]; then
     # Fallback to minimal core completions (offline/no submodule)
-    fpath=("${JSH_DIR}/lib/zsh-plugins/completions-core" $fpath)
+    fpath=("${JSH_DIR}/lib/zsh-plugins/completions-core" "${fpath[@]}")
 fi
 
 autoload -Uz compinit
@@ -95,9 +95,31 @@ _jsh_needs_compinit_rebuild() {
     local dump="$1"
     # No dump file? Rebuild
     [[ ! -f "$dump" ]] && return 0
-    # shellcheck disable=SC1009,SC1036,SC1072,SC1073
     # Dump older than 24 hours? Rebuild
-    [[ -n "${dump}"(#qN.mh+24) ]] && return 0
+    # Avoid zsh glob qualifiers here (can crash on some older/patch-level builds)
+    # and prefer a simple mtime check.
+    local now mtime
+    now=${EPOCHSECONDS:-$(date +%s 2>/dev/null || echo 0)}
+
+    if zmodload -F zsh/stat b:zstat 2>/dev/null; then
+        local -a _zstat
+        if zstat -A _zstat +mtime -- "$dump" 2>/dev/null; then
+            mtime=${_zstat[1]:-0}
+        else
+            mtime=0
+        fi
+    else
+        mtime=$(
+            /usr/bin/stat -c %Y "$dump" 2>/dev/null ||
+            /usr/bin/stat -f %m "$dump" 2>/dev/null ||
+            stat -c %Y "$dump" 2>/dev/null ||
+            stat -f %m "$dump" 2>/dev/null ||
+            echo 0
+        )
+    fi
+
+    [[ -z "${now}" || -z "${mtime}" ]] && return 0
+    (( now - mtime > 86400 )) && return 0
     # Any custom completion file newer than dump? Rebuild
     local comp
     for comp in "${JSH_DIR}"/src/completions/_*(N); do
@@ -124,7 +146,7 @@ fi
 # Completion options
 zstyle ':completion:*' completer _complete _match _approximate
 zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}' 'r:|=*' 'l:|=* r:|=*'
-zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}"
+[[ -n "${LS_COLORS:-}" ]] && zstyle ':completion:*' list-colors "${LS_COLORS}"
 zstyle ':completion:*' menu select=2
 zstyle ':completion:*' verbose yes
 zstyle ':completion:*' group-name ''
@@ -142,8 +164,12 @@ zstyle ':completion:*:*:kill:*:processes' list-colors '=(#b) #([0-9]#)*=0=01;31'
 zstyle ':completion:*:kill:*' command 'ps -u $USER -o pid,%cpu,tty,cputime,cmd'
 
 # SSH/SCP completion from known_hosts
-# Use absolute paths for pipeline commands - PATH may not be fully set during early init
-zstyle ':completion:*:(ssh|scp|sftp|rsync):*' hosts ${(f)"$(/bin/cat ~/.ssh/known_hosts 2>/dev/null | /usr/bin/cut -f1 -d' ' | /usr/bin/tr ',' '\n' | /usr/bin/grep -v '^#' | /usr/bin/grep -v '^\[')"}
+# Use absolute paths for pipeline commands - PATH may not be fully set during early init.
+# In SSH (jssh) sessions we skip this to avoid expensive startup work and
+# potential zsh bugs triggered by command substitutions on some platforms.
+if [[ "${JSH_ENV:-}" != "ssh" ]]; then
+    zstyle ':completion:*:(ssh|scp|sftp|rsync):*' hosts "$(/bin/cat ~/.ssh/known_hosts 2>/dev/null | /usr/bin/cut -f1 -d' ' | /usr/bin/tr ',' '\n' | /usr/bin/grep -v '^#' | /usr/bin/grep -v '^\[' | /usr/bin/tr '\n' ' ')"
+fi
 
 # =============================================================================
 # Key Bindings (Zsh-specific)

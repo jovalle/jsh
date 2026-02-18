@@ -116,13 +116,13 @@ cmd_options() {
         local rest option_desc option
         local -a parsed_options=()
 
-        rest="${line#${line%%[![:space:]]*}}"
+        rest="${line#"${line%%[![:space:]]*}"}"
         while [[ "${rest}" =~ ^(-{1,2}[^[:space:],]+(=[^[:space:],]+)?),?[[:space:]]*(.*)$ ]]; do
             parsed_options+=("${BASH_REMATCH[1]}")
             rest="${BASH_REMATCH[3]}"
         done
 
-        option_desc="${rest#${rest%%[![:space:]]*}}"
+        option_desc="${rest#"${rest%%[![:space:]]*}"}"
         [[ ${#parsed_options[@]} -eq 0 ]] && continue
         [[ -z "${option_desc}" ]] && continue
 

@@ -233,7 +233,8 @@ _setup_install_linuxbrew_delegate() {
   fi
 
   info "Installing Linuxbrew as '${delegate_user}'..."
-  local install_cmd='NONINTERACTIVE=1 CI=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+  local install_cmd
+  install_cmd="NONINTERACTIVE=1 CI=1 /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
 
   if command -v runuser >/dev/null 2>&1; then
     runuser -u "${delegate_user}" -- bash -lc "${install_cmd}" >/dev/null 2>&1 || {
