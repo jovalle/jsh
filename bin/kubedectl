@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# @name kubedectl
+# @version 1.0.0
+# @desc Clean noisy Kubernetes metadata from YAML/JSON manifests on stdin
+# @usage kubedectl [--output yaml|json] [--delete <yq-path>]...
+#
+# @option -o,--output <fmt>  Output format: yaml (default) or json
+# @option -d,--delete <path> Additional yq path to delete (repeatable)
+# @option -h,--help          Show this help message
+#
+# @example kubectl get pod test-pod -o yaml | kubedectl
+# @example kubectl get pod test-pod -o json | kubedectl
+# @example kubectl get deploy app -o yaml | kubedectl --delete '.spec.template.metadata.annotations'
+
+set -euo pipefail
+IFS=$'\n\t'
+
+usage() {
+  cat <<'EOF'
+Usage:
+  kubedectl [--output yaml|json] [--delete <yq-path>]...
+
+Reads Kubernetes YAML/JSON from stdin and removes noisy, non-portable fields:
+  - .status
+  - .metadata.managedFields
+  - .metadata.creationTimestamp
+  - .metadata.resourceVersion
+  - .metadata.uid
+  - .metadata.generation
+  - .metadata.annotations."kubectl.kubernetes.io/last-applied-configuration"
+Also sorts all object keys alphabetically (recursively).
+
+Options:
+  -o, --output <fmt>  Output format: yaml (default) or json
+  -d, --delete <path> Additional yq path to delete (repeatable, must start with '.')
+  -h, --help          Show this message
+
+Examples:
+  kubectl get pod test-pod -o yaml | kubedectl
+  kubectl get pod test-pod -o json | kubedectl
+  kubectl get svc my-svc -o yaml | kubedectl --delete '.spec.clusterIP'
+EOF
+}
+
+require_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "error: required command not found: $1" >&2
+    exit 1
+  fi
+}
+
+output="yaml"
+extra_paths=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -o|--output)
+      [[ $# -ge 2 ]] || { echo "error: --output requires a value" >&2; exit 1; }
+      output="$2"
+      shift 2
+      ;;
+    -d|--delete)
+      [[ $# -ge 2 ]] || { echo "error: --delete requires a yq path" >&2; exit 1; }
+      extra_paths+=("$2")
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "error: unknown argument: $1" >&2
+      usage
+      exit 1
+      ;;
+  esac
+done
+
+case "$output" in
+  yaml|json) ;;
+  *)
+    echo "error: invalid output format '$output' (expected yaml|json)" >&2
+    exit 1
+    ;;
+esac
+
+if [[ ${#extra_paths[@]} -gt 0 ]]; then
+  for path in "${extra_paths[@]}"; do
+    if [[ ! "$path" =~ ^\. ]]; then
+      echo "error: delete path must start with '.': $path" >&2
+      exit 1
+    fi
+  done
+fi
+
+require_cmd yq
+
+if [[ -t 0 ]]; then
+  echo "error: expected YAML/JSON input on stdin" >&2
+  usage
+  exit 1
+fi
+
+read -r -d '' base_expr <<'YQ' || true
+del(.. | .status?) |
+del(.. | .metadata?.managedFields?) |
+del(.. | .metadata?.creationTimestamp?) |
+del(.. | .metadata?.resourceVersion?) |
+del(.. | .metadata?.uid?) |
+del(.. | .metadata?.generation?) |
+del(.. | .metadata?.annotations?.["kubectl.kubernetes.io/last-applied-configuration"]?) |
+sort_keys(..)
+YQ
+
+expr="$base_expr"
+if [[ ${#extra_paths[@]} -gt 0 ]]; then
+  for path in "${extra_paths[@]}"; do
+    expr="$expr | del($path)"
+  done
+fi
+
+if [[ "$output" == "json" ]]; then
+  yq eval -o=json "$expr" -
+else
+  yq eval -P "$expr" -
+fi
