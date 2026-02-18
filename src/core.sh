@@ -528,9 +528,10 @@ export VISUAL="${VISUAL:-${EDITOR:-}}"
 if [[ -z "${LANG:-}" ]] || [[ "${LANG}" == "C" ]] || [[ "${LANG}" == "POSIX" ]]; then
     if locale -a 2>/dev/null | grep -qi 'en_US.utf-\?8'; then
         export LANG="en_US.UTF-8"
+    elif [[ "${JSH_OS}" == "linux" ]]; then
+        warn "en_US.UTF-8 locale not found — run: sudo locale-gen en_US.UTF-8"
     fi
 fi
-export LC_ALL="${LC_ALL:-${LANG:-}}"
 
 # =============================================================================
 # Debug Mode

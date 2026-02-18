@@ -38,6 +38,7 @@ JSSH_CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/jssh"
 JSSH_PAYLOAD_CACHE="${JSSH_CACHE_DIR}/payload.tar.gz"
 JSSH_PAYLOAD_HASH="${JSSH_CACHE_DIR}/payload.hash"
 JSSH_TTL=3600  # Rebuild payload if older than 1 hour
+JSSH_REMOTE_CONFIG="${JSH_DIR}/local/projects.json"
 
 # Remote settings - fixed prefix for safety
 JSSH_REMOTE_PREFIX="/tmp/.jsh-portable"
@@ -150,7 +151,6 @@ trap 'spinner_stop' EXIT
 # =============================================================================
 # Pre-flight Checks
 # =============================================================================
-
 _jssh_check_setup() {
     # Validate jssh setup - returns 0 if OK, 1 if issues found
     local errors=0 warnings=0
@@ -466,6 +466,28 @@ _jssh_get_payload() {
 }
 
 # =============================================================================
+# Remote Target Resolution
+# =============================================================================
+
+_jssh_expand_tilde() {
+    local value="$1"
+    if [[ "${value}" == [~]/* ]]; then
+        printf '%s\n' "${HOME}/${value:2}"
+    else
+        printf '%s\n' "${value}"
+    fi
+}
+
+_jssh_get_named_remote() {
+    local name="$1"
+
+    [[ -f "${JSSH_REMOTE_CONFIG}" ]] || return 1
+    command -v jq >/dev/null 2>&1 || return 1
+
+    jq -r --arg name "${name}" '.remotes[$name] // empty' "${JSSH_REMOTE_CONFIG}" 2>/dev/null || true
+}
+
+# =============================================================================
 # SSH Execution (Two-Stage Approach)
 # =============================================================================
 
@@ -671,8 +693,65 @@ main() {
     # Need at least a hostname
     [[ $# -eq 0 ]] && die "Usage: jssh [ssh-options] [user@]hostname"
 
-    # Extract hostname for display (last argument, strip user@ if present)
-    local display_host="${*: -1}"
+    local -a ssh_args
+    ssh_args=("$@")
+
+    local target_index=$(( ${#ssh_args[@]} - 1 ))
+    local target_arg="${ssh_args[$target_index]}"
+    local remote_name="${target_arg}"
+
+    # Resolve named remote projects from local/projects.json
+    if [[ "${target_arg}" != *"@"* ]] && [[ "${target_arg}" != -* ]]; then
+        local remote_info remote_host remote_user remote_key ssh_target
+        remote_info="$(_jssh_get_named_remote "${target_arg}")"
+
+        if [[ -n "${remote_info}" ]]; then
+            remote_host="$(printf '%s' "${remote_info}" | jq -r '.host // empty')"
+            remote_user="$(printf '%s' "${remote_info}" | jq -r '.user // empty')"
+            remote_key="$(printf '%s' "${remote_info}" | jq -r '.ssh_key // empty')"
+
+            if [[ -n "${remote_host}" ]]; then
+                ssh_target="${remote_host}"
+                [[ -n "${remote_user}" ]] && ssh_target="${remote_user}@${remote_host}"
+                ssh_args[target_index]="${ssh_target}"
+                target_arg="${ssh_target}"
+                debug "Resolved remote '${remote_name}' -> ${ssh_target}"
+            fi
+
+            if [[ -n "${remote_key}" ]]; then
+                local expanded_key has_identity_flag i
+                expanded_key="$(_jssh_expand_tilde "${remote_key}")"
+                has_identity_flag=0
+
+                for ((i=0; i<${#ssh_args[@]}; i++)); do
+                    if [[ "${ssh_args[$i]}" == "-i" ]]; then
+                        has_identity_flag=1
+                        break
+                    fi
+                    if [[ "${ssh_args[$i]}" == "-o" ]] && [[ "${ssh_args[$((i + 1))]:-}" == IdentityFile=* ]]; then
+                        has_identity_flag=1
+                        break
+                    fi
+                    if [[ "${ssh_args[$i]}" == -oIdentityFile=* ]]; then
+                        has_identity_flag=1
+                        break
+                    fi
+                done
+
+                if [[ ${has_identity_flag} -eq 0 ]]; then
+                    if [[ -f "${expanded_key}" ]]; then
+                        ssh_args=("-i" "${expanded_key}" "${ssh_args[@]}")
+                        debug "Using ssh_key from remote config: ${expanded_key}"
+                    else
+                        warn "Configured ssh_key not found: ${expanded_key}"
+                    fi
+                fi
+            fi
+        fi
+    fi
+
+    # Extract hostname for display (resolved target, strip user@ if present)
+    local display_host="${target_arg}"
     display_host="${display_host##*@}"
 
     # Quick pre-flight check (silent unless there are errors)
@@ -700,13 +779,18 @@ main() {
 
     # Stage 1: Transfer payload (non-interactive)
     spinner_start "Connecting to ${display_host}"
-    local transfer_script jsh_tmp
+    local transfer_script jsh_tmp ssh_error_file ssh_error_text
     transfer_script="$(_jssh_transfer_script)"
+    ssh_error_file="$(mktemp)"
 
-    if ! jsh_tmp=$(ssh "$@" "sh -c '$(printf '%s' "${transfer_script}" | sed "s/'/'\\\\''/g")'" < "${payload_path}" 2>/dev/null); then
+    if ! jsh_tmp=$(ssh "${ssh_args[@]}" "sh -c '$(printf '%s' "${transfer_script}" | sed "s/'/'\\\\''/g")'" < "${payload_path}" 2>"${ssh_error_file}"); then
+        ssh_error_text="$(tail -n 1 "${ssh_error_file}" 2>/dev/null || true)"
+        rm -f "${ssh_error_file}"
         spinner_stop fail "Connection failed"
+        [[ -n "${ssh_error_text}" ]] && warn "${ssh_error_text}"
         exit 1
     fi
+    rm -f "${ssh_error_file}"
 
     if [[ -z "${jsh_tmp}" ]] || [[ "${jsh_tmp}" == "FAILED" ]]; then
         spinner_stop fail "Failed to transfer payload"
@@ -723,7 +807,7 @@ main() {
     launch_script="$(_jssh_launch_script "${jsh_tmp}")"
 
     # Clear the status line before launching interactive session
-    ssh -t "$@" "sh -c '$(printf '%s' "${launch_script}" | sed "s/'/'\\\\''/g")'"
+    ssh -t "${ssh_args[@]}" "sh -c '$(printf '%s' "${launch_script}" | sed "s/'/'\\\\''/g")'"
 
     # Session ended
     success "Disconnected from ${display_host}"

@@ -41,7 +41,7 @@ _clean_size_to_bytes() {
     }
 
     number="${value%%[!0-9.]*}"
-    unit="${value#${number}}"
+    unit="${value#"${number}"}"
     unit=$(echo "${unit}" | tr '[:lower:]' '[:upper:]')
 
     [[ -z "${number}" ]] && {

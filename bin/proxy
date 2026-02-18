@@ -42,19 +42,23 @@ NO_PROXY_LIST="${NO_PROXY_LIST:-${NO_PROXY:-localhost,127.0.0.1,::1}}"
 # Config file location
 readonly PROXY_CONFIG_FILE="${XDG_CONFIG_HOME:-${HOME}/.config}/proxy/config"
 
-# Common proxy presets
-declare -A PROXY_PRESETS=(
-    [corporate]="http://proxy.corporate.com:8080"
-    [local]="http://127.0.0.1:8080"
-    [mitmproxy]="http://127.0.0.1:8080"
-    [burp]="http://127.0.0.1:8080"
-    [charles]="http://127.0.0.1:8888"
-    [fiddler]="http://127.0.0.1:8888"
-    [squid]="http://127.0.0.1:3128"
-    [privoxy]="http://127.0.0.1:8118"
-    [tor]="socks5://127.0.0.1:9050"
-    [ssh]="socks5://127.0.0.1:1080"
-)
+# Common proxy presets (function-based for bash 3.2 compatibility)
+_proxy_preset_url() {
+    case "$1" in
+        corporate)              echo "http://proxy.corporate.com:8080" ;;
+        local|mitmproxy|burp)   echo "http://127.0.0.1:8080" ;;
+        charles|fiddler)        echo "http://127.0.0.1:8888" ;;
+        squid)                  echo "http://127.0.0.1:3128" ;;
+        privoxy)                echo "http://127.0.0.1:8118" ;;
+        tor)                    echo "socks5://127.0.0.1:9050" ;;
+        ssh)                    echo "socks5://127.0.0.1:1080" ;;
+        *)                      return 1 ;;
+    esac
+}
+
+_proxy_preset_names() {
+    echo "burp charles corporate fiddler local mitmproxy privoxy squid ssh tor"
+}
 
 # =============================================================================
 # Dependencies
@@ -191,8 +195,8 @@ test_proxy() {
 list_presets() {
     printf "%sAvailable proxy presets:%s\n" "${C_BOLD}" "${C_RESET}"
     printf "%s─────────────────────────────────────────%s\n" "${C_DIM}" "${C_RESET}"
-    for preset in $(printf '%s\n' "${!PROXY_PRESETS[@]}" | sort); do
-        printf "%s%-15s%s %s\n" "${C_CYAN}" "${preset}" "${C_RESET}" "${PROXY_PRESETS[${preset}]}"
+    for preset in $(_proxy_preset_names); do
+        printf "%s%-15s%s %s\n" "${C_CYAN}" "${preset}" "${C_RESET}" "$(_proxy_preset_url "${preset}")"
     done
     printf "\n%sUse: %s -p <preset> <command>%s\n" "${C_DIM}" "${SCRIPT_NAME}" "${C_RESET}"
 }
@@ -231,10 +235,11 @@ main() {
             -p|--preset)
                 [[ $# -lt 2 ]] && die "Option $1 requires an argument"
                 local preset_name="$2"
-                if [[ -z "${PROXY_PRESETS[${preset_name}]:-}" ]]; then
+                local preset_url
+                if ! preset_url=$(_proxy_preset_url "${preset_name}"); then
                     die "Unknown preset: ${preset_name}\nUse --list to see available presets"
                 fi
-                proxy_url="${PROXY_PRESETS[${preset_name}]}"
+                proxy_url="${preset_url}"
                 shift 2
                 ;;
             -u|--url)

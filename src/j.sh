@@ -139,7 +139,16 @@ _j_open_code() {
     local code_cmd
     code_cmd="$(_j_find_code)"
     if [[ -n "${code_cmd}" ]]; then
-        "${code_cmd}" .
+        # The code command is a bash script - ensure bash is found
+        # Temporarily add /bin to PATH if bash isn't available (macOS edge case)
+        if ! command -v bash &>/dev/null; then
+            PATH="/bin:/usr/bin:$PATH" "${code_cmd}" .
+        else
+            "${code_cmd}" .
+        fi
+    elif [[ "$(uname)" == "Darwin" ]]; then
+        # macOS fallback: use open command directly
+        open -a "Visual Studio Code" .
     else
         printf '%s!%s VS Code command not found.\n' "${C_WARN:-}" "${RST:-}" >&2
         return 1

@@ -15,7 +15,6 @@ fi
 # VS Code terminals may not inherit LANG from the parent environment
 # Customize via JSH_LANG (e.g., de_DE.UTF-8, ja_JP.UTF-8, pt_BR.UTF-8)
 export LANG="${JSH_LANG:-en_US.UTF-8}"
-export LC_ALL="${JSH_LANG:-en_US.UTF-8}"
 
 # JSH_DIR - where jsh is installed
 export JSH_DIR="${JSH_DIR:-$HOME/.jsh}"
