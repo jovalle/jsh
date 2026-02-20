@@ -3,6 +3,7 @@
   "cifs-utils",
   "curl",
   "dkms",
+  "locales",
   "net-tools",
   "nvme-cli",
   "s-tui",
