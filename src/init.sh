@@ -42,6 +42,14 @@ export JSH_DIR
 # Bail early if not interactive
 [[ $- != *i* ]] && return 0
 
+# Preserve colorful interactive output unless explicitly disabled.
+# Some parent environments export NO_COLOR=1 globally, which makes the entire
+# shell look monochrome. Default to colorful output for jsh interactive shells,
+# but allow opting back into NO_COLOR behavior via JSH_RESPECT_NO_COLOR=1.
+if [[ "${JSH_PLAIN_OUTPUT:-0}" != "1" ]] && [[ "${JSH_RESPECT_NO_COLOR:-0}" != "1" ]]; then
+    unset NO_COLOR
+fi
+
 # =============================================================================
 # Terminal Settings (must be early, before keybindings)
 # =============================================================================
