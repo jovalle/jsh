@@ -339,22 +339,6 @@ cmd_status() {
     echo "${DIM}No submodules configured${RST}"
   fi
 
-  # Dependency versions (from versions.json)
-  local versions_file="${JSH_DIR}/lib/versions.json"
-  if [[ -f "${versions_file}" ]]; then
-    jsh_section "Configured Versions"
-    if has jq; then
-      jq -r 'to_entries[] | "\(.key): v\(.value)"' "${versions_file}" 2>/dev/null
-    else
-      # Fallback without jq
-      while IFS= read -r line; do
-        if [[ "${line}" =~ \"([^\"]+)\":\ *\"([^\"]+)\" ]]; then
-          echo "${BASH_REMATCH[1]}: v${BASH_REMATCH[2]}"
-        fi
-      done <"${versions_file}"
-    fi
-  fi
-
   # Broken symlinks check
   jsh_section "Broken Symlinks"
   local xdg_config="${XDG_CONFIG_HOME:-${HOME}/.config}"
