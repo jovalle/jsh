@@ -47,6 +47,7 @@ load_jsh_j() {
     unset _JSH_J_LOADED
     export J_NO_HOOK=1
     export J_DATA="${JSH_TEST_TEMP}/j.db"
+    # shellcheck source=/dev/null disable=SC1094
     source "${JSH_DIR}/src/j.sh"
 }
 
