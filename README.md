@@ -14,9 +14,11 @@
 ## Quick Start
 
 ```bash
-git clone https://github.com/jovalle/.jsh ~/.jsh
+git clone https://github.com/jovalle/jsh ~/.jsh
 ~/.jsh/jsh setup
 ```
+
+Clone into `~/.jsh` intentionally so the dotfiles repo stays hidden in your home directory.
 
 ## Credits
 
