@@ -689,9 +689,88 @@ _prompt_setup_zsh() {
     add-zsh-hook precmd _prompt_precmd_zsh
 }
 
+_prompt_zsh_probe_advanced() {
+    # Probe zsh features used by the advanced prompt path in a clean child zsh.
+    # Using `zsh -f` avoids user startup files and keeps probe deterministic.
+    command zsh -f -c '
+        emulate -L zsh
+        setopt prompt_subst
+        autoload -Uz add-zsh-hook || exit 1
+
+        typeset -gi _p_ahead=0 _p_behind=0 _p_untracked=0
+        typeset _p_line _p_status
+
+        _p_status="## main...origin/main [ahead 2, behind 3]\n M tracked\n?? new"
+        while IFS= read -r _p_line; do
+            case "${_p_line:0:2}" in
+                "##")
+                    if [[ "${_p_line}" =~ "\\[ahead ([0-9]+), behind ([0-9]+)\\]" ]]; then
+                        _p_ahead="${match[1]}"
+                        _p_behind="${match[2]}"
+                    fi
+                    ;;
+                "??") (( _p_untracked++ )) ;;
+            esac
+        done <<< "${_p_status}"
+
+        (( _p_ahead == 2 && _p_behind == 3 && _p_untracked == 1 ))
+    ' >/dev/null 2>&1
+}
+
+_prompt_should_use_safe_zsh() {
+    [[ -z "${ZSH_VERSION:-}" ]] && return 1
+
+    # Explicit overrides always win.
+    [[ "${JSH_PROMPT_FORCE_ADVANCED_ZSH:-0}" == "1" ]] && return 1
+    [[ "${JSH_PROMPT_FORCE_SAFE_ZSH:-0}" == "1" ]] && return 0
+
+    # Cache probe result per zsh version to avoid startup overhead.
+    local cache_dir cache_file cache_key cached_key cached_mode
+    cache_dir="${JSH_CACHE_DIR:-${XDG_CACHE_HOME:-${HOME}/.cache}/jsh}"
+    cache_file="${cache_dir}/prompt-zsh-mode.cache"
+    cache_key="${ZSH_VERSION}"
+
+    command mkdir -p "${cache_dir}" 2>/dev/null || true
+
+    if [[ -r "${cache_file}" ]]; then
+        IFS='|' read -r cached_key cached_mode < "${cache_file}" 2>/dev/null || true
+        if [[ "${cached_key}" == "${cache_key}" ]]; then
+            [[ "${cached_mode}" == "safe" ]] && return 0
+            return 1
+        fi
+    fi
+
+    if _prompt_zsh_probe_advanced; then
+        printf '%s|%s\n' "${cache_key}" "advanced" > "${cache_file}" 2>/dev/null || true
+        return 1
+    fi
+
+    printf '%s|%s\n' "${cache_key}" "safe" > "${cache_file}" 2>/dev/null || true
+    return 0
+}
+
+_prompt_setup_zsh_safe() {
+    setopt PROMPT_SUBST
+
+    # Keep this path intentionally simple for stability on affected zsh builds.
+    if [[ "${EUID:-$(id -u)}" == "0" ]]; then
+        PROMPT=$'%F{yellow}%n@%m%f %F{cyan}%~%f\n%F{green}❯%f '
+    else
+        PROMPT=$'%F{cyan}%~%f\n%F{green}❯%f '
+    fi
+
+    if [[ -z "${RPROMPT:-}" ]]; then
+        RPROMPT='%F{8}%*%f'
+    fi
+}
+
 prompt_init() {
     if [[ -n "${ZSH_VERSION:-}" ]]; then
-        _prompt_setup_zsh
+        if _prompt_should_use_safe_zsh; then
+            _prompt_setup_zsh_safe
+        else
+            _prompt_setup_zsh
+        fi
     else
         _prompt_setup_bash
     fi
