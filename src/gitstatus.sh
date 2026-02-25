@@ -165,7 +165,11 @@ git_status_fast() {
     branch="$(git_branch_or_tag)"
 
     # Parse porcelain status (fast, machine-readable)
-    local status_line
+    # NOTE: Avoid process substitution here.
+    # Some zsh builds on appliance distros can crash in hook contexts when
+    # evaluating '< <(...)' during prompt/precmd execution.
+    local status_line status_output
+    status_output="$(git status --porcelain=v1 -b 2>/dev/null)"
     while IFS= read -r status_line; do
         case "${status_line:0:2}" in
             "##")
@@ -202,7 +206,7 @@ git_status_fast() {
                 [[ "${status_line:1:1}" != " " && "${status_line:1:1}" != "?" ]] && ((unstaged++))
                 ;;
         esac
-    done < <(git status --porcelain=v1 -b 2>/dev/null)
+    done <<< "${status_output}"
 
     # Check stash
     if git_has_stash; then
