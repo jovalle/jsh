@@ -199,6 +199,20 @@ teardown() {
     assert_not_contains "$origin_url" "github-jovalle"
 }
 
+@test "profile apply: adds origin remote when missing" {
+    cd "${TEST_REPO}"
+
+  local profile_name
+  profile_name=$(jq -r '.profiles | keys[0]' "${JSH_PROFILES}")
+
+  run gitx profile "${profile_name}"
+    [ "$status" -eq 0 ]
+
+    local origin_url
+    origin_url=$(git remote get-url origin)
+  assert_matches "$origin_url" '^git@[^:]+:[^/]+/test_repo\.git$'
+}
+
 # =============================================================================
 # Commit Enforcement Tests
 # =============================================================================
