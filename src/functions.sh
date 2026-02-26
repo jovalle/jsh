@@ -343,6 +343,120 @@ urldecode() {
 # Git Utilities
 # =============================================================================
 
+# Shared confirmation prompt for git+ helpers
+_git_confirm() {
+    local action="$1"
+    local reply
+
+    printf '%s [y/N] ' "${action}"
+    read -r reply || return 1
+
+    case "${reply}" in
+        y|Y|yes|YES)
+            return 0
+            ;;
+        *)
+            echo "Cancelled"
+            return 1
+            ;;
+    esac
+}
+
+# Push to origin on the current branch
+git+() {
+    local branch
+    branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null) || {
+        echo "Detached HEAD: checkout a branch first" >&2
+        return 1
+    }
+
+    _git_confirm "Push '${branch}' to origin?" || return 1
+    git push origin "${branch}"
+}
+
+git+++() {
+    local branch
+    branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null) || {
+        echo "Detached HEAD: checkout a branch first" >&2
+        return 1
+    }
+
+    _git_confirm "Force-push '${branch}' to origin with --force-with-lease?" || return 1
+    git push --force-with-lease origin "${branch}"
+}
+
+# Backward-compat convenience alias
+git++() { git+++ "$@"; }
+
+# Reset HEAD to undo last commit (soft reset, keeps changes in working directory)
+git-() {
+    _git_confirm "Reset HEAD to undo last commit ($(git log -1 --pretty=format:'%s'))?" || return 1
+    git reset HEAD~1
+}
+
+# Rebase current branch onto latest remote default branch (origin/main, origin/master, etc.)
+# Usage: git-+ [git rebase args...]
+git-+() {
+    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        echo "Not a git repository" >&2
+        return 1
+    fi
+
+    local current_branch remote upstream_ref default_ref default_branch candidate
+    current_branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null) || {
+        echo "Detached HEAD: checkout a branch first" >&2
+        return 1
+    }
+
+    upstream_ref=$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null) || true
+    if [[ -n "${upstream_ref}" ]]; then
+        remote="${upstream_ref%%/*}"
+    else
+        remote=$(git config --get "branch.${current_branch}.remote" 2>/dev/null) || true
+    fi
+
+    if [[ -z "${remote}" ]]; then
+        if git remote get-url origin >/dev/null 2>&1; then
+            remote="origin"
+        else
+            remote=$(git remote | head -n 1)
+        fi
+    fi
+
+    if [[ -z "${remote}" ]]; then
+        echo "No git remote configured" >&2
+        return 1
+    fi
+
+    default_ref=$(git symbolic-ref --quiet --short "refs/remotes/${remote}/HEAD" 2>/dev/null) || true
+    default_branch="${default_ref#${remote}/}"
+
+    if [[ -z "${default_branch}" || "${default_branch}" == "${default_ref}" ]]; then
+        default_branch=$(git remote show "${remote}" 2>/dev/null | sed -n 's/^[[:space:]]*HEAD branch: //p' | head -n 1)
+    fi
+
+    if [[ -z "${default_branch}" ]]; then
+        for candidate in main master trunk develop; do
+            if git show-ref --verify --quiet "refs/remotes/${remote}/${candidate}"; then
+                default_branch="${candidate}"
+                break
+            fi
+        done
+    fi
+
+    if [[ -z "${default_branch}" ]]; then
+        echo "Could not determine default branch for remote '${remote}'" >&2
+        return 1
+    fi
+
+    _git_confirm "Fetch '${remote}' and rebase '${current_branch}' onto '${remote}/${default_branch}'?" || return 1
+
+    git fetch "${remote}" --prune || return 1
+
+    echo "Rebasing ${current_branch} onto ${remote}/${default_branch}"
+    git rebase --autostash "$@" "${remote}/${default_branch}"
+}
+
 # Commit with optional inline message
 # Usage: git_ "message" or just git_ to open editor
 git_() {
