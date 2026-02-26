@@ -150,11 +150,6 @@ alias hg='history | grep'
 # =============================================================================
 
 if has git; then
-  # Quick shortcuts with symbols
-  alias git+='git push'
-  alias 'git+++'='git push --force-with-lease'
-  alias git-='git reset HEAD~1'
-
   alias g='git'
   alias gs='git status -sb'
   alias gst='git status'
