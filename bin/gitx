@@ -758,9 +758,23 @@ _profiles_apply() {
         git -C "$dir" config --local --unset gpg.format 2>/dev/null || true
     fi
 
-    # Migrate old-style SSH host alias remote URLs to standard hosts
+    # Ensure origin exists and migrate old-style SSH host alias URLs to standard hosts
     local origin_url
     origin_url=$(git -C "$dir" remote get-url origin 2>/dev/null) || true
+
+    if [[ -z "$origin_url" ]]; then
+        local repo_root repo_name standard_host new_origin_url
+        repo_root=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) || true
+        repo_name=$(basename "${repo_root:-$dir}")
+
+        if [[ -n "$user" ]] && [[ -n "$repo_name" ]]; then
+            standard_host="${host:-$GITX_DEFAULT_PLATFORM}"
+            new_origin_url="git@${standard_host}:${user}/${repo_name}.git"
+            git -C "$dir" remote add origin "$new_origin_url"
+            info "Added missing origin: ${new_origin_url}"
+            origin_url="$new_origin_url"
+        fi
+    fi
 
     if [[ -n "$origin_url" ]]; then
         local parsed url_host repo_name
