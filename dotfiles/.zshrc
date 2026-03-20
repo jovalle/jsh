@@ -30,3 +30,6 @@ fi
 # Local overrides (machine-specific, not tracked)
 # shellcheck source=/dev/null
 [[ -f ~/.zshrc.local ]] && source ~/.zshrc.local
+
+# direnv — auto-activate project environments on cd
+command -v direnv >/dev/null && eval "$(direnv hook zsh)"
