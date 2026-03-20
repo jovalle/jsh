@@ -66,17 +66,17 @@ macos-icon = retro
 
 # Window padding - space between content and window edges (in points)
 # Format: horizontal (left,right) or single value for both
-window-padding-x = 4
+window-padding-x = 8
 
 # Format: vertical (top,bottom) or single value for both
-window-padding-y = 6,2
+window-padding-y = 2,8
 
 # Confirm before closing a terminal with running processes
 # Prevents accidental data loss
 confirm-close-surface = false
 
 # Quit application when last window closes (macOS behavior)
-quit-after-last-window-closed = true
+quit-after-last-window-closed = false
 
 # Focus follows mouse for split panes
 # When true, hovering over a pane focuses it
@@ -98,7 +98,7 @@ font-family = JetBrainsMono Nerd Font
 # font-family = Menlo
 
 # Font size in points
-font-size = 10
+font-size = 12
 
 # Enable font thickening (makes fonts appear bolder)
 # Useful for light fonts on dark backgrounds
