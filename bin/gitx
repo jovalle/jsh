@@ -38,6 +38,7 @@
 # @example gitx list -v
 # @example gitx commit -i
 # @example gitx commit -t "+1h" -m "feature"
+# @example gitx commit -t "2025-03-25 20" -m "feat"   # auto-fills mm:ss after prev commit
 # @example gitx amend -t "+30m"
 # @example gitx amend -t "now-1h"
 # @example gitx clone TEAM/project         # tries default platform, then fallbacks
@@ -2157,7 +2158,32 @@ cmd_commit() {
         # Detect precision and randomize unspecified components
         local precision
         precision=$(_ts_detect_precision "$timestamp_arg")
+        local hour_start="$parsed_epoch"
         parsed_epoch=$(_ts_randomize "$parsed_epoch" "$precision")
+
+        # For partial timestamps, ensure after previous commit — but only
+        # if the previous commit falls within the same randomization window.
+        # Otherwise the user's explicit date/hour takes priority.
+        if [[ "$precision" == "hour" || "$precision" == "minute" ]]; then
+            local prev_epoch
+            prev_epoch=$(git log -1 --format='%at' 2>/dev/null) || prev_epoch=0
+            if (( prev_epoch > 0 )); then
+                local window_end
+                if [[ "$precision" == "hour" ]]; then
+                    window_end=$(( hour_start + 3599 ))
+                else
+                    window_end=$(( hour_start + 59 ))
+                fi
+                # Only enforce ordering if previous commit is within the window
+                if (( prev_epoch >= hour_start && prev_epoch < window_end )); then
+                    parsed_epoch=$(_ts_ensure_after "$parsed_epoch" "$prev_epoch" 30)
+                    # Clamp to window end so we never spill into the next hour/minute
+                    if (( parsed_epoch > window_end )); then
+                        parsed_epoch="$window_end"
+                    fi
+                fi
+            fi
+        fi
 
         # Convert to git format
         local git_date

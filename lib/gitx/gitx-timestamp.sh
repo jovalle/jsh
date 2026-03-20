@@ -148,6 +148,23 @@ _ts_parse_absolute() {
         epoch=$(date -d "$input" +%s 2>/dev/null) && { echo "$epoch"; return 0; }
     fi
 
+    # Handle "YYYY-MM-DD HH" (hour-only, no minutes/seconds)
+    if [[ "$input" =~ ^[0-9]{4}[-/][0-9]{2}[-/][0-9]{2}[[:space:]]+[0-9]{1,2}$ ]]; then
+        local padded="${input}:00:00"
+        local sep="-"
+        [[ "$input" == */* ]] && sep="/"
+        local fmt="%Y${sep}%m${sep}%d %H:%M:%S"
+        if _ts_is_gnu_date; then
+            epoch=$(date -d "$padded" +%s 2>/dev/null)
+        else
+            epoch=$(date -j -f "$fmt" "$padded" +%s 2>/dev/null)
+        fi
+        if [[ -n "$epoch" ]]; then
+            echo "$epoch"
+            return 0
+        fi
+    fi
+
     # BSD date fallback - try common formats
     local formats=(
         "%Y-%m-%d %H:%M:%S"
@@ -169,6 +186,22 @@ _ts_parse_absolute() {
             return 0
         fi
     done
+
+    # Try bare hour (e.g., "20" = today at 20:00:00)
+    if [[ "$input" =~ ^([0-9]{1,2})$ ]] && (( BASH_REMATCH[1] >= 0 && BASH_REMATCH[1] <= 23 )); then
+        local hour="${BASH_REMATCH[1]}"
+        local today_str
+        today_str=$(date +%Y-%m-%d)
+        if _ts_is_gnu_date; then
+            epoch=$(date -d "$today_str $hour:00:00" +%s 2>/dev/null)
+        else
+            epoch=$(date -j -f "%Y-%m-%d %H:%M:%S" "$today_str $hour:00:00" +%s 2>/dev/null)
+        fi
+        if [[ -n "$epoch" ]]; then
+            echo "$epoch"
+            return 0
+        fi
+    fi
 
     # Try time-only formats (assume today)
     if [[ "$input" =~ ^([0-9]{1,2}):([0-9]{2})(:([0-9]{2}))?$ ]]; then
@@ -232,8 +265,28 @@ _ts_parse() {
 _ts_detect_precision() {
     local input="$1"
 
-    # Not a relative time
+    # Absolute timestamp precision detection
     if ! _ts_is_relative "$input"; then
+        # "YYYY-MM-DD HH" — hour only, randomize minutes and seconds
+        if [[ "$input" =~ ^[0-9]{4}[-/][0-9]{2}[-/][0-9]{2}[[:space:]]+[0-9]{1,2}$ ]]; then
+            echo "hour"
+            return 0
+        fi
+        # "YYYY-MM-DD HH:MM" — minutes given, randomize seconds
+        if [[ "$input" =~ ^[0-9]{4}[-/][0-9]{2}[-/][0-9]{2}[[:space:]]+[0-9]{1,2}:[0-9]{2}$ ]]; then
+            echo "minute"
+            return 0
+        fi
+        # Bare hour (e.g., "20") — today at that hour, randomize minutes and seconds
+        if [[ "$input" =~ ^[0-9]{1,2}$ ]] && (( input >= 0 && input <= 23 )); then
+            echo "hour"
+            return 0
+        fi
+        # "HH:MM" — time only, randomize seconds
+        if [[ "$input" =~ ^[0-9]{1,2}:[0-9]{2}$ ]]; then
+            echo "minute"
+            return 0
+        fi
         echo "full"
         return 0
     fi
