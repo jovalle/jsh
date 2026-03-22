@@ -14,6 +14,7 @@
 # @cmd commit              Identity-enforced commit (requires profile)
 # @cmd amend               Amend last commit's timestamp
 # @cmd push                Push commits (use -i for interactive)
+# @cmd undo [N]            Undo N commits, keep changes staged (default: 1)
 # @cmd backup              Manage gitx backup refs
 # @cmd remote <name>       Open remote project in VS Code (via shell wrapper)
 # @cmd <other>             Passthrough to git
@@ -2349,6 +2350,35 @@ cmd_push() {
 }
 
 # =============================================================================
+# Undo Command
+# =============================================================================
+
+cmd_undo() {
+    if ! git rev-parse --git-dir &>/dev/null; then
+        error "Not in a git repository"
+        return 1
+    fi
+
+    local count="${1:-1}"
+
+    if ! [[ "$count" =~ ^[1-9][0-9]*$ ]]; then
+        error "Invalid count: $count (must be a positive integer)"
+        return 1
+    fi
+
+    local total
+    total=$(git rev-list --count HEAD 2>/dev/null) || total=0
+    if (( count >= total )); then
+        error "Cannot undo $count commit(s) — only $total commit(s) in history"
+        return 1
+    fi
+
+    info "Undoing $count commit(s) (changes will remain staged)..."
+    git reset --soft "HEAD~${count}"
+    success "Undone $count commit(s)"
+}
+
+# =============================================================================
 # Backup Command (utility)
 # =============================================================================
 
@@ -2423,6 +2453,9 @@ case "${1:-}" in
     commit)    shift; cmd_commit "$@" ;;
     amend)     shift; cmd_amend "$@" ;;
     push)      shift; cmd_push "$@" ;;
+
+    # Undo commits (keep changes staged)
+    undo)      shift; cmd_undo "$@" ;;
 
     # Backup management
     backup)    shift; cmd_backup "$@" ;;
