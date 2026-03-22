@@ -1,9 +1,0 @@
-[
-  "@commitlint/cli",
-  "@commitlint/config-conventional",
-  "@mixedbread/mgrep",
-  "commitizen",
-  "cz-conventional-changelog",
-  "get-shit-done-cc",
-  "typescript"
-]
