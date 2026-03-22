@@ -111,7 +111,6 @@ env/
 vendor/bundle
 
 # Go
-vendor/
 
 # =============================================================================
 # Build & Output
@@ -145,17 +144,6 @@ pnpm-debug.log*
 .parcel-cache/
 .eslintcache
 .stylelintcache
-
-# =============================================================================
-# Testing & Coverage
-# =============================================================================
-
-coverage/
-.nyc_output/
-.coverage
-htmlcov/
-.pytest_cache/
-.tox/
 
 # =============================================================================
 # Temporary Files
@@ -209,22 +197,13 @@ kubeconfig
 # Jsh-Specific (only applies to this repo)
 # =============================================================================
 
-# Platform-specific binaries (downloaded via `make download-tools`)
-# These are not stored in git - users download on-demand or use system packages
-bin/darwin-*/
-bin/linux-*/
-
-# Zsh plugin test files (not needed for runtime)
-lib/zsh-plugins/highlighters/*/test-data/
-
 # Local machine-specific config (not tracked)
-jsh.yaml
+.planning
 .jshrc
 *.local
 local/*
 !local/*.example
 /.*.sh
-/docs/
 
 # Keep example files
 !*.example
@@ -233,13 +212,10 @@ local/*
 lib/mason-packages/
 
 # Vim plugins (downloaded on setup)
-lib/vim-config/plugged/
+vendor/vim-config/plugged/
 
 # Neovim pre-built binaries (downloaded on setup)
 lib/nvim/
-
-# Keep nvim config but don't track (user may want it locally)
-dotfiles/.config/nvim/
 
 # Archive
 archive/
