@@ -1,14 +1,7 @@
-[submodule "lib/zsh-completions"]
-	path = lib/zsh-completions
+[submodule "vendor/zsh-completions"]
+	path = vendor/zsh-completions
 	url = https://github.com/zsh-users/zsh-completions.git
-[submodule "lib/fzf-tab"]
-	path = lib/fzf-tab
+[submodule "vendor/fzf-tab"]
+	path = vendor/fzf-tab
 	url = https://github.com/Aloxaf/fzf-tab.git
   ignore = dirty
-[submodule "lib/fzf"]
-	path = lib/fzf
-	url = https://github.com/junegunn/fzf.git
-[submodule "lib/lazyvim"]
-	path = lib/lazyvim
-	url = https://github.com/LazyVim/starter.git
-	ignore = dirty
