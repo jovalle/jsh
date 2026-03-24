@@ -1,25 +1,4 @@
 #!/usr/bin/env bash
-# @name proxy
-# @version 1.0.0
-# @desc Execute commands with proxy environment configured
-# @usage proxy [options] <command> [args...]
-#
-# @option -p,--preset <NAME>  Use a preset proxy configuration
-# @option -u,--url <URL>      Use custom proxy URL
-# @option -s,--socks <URL>    Use SOCKS proxy (sets ALL_PROXY)
-# @option -n,--no-proxy <LIST>  Hosts to bypass proxy
-# @option --shell             Start interactive shell with proxy
-# @option --env               Print export commands (for eval)
-# @option --test              Test proxy connectivity
-# @option --list              List available presets
-# @option -v,--verbose        Show proxy configuration before running
-# @option -h,--help           Show this help message
-# @option --version           Show version information
-#
-# @example proxy -u http://127.0.0.1:8080 curl https://api.example.com
-# @example proxy -p mitmproxy curl -k https://httpbin.org/ip
-# @example proxy -p local --shell
-#
 # shellcheck shell=bash
 #
 # Wraps commands with HTTP/HTTPS proxy environment variables set.
@@ -44,28 +23,93 @@ readonly PROXY_CONFIG_FILE="${XDG_CONFIG_HOME:-${HOME}/.config}/proxy/config"
 
 # Common proxy presets (function-based for bash 3.2 compatibility)
 _proxy_preset_url() {
-    case "$1" in
-        corporate)              echo "http://proxy.corporate.com:8080" ;;
-        local|mitmproxy|burp)   echo "http://127.0.0.1:8080" ;;
-        charles|fiddler)        echo "http://127.0.0.1:8888" ;;
-        squid)                  echo "http://127.0.0.1:3128" ;;
-        privoxy)                echo "http://127.0.0.1:8118" ;;
-        tor)                    echo "socks5://127.0.0.1:9050" ;;
-        ssh)                    echo "socks5://127.0.0.1:1080" ;;
-        *)                      return 1 ;;
-    esac
+  case "$1" in
+    corporate) echo "http://proxy.corporate.com:8080" ;;
+    local | mitmproxy | burp) echo "http://127.0.0.1:8080" ;;
+    charles | fiddler) echo "http://127.0.0.1:8888" ;;
+    squid) echo "http://127.0.0.1:3128" ;;
+    privoxy) echo "http://127.0.0.1:8118" ;;
+    tor) echo "socks5://127.0.0.1:9050" ;;
+    ssh) echo "socks5://127.0.0.1:1080" ;;
+    *) return 1 ;;
+  esac
 }
 
 _proxy_preset_names() {
-    echo "burp charles corporate fiddler local mitmproxy privoxy squid ssh tor"
+  echo "burp charles corporate fiddler local mitmproxy privoxy squid ssh tor"
 }
 
 # =============================================================================
-# Dependencies
+# Output
 # =============================================================================
 
-# Source CLI framework (provides help generation and colors)
-source "${0%/*}/../lib/cli.sh" 2>/dev/null || source "${JSH_DIR:-$HOME/.jsh}/lib/cli.sh"
+if [[ "${JSH_PLAIN_OUTPUT:-0}" != 1 && "${TERM:-dumb}" != dumb &&
+  -z ${NO_COLOR+x} && "${JSH_COLOR:-auto}" != never ]] \
+  && { [[ -t 1 ]] || [[ "${JSH_COLOR:-auto}" == always ]]; }; then
+  C_RESET=$'\033[0m' C_BOLD=$'\033[1m' C_DIM=$'\033[2m'
+  C_RED=$'\033[31m' C_GREEN=$'\033[32m' C_YELLOW=$'\033[33m' C_CYAN=$'\033[36m'
+else
+  C_RESET='' C_BOLD='' C_DIM=''
+  C_RED='' C_GREEN='' C_YELLOW='' C_CYAN=''
+fi
+
+_jsh_status_style() {
+  case "$1" in
+    success)
+      REPLY_COLOR=${C_GREEN}
+      [[ -n "${C_RESET}" ]] && REPLY_MARK='✔' || REPLY_MARK='[ok]'
+      ;;
+    warn | warning)
+      REPLY_COLOR=${C_YELLOW}
+      [[ -n "${C_RESET}" ]] && REPLY_MARK='▲' || REPLY_MARK='[warn]'
+      ;;
+    error)
+      REPLY_COLOR=${C_RED}
+      [[ -n "${C_RESET}" ]] && REPLY_MARK='✖' || REPLY_MARK='[error]'
+      ;;
+    *)
+      REPLY_COLOR=${C_CYAN}
+      [[ -n "${C_RESET}" ]] && REPLY_MARK='›' || REPLY_MARK='[note]'
+      ;;
+  esac
+}
+_jsh_message() {
+  _jsh_status_style "$1"
+  shift
+  printf '%s%s%s %b\n' "${REPLY_COLOR}" "${REPLY_MARK}" "${C_RESET}" "$*"
+}
+die() {
+  _jsh_message error "$@" >&2
+  exit 1
+}
+_debug() { printf '%sdebug:%s %s\n' "${C_DIM}" "${C_RESET}" "$*" >&2; }
+info() { _jsh_message note "$@"; }
+success() { _jsh_message success "$@"; }
+warn() { _jsh_message warn "$@" >&2; }
+jsh_section() { printf '\n%s%s%s%s\n' "${C_BOLD}" "${C_CYAN}" "$1" "${C_RESET}"; }
+jsh_field() { printf '  %-*s %s\n' "${3:-20}" "$1" "${2:-}"; }
+jsh_note() { printf '  %s%s%s\n' "${C_DIM}" "$*" "${C_RESET}"; }
+jsh_detail() { printf '  %s%s%s\n' "${C_DIM}" "$*" "${C_RESET}"; }
+jsh_command_preview() { printf '  %s$%s %s\n' "${C_CYAN}" "${C_RESET}" "$*"; }
+cli_version() { printf 'proxy 1.0.1\n'; }
+cli_help() {
+  cat <<'EOF'
+Usage: proxy [options] <command> [args...]
+
+Options:
+  -p, --preset NAME    Use a built-in proxy preset
+  -u, --url URL        Set HTTP and HTTPS proxy URL
+  -s, --socks URL      Set SOCKS proxy URL
+  -n, --no-proxy LIST  Set hosts that bypass the proxy
+      --shell          Start an interactive proxied shell
+      --env            Print export commands
+      --test           Test proxy connectivity
+      --list           List presets
+  -v, --verbose        Show proxy configuration
+  -h, --help           Show help
+      --version        Show version
+EOF
+}
 
 # Override debug with script-specific env var
 debug() { [[ "${PROXY_DEBUG:-0}" == "1" ]] && _debug "$@" || true; }
@@ -76,129 +120,127 @@ debug() { [[ "${PROXY_DEBUG:-0}" == "1" ]] && _debug "$@" || true; }
 
 # Load config file if it exists
 load_config() {
-    if [[ -f "${PROXY_CONFIG_FILE}" ]]; then
-        debug "Loading config from ${PROXY_CONFIG_FILE}"
-        # shellcheck source=/dev/null
-        source "${PROXY_CONFIG_FILE}"
-    fi
+  if [[ -f "${PROXY_CONFIG_FILE}" ]]; then
+    debug "Loading config from ${PROXY_CONFIG_FILE}"
+    # shellcheck source=/dev/null
+    source "${PROXY_CONFIG_FILE}"
+  fi
 }
 
 # Parse proxy URL and validate
 validate_proxy_url() {
-    local url="$1"
-    local name="${2:-proxy}"
+  local url="$1"
+  local name="${2:-proxy}"
 
-    # Basic validation - should start with http://, https://, or socks://
-    if [[ ! "${url}" =~ ^(https?|socks[45]?)://[^[:space:]]+ ]]; then
-        die "Invalid ${name} URL: ${url}\nExpected format: http://host:port or socks5://host:port"
-    fi
+  # Basic validation - should start with http://, https://, or socks://
+  if [[ ! "${url}" =~ ^(https?|socks[45]?)://[^[:space:]]+ ]]; then
+    die "Invalid ${name} URL: ${url}\nExpected format: http://host:port or socks5://host:port"
+  fi
 
-    debug "Validated ${name}: ${url}"
+  debug "Validated ${name}: ${url}"
 }
 
 # Build proxy environment variables
 build_proxy_env() {
-    local http_proxy="${1:-}"
-    local https_proxy="${2:-${http_proxy}}"
-    local socks_proxy="${3:-}"
-    local no_proxy="${4:-localhost,127.0.0.1,::1}"
+  local http_proxy="${1:-}"
+  local https_proxy="${2:-${http_proxy}}"
+  local socks_proxy="${3:-}"
+  local no_proxy="${4:-localhost,127.0.0.1,::1}"
 
-    local env_vars=()
+  local env_vars=()
 
-    if [[ -n "${http_proxy}" ]]; then
-        env_vars+=(
-            "HTTP_PROXY=${http_proxy}"
-            "http_proxy=${http_proxy}"
-        )
-    fi
+  if [[ -n "${http_proxy}" ]]; then
+    env_vars+=(
+      "HTTP_PROXY=${http_proxy}"
+      "http_proxy=${http_proxy}"
+    )
+  fi
 
-    if [[ -n "${https_proxy}" ]]; then
-        env_vars+=(
-            "HTTPS_PROXY=${https_proxy}"
-            "https_proxy=${https_proxy}"
-        )
-    fi
+  if [[ -n "${https_proxy}" ]]; then
+    env_vars+=(
+      "HTTPS_PROXY=${https_proxy}"
+      "https_proxy=${https_proxy}"
+    )
+  fi
 
-    if [[ -n "${socks_proxy}" ]]; then
-        env_vars+=(
-            "ALL_PROXY=${socks_proxy}"
-            "all_proxy=${socks_proxy}"
-        )
-    fi
+  if [[ -n "${socks_proxy}" ]]; then
+    env_vars+=(
+      "ALL_PROXY=${socks_proxy}"
+      "all_proxy=${socks_proxy}"
+    )
+  fi
 
-    if [[ -n "${no_proxy}" ]]; then
-        env_vars+=(
-            "NO_PROXY=${no_proxy}"
-            "no_proxy=${no_proxy}"
-        )
-    fi
+  if [[ -n "${no_proxy}" ]]; then
+    env_vars+=(
+      "NO_PROXY=${no_proxy}"
+      "no_proxy=${no_proxy}"
+    )
+  fi
 
-    printf '%s\n' "${env_vars[@]}"
+  printf '%s\n' "${env_vars[@]}"
 }
 
 # Test proxy connectivity
 test_proxy() {
-    local proxy_url="$1"
+  local proxy_url="$1"
 
-    info "Testing proxy: ${proxy_url}"
+  info "Testing proxy: ${proxy_url}"
 
-    # Extract host and port from URL
-    local host port
-    if [[ "${proxy_url}" =~ ^[a-z0-9]+://([^:/]+):([0-9]+) ]]; then
-        host="${BASH_REMATCH[1]}"
-        port="${BASH_REMATCH[2]}"
-    elif [[ "${proxy_url}" =~ ^[a-z0-9]+://([^:/]+) ]]; then
-        host="${BASH_REMATCH[1]}"
-        port="8080"  # default
+  # Extract host and port from URL
+  local host port
+  if [[ "${proxy_url}" =~ ^[a-z0-9]+://([^:/]+):([0-9]+) ]]; then
+    host="${BASH_REMATCH[1]}"
+    port="${BASH_REMATCH[2]}"
+  elif [[ "${proxy_url}" =~ ^[a-z0-9]+://([^:/]+) ]]; then
+    host="${BASH_REMATCH[1]}"
+    port="8080" # default
+  else
+    die "Cannot parse proxy URL: ${proxy_url}"
+  fi
+
+  debug "Testing connectivity to ${host}:${port}"
+
+  # Test TCP connectivity
+  if command -v nc &>/dev/null; then
+    if nc -z -w 3 "${host}" "${port}" 2>/dev/null; then
+      success "Proxy is reachable at ${host}:${port}"
     else
-        die "Cannot parse proxy URL: ${proxy_url}"
+      die "Cannot connect to proxy at ${host}:${port}"
     fi
-
-    debug "Testing connectivity to ${host}:${port}"
-
-    # Test TCP connectivity
-    if command -v nc &>/dev/null; then
-        if nc -z -w 3 "${host}" "${port}" 2>/dev/null; then
-            success "Proxy is reachable at ${host}:${port}"
-        else
-            die "Cannot connect to proxy at ${host}:${port}"
-        fi
-    elif command -v timeout &>/dev/null; then
-        if timeout 3 bash -c "echo >/dev/tcp/${host}/${port}" 2>/dev/null; then
-            success "Proxy is reachable at ${host}:${port}"
-        else
-            die "Cannot connect to proxy at ${host}:${port}"
-        fi
+  elif command -v timeout &>/dev/null; then
+    if timeout 3 bash -c "echo >/dev/tcp/${host}/${port}" 2>/dev/null; then
+      success "Proxy is reachable at ${host}:${port}"
     else
-        warn "Cannot test connectivity (nc or timeout not available)"
+      die "Cannot connect to proxy at ${host}:${port}"
     fi
+  else
+    warn "Cannot test connectivity (nc or timeout not available)"
+  fi
 
-    # Test HTTP if curl is available
-    if command -v curl &>/dev/null; then
-        info "Testing HTTP through proxy..."
-        local test_url="http://httpbin.org/ip"
+  # Test HTTP if curl is available
+  if command -v curl &>/dev/null; then
+    info "Testing HTTP through proxy..."
+    local test_url="http://httpbin.org/ip"
 
-        if curl -s -m 10 --proxy "${proxy_url}" "${test_url}" &>/dev/null; then
-            local result
-            result=$(curl -s -m 10 --proxy "${proxy_url}" "${test_url}" 2>/dev/null || true)
-            success "HTTP proxy working"
-            if [[ -n "${result}" ]]; then
-                printf "%sResponse: %s%s\n" "${C_DIM}" "${result}" "${C_RESET}"
-            fi
-        else
-            warn "HTTP test failed (proxy may require authentication or only support HTTPS)"
-        fi
+    if curl -s -m 10 --proxy "${proxy_url}" "${test_url}" &>/dev/null; then
+      local result
+      result=$(curl -s -m 10 --proxy "${proxy_url}" "${test_url}" 2>/dev/null || true)
+      success "HTTP proxy working"
+      if [[ -n "${result}" ]]; then
+        jsh_detail "Response: ${result}"
+      fi
+    else
+      warn "HTTP test failed (proxy may require authentication or only support HTTPS)"
     fi
+  fi
 }
 
 # List available presets
 list_presets() {
-    printf "%sAvailable proxy presets:%s\n" "${C_BOLD}" "${C_RESET}"
-    printf "%s─────────────────────────────────────────%s\n" "${C_DIM}" "${C_RESET}"
-    for preset in $(_proxy_preset_names); do
-        printf "%s%-15s%s %s\n" "${C_CYAN}" "${preset}" "${C_RESET}" "$(_proxy_preset_url "${preset}")"
-    done
-    printf "\n%sUse: %s -p <preset> <command>%s\n" "${C_DIM}" "${SCRIPT_NAME}" "${C_RESET}"
+  for preset in $(_proxy_preset_names); do
+    jsh_field "${preset}" "$(_proxy_preset_url "${preset}")" 15
+  done
+  jsh_command_preview "${SCRIPT_NAME} -p <preset> <command>"
 }
 
 # =============================================================================
@@ -206,159 +248,158 @@ list_presets() {
 # =============================================================================
 
 main() {
-    local proxy_url=""
-    local socks_url=""
-    local no_proxy="${NO_PROXY_LIST}"
-    local verbose=false
-    local shell_mode=false
-    local env_mode=false
-    local test_mode=false
+  local proxy_url=""
+  local socks_url=""
+  local no_proxy="${NO_PROXY_LIST}"
+  local verbose=false
+  local shell_mode=false
+  local env_mode=false
+  local test_mode=false
 
-    # Load config file first
-    load_config
+  # Load config file first
+  load_config
 
-    # Parse arguments
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            -h|--help)
-                cli_help
-                exit 0
-                ;;
-            --version)
-                cli_version
-                exit 0
-                ;;
-            --list)
-                list_presets
-                exit 0
-                ;;
-            -p|--preset)
-                [[ $# -lt 2 ]] && die "Option $1 requires an argument"
-                local preset_name="$2"
-                local preset_url
-                if ! preset_url=$(_proxy_preset_url "${preset_name}"); then
-                    die "Unknown preset: ${preset_name}\nUse --list to see available presets"
-                fi
-                proxy_url="${preset_url}"
-                shift 2
-                ;;
-            -u|--url)
-                [[ $# -lt 2 ]] && die "Option $1 requires an argument"
-                proxy_url="$2"
-                shift 2
-                ;;
-            -s|--socks)
-                [[ $# -lt 2 ]] && die "Option $1 requires an argument"
-                socks_url="$2"
-                shift 2
-                ;;
-            -n|--no-proxy)
-                [[ $# -lt 2 ]] && die "Option $1 requires an argument"
-                no_proxy="$2"
-                shift 2
-                ;;
-            --shell)
-                shell_mode=true
-                shift
-                ;;
-            --env)
-                env_mode=true
-                shift
-                ;;
-            --test)
-                test_mode=true
-                shift
-                ;;
-            -v|--verbose)
-                verbose=true
-                PROXY_DEBUG=1
-                export PROXY_DEBUG
-                shift
-                ;;
-            --)
-                shift
-                break
-                ;;
-            -*)
-                die "Unknown option: $1 (use --help for usage)"
-                ;;
-            *)
-                break
-                ;;
-        esac
-    done
-
-    # Use defaults if no proxy specified
-    if [[ -z "${proxy_url}" && -z "${socks_url}" ]]; then
-        if [[ -n "${PROXY_SOCKS}" ]]; then
-            socks_url="${PROXY_SOCKS}"
-        elif [[ -n "${PROXY_HTTP}" ]]; then
-            proxy_url="${PROXY_HTTP}"
-        fi
-    fi
-
-    # Still no proxy?
-    if [[ -z "${proxy_url}" && -z "${socks_url}" ]]; then
-        if [[ "${test_mode}" == "true" || "${env_mode}" == "true" || "${shell_mode}" == "true" || $# -gt 0 ]]; then
-            die "No proxy specified. Use -u URL, -p PRESET, or configure PROXY_HTTP"
-        fi
+  # Parse arguments
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h | --help)
         cli_help
         exit 0
-    fi
-
-    # Validate URLs
-    [[ -n "${proxy_url}" ]] && validate_proxy_url "${proxy_url}" "HTTP proxy"
-    [[ -n "${socks_url}" ]] && validate_proxy_url "${socks_url}" "SOCKS proxy"
-
-    # Handle test mode
-    if [[ "${test_mode}" == "true" ]]; then
-        test_proxy "${proxy_url:-${socks_url}}"
+        ;;
+      --version)
+        cli_version
         exit 0
-    fi
-
-    # Build environment
-    local env_lines
-    env_lines=$(build_proxy_env "${proxy_url}" "${proxy_url}" "${socks_url}" "${no_proxy}")
-
-    # Handle env mode (for eval)
-    if [[ "${env_mode}" == "true" ]]; then
-        while IFS= read -r line; do
-            printf 'export %s\n' "${line}"
-        done <<< "${env_lines}"
+        ;;
+      --list)
+        list_presets
         exit 0
-    fi
+        ;;
+      -p | --preset)
+        [[ $# -lt 2 ]] && die "Option $1 requires an argument"
+        local preset_name="$2"
+        local preset_url
+        if ! preset_url=$(_proxy_preset_url "${preset_name}"); then
+          die "Unknown preset: ${preset_name}\nUse --list to see available presets"
+        fi
+        proxy_url="${preset_url}"
+        shift 2
+        ;;
+      -u | --url)
+        [[ $# -lt 2 ]] && die "Option $1 requires an argument"
+        proxy_url="$2"
+        shift 2
+        ;;
+      -s | --socks)
+        [[ $# -lt 2 ]] && die "Option $1 requires an argument"
+        socks_url="$2"
+        shift 2
+        ;;
+      -n | --no-proxy)
+        [[ $# -lt 2 ]] && die "Option $1 requires an argument"
+        no_proxy="$2"
+        shift 2
+        ;;
+      --shell)
+        shell_mode=true
+        shift
+        ;;
+      --env)
+        env_mode=true
+        shift
+        ;;
+      --test)
+        test_mode=true
+        shift
+        ;;
+      -v | --verbose)
+        verbose=true
+        PROXY_DEBUG=1
+        export PROXY_DEBUG
+        shift
+        ;;
+      --)
+        shift
+        break
+        ;;
+      -*)
+        die "Unknown option: $1 (use --help for usage)"
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
 
-    # Show configuration if verbose
-    if [[ "${verbose}" == "true" ]]; then
-        printf "%sProxy configuration:%s\n" "${C_BOLD}" "${C_RESET}"
-        while IFS= read -r line; do
-            printf "%s%s%s\n" "${C_CYAN}" "${line}" "${C_RESET}"
-        done <<< "${env_lines}"
-        printf "\n"
+  # Use defaults if no proxy specified
+  if [[ -z "${proxy_url}" && -z "${socks_url}" ]]; then
+    if [[ -n "${PROXY_SOCKS}" ]]; then
+      socks_url="${PROXY_SOCKS}"
+    elif [[ -n "${PROXY_HTTP}" ]]; then
+      proxy_url="${PROXY_HTTP}"
     fi
+  fi
 
-    # Build env array for command execution
-    local env_array=()
+  # Still no proxy?
+  if [[ -z "${proxy_url}" && -z "${socks_url}" ]]; then
+    if [[ "${test_mode}" == "true" || "${env_mode}" == "true" || "${shell_mode}" == "true" || $# -gt 0 ]]; then
+      die "No proxy specified. Use -u URL, -p PRESET, or configure PROXY_HTTP"
+    fi
+    cli_help
+    exit 0
+  fi
+
+  # Validate URLs
+  [[ -n "${proxy_url}" ]] && validate_proxy_url "${proxy_url}" "HTTP proxy"
+  [[ -n "${socks_url}" ]] && validate_proxy_url "${socks_url}" "SOCKS proxy"
+
+  # Handle test mode
+  if [[ "${test_mode}" == "true" ]]; then
+    test_proxy "${proxy_url:-${socks_url}}"
+    exit 0
+  fi
+
+  # Build environment
+  local env_lines
+  env_lines=$(build_proxy_env "${proxy_url}" "${proxy_url}" "${socks_url}" "${no_proxy}")
+
+  # Handle env mode (for eval)
+  if [[ "${env_mode}" == "true" ]]; then
     while IFS= read -r line; do
-        env_array+=("${line}")
-    done <<< "${env_lines}"
+      printf 'export %s\n' "${line}"
+    done <<<"${env_lines}"
+    exit 0
+  fi
 
-    # Handle shell mode
-    if [[ "${shell_mode}" == "true" ]]; then
-        local shell_cmd="${SHELL:-/bin/bash}"
-        info "Starting shell with proxy configured..."
-        printf "%s(Exit shell to remove proxy settings)%s\n" "${C_DIM}" "${C_RESET}"
-        exec env "${env_array[@]}" "${shell_cmd}"
-    fi
+  # Show configuration if verbose
+  if [[ "${verbose}" == "true" ]]; then
+    jsh_section "Proxy Configuration"
+    while IFS= read -r line; do
+      jsh_detail "${line}"
+    done <<<"${env_lines}"
+  fi
 
-    # Require command
-    if [[ $# -eq 0 ]]; then
-        die "No command specified. Use --shell for interactive shell, or provide a command."
-    fi
+  # Build env array for command execution
+  local env_array=()
+  while IFS= read -r line; do
+    env_array+=("${line}")
+  done <<<"${env_lines}"
 
-    # Execute command with proxy environment
-    debug "Executing: $*"
-    exec env "${env_array[@]}" "$@"
+  # Handle shell mode
+  if [[ "${shell_mode}" == "true" ]]; then
+    local shell_cmd="${SHELL:-/bin/bash}"
+    info "Starting shell with proxy configured..."
+    jsh_note "Exit the child shell to remove proxy settings"
+    exec env "${env_array[@]}" "${shell_cmd}"
+  fi
+
+  # Require command
+  if [[ $# -eq 0 ]]; then
+    die "No command specified. Use --shell for interactive shell, or provide a command."
+  fi
+
+  # Execute command with proxy environment
+  debug "Executing: $*"
+  exec env "${env_array[@]}" "$@"
 }
 
 # Handle interrupts
