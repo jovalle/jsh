@@ -1,0 +1,446 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+readonly SCRIPT_NAME="${0##*/}"
+HOST_OS="$(uname -s)"
+readonly HOST_OS
+
+if [[ "${JSH_PLAIN_OUTPUT:-0}" != 1 && "${TERM:-dumb}" != dumb &&
+  -z ${NO_COLOR+x} && "${JSH_COLOR:-auto}" != never ]] \
+  && { [[ -t 1 ]] || [[ "${JSH_COLOR:-auto}" == always ]]; }; then
+  C_RESET=$'\033[0m' C_RED=$'\033[31m' C_GREEN=$'\033[32m'
+  C_YELLOW=$'\033[33m' C_CYAN=$'\033[36m'
+else
+  C_RESET='' C_RED='' C_GREEN='' C_YELLOW='' C_CYAN=''
+fi
+
+status_style() {
+  case "$1" in
+    success)
+      REPLY_COLOR=${C_GREEN}
+      [[ -n "${C_RESET}" ]] && REPLY_MARK='✔' || REPLY_MARK='[ok]'
+      ;;
+    plan)
+      REPLY_COLOR=${C_CYAN}
+      [[ -n "${C_RESET}" ]] && REPLY_MARK='➜' || REPLY_MARK='[plan]'
+      ;;
+    warning)
+      REPLY_COLOR=${C_YELLOW}
+      [[ -n "${C_RESET}" ]] && REPLY_MARK='▲' || REPLY_MARK='[warn]'
+      ;;
+    *)
+      REPLY_COLOR=${C_RED}
+      [[ -n "${C_RESET}" ]] && REPLY_MARK='✖' || REPLY_MARK='[error]'
+      ;;
+  esac
+}
+
+message() {
+  status_style "$1"
+  shift
+  printf '%s%s%s %s\n' "${REPLY_COLOR}" "${REPLY_MARK}" "${C_RESET}" "$*"
+}
+
+die() {
+  message error "${SCRIPT_NAME}: $*" >&2
+  exit 1
+}
+
+usage_error() {
+  message error "${SCRIPT_NAME}: $*" >&2
+  printf 'Try "%s --help" for usage.\n' "${SCRIPT_NAME}" >&2
+  exit 2
+}
+
+warn() { message warning "$@" >&2; }
+plan() { message plan "$@"; }
+success() { message success "$@"; }
+
+cli_version() { printf 'dockerctl 1.0.1\n'; }
+
+cli_help() {
+  cat <<'EOF'
+Usage: dockerctl [--backend NAME] [up|down|restart|status]
+
+Manage an installed local Docker-compatible backend. With no command, dockerctl
+starts the selected backend. It honors a recognized current Docker context,
+then prefers Colima, then uses the only other available backend.
+
+Commands:
+  up, start       Start the backend and wait for the Docker API
+  down, stop      Stop the backend
+  restart         Restart the backend and wait for the Docker API
+  status          Report whether the backend is reachable
+
+Options:
+  -b, --backend NAME  colima, desktop, orbstack, docker, or podman
+  -h, --help          Show help
+      --version       Show version
+
+Supported backends:
+  macOS          Colima, Docker Desktop, OrbStack
+  Linux          Colima, rootless/rootful Docker Engine, rootless Podman
+EOF
+}
+
+docker_cli() {
+  env -u DOCKER_HOST docker "$@"
+}
+
+context_exists() {
+  docker_cli context inspect "$1" >/dev/null 2>&1
+}
+
+context_healthy() {
+  context_exists "$1" && docker_cli --context "$1" info >/dev/null 2>&1
+}
+
+current_context() {
+  docker_cli context show 2>/dev/null || true
+}
+
+docker_desktop_available() {
+  local app_path=${DOCKERCTL_DOCKER_APP:-/Applications/Docker.app}
+  [[ "${HOST_OS}" == Darwin ]] || return 1
+  [[ -d "${app_path}" ]] || return 1
+  docker_cli desktop version >/dev/null 2>&1
+}
+
+docker_user_service_available() {
+  [[ "${HOST_OS}" == Linux ]] || return 1
+  command -v systemctl >/dev/null 2>&1 || return 1
+  systemctl --user cat docker.service >/dev/null 2>&1
+}
+
+docker_system_service_available() {
+  [[ "${HOST_OS}" == Linux ]] || return 1
+  command -v systemctl >/dev/null 2>&1 || return 1
+  systemctl cat docker.service >/dev/null 2>&1
+}
+
+backend_available() {
+  case "$1" in
+    colima)
+      { [[ "${HOST_OS}" == Darwin ]] || [[ "${HOST_OS}" == Linux ]]; } \
+        && command -v colima >/dev/null 2>&1
+      ;;
+    desktop) docker_desktop_available ;;
+    orbstack)
+      [[ "${HOST_OS}" == Darwin ]] && command -v orb >/dev/null 2>&1
+      ;;
+    docker)
+      docker_user_service_available || docker_system_service_available
+      ;;
+    podman)
+      [[ "${HOST_OS}" == Linux ]] && command -v podman >/dev/null 2>&1 \
+        && command -v systemctl >/dev/null 2>&1 \
+        && systemctl --user cat podman.socket >/dev/null 2>&1
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+backend_for_context() {
+  case "$1" in
+    colima) printf 'colima\n' ;;
+    desktop-linux) printf 'desktop\n' ;;
+    orbstack) printf 'orbstack\n' ;;
+    rootless) [[ "${HOST_OS}" == Linux ]] && printf 'docker\n' ;;
+    default) [[ "${HOST_OS}" == Linux ]] && printf 'docker\n' ;;
+    podman) [[ "${HOST_OS}" == Linux ]] && printf 'podman\n' ;;
+    *) return 1 ;;
+  esac
+}
+
+select_backend() {
+  local requested="$1" context backend candidate count=0 selected=''
+
+  if [[ -n "${requested}" ]]; then
+    case "${requested}" in colima | desktop | orbstack | docker | podman) ;; *)
+      usage_error "unknown backend: ${requested}"
+      ;;
+    esac
+    backend_available "${requested}" || die "backend is not available: ${requested}"
+    printf '%s\n' "${requested}"
+    return
+  fi
+
+  context=$(current_context)
+  backend=$(backend_for_context "${context}" 2>/dev/null || true)
+  if [[ -n "${backend}" ]] && backend_available "${backend}"; then
+    printf '%s\n' "${backend}"
+    return
+  fi
+
+  if backend_available colima; then
+    printf 'colima\n'
+    return
+  fi
+
+  for candidate in desktop orbstack docker podman; do
+    if backend_available "${candidate}"; then
+      selected="${candidate}"
+      count=$((count + 1))
+    fi
+  done
+  [[ "${count}" -gt 0 ]] || die 'no supported Docker backend is installed'
+  [[ "${count}" -eq 1 ]] || die 'multiple backends are available; choose one with --backend'
+  printf '%s\n' "${selected}"
+}
+
+docker_service_mode() {
+  local context
+  context=$(current_context)
+  if [[ "${context}" == rootless ]] && docker_user_service_available; then
+    printf 'user\n'
+  elif [[ "${context}" == default ]] && docker_system_service_available; then
+    printf 'system\n'
+  elif docker_user_service_available; then
+    printf 'user\n'
+  elif docker_system_service_available; then
+    printf 'system\n'
+  else
+    return 1
+  fi
+}
+
+backend_context() {
+  case "$1" in
+    colima) printf 'colima\n' ;;
+    desktop) printf 'desktop-linux\n' ;;
+    orbstack) printf 'orbstack\n' ;;
+    docker)
+      if [[ "$(docker_service_mode)" == user ]]; then
+        printf 'rootless\n'
+      else
+        printf 'default\n'
+      fi
+      ;;
+    podman) printf 'podman\n' ;;
+  esac
+}
+
+ensure_context() {
+  local backend="$1" context runtime_dir
+  context=$(backend_context "${backend}")
+  context_exists "${context}" && return 0
+
+  case "${backend}" in
+    docker)
+      [[ "$(docker_service_mode)" == user ]] || return 0
+      runtime_dir=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+      docker_cli context create rootless --docker "host=unix://${runtime_dir}/docker.sock" >/dev/null
+      ;;
+    podman)
+      runtime_dir=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+      docker_cli context create podman --docker "host=unix://${runtime_dir}/podman/podman.sock" >/dev/null
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+backend_running() {
+  local backend="$1" context mode
+  context=$(backend_context "${backend}")
+  case "${backend}" in
+    colima) colima status >/dev/null 2>&1 ;;
+    desktop | orbstack) context_healthy "${context}" ;;
+    docker)
+      mode=$(docker_service_mode)
+      if [[ "${mode}" == user ]]; then
+        systemctl --user is-active --quiet docker.service
+      else
+        systemctl is-active --quiet docker.service
+      fi
+      ;;
+    podman) systemctl --user is-active --quiet podman.socket ;;
+  esac
+}
+
+start_backend() {
+  local backend="$1" mode colima_home
+  case "${backend}" in
+    colima)
+      colima_home=${COLIMA_HOME:-${HOME}/.colima}
+      if [[ -f "${colima_home}/default/colima.yaml" ]]; then
+        colima start
+      else
+        colima start --cpus 2 --memory 2 --disk 20
+      fi
+      ;;
+    desktop) docker_cli desktop start ;;
+    orbstack) orb start ;;
+    docker)
+      mode=$(docker_service_mode)
+      if [[ "${mode}" == user ]]; then
+        systemctl --user start docker.service
+      else
+        command -v sudo >/dev/null 2>&1 || die 'sudo is required to start the system Docker service'
+        sudo systemctl start docker.service
+      fi
+      ;;
+    podman) systemctl --user start podman.socket ;;
+  esac
+}
+
+stop_backend() {
+  local backend="$1" mode
+  case "${backend}" in
+    colima) colima stop ;;
+    desktop) docker_cli desktop stop ;;
+    orbstack) orb stop ;;
+    docker)
+      mode=$(docker_service_mode)
+      if [[ "${mode}" == user ]]; then
+        systemctl --user stop docker.service
+      else
+        command -v sudo >/dev/null 2>&1 || die 'sudo is required to stop the system Docker service'
+        sudo systemctl stop docker.service
+      fi
+      ;;
+    podman)
+      systemctl --user stop podman.socket
+      systemctl --user stop podman.service >/dev/null 2>&1 || true
+      ;;
+  esac
+}
+
+restart_backend() {
+  local backend="$1" mode
+  case "${backend}" in
+    colima) colima restart ;;
+    desktop) docker_cli desktop restart ;;
+    orbstack)
+      backend_running orbstack && orb stop || true
+      orb start
+      ;;
+    docker)
+      mode=$(docker_service_mode)
+      if [[ "${mode}" == user ]]; then
+        systemctl --user restart docker.service
+      else
+        command -v sudo >/dev/null 2>&1 || die 'sudo is required to restart the system Docker service'
+        sudo systemctl restart docker.service
+      fi
+      ;;
+    podman) systemctl --user restart podman.socket ;;
+  esac
+}
+
+wait_until_ready() {
+  local backend="$1" context attempts interval attempt
+  context=$(backend_context "${backend}")
+  attempts=${DOCKERCTL_READY_ATTEMPTS:-60}
+  interval=${DOCKERCTL_READY_INTERVAL:-1}
+
+  for ((attempt = 1; attempt <= attempts; attempt++)); do
+    ensure_context "${backend}" >/dev/null 2>&1 || true
+    if context_healthy "${context}"; then
+      docker_cli context use "${context}" >/dev/null 2>&1
+      return 0
+    fi
+    ((attempt == attempts)) || sleep "${interval}"
+  done
+  return 1
+}
+
+warn_docker_host() {
+  [[ -z "${DOCKER_HOST:-}" ]] || warn "DOCKER_HOST overrides the selected Docker context: ${DOCKER_HOST}"
+}
+
+command_up() {
+  local backend="$1" context
+  context=$(backend_context "${backend}")
+  if context_healthy "${context}"; then
+    docker_cli context use "${context}" >/dev/null 2>&1
+    success "Docker is already running with ${backend}."
+    warn_docker_host
+    return
+  fi
+
+  plan "Starting ${backend}"
+  start_backend "${backend}"
+  wait_until_ready "${backend}" || die "${backend} started, but the Docker API did not become ready"
+  success "Docker is ready with ${backend}."
+  warn_docker_host
+}
+
+command_down() {
+  local backend="$1"
+  if ! backend_running "${backend}"; then
+    success "Docker backend ${backend} is already stopped."
+    return
+  fi
+  stop_backend "${backend}"
+  success "Docker backend ${backend} stopped."
+}
+
+command_restart() {
+  local backend="$1"
+  plan "Restarting ${backend}"
+  if backend_running "${backend}"; then
+    restart_backend "${backend}"
+  else
+    start_backend "${backend}"
+  fi
+  wait_until_ready "${backend}" || die "${backend} restarted, but the Docker API did not become ready"
+  success "Docker is ready with ${backend}."
+  warn_docker_host
+}
+
+command_status() {
+  local backend="$1" context
+  context=$(backend_context "${backend}")
+  if context_healthy "${context}"; then
+    success "${backend}: running · context=${context}"
+    return 0
+  fi
+  message error "${backend}: stopped · context=${context}"
+  return 1
+}
+
+main() {
+  local backend='' action=up
+  while (($# > 0)); do
+    case "$1" in
+      -b | --backend)
+        [[ $# -ge 2 ]] || usage_error "$1 requires a backend name"
+        backend="$2"
+        shift 2
+        ;;
+      --backend=*)
+        backend="${1#*=}"
+        shift
+        ;;
+      up | start)
+        action=up
+        shift
+        ;;
+      down | stop)
+        action=down
+        shift
+        ;;
+      restart | status)
+        action="$1"
+        shift
+        ;;
+      -h | --help)
+        cli_help
+        exit 0
+        ;;
+      --version)
+        cli_version
+        exit 0
+        ;;
+      -*) usage_error "unknown option: $1" ;;
+      *) usage_error "unknown command: $1" ;;
+    esac
+  done
+
+  command -v docker >/dev/null 2>&1 || die 'Docker CLI is not installed'
+  backend=$(select_backend "${backend}")
+  "command_${action}" "${backend}"
+}
+
+main "$@"
