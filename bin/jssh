@@ -1,19 +1,4 @@
 #!/usr/bin/env bash
-# @name jssh
-# @version 1.0.0
-# @desc SSH with portable Jsh environment
-# @usage jssh [ssh-options] [user@]hostname
-#
-# @cmd --check    Validate setup and show status
-# @cmd --rebuild  Force rebuild of payload cache
-#
-# @option -h,--help  Show this help message
-#
-# @example jssh server.example.com
-# @example jssh -p 2222 user@server.example.com
-# @example jssh -i ~/.ssh/mykey server
-# @example jssh --check
-#
 # shellcheck shell=bash
 #
 # Connects to a remote host via SSH and automatically deploys your
@@ -23,299 +8,414 @@
 set -euo pipefail
 
 # =============================================================================
-# Dependencies
-# =============================================================================
-
-# Source CLI framework (for help/version generation - keeps custom UI helpers below)
-source "${0%/*}/../lib/cli.sh" 2>/dev/null || source "${JSH_DIR:-$HOME/.jsh}/lib/cli.sh"
-
-# =============================================================================
 # Configuration
 # =============================================================================
 
 JSH_DIR="${JSH_DIR:-$HOME/.jsh}"
 JSSH_CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/jssh"
-JSSH_PAYLOAD_CACHE="${JSSH_CACHE_DIR}/payload.tar.gz"
-JSSH_PAYLOAD_HASH="${JSSH_CACHE_DIR}/payload.hash"
-JSSH_TTL=3600  # Rebuild payload if older than 1 hour
+JSSH_CAPSULE="${JSSH_CAPSULE:-standard}"
+JSSH_PAYLOAD_CACHE=""
+JSSH_PAYLOAD_HASH=""
+JSSH_TTL=3600 # Rebuild payload if older than 1 hour
 JSSH_REMOTE_CONFIG="${JSH_DIR}/local/projects.json"
+JSSH_ACTIVE_CONTROL_DIR=""
+JSSH_ACTIVE_CONTROL_PATH=""
+JSSH_ACTIVE_REMOTE_DIR=""
+declare -a JSSH_ACTIVE_SSH_ARGS=()
 
 # Remote settings - fixed prefix for safety
-JSSH_REMOTE_PREFIX="/tmp/.jsh-portable"
+JSSH_REMOTE_TMPDIR="${JSSH_REMOTE_TMPDIR:-/tmp}"
+JSSH_REMOTE_PREFIX="${JSSH_REMOTE_TMPDIR%/}/.jsh-portable"
 JSSH_PREFER_ZSH="${JSSH_PREFER_ZSH:-1}"
+
+_jssh_set_capsule() {
+  case "$1" in minimal | standard | full) JSSH_CAPSULE="$1" ;; *) die "Unknown capsule: $1" ;; esac
+  JSSH_PAYLOAD_CACHE="${JSSH_CACHE_DIR}/payload-${JSSH_CAPSULE}.tar.gz"
+  JSSH_PAYLOAD_HASH="${JSSH_CACHE_DIR}/payload-${JSSH_CAPSULE}.hash"
+}
+
+_jssh_set_capsule "$JSSH_CAPSULE"
 
 # =============================================================================
 # UI Helpers
 # =============================================================================
 
-# Colors (auto-detect terminal support)
-if [[ -t 2 ]] && [[ "${TERM:-}" != "dumb" ]]; then
-    C_RESET='\033[0m'
-    C_DIM='\033[2m'
-    C_BOLD='\033[1m'
-    C_GREEN='\033[32m'
-    C_YELLOW='\033[33m'
-    C_BLUE='\033[34m'
-    C_RED='\033[31m'
-    C_CYAN='\033[36m'
+if [[ "${JSH_PLAIN_OUTPUT:-0}" != 1 && "${TERM:-dumb}" != dumb &&
+  -z ${NO_COLOR+x} && "${JSH_COLOR:-auto}" != never ]] \
+  && { [[ -t 2 ]] || [[ "${JSH_COLOR:-auto}" == always ]]; }; then
+  JSH_UI_RESET=$'\033[0m' JSH_UI_DIM=$'\033[2m'
+  JSH_UI_RED=$'\033[31m' JSH_UI_GREEN=$'\033[32m'
+  JSH_UI_YELLOW=$'\033[33m' JSH_UI_CYAN=$'\033[36m'
 else
-    C_RESET='' C_DIM='' C_BOLD='' C_GREEN='' C_YELLOW='' C_BLUE='' C_RED='' C_CYAN=''
+  JSH_UI_RESET='' JSH_UI_DIM=''
+  JSH_UI_RED='' JSH_UI_GREEN='' JSH_UI_YELLOW='' JSH_UI_CYAN=''
 fi
 
-# Spinner state
-_SPINNER_PID=""
-
-die() {
-    printf "${C_RED}✗${C_RESET} %s\n" "$*" >&2
-    exit 1
+jsh_ui_style() {
+  case "$1" in
+    ok | success)
+      REPLY_COLOR=${JSH_UI_GREEN}
+      [[ -n "${JSH_UI_RESET}" ]] && REPLY_MARK='✔' || REPLY_MARK='[ok]'
+      ;;
+    plan)
+      REPLY_COLOR=${JSH_UI_CYAN}
+      [[ -n "${JSH_UI_RESET}" ]] && REPLY_MARK='➜' || REPLY_MARK='[plan]'
+      ;;
+    warn | warning)
+      REPLY_COLOR=${JSH_UI_YELLOW}
+      [[ -n "${JSH_UI_RESET}" ]] && REPLY_MARK='▲' || REPLY_MARK='[warn]'
+      ;;
+    error | fail | failed)
+      REPLY_COLOR=${JSH_UI_RED}
+      [[ -n "${JSH_UI_RESET}" ]] && REPLY_MARK='✖' || REPLY_MARK='[error]'
+      ;;
+    *)
+      REPLY_COLOR=${JSH_UI_CYAN}
+      [[ -n "${JSH_UI_RESET}" ]] && REPLY_MARK='›' || REPLY_MARK='[note]'
+      ;;
+  esac
 }
 
+jsh_ui_message() {
+  local state="$1"
+  shift
+  jsh_ui_style "${state}"
+  printf '%s%s%s %s\n' "${REPLY_COLOR}" "${REPLY_MARK}" "${JSH_UI_RESET}" "$*"
+}
+
+jsh_ui_note() {
+  printf '  %s%s%s\n' "${JSH_UI_DIM}" "$*" "${JSH_UI_RESET}"
+}
+
+jsh_spinner_start() {
+  jsh_ui_message plan "$1" >&2
+}
+
+jsh_spinner_stop() {
+  [[ -z "${2:-}" ]] || jsh_ui_message "${1:-note}" "$2" >&2
+}
+
+cli_version() { printf 'jssh 1.0.1\n'; }
+cli_help() {
+  cat <<'EOF'
+Usage: jssh [options] [user@]hostname
+
+Options:
+      --capsule PROFILE  Payload profile: minimal, standard, or full
+      --check            Validate local setup
+      --rebuild          Rebuild the selected payload without connecting
+  -h, --help             Show help
+      --version          Show version
+EOF
+}
+
+die() {
+  jsh_ui_message error "$*" >&2
+  exit 1
+}
+
+case "${JSSH_REMOTE_TMPDIR}" in
+  /*) ;;
+  *) die "JSSH_REMOTE_TMPDIR must be an absolute path" ;;
+esac
+[[ "${JSSH_REMOTE_TMPDIR}" != *[!A-Za-z0-9._/-]* && "${JSSH_REMOTE_TMPDIR}" != *..* ]] \
+  || die "JSSH_REMOTE_TMPDIR contains unsafe characters"
+
 debug() {
-    [[ "${JSSH_DEBUG:-0}" == "1" ]] && printf "${C_DIM}[debug] %s${C_RESET}\n" "$*" >&2
-    return 0
+  [[ "${JSSH_DEBUG:-0}" == "1" ]] && jsh_ui_message debug "$*" >&2
+  return 0
 }
 
 # Status message (always shown)
 status() {
-    printf "${C_BLUE}→${C_RESET} %s\n" "$*" >&2
+  jsh_ui_message plan "$*" >&2
 }
 
 # Success message
 success() {
-    printf "${C_GREEN}✓${C_RESET} %s\n" "$*" >&2
+  jsh_ui_message success "$*" >&2
 }
 
 # Warning message
 warn() {
-    printf "${C_YELLOW}!${C_RESET} %s\n" "$*" >&2
+  jsh_ui_message warn "$*" >&2
 }
 
-# Start spinner with message
 spinner_start() {
-    local msg="$1"
-    # Only show spinner if stderr is a terminal
-    if [[ ! -t 2 ]]; then
-        printf "${C_DIM}%s...${C_RESET}\n" "$msg" >&2
-        return 0
-    fi
-
-    # Kill any existing spinner
-    spinner_stop 2>/dev/null || true
-
-    # Start spinner in background
-    (
-        local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
-        local i=0
-        # Hide cursor
-        printf '\033[?25l' >&2
-        while true; do
-            printf "\r${C_CYAN}%s${C_RESET} %s" "${frames[$i]}" "$msg" >&2
-            i=$(( (i + 1) % ${#frames[@]} ))
-            sleep 0.08
-        done
-    ) &
-    _SPINNER_PID=$!
-    disown $_SPINNER_PID 2>/dev/null || true
+  jsh_spinner_start "$1"
 }
 
-# Stop spinner with optional status
 spinner_stop() {
-    local status="${1:-}"
-    local msg="${2:-}"
-
-    if [[ -n "$_SPINNER_PID" ]]; then
-        kill "$_SPINNER_PID" 2>/dev/null || true
-        wait "$_SPINNER_PID" 2>/dev/null || true
-        _SPINNER_PID=""
-    fi
-
-    # Only do terminal cleanup if stderr is a terminal
-    if [[ -t 2 ]]; then
-        # Show cursor, clear line
-        printf '\033[?25h\r\033[K' >&2
-    fi
-
-    # Print final status if provided
-    if [[ -n "$status" ]] && [[ -n "$msg" ]]; then
-        case "$status" in
-            ok)      success "$msg" ;;
-            fail)    printf "${C_RED}✗${C_RESET} %s\n" "$msg" >&2 ;;
-            warn)    warn "$msg" ;;
-        esac
-    fi
+  jsh_spinner_stop "${1:-}" "${2:-}"
 }
 
-# Cleanup spinner on exit
-trap 'spinner_stop' EXIT
+_jssh_cleanup_active_session() {
+  local control_path="${JSSH_ACTIVE_CONTROL_PATH:-}"
+  local remote_dir="${JSSH_ACTIVE_REMOTE_DIR:-}"
+
+  if [[ -n "${control_path}" ]] \
+    && ssh -S "${control_path}" -O check "${JSSH_ACTIVE_SSH_ARGS[@]}" >/dev/null 2>&1; then
+    if [[ "${remote_dir}" == "${JSSH_REMOTE_PREFIX}"-* ]] \
+      && [[ "${remote_dir}" != *[!A-Za-z0-9._/-]* ]]; then
+      ssh -S "${control_path}" "${JSSH_ACTIVE_SSH_ARGS[@]}" \
+        "rm -rf '${remote_dir}'" >/dev/null 2>&1 || true
+    fi
+    ssh -S "${control_path}" -O exit "${JSSH_ACTIVE_SSH_ARGS[@]}" >/dev/null 2>&1 || true
+  fi
+
+  [[ -n "${JSSH_ACTIVE_CONTROL_DIR:-}" ]] && rm -rf "${JSSH_ACTIVE_CONTROL_DIR}"
+  JSSH_ACTIVE_CONTROL_DIR=""
+  JSSH_ACTIVE_CONTROL_PATH=""
+  JSSH_ACTIVE_REMOTE_DIR=""
+  JSSH_ACTIVE_SSH_ARGS=()
+}
+
+_jssh_on_exit() {
+  local exit_code=$?
+  trap - EXIT
+  spinner_stop
+  _jssh_cleanup_active_session
+  exit "${exit_code}"
+}
+
+trap '_jssh_on_exit' EXIT
 
 # =============================================================================
 # Pre-flight Checks
 # =============================================================================
 _jssh_check_setup() {
-    # Validate jssh setup - returns 0 if OK, 1 if issues found
-    local errors=0 warnings=0
+  # Validate jssh setup - returns 0 if OK, 1 if issues found
+  local errors=0 warnings=0
 
-    status "Checking jssh setup..."
+  status "Checking jssh setup..."
 
-    # Check JSH_DIR exists
-    if [[ ! -d "${JSH_DIR}" ]]; then
-        printf "${C_RED}✗${C_RESET} JSH_DIR not found: %s\n" "${JSH_DIR}" >&2
-        return 1
-    fi
-    success "Jsh directory: ${JSH_DIR}"
+  # Check JSH_DIR exists
+  if [[ ! -d "${JSH_DIR}" ]]; then
+    jsh_ui_message error "JSH_DIR not found: ${JSH_DIR}" >&2
+    return 1
+  fi
+  success "Jsh directory: ${JSH_DIR}"
 
-    # Check source files
-    if [[ ! -f "${JSH_DIR}/src/init.sh" ]]; then
-        printf "${C_RED}✗${C_RESET} Missing: src/init.sh\n" >&2
-        ((errors++))
+  # Check shell entry points.
+  local shell_config shell_configs_ok=0
+  for shell_config in dotfiles/.zshrc dotfiles/.bashrc; do
+    if [[ ! -f "${JSH_DIR}/${shell_config}" ]]; then
+      jsh_ui_message error "Missing: ${shell_config}" >&2
+      errors=$((errors + 1))
     else
-        local src_count
-        src_count=$(find "${JSH_DIR}/src" -name "*.sh" -type f | wc -l | tr -d ' ')
-        success "Shell configs: ${src_count} files"
+      shell_configs_ok=$((shell_configs_ok + 1))
     fi
+  done
+  success "Shell configs: ${shell_configs_ok}/2 found"
 
-    # Check FZF shell integration
-    if [[ ! -d "${JSH_DIR}/src/fzf" ]]; then
-        printf "${C_YELLOW}!${C_RESET} Missing: src/fzf/ (FZF shell integration)\n" >&2
-        ((warnings++))
-    else
-        success "FZF shell integration: present"
-    fi
+  # Check local FZF availability for non-jssh shell use.
+  if command -v fzf >/dev/null 2>&1; then
+    local fzf_version
+    fzf_version=$(fzf --version 2>/dev/null | cut -d' ' -f1 || echo "unknown")
+    success "FZF: installed (v${fzf_version})"
+  else
+    jsh_ui_message warn "FZF not installed (optional - install via package manager)" >&2
+    warnings=$((warnings + 1))
+  fi
 
-    # Check FZF (now a system dependency)
-    if command -v fzf >/dev/null 2>&1; then
-        local fzf_version
-        fzf_version=$(fzf --version 2>/dev/null | cut -d' ' -f1 || echo "unknown")
-        success "FZF: installed (v${fzf_version})"
-    else
-        printf "${C_YELLOW}!${C_RESET} FZF not installed (optional - install via package manager)\n" >&2
-        ((warnings++))
-    fi
+  # Check config files
+  local configs_ok=0
+  [[ -f "${JSH_DIR}/dotfiles/.inputrc" ]] && configs_ok=$((configs_ok + 1))
+  [[ -f "${JSH_DIR}/dotfiles/.tmux.conf" ]] && configs_ok=$((configs_ok + 1))
+  success "Config files: ${configs_ok} found"
 
-    # Check config files
-    local configs_ok=0
-    [[ -f "${JSH_DIR}/.inputrc" ]] && ((configs_ok++))
-    [[ -f "${JSH_DIR}/.tmux.conf" ]] && ((configs_ok++))
-    success "Config files: ${configs_ok} found"
+  # Check payload cache
+  if [[ -f "${JSSH_PAYLOAD_CACHE}" ]]; then
+    local payload_size payload_age
+    payload_size=$(du -h "${JSSH_PAYLOAD_CACHE}" | cut -f1 | tr -d ' ')
+    payload_age=$((($(date +%s) - $(stat -f%m "${JSSH_PAYLOAD_CACHE}" 2>/dev/null || stat -c%Y "${JSSH_PAYLOAD_CACHE}" 2>/dev/null || echo 0)) / 60))
+    success "Cached payload: ${payload_size} (${payload_age}m old)"
+  else
+    jsh_ui_note "No cached payload (will build on first use)" >&2
+  fi
 
-    # Check payload cache
-    if [[ -f "${JSSH_PAYLOAD_CACHE}" ]]; then
-        local payload_size payload_age
-        payload_size=$(du -h "${JSSH_PAYLOAD_CACHE}" | cut -f1 | tr -d ' ')
-        payload_age=$(( ($(date +%s) - $(stat -f%m "${JSSH_PAYLOAD_CACHE}" 2>/dev/null || stat -c%Y "${JSSH_PAYLOAD_CACHE}" 2>/dev/null || echo 0)) / 60 ))
-        success "Cached payload: ${payload_size} (${payload_age}m old)"
-    else
-        printf "${C_DIM}  No cached payload (will build on first use)${C_RESET}\n" >&2
-    fi
-
-    # Summary
-    echo "" >&2
-    if [[ ${errors} -gt 0 ]]; then
-        printf "${C_RED}✗${C_RESET} Setup incomplete: %d error(s), %d warning(s)\n" "${errors}" "${warnings}" >&2
-        return 1
-    elif [[ ${warnings} -gt 0 ]]; then
-        printf "${C_YELLOW}!${C_RESET} Setup OK with %d warning(s)\n" "${warnings}" >&2
-        return 0
-    else
-        printf "${C_GREEN}✓${C_RESET} Setup complete - ready to use\n" >&2
-        return 0
-    fi
+  # Summary
+  echo "" >&2
+  if [[ ${errors} -gt 0 ]]; then
+    jsh_ui_message error "Setup incomplete: ${errors} error(s), ${warnings} warning(s)" >&2
+    return 1
+  elif [[ ${warnings} -gt 0 ]]; then
+    jsh_ui_message warn "Setup OK with ${warnings} warning(s)" >&2
+    return 0
+  else
+    jsh_ui_message success "Setup complete - ready to use" >&2
+    return 0
+  fi
 }
 
 # =============================================================================
 # Payload Generation
 # =============================================================================
 
-_jssh_files_hash() {
-    # Generate hash of source files for cache invalidation
-    local hash_cmd=""
-    if command -v md5sum >/dev/null 2>&1; then
-        hash_cmd="md5sum"
-    elif command -v md5 >/dev/null 2>&1; then
-        hash_cmd="md5 -r"
-    elif command -v sha256sum >/dev/null 2>&1; then
-        hash_cmd="sha256sum"
-    elif command -v shasum >/dev/null 2>&1; then
-        hash_cmd="shasum"
-    else
-        # Fallback: use file modification times as "hash"
-        find "${JSH_DIR}/src" -type f -name "*.sh" 2>/dev/null | while read -r f; do
-            stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null
-        done | sort | tr '\n' '-'
-        return
-    fi
+_jssh_portable_commands() {
+  if [[ "${JSSH_CAPSULE}" == standard ]]; then
+    printf '%s\n' colours jsh proxy
+    return
+  fi
+  printf '%s\n' \
+    cafe \
+    colours \
+    gitx \
+    httpstat \
+    jsh \
+    nvim \
+    kubectx \
+    kubedectl \
+    kubens \
+    nukem \
+    proxy
+}
 
-    find "${JSH_DIR}/src" -type f -name "*.sh" 2>/dev/null | \
-        sort | xargs cat 2>/dev/null | $hash_cmd | cut -d' ' -f1
+_jssh_validate_full_sources() {
+  [[ "${JSSH_CAPSULE}" == full ]] || return 0
+  local required
+  for required in \
+    dotfiles/.vimrc \
+    vendor/fzf-tab/fzf-tab.plugin.zsh \
+    vendor/vim-config/autoload/plug.vim \
+    vendor/zsh-completions/src \
+    vendor/zsh-plugins/zsh-autosuggestions.zsh \
+    vendor/zsh-plugins/zsh-syntax-highlighting.zsh \
+    vendor/zsh-plugins/zsh-history-substring-search.zsh; do
+    [[ -e "${JSH_DIR}/${required}" ]] || die "Full capsule source is missing: ${required}"
+  done
+}
+
+_jssh_require_build_tools() {
+  local command_name
+  for command_name in tar cp find mkdir mktemp sed; do
+    command -v "${command_name}" >/dev/null 2>&1 || die "${command_name} is required to build a JSSH capsule"
+  done
+  [[ -w "${JSSH_CACHE_DIR}" ]] || die "JSSH cache is not writable: ${JSSH_CACHE_DIR}"
+}
+
+_jssh_payload_files() {
+  printf '%s\n' \
+    "${JSH_DIR}/bin/jssh" \
+    "${JSH_DIR}/dotfiles/.zshrc" \
+    "${JSH_DIR}/dotfiles/.bashrc"
+  find "${JSH_DIR}/dotfiles/.config/shell/completions" -type f 2>/dev/null
+  [[ -f "${JSH_DIR}/dotfiles/.inputrc" ]] && printf '%s\n' "${JSH_DIR}/dotfiles/.inputrc"
+  [[ -f "${JSH_DIR}/dotfiles/.tmux.conf" ]] && printf '%s\n' "${JSH_DIR}/dotfiles/.tmux.conf"
+
+  if [[ "${JSSH_CAPSULE}" != minimal ]]; then
+    while IFS= read -r command_name; do
+      printf '%s\n' "${JSH_DIR}/bin/${command_name}"
+    done < <(_jssh_portable_commands)
+  fi
+
+  if [[ "${JSSH_CAPSULE}" == full ]]; then
+    [[ -f "${JSH_DIR}/dotfiles/.vimrc" ]] && printf '%s\n' "${JSH_DIR}/dotfiles/.vimrc"
+    find "${JSH_DIR}/vendor/fzf-tab" -type f 2>/dev/null
+    find "${JSH_DIR}/vendor/vim-config" -type f 2>/dev/null
+    find "${JSH_DIR}/vendor/zsh-completions" -type f 2>/dev/null
+    find "${JSH_DIR}/vendor/zsh-plugins" -type f 2>/dev/null
+  fi
+}
+
+_jssh_files_hash() {
+  # Generate hash of source files for cache invalidation
+  local hash_cmd=""
+  if command -v md5sum >/dev/null 2>&1; then
+    hash_cmd="md5sum"
+  elif command -v md5 >/dev/null 2>&1; then
+    hash_cmd="md5 -r"
+  elif command -v sha256sum >/dev/null 2>&1; then
+    hash_cmd="sha256sum"
+  elif command -v shasum >/dev/null 2>&1; then
+    hash_cmd="shasum"
+  else
+    # Fallback: use file modification times as "hash"
+    _jssh_payload_files | sort | while IFS= read -r f; do
+      stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null
+    done | sort | tr '\n' '-'
+    return
+  fi
+
+  _jssh_payload_files | sort | while IFS= read -r f; do
+    cat "$f"
+  done | $hash_cmd | cut -d' ' -f1
 }
 
 _jssh_payload_needs_rebuild() {
-    # Check if payload needs to be rebuilt
-    [[ ! -f "${JSSH_PAYLOAD_CACHE}" ]] && return 0
-    [[ ! -f "${JSSH_PAYLOAD_HASH}" ]] && return 0
+  # Check if payload needs to be rebuilt
+  [[ ! -f "${JSSH_PAYLOAD_CACHE}" ]] && return 0
+  [[ ! -f "${JSSH_PAYLOAD_HASH}" ]] && return 0
 
-    # Check age
-    local age=$(($(date +%s) - $(stat -f%m "${JSSH_PAYLOAD_CACHE}" 2>/dev/null || stat -c%Y "${JSSH_PAYLOAD_CACHE}" 2>/dev/null || echo 0)))
-    [[ "${age}" -gt "${JSSH_TTL}" ]] && return 0
+  # Check age
+  local age=$(($(date +%s) - $(stat -f%m "${JSSH_PAYLOAD_CACHE}" 2>/dev/null || stat -c%Y "${JSSH_PAYLOAD_CACHE}" 2>/dev/null || echo 0)))
+  [[ "${age}" -gt "${JSSH_TTL}" ]] && return 0
 
-    # Check hash
-    local current_hash stored_hash
-    current_hash="$(_jssh_files_hash)"
-    stored_hash="$(cat "${JSSH_PAYLOAD_HASH}" 2>/dev/null)"
-    [[ "${current_hash}" != "${stored_hash}" ]] && return 0
+  # Check hash
+  local current_hash stored_hash
+  current_hash="$(_jssh_files_hash)"
+  stored_hash="$(cat "${JSSH_PAYLOAD_HASH}" 2>/dev/null)"
+  [[ "${current_hash}" != "${stored_hash}" ]] && return 0
 
-    return 1
+  return 1
 }
 
 _jssh_build_payload() {
-    # Build the payload tarball
-    debug "Building payload..."
+  # Build the payload tarball
+  debug "Building payload..."
 
-    mkdir -p "${JSSH_CACHE_DIR}"
+  mkdir -p "${JSSH_CACHE_DIR}"
+  _jssh_require_build_tools
+  _jssh_validate_full_sources
 
-    local tmpdir
-    tmpdir="$(mktemp -d)"
-    trap "rm -rf '${tmpdir}'" EXIT
+  local tmpdir
+  tmpdir="$(mktemp -d "${JSSH_CACHE_DIR}/build.XXXXXX")"
+  trap 'rm -rf "${tmpdir}"' EXIT
 
-    local payload_dir="${tmpdir}/jsh"
-    mkdir -p "${payload_dir}"/{src,config,src/fzf,bin}
+  local payload_dir="${tmpdir}/jsh"
+  mkdir -p "${payload_dir}"/{config,bin,vendor} "${payload_dir}/dotfiles/.config/shell/completions"
 
-    # Copy shell configs from src/
-    cp "${JSH_DIR}/src"/*.sh "${payload_dir}/src/" 2>/dev/null || true
+  # Copy standalone shell entry points and their optional completion data.
+  cp "${JSH_DIR}/dotfiles/.zshrc" "${payload_dir}/dotfiles/.zshrc"
+  cp "${JSH_DIR}/dotfiles/.bashrc" "${payload_dir}/dotfiles/.bashrc"
+  if [[ -d "${JSH_DIR}/dotfiles/.config/shell/completions" ]]; then
+    cp -R "${JSH_DIR}/dotfiles/.config/shell/completions/." \
+      "${payload_dir}/dotfiles/.config/shell/completions/"
+  fi
 
-    # Copy essential configs from root
-    cp "${JSH_DIR}/.inputrc" "${payload_dir}/config/inputrc" 2>/dev/null || true
-    cp "${JSH_DIR}/.tmux.conf" "${payload_dir}/config/tmux.conf" 2>/dev/null || true
+  # Copy essential configs.
+  cp "${JSH_DIR}/dotfiles/.inputrc" "${payload_dir}/config/inputrc" 2>/dev/null || true
+  cp "${JSH_DIR}/dotfiles/.tmux.conf" "${payload_dir}/config/tmux.conf" 2>/dev/null || true
 
-    # Copy fzf shell scripts from src/fzf/
-    if [[ -d "${JSH_DIR}/src/fzf" ]]; then
-        cp "${JSH_DIR}/src/fzf"/*.zsh "${payload_dir}/src/fzf/" 2>/dev/null || true
-        cp "${JSH_DIR}/src/fzf"/*.bash "${payload_dir}/src/fzf/" 2>/dev/null || true
-    fi
+  # Carry portable, self-contained jsh commands.
+  if [[ "${JSSH_CAPSULE}" != minimal ]]; then
+    local command_name
+    while IFS= read -r command_name; do
+      cp "${JSH_DIR}/bin/${command_name}" "${payload_dir}/bin/${command_name}"
+    done < <(_jssh_portable_commands)
+  fi
 
-    # Note: fzf is now a system dependency - remote hosts should install via package manager
-
-    # Copy vim-config (vim-plug + plugins for full editing experience)
-    if [[ -d "${JSH_DIR}/lib/vim-config" ]]; then
-        mkdir -p "${payload_dir}/lib/vim-config"
-        # Copy vimrc and autoload (vim-plug)
-        cp "${JSH_DIR}/lib/vim-config/vimrc" "${payload_dir}/lib/vim-config/" 2>/dev/null || true
-        cp -r "${JSH_DIR}/lib/vim-config/autoload" "${payload_dir}/lib/vim-config/" 2>/dev/null || true
-        # Copy pre-bundled plugins (if they exist)
-        if [[ -d "${JSH_DIR}/lib/vim-config/plugged" ]]; then
-            if command -v rsync &>/dev/null; then
-                rsync -a --safe-links --exclude='.git*' \
-                    "${JSH_DIR}/lib/vim-config/plugged" "${payload_dir}/lib/vim-config/" 2>/dev/null
-            else
-                cp -r "${JSH_DIR}/lib/vim-config/plugged" "${payload_dir}/lib/vim-config/" 2>/dev/null || true
-                find "${payload_dir}/lib/vim-config/plugged" -name '.git*' -exec rm -rf {} + 2>/dev/null || true
-            fi
+  # Copy vim-config (vim-plug + plugins for full editing experience).
+  if [[ "${JSSH_CAPSULE}" == full ]]; then
+    mkdir -p "${payload_dir}/vendor/vim-config"
+    if [[ -d "${JSH_DIR}/vendor/vim-config" ]]; then
+      # Copy vimrc and autoload (vim-plug)
+      cp "${JSH_DIR}/dotfiles/.vimrc" "${payload_dir}/vendor/vim-config/vimrc" 2>/dev/null || true
+      cp -r "${JSH_DIR}/vendor/vim-config/autoload" "${payload_dir}/vendor/vim-config/" 2>/dev/null || true
+      # Copy pre-bundled plugins (if they exist)
+      if [[ -d "${JSH_DIR}/vendor/vim-config/plugged" ]]; then
+        if command -v rsync &>/dev/null; then
+          rsync -a --safe-links --exclude='.git*' \
+            "${JSH_DIR}/vendor/vim-config/plugged" "${payload_dir}/vendor/vim-config/" 2>/dev/null
+        else
+          cp -r "${JSH_DIR}/vendor/vim-config/plugged" "${payload_dir}/vendor/vim-config/" 2>/dev/null || true
+          find "${payload_dir}/vendor/vim-config/plugged" -name '.git*' -exec rm -rf {} + 2>/dev/null || true
         fi
-        debug "  Added vim-config with plugins"
+      fi
+      debug "  Added vim-config with plugins"
     else
-        # Fallback: create minimal vimrc if vim-config doesn't exist
-        mkdir -p "${payload_dir}/lib/vim-config"
-        cat > "${payload_dir}/lib/vim-config/vimrc" << 'VIMRC'
+      # Fallback: create minimal vimrc if vim-config doesn't exist
+      cat >"${payload_dir}/vendor/vim-config/vimrc" <<'VIMRC'
 " Minimal vimrc for SSH sessions (fallback)
 set nocompatible encoding=utf-8
 set number relativenumber
@@ -331,51 +431,69 @@ nnoremap <Esc> :nohlsearch<CR>
 inoremap jj <Esc>
 inoremap jk <Esc>
 VIMRC
-        debug "  Added minimal vimrc (vim-config not found)"
+      debug "  Added minimal vimrc (vim-config not found)"
     fi
+  fi
 
-    # Copy zsh plugins (entire directory for highlighters, etc.)
-    # Use rsync to handle broken symlinks gracefully, or tar to skip them
-    if [[ -d "${JSH_DIR}/lib/zsh-plugins" ]]; then
-        if command -v rsync &>/dev/null; then
-            rsync -a --safe-links "${JSH_DIR}/lib/zsh-plugins" "${payload_dir}/lib/" 2>/dev/null
-        else
-            # Fallback: tar to skip broken symlinks
-            (cd "${JSH_DIR}/lib" && tar cf - --exclude='*.md' --exclude='.git*' zsh-plugins 2>/dev/null) | \
-                tar xf - -C "${payload_dir}/lib/" 2>/dev/null || true
-        fi
-        # Remove broken symlinks and unnecessary files
-        find "${payload_dir}/lib/zsh-plugins" -xtype l -delete 2>/dev/null || true
-        find "${payload_dir}/lib/zsh-plugins" -name '.git*' -exec rm -rf {} + 2>/dev/null || true
-        find "${payload_dir}/lib/zsh-plugins" -name '*.md' -delete 2>/dev/null || true
-        debug "  Added zsh plugins"
+  # Copy zsh plugins (entire directory for highlighters, etc.)
+  # Use rsync to handle broken symlinks gracefully, or tar to skip them
+  if [[ "${JSSH_CAPSULE}" == full && -d "${JSH_DIR}/vendor/zsh-plugins" ]]; then
+    if command -v rsync &>/dev/null; then
+      rsync -a --safe-links "${JSH_DIR}/vendor/zsh-plugins" "${payload_dir}/vendor/" 2>/dev/null
+    else
+      # Fallback: tar to skip broken symlinks
+      (cd "${JSH_DIR}/vendor" && tar cf - --exclude='*.md' --exclude='.git*' zsh-plugins 2>/dev/null) \
+        | tar xf - -C "${payload_dir}/vendor/" 2>/dev/null || true
     fi
+    # Remove broken symlinks and unnecessary files
+    find "${payload_dir}/vendor/zsh-plugins" -xtype l -delete 2>/dev/null || true
+    find "${payload_dir}/vendor/zsh-plugins" -name '.git*' -exec rm -rf {} + 2>/dev/null || true
+    find "${payload_dir}/vendor/zsh-plugins" -name '*.md' -delete 2>/dev/null || true
+    debug "  Added zsh plugins"
+  fi
 
-    # Copy fzf-tab plugin (entire directory for lib/, modules/)
-    if [[ -d "${JSH_DIR}/lib/fzf-tab" ]]; then
-        if command -v rsync &>/dev/null; then
-            rsync -a --safe-links --exclude='.git*' --exclude='.github' --exclude='test' --exclude='*.md' \
-                "${JSH_DIR}/lib/fzf-tab" "${payload_dir}/lib/" 2>/dev/null
-        else
-            cp -r "${JSH_DIR}/lib/fzf-tab" "${payload_dir}/lib/" 2>/dev/null || true
-            rm -rf "${payload_dir}/lib/fzf-tab/.git"* 2>/dev/null || true
-            rm -rf "${payload_dir}/lib/fzf-tab/.github" 2>/dev/null || true
-            rm -rf "${payload_dir}/lib/fzf-tab/test" 2>/dev/null || true
-            find "${payload_dir}/lib/fzf-tab" -name '*.md' -delete 2>/dev/null || true
-        fi
-        # Remove broken symlinks
-        find "${payload_dir}/lib/fzf-tab" -xtype l -delete 2>/dev/null || true
-        debug "  Added fzf-tab plugin"
+  # Copy additional completion definitions for full capsules.
+  if [[ "${JSSH_CAPSULE}" == full && -d "${JSH_DIR}/vendor/zsh-completions" ]]; then
+    if command -v rsync &>/dev/null; then
+      rsync -a --safe-links --exclude='.git*' --exclude='.github' --exclude='*.md' \
+        "${JSH_DIR}/vendor/zsh-completions" "${payload_dir}/vendor/" 2>/dev/null
+    else
+      cp -r "${JSH_DIR}/vendor/zsh-completions" "${payload_dir}/vendor/" 2>/dev/null || true
+      rm -rf "${payload_dir}/vendor/zsh-completions/.git"* 2>/dev/null || true
+      rm -rf "${payload_dir}/vendor/zsh-completions/.github" 2>/dev/null || true
+      find "${payload_dir}/vendor/zsh-completions" -name '*.md' -delete 2>/dev/null || true
     fi
+    find "${payload_dir}/vendor/zsh-completions" -xtype l -delete 2>/dev/null || true
+    debug "  Added zsh completions"
+  fi
 
-    # Create bootstrap script for remote
-    cat > "${payload_dir}/bootstrap.sh" << 'BOOTSTRAP'
+  # Copy fzf-tab plugin (entire directory for lib/, modules/)
+  if [[ "${JSSH_CAPSULE}" == full && -d "${JSH_DIR}/vendor/fzf-tab" ]]; then
+    if command -v rsync &>/dev/null; then
+      rsync -a --safe-links --exclude='.git*' --exclude='.github' --exclude='test' --exclude='*.md' \
+        "${JSH_DIR}/vendor/fzf-tab" "${payload_dir}/vendor/" 2>/dev/null
+    else
+      cp -r "${JSH_DIR}/vendor/fzf-tab" "${payload_dir}/vendor/" 2>/dev/null || true
+      rm -rf "${payload_dir}/vendor/fzf-tab/.git"* 2>/dev/null || true
+      rm -rf "${payload_dir}/vendor/fzf-tab/.github" 2>/dev/null || true
+      rm -rf "${payload_dir}/vendor/fzf-tab/test" 2>/dev/null || true
+      find "${payload_dir}/vendor/fzf-tab" -name '*.md' -delete 2>/dev/null || true
+    fi
+    # Remove broken symlinks
+    find "${payload_dir}/vendor/fzf-tab" -xtype l -delete 2>/dev/null || true
+    debug "  Added fzf-tab plugin"
+  fi
+
+  # Create bootstrap script for remote
+  cat >"${payload_dir}/bootstrap.sh" <<'BOOTSTRAP'
 #!/bin/sh
 # Jsh Remote Bootstrap
 
 export JSH_DIR="${JSH_EPHEMERAL}"
 export JSH_EPHEMERAL="${JSH_EPHEMERAL}"
 export JSH_ENV="ssh"
+export JSH_RUNTIME_PROFILE="__JSSH_RUNTIME_PROFILE__"
+export JSH_MODE="runtime"
 
 # =============================================================================
 # Terminal Configuration (critical for SSH sessions)
@@ -401,26 +519,6 @@ if [ -f "${JSH_DIR}/config/inputrc" ]; then
 fi
 
 # =============================================================================
-# Platform Detection & Binary Path
-# =============================================================================
-
-_jsh_platform() {
-    local os arch
-    os="$(uname -s | tr '[:upper:]' '[:lower:]')"
-    arch="$(uname -m)"
-    case "${arch}" in
-        x86_64|amd64) arch="amd64" ;;
-        aarch64|arm64) arch="arm64" ;;
-    esac
-    echo "${os}-${arch}"
-}
-
-_JSH_PLATFORM="$(_jsh_platform)"
-if [ -d "${JSH_DIR}/bin/${_JSH_PLATFORM}" ]; then
-    export PATH="${JSH_DIR}/bin/${_JSH_PLATFORM}:${PATH}"
-fi
-
-# =============================================================================
 # Shell Detection & Init
 # =============================================================================
 
@@ -433,36 +531,57 @@ else
     export JSH_SHELL="sh"
 fi
 
-# Source init
-if [ -f "${JSH_DIR}/src/init.sh" ]; then
-    . "${JSH_DIR}/src/init.sh"
+# Load the packaged rc without sourcing overrides from the remote host's home.
+_JSSH_HOST_HOME="${HOME-}"
+_JSSH_HOST_HOME_SET="${HOME+x}"
+export HOME="${JSH_DIR}"
+if [ -n "${ZSH_VERSION:-}" ] && [ -f "${JSH_DIR}/dotfiles/.zshrc" ]; then
+    . "${JSH_DIR}/dotfiles/.zshrc"
+elif [ -n "${BASH_VERSION:-}" ] && [ -f "${JSH_DIR}/dotfiles/.bashrc" ]; then
+    . "${JSH_DIR}/dotfiles/.bashrc"
 fi
+if [ -n "${_JSSH_HOST_HOME_SET}" ]; then
+    export HOME="${_JSSH_HOST_HOME}"
+else
+    unset HOME
+fi
+unset _JSSH_HOST_HOME _JSSH_HOST_HOME_SET
 
-# Setup vim/tmux with bundled configs
-alias vim="vim -u ${JSH_DIR}/lib/vim-config/vimrc"
-alias tmux="tmux -f ${JSH_DIR}/config/tmux.conf"
-export VIMINIT="source ${JSH_DIR}/lib/vim-config/vimrc"
+# Setup vim/tmux only when the capsule carries their configs.
+if [ -f "${JSH_DIR}/vendor/vim-config/vimrc" ]; then
+    alias vim="vim -u ${JSH_DIR}/vendor/vim-config/vimrc"
+    export VIMINIT="source ${JSH_DIR}/vendor/vim-config/vimrc"
+fi
+if [ -f "${JSH_DIR}/config/tmux.conf" ]; then
+    alias tmux="tmux -f ${JSH_DIR}/config/tmux.conf"
+fi
 BOOTSTRAP
 
-    # Create tarball (use --no-xattrs to avoid macOS extended attributes)
-    tar --no-xattrs -czf "${JSSH_PAYLOAD_CACHE}" -C "${tmpdir}" jsh 2>/dev/null || \
-        tar -czf "${JSSH_PAYLOAD_CACHE}" -C "${tmpdir}" jsh
+  local remote_profile=ssh
+  [[ "${JSSH_CAPSULE}" == minimal ]] && remote_profile=minimal
+  [[ "${JSSH_CAPSULE}" == full ]] && remote_profile=full
+  sed -i.bak "s/__JSSH_RUNTIME_PROFILE__/${remote_profile}/" "${payload_dir}/bootstrap.sh"
+  rm -f "${payload_dir}/bootstrap.sh.bak"
 
-    # Save hash
-    _jssh_files_hash > "${JSSH_PAYLOAD_HASH}"
+  # Create tarball (use --no-xattrs to avoid macOS extended attributes)
+  tar --no-xattrs -czf "${JSSH_PAYLOAD_CACHE}" -C "${tmpdir}" jsh 2>/dev/null \
+    || tar -czf "${JSSH_PAYLOAD_CACHE}" -C "${tmpdir}" jsh
 
-    debug "Payload built: $(du -h "${JSSH_PAYLOAD_CACHE}" | cut -f1)"
+  # Save hash
+  _jssh_files_hash >"${JSSH_PAYLOAD_HASH}"
 
-    trap - EXIT
-    rm -rf "${tmpdir}"
+  debug "Payload built: $(du -h "${JSSH_PAYLOAD_CACHE}" | cut -f1)"
+
+  trap - EXIT
+  rm -rf "${tmpdir}"
 }
 
 _jssh_get_payload() {
-    # Get payload (build if needed)
-    if _jssh_payload_needs_rebuild; then
-        _jssh_build_payload
-    fi
-    echo "${JSSH_PAYLOAD_CACHE}"
+  # Get payload (build if needed)
+  if _jssh_payload_needs_rebuild; then
+    _jssh_build_payload
+  fi
+  echo "${JSSH_PAYLOAD_CACHE}"
 }
 
 # =============================================================================
@@ -470,21 +589,21 @@ _jssh_get_payload() {
 # =============================================================================
 
 _jssh_expand_tilde() {
-    local value="$1"
-    if [[ "${value}" == [~]/* ]]; then
-        printf '%s\n' "${HOME}/${value:2}"
-    else
-        printf '%s\n' "${value}"
-    fi
+  local value="$1"
+  if [[ "${value}" == [~]/* ]]; then
+    printf '%s\n' "${HOME}/${value:2}"
+  else
+    printf '%s\n' "${value}"
+  fi
 }
 
 _jssh_get_named_remote() {
-    local name="$1"
+  local name="$1"
 
-    [[ -f "${JSSH_REMOTE_CONFIG}" ]] || return 1
-    command -v jq >/dev/null 2>&1 || return 1
+  [[ -f "${JSSH_REMOTE_CONFIG}" ]] || return 1
+  command -v jq >/dev/null 2>&1 || return 1
 
-    jq -r --arg name "${name}" '.remotes[$name] // empty' "${JSSH_REMOTE_CONFIG}" 2>/dev/null || true
+  jq -r --arg name "${name}" '.remotes[$name] // empty' "${JSSH_REMOTE_CONFIG}" 2>/dev/null || true
 }
 
 # =============================================================================
@@ -492,11 +611,12 @@ _jssh_get_named_remote() {
 # =============================================================================
 
 _jssh_transfer_script() {
-    # Script to receive and extract payload on remote
-    # This runs non-interactively to receive the tarball
-    cat << 'TRANSFER'
+  # Script to receive and extract payload on remote
+  # This runs non-interactively to receive the tarball
+  printf "JSSH_SAFE_PREFIX='%s'\n" "${JSSH_REMOTE_PREFIX}"
+  cat <<'TRANSFER'
 set -e
-JSSH_SAFE_PREFIX="/tmp/.jsh-portable"
+JSSH_TRANSFER_COMPLETE=0
 
 # Generate unique session ID
 if [ -r /dev/urandom ]; then
@@ -506,15 +626,22 @@ else
 fi
 [ -z "${JSSH_ID}" ] && JSSH_ID="$$-$(date +%s)"
 
-JSH_TMP="${JSSH_SAFE_PREFIX}-${USER:-unknown}-${JSSH_ID}"
+JSH_TMP="${JSSH_SAFE_PREFIX}-${JSSH_ID}"
 mkdir -p "${JSH_TMP}"
 touch "${JSH_TMP}/.jssh-marker"
+
+_cleanup_transfer() {
+    [ "${JSSH_TRANSFER_COMPLETE}" = "1" ] && return
+    [ -f "${JSH_TMP}/.jssh-marker" ] && rm -rf "${JSH_TMP}"
+}
+trap '_cleanup_transfer' EXIT INT TERM HUP
 
 # Extract payload from stdin
 tar -xzf - -C "${JSH_TMP}"
 
 # Verify and output the path for stage 2
 if [ -d "${JSH_TMP}/jsh" ] && [ -f "${JSH_TMP}/jsh/bootstrap.sh" ]; then
+    JSSH_TRANSFER_COMPLETE=1
     echo "${JSH_TMP}"
 else
     rm -rf "${JSH_TMP}"
@@ -524,21 +651,48 @@ fi
 TRANSFER
 }
 
-_jssh_launch_script() {
-    # Script to launch interactive shell (stage 2)
-    # $1 = JSH_TMP path from stage 1
-    local jsh_tmp="$1"
+_jssh_remote_preflight_script() {
+  printf "JSSH_REMOTE_TMPDIR='%s'\nJSSH_SAFE_PREFIX='%s'\n" \
+    "${JSSH_REMOTE_TMPDIR}" "${JSSH_REMOTE_PREFIX}"
+  cat <<'PREFLIGHT'
+set -e
+command -v tar >/dev/null 2>&1 || { echo 'jssh: remote tar is required' >&2; exit 127; }
+if ! command -v zsh >/dev/null 2>&1 && ! command -v bash >/dev/null 2>&1; then
+    echo 'jssh: remote host requires Bash or Zsh' >&2
+    exit 127
+fi
+[ -d "${JSSH_REMOTE_TMPDIR}" ] && [ -w "${JSSH_REMOTE_TMPDIR}" ] || {
+    echo "jssh: remote temp directory is not writable: ${JSSH_REMOTE_TMPDIR}" >&2
+    exit 1
+}
+JSSH_PROBE="${JSSH_SAFE_PREFIX}-preflight-$$"
+mkdir "${JSSH_PROBE}" || { echo 'jssh: unable to create remote staging directory' >&2; exit 1; }
+rmdir "${JSSH_PROBE}"
+PREFLIGHT
+}
 
-    cat << LAUNCH
+_jssh_launch_script() {
+  # Script to launch interactive shell (stage 2)
+  # $1 = JSH_TMP path from stage 1
+  local jsh_tmp="$1"
+  local client_colorterm=""
+  case "${COLORTERM:-}:${TERM:-}" in
+    truecolor:* | 24bit:* | *:*direct*) client_colorterm="truecolor" ;;
+  esac
+
+  cat <<LAUNCH
 set -e
 JSH_TMP="${jsh_tmp}"
 export JSH_EPHEMERAL="\${JSH_TMP}/jsh"
+if [ -n "${client_colorterm}" ]; then
+    export COLORTERM="${client_colorterm}"
+fi
 
 # Safety cleanup on exit
 _cleanup() {
     local target="\${JSH_TMP}"
     [ -z "\${target}" ] && return
-    case "\${target}" in /tmp/.jsh-portable-*) ;; *) return ;; esac
+    case "\${target}" in "${JSSH_REMOTE_PREFIX}"-*) ;; *) return ;; esac
     [ ! -d "\${target}" ] && return
     [ ! -f "\${target}/.jssh-marker" ] && return
     rm -rf "\${target}"
@@ -553,23 +707,26 @@ fi
 
 export JSH_DIR="\${JSH_EPHEMERAL}"
 export JSH_ENV="ssh"
+export JSH_MODE="ephemeral"
+export JSH_SESSION="\${JSH_TMP}"
 
 LAUNCH
 
-    # Shell selection with variable expansion
-    cat << SHELL_SELECT
+  # Shell selection with variable expansion
+  cat <<SHELL_SELECT
 # Select shell
 if [ "${JSSH_PREFER_ZSH}" = "1" ] && command -v zsh >/dev/null 2>&1; then
     REMOTE_SHELL="zsh"
 elif command -v bash >/dev/null 2>&1; then
     REMOTE_SHELL="bash"
 else
-    REMOTE_SHELL="sh"
+    echo "jssh: remote host requires Bash or Zsh" >&2
+    exit 1
 fi
 SHELL_SELECT
 
-    # Shell launch (literal heredoc for outer, expanded for inner .zshrc)
-    cat << 'SHELL_LAUNCH'
+  # Shell launch (literal heredoc for outer, expanded for inner .zshrc)
+  cat <<'SHELL_LAUNCH'
 export JSH_SHELL="${REMOTE_SHELL}"
 
 if [ "${REMOTE_SHELL}" = "zsh" ]; then
@@ -580,6 +737,8 @@ if [ "${REMOTE_SHELL}" = "zsh" ]; then
 export JSH_DIR="${JSH_EPHEMERAL}"
 export JSH_EPHEMERAL="${JSH_EPHEMERAL}"
 export JSH_ENV="ssh"
+export JSH_MODE="ephemeral"
+export JSH_SESSION="${JSH_TMP}"
 
 # =============================================================================
 # Terminal Setup - MUST happen FIRST
@@ -612,7 +771,6 @@ zmodload zsh/terminfo 2>/dev/null || true
 # =============================================================================
 
 [[ -f "${JSH_EPHEMERAL}/bootstrap.sh" ]] && source "${JSH_EPHEMERAL}/bootstrap.sh"
-[[ -f "${JSH_EPHEMERAL}/src/init.sh" ]] && source "${JSH_EPHEMERAL}/src/init.sh"
 
 # =============================================================================
 # Backspace Fix - Applied LAST to override any conflicts
@@ -652,12 +810,9 @@ unfunction _jssh_fix_backspace
 # To test manually: cat -v (then press backspace)
 # echo "[jssh] Backspace bindings applied. If issues persist, run: bindkey | grep backward-delete"
 ZSHRC
-    exec zsh -i
+    zsh -i
 elif [ "${REMOTE_SHELL}" = "bash" ]; then
-    exec bash --rcfile "${JSH_EPHEMERAL}/bootstrap.sh" -i
-else
-    . "${JSH_EPHEMERAL}/bootstrap.sh"
-    exec sh -i
+    bash --rcfile "${JSH_EPHEMERAL}/bootstrap.sh" -i
 fi
 SHELL_LAUNCH
 }
@@ -667,150 +822,204 @@ SHELL_LAUNCH
 # =============================================================================
 
 main() {
-    # Check for help/version
-    case "${1:-}" in
-        -h|--help)
-            cli_help
-            exit 0
-            ;;
-        --version)
-            cli_version
-            exit 0
-            ;;
-        --check|--status)
-            _jssh_check_setup
-            exit $?
-            ;;
-        --rebuild)
-            spinner_start "Rebuilding payload"
-            rm -f "${JSSH_PAYLOAD_CACHE}" "${JSSH_PAYLOAD_HASH}"
-            _jssh_build_payload
-            spinner_stop ok "Payload rebuilt ($(du -h "${JSSH_PAYLOAD_CACHE}" | cut -f1 | tr -d ' '))"
-            exit 0
-            ;;
+  local -a filtered_args=()
+  local capsule_value="${JSSH_CAPSULE}"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --capsule=*)
+        capsule_value="${1#--capsule=}"
+        shift
+        ;;
+      --capsule)
+        [[ $# -ge 2 ]] || die "--capsule requires a profile"
+        capsule_value="$2"
+        shift 2
+        ;;
+      *)
+        filtered_args+=("$1")
+        shift
+        ;;
     esac
+  done
+  set -- "${filtered_args[@]}"
+  _jssh_set_capsule "$capsule_value"
 
-    # Need at least a hostname
-    [[ $# -eq 0 ]] && die "Usage: jssh [ssh-options] [user@]hostname"
+  # Check for help/version
+  case "${1:-}" in
+    -h | --help)
+      cli_help
+      exit 0
+      ;;
+    --version)
+      cli_version
+      exit 0
+      ;;
+    --check | --status)
+      _jssh_check_setup
+      exit $?
+      ;;
+    --rebuild)
+      spinner_start "Rebuilding payload"
+      rm -f "${JSSH_PAYLOAD_CACHE}" "${JSSH_PAYLOAD_HASH}"
+      _jssh_build_payload
+      spinner_stop ok "Payload rebuilt ($(du -h "${JSSH_PAYLOAD_CACHE}" | cut -f1 | tr -d ' '))"
+      exit 0
+      ;;
+  esac
 
-    local -a ssh_args
-    ssh_args=("$@")
+  # Need at least a hostname
+  [[ $# -eq 0 ]] && die "Usage: jssh [ssh-options] [user@]hostname"
 
-    local target_index=$(( ${#ssh_args[@]} - 1 ))
-    local target_arg="${ssh_args[$target_index]}"
-    local remote_name="${target_arg}"
+  local -a ssh_args
+  ssh_args=("$@")
 
-    # Resolve named remote projects from local/projects.json
-    if [[ "${target_arg}" != *"@"* ]] && [[ "${target_arg}" != -* ]]; then
-        local remote_info remote_host remote_user remote_key ssh_target
-        remote_info="$(_jssh_get_named_remote "${target_arg}")"
+  local target_index=$((${#ssh_args[@]} - 1))
+  local target_arg="${ssh_args[$target_index]}"
+  local remote_name="${target_arg}"
 
-        if [[ -n "${remote_info}" ]]; then
-            remote_host="$(printf '%s' "${remote_info}" | jq -r '.host // empty')"
-            remote_user="$(printf '%s' "${remote_info}" | jq -r '.user // empty')"
-            remote_key="$(printf '%s' "${remote_info}" | jq -r '.ssh_key // empty')"
+  # Resolve named remote projects from local/projects.json
+  if [[ "${target_arg}" != *"@"* ]] && [[ "${target_arg}" != -* ]]; then
+    local remote_info remote_host remote_user remote_key ssh_target
+    remote_info="$(_jssh_get_named_remote "${target_arg}" || true)"
 
-            if [[ -n "${remote_host}" ]]; then
-                ssh_target="${remote_host}"
-                [[ -n "${remote_user}" ]] && ssh_target="${remote_user}@${remote_host}"
-                ssh_args[target_index]="${ssh_target}"
-                target_arg="${ssh_target}"
-                debug "Resolved remote '${remote_name}' -> ${ssh_target}"
-            fi
+    if [[ -n "${remote_info}" ]]; then
+      remote_host="$(printf '%s' "${remote_info}" | jq -r '.host // empty')"
+      remote_user="$(printf '%s' "${remote_info}" | jq -r '.user // empty')"
+      remote_key="$(printf '%s' "${remote_info}" | jq -r '.ssh_key // empty')"
 
-            if [[ -n "${remote_key}" ]]; then
-                local expanded_key has_identity_flag i
-                expanded_key="$(_jssh_expand_tilde "${remote_key}")"
-                has_identity_flag=0
+      if [[ -n "${remote_host}" ]]; then
+        ssh_target="${remote_host}"
+        [[ -n "${remote_user}" ]] && ssh_target="${remote_user}@${remote_host}"
+        ssh_args[target_index]="${ssh_target}"
+        target_arg="${ssh_target}"
+        debug "Resolved remote '${remote_name}' -> ${ssh_target}"
+      fi
 
-                for ((i=0; i<${#ssh_args[@]}; i++)); do
-                    if [[ "${ssh_args[$i]}" == "-i" ]]; then
-                        has_identity_flag=1
-                        break
-                    fi
-                    if [[ "${ssh_args[$i]}" == "-o" ]] && [[ "${ssh_args[$((i + 1))]:-}" == IdentityFile=* ]]; then
-                        has_identity_flag=1
-                        break
-                    fi
-                    if [[ "${ssh_args[$i]}" == -oIdentityFile=* ]]; then
-                        has_identity_flag=1
-                        break
-                    fi
-                done
+      if [[ -n "${remote_key}" ]]; then
+        local expanded_key has_identity_flag i
+        expanded_key="$(_jssh_expand_tilde "${remote_key}")"
+        has_identity_flag=0
 
-                if [[ ${has_identity_flag} -eq 0 ]]; then
-                    if [[ -f "${expanded_key}" ]]; then
-                        ssh_args=("-i" "${expanded_key}" "${ssh_args[@]}")
-                        debug "Using ssh_key from remote config: ${expanded_key}"
-                    else
-                        warn "Configured ssh_key not found: ${expanded_key}"
-                    fi
-                fi
-            fi
+        for ((i = 0; i < ${#ssh_args[@]}; i++)); do
+          if [[ "${ssh_args[$i]}" == "-i" ]]; then
+            has_identity_flag=1
+            break
+          fi
+          if [[ "${ssh_args[$i]}" == "-o" ]] && [[ "${ssh_args[$((i + 1))]:-}" == IdentityFile=* ]]; then
+            has_identity_flag=1
+            break
+          fi
+          if [[ "${ssh_args[$i]}" == -oIdentityFile=* ]]; then
+            has_identity_flag=1
+            break
+          fi
+        done
+
+        if [[ ${has_identity_flag} -eq 0 ]]; then
+          if [[ -f "${expanded_key}" ]]; then
+            ssh_args=("-i" "${expanded_key}" "${ssh_args[@]}")
+            debug "Using ssh_key from remote config: ${expanded_key}"
+          else
+            warn "Configured ssh_key not found: ${expanded_key}"
+          fi
         fi
+      fi
     fi
+  fi
 
-    # Extract hostname for display (resolved target, strip user@ if present)
-    local display_host="${target_arg}"
-    display_host="${display_host##*@}"
+  # Extract hostname for display (resolved target, strip user@ if present)
+  local display_host="${target_arg}"
+  display_host="${display_host##*@}"
 
-    # Quick pre-flight check (silent unless there are errors)
-    if [[ ! -d "${JSH_DIR}/src" ]]; then
-        die "Jsh source directory not found. Run: jssh --check"
-    fi
+  # Quick pre-flight check (silent unless there are errors)
+  if [[ ! -f "${JSH_DIR}/dotfiles/.zshrc" || ! -f "${JSH_DIR}/dotfiles/.bashrc" ]]; then
+    die "Jsh shell configs not found. Run: jssh --check"
+  fi
+  command -v ssh >/dev/null 2>&1 || die "ssh is required to connect with JSSH"
 
-    # Note: fzf is now a system dependency - must be installed on remote hosts separately
+  # Ensure payload exists
+  local payload_path payload_size
+  if _jssh_payload_needs_rebuild; then
+    spinner_start "Building payload"
+    _jssh_build_payload
+    spinner_stop ok "Payload ready"
+  fi
+  payload_path="${JSSH_PAYLOAD_CACHE}"
+  payload_size="$(du -h "${payload_path}" | cut -f1 | tr -d ' ')"
 
-    # Ensure payload exists
-    local payload_path payload_size
-    if _jssh_payload_needs_rebuild; then
-        spinner_start "Building payload"
-        _jssh_build_payload
-        spinner_stop ok "Payload ready"
-    fi
-    payload_path="${JSSH_PAYLOAD_CACHE}"
-    payload_size="$(du -h "${payload_path}" | cut -f1 | tr -d ' ')"
+  if [[ ! -f "${payload_path}" ]]; then
+    die "Payload not found at ${payload_path}"
+  fi
 
-    if [[ ! -f "${payload_path}" ]]; then
-        die "Payload not found at ${payload_path}"
-    fi
+  debug "Payload: ${payload_path} (${payload_size})"
 
-    debug "Payload: ${payload_path} (${payload_size})"
+  # Use one authenticated SSH transport for transfer and interactive channels.
+  spinner_start "Connecting to ${display_host}"
+  local preflight_script transfer_script jsh_tmp ssh_error_file ssh_error_text session_status
+  local -a control_args
+  mkdir -p "${JSSH_CACHE_DIR}"
+  JSSH_ACTIVE_CONTROL_DIR="$(mktemp -d "${JSSH_CACHE_DIR}/session.XXXXXX")"
+  JSSH_ACTIVE_CONTROL_PATH="${JSSH_ACTIVE_CONTROL_DIR}/socket"
+  JSSH_ACTIVE_SSH_ARGS=("${ssh_args[@]}")
+  control_args=(
+    -o ControlMaster=auto
+    -o "ControlPath=${JSSH_ACTIVE_CONTROL_PATH}"
+    -o ControlPersist=60
+  )
+  transfer_script="$(_jssh_transfer_script)"
+  ssh_error_file="${JSSH_ACTIVE_CONTROL_DIR}/ssh-error"
 
-    # Stage 1: Transfer payload (non-interactive)
-    spinner_start "Connecting to ${display_host}"
-    local transfer_script jsh_tmp ssh_error_file ssh_error_text
-    transfer_script="$(_jssh_transfer_script)"
-    ssh_error_file="$(mktemp)"
-
-    if ! jsh_tmp=$(ssh "${ssh_args[@]}" "sh -c '$(printf '%s' "${transfer_script}" | sed "s/'/'\\\\''/g")'" < "${payload_path}" 2>"${ssh_error_file}"); then
-        ssh_error_text="$(tail -n 1 "${ssh_error_file}" 2>/dev/null || true)"
-        rm -f "${ssh_error_file}"
-        spinner_stop fail "Connection failed"
-        [[ -n "${ssh_error_text}" ]] && warn "${ssh_error_text}"
-        exit 1
-    fi
+  preflight_script="$(_jssh_remote_preflight_script)"
+  if ! ssh "${control_args[@]}" -T "${ssh_args[@]}" \
+    "sh -c '$(printf '%s' "${preflight_script}" | sed "s/'/'\\\\''/g")'" \
+    2>"${ssh_error_file}"; then
+    ssh_error_text="$(tail -n 1 "${ssh_error_file}" 2>/dev/null || true)"
     rm -f "${ssh_error_file}"
+    spinner_stop fail "Remote preflight failed"
+    [[ -n "${ssh_error_text}" ]] && warn "${ssh_error_text}"
+    exit 1
+  fi
 
-    if [[ -z "${jsh_tmp}" ]] || [[ "${jsh_tmp}" == "FAILED" ]]; then
-        spinner_stop fail "Failed to transfer payload"
-        exit 1
-    fi
+  if ! jsh_tmp=$(ssh "${control_args[@]}" -T "${ssh_args[@]}" \
+    "sh -c '$(printf '%s' "${transfer_script}" | sed "s/'/'\\\\''/g")'" \
+    <"${payload_path}" 2>"${ssh_error_file}"); then
+    ssh_error_text="$(tail -n 1 "${ssh_error_file}" 2>/dev/null || true)"
+    rm -f "${ssh_error_file}"
+    spinner_stop fail "Connection failed"
+    [[ -n "${ssh_error_text}" ]] && warn "${ssh_error_text}"
+    exit 1
+  fi
+  rm -f "${ssh_error_file}"
 
-    spinner_stop ok "Environment deployed (${payload_size})"
-    debug "Remote path: ${jsh_tmp}"
+  if [[ -z "${jsh_tmp}" ]] || [[ "${jsh_tmp}" == "FAILED" ]]; then
+    spinner_stop fail "Failed to transfer payload"
+    exit 1
+  fi
+  if [[ "${jsh_tmp}" != "${JSSH_REMOTE_PREFIX}"-* ]] \
+    || [[ "${jsh_tmp}" == *[!A-Za-z0-9._/-]* ]]; then
+    spinner_stop fail "Remote returned an invalid session path"
+    exit 1
+  fi
+  JSSH_ACTIVE_REMOTE_DIR="${jsh_tmp}"
 
-    # Stage 2: Launch interactive shell
-    status "Launching shell on ${display_host}"
+  spinner_stop ok "Environment deployed (${payload_size})"
+  debug "Remote path: ${jsh_tmp}"
 
-    local launch_script
-    launch_script="$(_jssh_launch_script "${jsh_tmp}")"
+  status "Launching shell on ${display_host}"
 
-    # Clear the status line before launching interactive session
-    ssh -t "${ssh_args[@]}" "sh -c '$(printf '%s' "${launch_script}" | sed "s/'/'\\\\''/g")'"
+  local launch_script
+  launch_script="$(_jssh_launch_script "${jsh_tmp}")"
 
-    # Session ended
-    success "Disconnected from ${display_host}"
+  # Clear the status line before launching interactive session
+  session_status=0
+  ssh "${control_args[@]}" -t "${ssh_args[@]}" \
+    "sh -c '$(printf '%s' "${launch_script}" | sed "s/'/'\\\\''/g")'" || session_status=$?
+
+  _jssh_cleanup_active_session
+  [[ ${session_status} -eq 0 ]] || exit "${session_status}"
+
+  # Session ended
+  success "Disconnected from ${display_host}"
 }
 
 main "$@"
