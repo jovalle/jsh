@@ -1,0 +1,1176 @@
+#!/usr/bin/env bash
+
+set -o pipefail
+
+_jsh_resolve_script() {
+  local source_path="${BASH_SOURCE[0]}" source_dir link_target
+  while [[ -L "${source_path}" ]]; do
+    source_dir=$(cd -P "$(dirname "${source_path}")" && pwd) || return 1
+    link_target=$(readlink "${source_path}") || return 1
+    case "${link_target}" in
+      /*) source_path="${link_target}" ;;
+      *) source_path="${source_dir}/${link_target}" ;;
+    esac
+  done
+  REPLY=$(cd -P "$(dirname "${source_path}")" && pwd) || return 1
+}
+
+_jsh_resolve_script || exit 2
+export JSH_DIR="${JSH_DIR:-$(cd "${REPLY}/.." && pwd -P)}"
+JSH_STATE_DIR="${JSH_STATE_DIR:-${XDG_STATE_HOME:-${HOME}/.local/state}/jsh}"
+JSH_LINK_STATE="${JSH_LINK_STATE:-${JSH_STATE_DIR}/managed-links}"
+JSH_MODE_FILE="${JSH_MODE_FILE:-${JSH_STATE_DIR}/mode}"
+
+_jsh_ui_init() {
+  local enabled=0
+  if [[ "${JSH_PLAIN_OUTPUT:-0}" != 1 && "${TERM:-dumb}" != dumb && -z ${NO_COLOR+x} ]]; then
+    case "${JSH_COLOR:-auto}" in
+      always) enabled=1 ;;
+      auto) [[ -t 1 ]] && enabled=1 ;;
+    esac
+  fi
+
+  if [[ "${enabled}" == 1 ]]; then
+    _JSH_UI_RICH=1
+    _JSH_UI_RESET=$'\033[0m'
+    _JSH_UI_BOLD=$'\033[1m'
+    _JSH_UI_DIM=$'\033[2m'
+    _JSH_UI_RED=$'\033[31m'
+    _JSH_UI_GREEN=$'\033[32m'
+    _JSH_UI_YELLOW=$'\033[33m'
+    _JSH_UI_CYAN=$'\033[36m'
+  else
+    _JSH_UI_RICH=0
+    _JSH_UI_RESET=''
+    _JSH_UI_BOLD=''
+    _JSH_UI_DIM=''
+    _JSH_UI_RED=''
+    _JSH_UI_GREEN=''
+    _JSH_UI_YELLOW=''
+    _JSH_UI_CYAN=''
+  fi
+}
+
+_jsh_ui_status() {
+  local status="$1"
+  case "${status}" in
+    current | linked | pruned | removed | success)
+      REPLY_COLOR=${_JSH_UI_GREEN}
+      [[ "${_JSH_UI_RICH}" == 1 ]] && REPLY_MARK='✔' || REPLY_MARK=ok
+      ;;
+    plan)
+      REPLY_COLOR=${_JSH_UI_CYAN}
+      [[ "${_JSH_UI_RICH}" == 1 ]] && REPLY_MARK='➜' || REPLY_MARK=plan
+      ;;
+    changed | retained | warning)
+      REPLY_COLOR=${_JSH_UI_YELLOW}
+      [[ "${_JSH_UI_RICH}" == 1 ]] && REPLY_MARK='▲' || REPLY_MARK=warn
+      ;;
+    note)
+      REPLY_COLOR=${_JSH_UI_CYAN}
+      [[ "${_JSH_UI_RICH}" == 1 ]] && REPLY_MARK='›' || REPLY_MARK=note
+      ;;
+    error | missing | failed)
+      REPLY_COLOR=${_JSH_UI_RED}
+      [[ "${_JSH_UI_RICH}" == 1 ]] && REPLY_MARK='✖' || REPLY_MARK=error
+      ;;
+    *)
+      REPLY_COLOR=${_JSH_UI_DIM}
+      REPLY_MARK=${status}
+      ;;
+  esac
+}
+
+_jsh_ui_text() {
+  REPLY_TEXT="$1"
+  [[ -z "${HOME:-}" ]] || REPLY_TEXT=${REPLY_TEXT//"${HOME}"/\~}
+}
+
+_jsh_ui_heading() {
+  _jsh_ui_init
+  printf '\n%s%s%s%s\n' "${_JSH_UI_BOLD}" "${_JSH_UI_CYAN}" "$1" "${_JSH_UI_RESET}"
+}
+
+_jsh_ui_stage() {
+  local current="$1" total="$2" title="$3"
+  _jsh_ui_init
+  printf '\n%s%s[%s/%s] %s%s\n' \
+    "${_JSH_UI_BOLD}" "${_JSH_UI_CYAN}" "${current}" "${total}" "${title}" "${_JSH_UI_RESET}"
+  _JSH_UI_TREE=1
+}
+
+_jsh_ui_row() {
+  local status="$1" key="$2" value="${3:-}" position="${4:-more}"
+  local connector dots dot_count target_width columns row_width
+  _jsh_ui_init
+  _jsh_ui_status "${status}"
+  _jsh_ui_text "${key}"
+  key=${REPLY_TEXT}
+  _jsh_ui_text "${value}"
+  value=${REPLY_TEXT}
+  if [[ "${_JSH_UI_RICH}" == 1 ]]; then
+    [[ "${position}" == last ]] && connector='└──' || connector='├──'
+  else
+    [[ "${position}" == last ]] && connector='\--' || connector='|--'
+    REPLY_MARK="[${REPLY_MARK}]"
+  fi
+
+  if [[ -z "${value}" ]]; then
+    printf '  %s %s%s%s %s\n' "${connector}" "${REPLY_COLOR}" "${REPLY_MARK}" "${_JSH_UI_RESET}" "${key}"
+    return
+  fi
+
+  target_width=${JSH_UI_KEY_WIDTH:-28}
+  dot_count=$((target_width - ${#key}))
+  ((dot_count >= 3)) || dot_count=3
+  printf -v dots '%*s' "${dot_count}" ''
+  dots=${dots// /.}
+  columns=${COLUMNS:-80}
+  [[ "${columns}" =~ ^[0-9]+$ ]] || columns=80
+  row_width=$((7 + ${#key} + dot_count + ${#REPLY_MARK} + ${#value}))
+  if ((columns >= 30 && row_width > columns)); then
+    printf '  %s %s\n' "${connector}" "${key}"
+    printf '      %s%s%s %s\n' "${REPLY_COLOR}" "${REPLY_MARK}" "${_JSH_UI_RESET}" "${value}"
+  else
+    printf '  %s %s %s %s%s%s %s\n' \
+      "${connector}" "${key}" "${dots}" "${REPLY_COLOR}" "${REPLY_MARK}" "${_JSH_UI_RESET}" "${value}"
+  fi
+}
+
+_jsh_message() {
+  local status="$1" message="$2"
+  if [[ "${_JSH_UI_TREE:-0}" == 1 ]]; then
+    _jsh_ui_row "${status}" "${message}"
+    return
+  fi
+  _jsh_ui_init
+  _jsh_ui_status "${status}"
+  _jsh_ui_text "${message}"
+  message=${REPLY_TEXT}
+  printf '%s%-5s%s %s\n' "${REPLY_COLOR}" "${REPLY_MARK}" "${_JSH_UI_RESET}" "${message}"
+}
+
+_jsh_error() {
+  local message="$1"
+  _jsh_ui_init
+  _jsh_ui_status error
+  _jsh_ui_text "${message}"
+  message=${REPLY_TEXT}
+  if [[ "${_JSH_UI_RICH}" == 1 ]]; then
+    printf '%s%s%s jsh: %s\n' "${REPLY_COLOR}" "${REPLY_MARK}" "${_JSH_UI_RESET}" "${message}" >&2
+  else
+    printf '[%s] jsh: %s\n' "${REPLY_MARK}" "${message}" >&2
+  fi
+}
+
+_jsh_runtime_shell() {
+  if command -v zsh >/dev/null 2>&1; then
+    printf 'zsh\n'
+  else
+    command -v bash >/dev/null 2>&1 || {
+      _jsh_error 'Bash or Zsh is required for runtime mode'
+      return 1
+    }
+    printf 'bash\n'
+  fi
+}
+
+_jsh_prepare_runtime_environment() {
+  local git_config include_path shellcheck_config
+
+  if [[ -z ${JSH_RUNTIME_CONFIG_DIR+x} ]]; then
+    export JSH_RUNTIME_CONFIG_DIR="${JSH_DIR}/local/runtime"
+  fi
+  if [[ -z ${RIPGREP_CONFIG_PATH+x} ]]; then
+    export RIPGREP_CONFIG_PATH="${JSH_DIR}/dotfiles/.ripgreprc"
+  fi
+  if [[ -z ${INPUTRC+x} ]]; then
+    export INPUTRC="${JSH_DIR}/dotfiles/.inputrc"
+  fi
+  if [[ -z ${VIMINIT+x} ]]; then
+    export VIMINIT='execute "source " . fnameescape($JSH_DIR . "/dotfiles/.vimrc")'
+  fi
+
+  if [[ -n ${JSH_RUNTIME_CONFIG_DIR} ]] \
+    && mkdir -p "${JSH_RUNTIME_CONFIG_DIR}" 2>/dev/null; then
+    shellcheck_config="${JSH_RUNTIME_CONFIG_DIR}/shellcheckrc"
+    if [[ ! -e ${shellcheck_config} && ! -L ${shellcheck_config} ]]; then
+      ln -s "${JSH_DIR}/dotfiles/.shellcheckrc" \
+        "${shellcheck_config}" 2>/dev/null || true
+    fi
+  fi
+
+  [[ -z ${GIT_CONFIG_GLOBAL+x} && -n ${JSH_RUNTIME_CONFIG_DIR} ]] || return 0
+  command -v git >/dev/null 2>&1 || return 0
+  [[ -d ${JSH_RUNTIME_CONFIG_DIR} ]] || return 0
+
+  git_config="${JSH_RUNTIME_CONFIG_DIR}/gitconfig"
+  if [[ ! -s ${git_config} && ! -L ${git_config} ]]; then
+    git config --file "${git_config}" include.path \
+      "${JSH_DIR}/dotfiles/.gitconfig" >/dev/null 2>&1 || return 0
+  fi
+  while IFS= read -r include_path; do
+    if [[ ${include_path} == "${JSH_DIR}/dotfiles/.gitconfig" ]]; then
+      export GIT_CONFIG_GLOBAL="${git_config}"
+      return 0
+    fi
+  done < <(git config --file "${git_config}" --get-all include.path 2>/dev/null)
+}
+
+_jsh_launch_runtime() {
+  local login=0 runtime_shell
+  [[ "${1:-}" != -l ]] || {
+    login=1
+    shift
+  }
+  (($# == 0)) || {
+    _jsh_error 'Usage: jsh shell [-l]'
+    return 2
+  }
+  [[ "${JSH_RUNTIME_ACTIVE:-0}" != 1 ]] || {
+    usage
+    return 0
+  }
+  _jsh_prepare_runtime_environment
+  runtime_shell=$(_jsh_runtime_shell) || return 1
+  if [[ "${runtime_shell}" == zsh && "${login}" == 1 ]]; then
+    exec env JSH_RUNTIME_ACTIVE=1 JSH_MODE=runtime JSH_DIR="${JSH_DIR}" \
+      JSH_SHELL=zsh ZDOTDIR="${JSH_DIR}/dotfiles" zsh -d -l -i
+  elif [[ "${runtime_shell}" == zsh ]]; then
+    exec env JSH_RUNTIME_ACTIVE=1 JSH_MODE=runtime JSH_DIR="${JSH_DIR}" \
+      JSH_SHELL=zsh ZDOTDIR="${JSH_DIR}/dotfiles" zsh -d -i
+  fi
+  exec env JSH_RUNTIME_ACTIVE=1 JSH_MODE=runtime JSH_DIR="${JSH_DIR}" \
+    JSH_SHELL=bash bash --rcfile "${JSH_DIR}/dotfiles/.bashrc" -i
+}
+
+_jsh_run_command() {
+  local command_text="${1:-}" runtime_shell
+  [[ -n "${command_text}" ]] || {
+    _jsh_error 'Usage: jsh -c <command> [args...]'
+    return 2
+  }
+  shift
+  _jsh_prepare_runtime_environment
+  runtime_shell=$(_jsh_runtime_shell) || return 1
+  if [[ "${runtime_shell}" == zsh ]]; then
+    exec env JSH_RUNTIME_ACTIVE=1 JSH_MODE=runtime JSH_DIR="${JSH_DIR}" \
+      JSH_SHELL=zsh ZDOTDIR="${JSH_DIR}/dotfiles" zsh -d -i -c "${command_text}" jsh "$@"
+  fi
+  exec env JSH_RUNTIME_ACTIVE=1 JSH_MODE=runtime JSH_DIR="${JSH_DIR}" \
+    JSH_SHELL=bash bash --rcfile "${JSH_DIR}/dotfiles/.bashrc" -i -c "${command_text}" jsh "$@"
+}
+
+_jsh_vscode_user_dir() {
+  case "$(uname -s 2>/dev/null)" in
+    Darwin) printf '%s\n' "${HOME}/Library/Application Support/Code/User" ;;
+    *) printf '%s\n' "${XDG_CONFIG_HOME:-${HOME}/.config}/Code/User" ;;
+  esac
+}
+
+_jsh_install_entries() {
+  local relative source child destination
+  for relative in .zshrc .bashrc .bash_profile .gitconfig .inputrc .tmux.conf \
+    .vimrc .editorconfig .shellcheckrc .markdownlint.jsonc .prettierrc.json \
+    .czrc .ripgreprc; do
+    source="${JSH_DIR}/dotfiles/${relative}"
+    [[ -e "${source}" ]] && printf '%s|%s\n' "${source}" "${HOME}/${relative}"
+  done
+
+  source="${JSH_DIR}/dotfiles/.config"
+  if [[ -d "${source}" ]]; then
+    for child in "${source}"/*; do
+      [[ -e "${child}" ]] || continue
+      printf '%s|%s\n' "${child}" "${XDG_CONFIG_HOME:-${HOME}/.config}/${child##*/}"
+    done
+  fi
+
+  source="${JSH_DIR}/dotfiles/.vscode/user"
+  destination=$(_jsh_vscode_user_dir)
+  if [[ -d "${source}" ]]; then
+    for child in "${source}"/*; do
+      [[ -e "${child}" ]] || continue
+      printf '%s|%s\n' "${child}" "${destination}/${child##*/}"
+    done
+  fi
+}
+
+_jsh_resolve_path() {
+  local path="$1" parent
+  parent=$(cd "$(dirname "${path}")" 2>/dev/null && pwd -P) || return 1
+  printf '%s/%s\n' "${parent}" "$(basename "${path}")"
+}
+
+_jsh_link_target() {
+  local link="$1" target
+  target=$(readlink "${link}") || return 1
+  case "${target}" in
+    /*) _jsh_resolve_path "${target}" ;;
+    *) _jsh_resolve_path "$(dirname "${link}")/${target}" ;;
+  esac
+}
+
+_jsh_link_points_to() {
+  local source="$1" destination="$2" source_path target_path
+  [[ -L "${destination}" ]] || return 1
+  source_path=$(_jsh_resolve_path "${source}") || return 1
+  target_path=$(_jsh_link_target "${destination}") || return 1
+  [[ "${source_path}" == "${target_path}" ]]
+}
+
+_jsh_state_has_destination() {
+  local wanted="$1" source destination backup
+  [[ -r "${JSH_LINK_STATE}" ]] || return 1
+  while IFS='|' read -r source destination backup || [[ -n "${source}${destination}${backup}" ]]; do
+    [[ "${destination}" == "${wanted}" ]] && return 0
+  done <"${JSH_LINK_STATE}"
+  return 1
+}
+
+_jsh_state_add() {
+  local source="$1" destination="$2" backup="$3"
+  _jsh_state_has_destination "${destination}" && return 0
+  mkdir -p "${JSH_STATE_DIR}"
+  printf '%s|%s|%s\n' "${source}" "${destination}" "${backup}" >>"${JSH_LINK_STATE}"
+}
+
+_jsh_backup_path() {
+  local backup_root="$1" destination="$2" relative
+  case "${destination}" in
+    "${HOME}"/*) relative="${destination#"${HOME}"/}" ;;
+    *) relative="external/${destination#/}" ;;
+  esac
+  printf '%s/%s\n' "${backup_root}" "${relative}"
+}
+
+_jsh_manage_link() {
+  local source="$1" destination="$2" backup_root="$3" dry_run="$4" backup=""
+  if _jsh_link_points_to "${source}" "${destination}"; then
+    [[ "${dry_run}" == 1 ]] || _jsh_state_add "${source}" "${destination}" ""
+    _jsh_message current "${destination}"
+    return 0
+  fi
+
+  if [[ -e "${destination}" || -L "${destination}" ]]; then
+    backup=$(_jsh_backup_path "${backup_root}" "${destination}")
+    if [[ -e "${backup}" || -L "${backup}" ]]; then
+      _jsh_message error "backup already exists: ${backup}"
+      return 1
+    fi
+    if [[ "${dry_run}" == 1 ]]; then
+      _jsh_message plan "backup ${destination} -> ${backup}"
+    else
+      mkdir -p "$(dirname "${backup}")" || return 1
+      mv "${destination}" "${backup}" || return 1
+    fi
+  fi
+
+  if [[ "${dry_run}" == 1 ]]; then
+    _jsh_message plan "link ${destination} -> ${source}"
+    return 0
+  fi
+  mkdir -p "$(dirname "${destination}")" || return 1
+  if ! ln -s "${source}" "${destination}"; then
+    [[ -z "${backup}" ]] || mv "${backup}" "${destination}" 2>/dev/null || true
+    return 1
+  fi
+  _jsh_state_add "${source}" "${destination}" "${backup}"
+  _jsh_message linked "${destination}"
+}
+
+_jsh_install_launcher() {
+  local dry_run="$1" timestamp="$2" backup_root destination directory
+  backup_root="${JSH_STATE_DIR}/backups/${timestamp}"
+
+  if [[ -n "${JSH_BIN_DIR:-}" ]]; then
+    [[ "${JSH_BIN_DIR}" == /* ]] || {
+      _jsh_message error 'JSH_BIN_DIR must be an absolute path'
+      return 1
+    }
+    JSH_LAUNCHER_DESTINATION="${JSH_BIN_DIR%/}/jsh"
+    _jsh_manage_link "${JSH_DIR}/bin/jsh" "${JSH_LAUNCHER_DESTINATION}" "${backup_root}" "${dry_run}"
+    return
+  fi
+
+  destination=/usr/local/bin/jsh
+  directory=${destination%/*}
+  if _jsh_link_points_to "${JSH_DIR}/bin/jsh" "${destination}" \
+    || { [[ ! -e "${destination}" && ! -L "${destination}" && -w "${directory}" ]]; }; then
+    JSH_LAUNCHER_DESTINATION=${destination}
+    _jsh_manage_link "${JSH_DIR}/bin/jsh" "${destination}" "${backup_root}" "${dry_run}" && return
+  fi
+  if [[ ! -e "${destination}" && ! -L "${destination}" ]] \
+    && command -v sudo >/dev/null 2>&1 \
+    && { sudo -n true 2>/dev/null || { [[ "${dry_run}" == 0 && -r /dev/tty && -w /dev/tty ]] && sudo -v; }; }; then
+    JSH_LAUNCHER_DESTINATION=${destination}
+    if [[ "${dry_run}" == 1 ]]; then
+      _jsh_message plan "link ${destination} -> ${JSH_DIR}/bin/jsh"
+      return
+    elif sudo mkdir -p "${directory}" && sudo ln -s "${JSH_DIR}/bin/jsh" "${destination}"; then
+      if _jsh_state_add "${JSH_DIR}/bin/jsh" "${destination}" ""; then
+        _jsh_message linked "${destination}"
+        return
+      fi
+      sudo rm -f "${destination}" || true
+    fi
+  fi
+
+  JSH_LAUNCHER_DESTINATION="${HOME}/.local/bin/jsh"
+  if _jsh_manage_link "${JSH_DIR}/bin/jsh" "${JSH_LAUNCHER_DESTINATION}" "${backup_root}" "${dry_run}"; then
+    return
+  fi
+
+  [[ -r /dev/tty && -w /dev/tty ]] || {
+    _jsh_message error 'could not install the launcher; set JSH_BIN_DIR to a writable directory'
+    return 1
+  }
+  while :; do
+    printf 'Launcher directory: ' >/dev/tty
+    IFS= read -r directory </dev/tty || return 1
+    [[ "${directory}" == /* ]] || {
+      _jsh_message error 'enter an absolute directory path'
+      continue
+    }
+    JSH_LAUNCHER_DESTINATION="${directory%/}/jsh"
+    _jsh_manage_link "${JSH_DIR}/bin/jsh" "${JSH_LAUNCHER_DESTINATION}" "${backup_root}" "${dry_run}" && return
+  done
+}
+
+_jsh_install() {
+  local mode=runtime mode_label=Runtime dry_run=0 source destination failures=0
+  local timestamp backup_root current_mode="" stage_offset stage_total result_status result_detail
+  while (($# > 0)); do
+    case "$1" in
+      --mode)
+        [[ $# -ge 2 ]] || return 2
+        mode="$2"
+        shift 2
+        ;;
+      --mode=*)
+        mode="${1#*=}"
+        shift
+        ;;
+      --dry-run | -n)
+        dry_run=1
+        shift
+        ;;
+      *)
+        _jsh_error "unknown install option: $1"
+        return 2
+        ;;
+    esac
+  done
+  case "${mode}" in runtime | install) ;; *)
+    _jsh_error 'mode must be runtime or install'
+    return 2
+    ;;
+  esac
+  [[ "${mode}" != install ]] || mode_label=Install
+  stage_offset=${JSH_STAGE_OFFSET:-0}
+  [[ "${stage_offset}" =~ ^[0-9]+$ ]] || stage_offset=0
+  stage_total=${JSH_STAGE_TOTAL:-$((stage_offset + 2))}
+  [[ "${stage_total}" =~ ^[0-9]+$ ]] || stage_total=$((stage_offset + 2))
+  [[ ! -r "${JSH_MODE_FILE}" ]] || IFS= read -r current_mode <"${JSH_MODE_FILE}"
+  if [[ "${current_mode}" == install && "${mode}" == runtime ]]; then
+    _jsh_error 'uninstall managed dotfiles before switching to runtime mode'
+    return 1
+  fi
+
+  _jsh_banner
+  _jsh_ui_stage "$((stage_offset + 1))" "${stage_total}" "Configuring ${mode_label}"
+  timestamp=$(date +%Y%m%d-%H%M%S)
+  backup_root="${JSH_STATE_DIR}/backups/${timestamp}"
+  _jsh_install_launcher "${dry_run}" "${timestamp}" || failures=$((failures + 1))
+  if [[ "${mode}" == install ]]; then
+    while IFS='|' read -r source destination; do
+      _jsh_manage_link "${source}" "${destination}" "${backup_root}" "${dry_run}" \
+        || failures=$((failures + 1))
+    done < <(_jsh_install_entries)
+  fi
+  if ((failures == 0)); then
+    result_status=success
+    [[ "${dry_run}" == 1 ]] && result_detail='preview complete' || result_detail='links configured'
+  else
+    result_status=error
+    result_detail="${failures} failures"
+  fi
+  _jsh_ui_row "${result_status}" Configuration "${result_detail}" last
+
+  _jsh_ui_stage "$((stage_offset + 2))" "${stage_total}" Finalizing
+  if [[ "${dry_run}" == 0 && "${failures}" == 0 ]]; then
+    mkdir -p "${JSH_STATE_DIR}" && printf '%s\n' "${mode}" >"${JSH_MODE_FILE}"
+  fi
+  if [[ -n "${JSH_LAUNCHER_DESTINATION:-}" && ":${PATH}:" != *":${JSH_LAUNCHER_DESTINATION%/*}:"* ]]; then
+    _jsh_message note "add ${JSH_LAUNCHER_DESTINATION%/*} to PATH"
+  fi
+  [[ "${dry_run}" == 1 ]] && result_detail="${mode} previewed" || result_detail="${mode} configured"
+  _jsh_ui_row "${result_status}" Mode "${result_detail}" last
+  _JSH_UI_TREE=0
+  [[ "${failures}" == 0 ]]
+}
+
+_jsh_status_emit() {
+  local component="$1" state="$2" name="$3" detail="$4"
+  name=${name//$'\t'/ }
+  name=${name//$'\n'/ }
+  detail=${detail//$'\t'/ }
+  detail=${detail//$'\n'/ }
+  printf '%s\t%s\t%s\t%s\n' "${component}" "${state}" "${name}" "${detail}" >>"${JSH_STATUS_RECORDS}"
+}
+
+_jsh_install_entry_exists() {
+  local wanted_source="$1" wanted_destination="$2" source destination
+  while IFS='|' read -r source destination; do
+    [[ "${source}" == "${wanted_source}" && "${destination}" == "${wanted_destination}" ]] && return 0
+  done < <(_jsh_install_entries)
+  return 1
+}
+
+_jsh_managed_entry_is_stale() {
+  local mode="$1" source="$2" destination="$3"
+  [[ "${source}" != "${JSH_DIR}/bin/jsh" ]] || return 1
+  [[ "${mode}" == install ]] || return 0
+  ! _jsh_install_entry_exists "${source}" "${destination}"
+}
+
+_jsh_status_shell() {
+  local mode=unconfigured line source destination backup state detail seen_launcher=0
+  [[ ! -r "${JSH_MODE_FILE}" ]] || IFS= read -r mode <"${JSH_MODE_FILE}"
+  case "${mode}" in
+    runtime | install) _jsh_status_emit shell current mode "${mode}" ;;
+    unconfigured) _jsh_status_emit shell missing mode 'jsh has not been configured' ;;
+    *) _jsh_status_emit shell changed mode "unknown mode: ${mode}" ;;
+  esac
+
+  if [[ -r "${JSH_LINK_STATE}" ]]; then
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+      if [[ "${line}" != *'|'* ]]; then
+        [[ -z "${line}" ]] || _jsh_status_emit shell error "${line}" 'malformed managed-link state'
+        continue
+      fi
+      IFS='|' read -r source destination backup <<<"${line}"
+      if [[ -z "${source}" || -z "${destination}" ]]; then
+        _jsh_status_emit shell error "${destination:-${source:-record}}" 'malformed managed-link state'
+        continue
+      fi
+      if [[ "${source}" == "${JSH_DIR}/bin/jsh" ]]; then
+        seen_launcher=1
+        detail=${destination}
+      else
+        detail=${source}
+      fi
+
+      if _jsh_managed_entry_is_stale "${mode}" "${source}" "${destination}"; then
+        state=changed
+        detail="stale managed link: ${source}"
+      elif [[ ! -e "${source}" && ! -L "${source}" ]]; then
+        state=changed
+        detail="managed source is missing: ${source}"
+      elif _jsh_link_points_to "${source}" "${destination}"; then
+        state=current
+      elif [[ -e "${destination}" || -L "${destination}" ]]; then
+        state=changed
+        detail="wrong target; expected ${source}"
+      else
+        state=missing
+        detail="expected link to ${source}"
+      fi
+
+      if [[ "${source}" == "${JSH_DIR}/bin/jsh" ]]; then
+        _jsh_status_emit shell "${state}" launcher "${detail}"
+      else
+        _jsh_status_emit shell "${state}" "${destination}" "${detail}"
+      fi
+    done <"${JSH_LINK_STATE}"
+  fi
+  [[ "${seen_launcher}" == 1 ]] || _jsh_status_emit shell missing launcher 'managed launcher is not recorded'
+
+  if [[ "${mode}" == install ]]; then
+    while IFS='|' read -r source destination; do
+      _jsh_state_has_destination "${destination}" \
+        || _jsh_status_emit shell missing "${destination}" "not linked from ${source}"
+    done < <(_jsh_install_entries)
+  fi
+}
+
+_jsh_status_label() {
+  case "$1" in
+    shell) printf 'Shell' ;;
+  esac
+}
+
+_jsh_status_colors() {
+  _jsh_ui_init
+  _JSH_STATUS_RESET=${_JSH_UI_RESET}
+  _JSH_STATUS_BOLD=${_JSH_UI_BOLD}
+  _JSH_STATUS_DIM=${_JSH_UI_DIM}
+  _JSH_STATUS_RED=${_JSH_UI_RED}
+  _JSH_STATUS_GREEN=${_JSH_UI_GREEN}
+  _JSH_STATUS_YELLOW=${_JSH_UI_YELLOW}
+  _JSH_STATUS_CYAN=${_JSH_UI_CYAN}
+}
+
+_jsh_banner() {
+  _jsh_status_colors
+  printf '%s%s' "${_JSH_STATUS_BOLD}" "${_JSH_STATUS_CYAN}"
+  cat <<'BANNER'
+   :%@@@@@@@@@#*#@%-              +-:##
+  :#    -#%%+=#:@#                :@@%:
+   %@@     +@++@@-            *-   @@%:
+          *@%:%@@:    :%@@@@*%+  *@@@%::*@@#
+     -###%@@+:%@@:  :%@#:--=%:    -@@@#: #@@=
+       :#@@@+:%@@:  :%@#  -#-     -@@%   *@@=
+      *#:#@@+:%@@:  :%@@@@@@@@*   -@@%   *@@=
+       -#@@@+:%@%:     *%  -@@*   -@@%   *@@=
+         :@@+:%@*     -*   -@@*   -@@%   *@@=
+          +@+:%*     *@@@@@%@%-   #@@@+  *@@-
+   :==--::*#:#-     -:   -*:        +   =@@=
+ :@@@@@@@@#@-                         +@#:
+ =   :-=-:                          -:
+BANNER
+  printf '%s\n' "${_JSH_STATUS_RESET}"
+}
+
+_jsh_status_state_color() {
+  case "$1" in
+    current) printf '%s' "${_JSH_STATUS_GREEN}" ;;
+    missing | error) printf '%s' "${_JSH_STATUS_RED}" ;;
+    changed) printf '%s' "${_JSH_STATUS_YELLOW}" ;;
+    optional) printf '%s' "${_JSH_STATUS_CYAN}" ;;
+    skipped) printf '%s' "${_JSH_STATUS_DIM}" ;;
+  esac
+}
+
+_jsh_status_render() {
+  local verbose="$1" component=shell label record_component state name detail summary_status position shell_summary
+  local current problems optional skipped total_problems=0 problem_categories=0 details=0 rendered=0
+  _jsh_banner
+  current=0 problems=0 optional=0 skipped=0
+  while IFS=$'\t' read -r record_component state name detail; do
+    [[ "${record_component}" == "${component}" ]] || continue
+    case "${state}" in
+      current) current=$((current + 1)) ;;
+      missing | changed | error) problems=$((problems + 1)) ;;
+      optional) optional=$((optional + 1)) ;;
+      skipped) skipped=$((skipped + 1)) ;;
+    esac
+  done <"${JSH_STATUS_RECORDS}"
+  total_problems=${problems}
+  if ((problems > 0)); then
+    problem_categories=1
+    summary_status=error
+  elif ((optional > 0 || skipped > 0)); then
+    summary_status=warning
+  else
+    summary_status=current
+  fi
+  label=$(_jsh_status_label "${component}")
+  shell_summary="${current} current, ${problems} problems"
+  ((optional == 0)) || shell_summary+=", ${optional} optional"
+  ((skipped == 0)) || shell_summary+=", ${skipped} skipped"
+  _jsh_ui_heading Status
+  _jsh_ui_row "${summary_status}" "${label}" "${shell_summary}"
+  if ((total_problems > 0)); then
+    _jsh_ui_row "${summary_status}" Overall "${total_problems} problems in ${problem_categories} categories" last
+  else
+    _jsh_ui_row "${summary_status}" Overall '0 problems' last
+  fi
+  _JSH_UI_TREE=0
+
+  if [[ "${verbose}" != 1 ]]; then
+    printf '\n%sRun jsh status --verbose to inspect %s.%s\n' \
+      "${_JSH_UI_DIM}" "$([[ "${total_problems}" == 0 ]] && printf 'all managed items' || printf 'problems')" "${_JSH_UI_RESET}"
+    if awk -F '\t' '$1 == "shell" && (($2 == "changed" && $4 ~ /^stale managed link:/) || ($2 == "error" && $4 == "malformed managed-link state")) { found=1 } END { exit !found }' \
+      "${JSH_STATUS_RECORDS}"; then
+      printf '%sRun jsh repair --dry-run to preview stale managed-link cleanup.%s\n' \
+        "${_JSH_UI_DIM}" "${_JSH_UI_RESET}"
+    fi
+    ((total_problems == 0))
+    return
+  fi
+
+  while IFS=$'\t' read -r record_component state name detail; do
+    [[ "${record_component}" == "${component}" ]] || continue
+    details=$((details + 1))
+  done <"${JSH_STATUS_RECORDS}"
+  if ((details > 0)); then
+    label=$(_jsh_status_label "${component}")
+    _jsh_ui_heading "${label} details"
+    while IFS=$'\t' read -r record_component state name detail; do
+      [[ "${record_component}" == "${component}" ]] || continue
+      rendered=$((rendered + 1))
+      [[ "${rendered}" == "${details}" ]] && position='last' || position='more'
+      _jsh_ui_row "${state}" "${name}" "${detail}" "${position}"
+    done <"${JSH_STATUS_RECORDS}"
+  fi
+  ((total_problems == 0))
+}
+
+_jsh_status() {
+  local verbose=0 porcelain=0 work_dir result=0
+  while (($# > 0)); do
+    case "$1" in
+      --verbose | -v) verbose=1 ;;
+      --porcelain) porcelain=1 ;;
+      *)
+        _jsh_error "unknown status option: $1"
+        return 2
+        ;;
+    esac
+    shift
+  done
+
+  mkdir -p "${JSH_DIR}/tmp" || return 1
+  work_dir=$(mktemp -d "${JSH_DIR}/tmp/jsh-status.XXXXXX") || return 1
+  JSH_STATUS_RECORDS="${work_dir}/records"
+  : >"${JSH_STATUS_RECORDS}"
+  _jsh_status_shell
+
+  if [[ "${porcelain}" == 1 ]]; then
+    printf 'jsh-status\t1\tcomponent\tstate\tname\tdetail\n'
+    cat "${JSH_STATUS_RECORDS}"
+    if grep -Eq $'^[^\t]+\t(missing|changed|error)\t' "${JSH_STATUS_RECORDS}"; then result=1; fi
+  else
+    _jsh_status_render "${verbose}" || result=$?
+  fi
+  rm -rf "${work_dir}"
+  return "${result}"
+}
+
+_jsh_repair() {
+  local dry_run=0 mode=unconfigured line source destination backup temporary
+  local pruned=0 retained=0 suffix
+  while (($# > 0)); do
+    case "$1" in
+      --dry-run | -n) dry_run=1 ;;
+      *)
+        _jsh_error "unknown repair option: $1"
+        return 2
+        ;;
+    esac
+    shift
+  done
+
+  _jsh_ui_heading Repair
+  _JSH_UI_TREE=1
+
+  if [[ ! -r "${JSH_LINK_STATE}" ]]; then
+    _jsh_ui_row current State 'nothing to repair' last
+    _JSH_UI_TREE=0
+    return 0
+  fi
+  [[ ! -r "${JSH_MODE_FILE}" ]] || IFS= read -r mode <"${JSH_MODE_FILE}"
+  temporary="${JSH_LINK_STATE}.repair.$$"
+  [[ "${dry_run}" == 1 ]] || : >"${temporary}" || return 1
+
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    if [[ "${line}" != *'|'* ]]; then
+      [[ -z "${line}" ]] || pruned=$((pruned + 1))
+      continue
+    fi
+    IFS='|' read -r source destination backup <<<"${line}"
+    if [[ -z "${source}" || -z "${destination}" ]]; then
+      pruned=$((pruned + 1))
+      continue
+    fi
+    if _jsh_managed_entry_is_stale "${mode}" "${source}" "${destination}"; then
+      if [[ ! -e "${destination}" && ! -L "${destination}" ]] \
+        && { [[ -z "${backup}" ]] || { [[ ! -e "${backup}" && ! -L "${backup}" ]]; }; }; then
+        pruned=$((pruned + 1))
+        continue
+      fi
+      retained=$((retained + 1))
+    fi
+    [[ "${dry_run}" == 1 ]] || printf '%s\n' "${line}" >>"${temporary}" || {
+      rm -f "${temporary}"
+      return 1
+    }
+  done <"${JSH_LINK_STATE}"
+
+  if [[ "${dry_run}" != 1 ]]; then
+    if ((pruned > 0)); then
+      mv "${temporary}" "${JSH_LINK_STATE}" || return 1
+    else rm -f "${temporary}"; fi
+  fi
+  [[ "${pruned}" == 1 ]] && suffix= || suffix=s
+  if [[ "${dry_run}" == 1 ]]; then
+    _jsh_message plan "would prune ${pruned} stale managed-link record${suffix}"
+  else
+    _jsh_message pruned "${pruned} stale managed-link record${suffix}"
+  fi
+  if ((retained > 0)); then
+    [[ "${retained}" == 1 ]] && suffix= || suffix=s
+    _jsh_message retained "${retained} stale record${suffix} with a live destination or backup"
+    _jsh_ui_row warning Result 'repair incomplete' last
+    _JSH_UI_TREE=0
+    return 1
+  fi
+  _jsh_ui_row success Result "$([[ "${dry_run}" == 1 ]] && printf 'preview complete' || printf 'repair complete')" last
+  _JSH_UI_TREE=0
+}
+
+_jsh_doctor_record() {
+  local component="$1" classification="$2" name="$3" detail="$4"
+  printf '%s\t%s\t%s\t%s\n' "${component}" "${classification}" "${name}" "${detail}" >>"${JSH_DOCTOR_RECORDS}"
+}
+
+_jsh_doctor_command() {
+  local component="$1" name="$2" command_name="$3" detail="$4"
+  if command -v "${command_name}" >/dev/null 2>&1; then
+    _jsh_doctor_record "${component}" available "${name}" "${detail}"
+  else
+    _jsh_doctor_record "${component}" optional-missing "${name}" "${detail}"
+  fi
+}
+
+_jsh_doctor_path() {
+  local component="$1" name="$2" path="$3" detail="$4"
+  if [[ -e "${path}" ]]; then
+    _jsh_doctor_record "${component}" available "${name}" "${detail}"
+  else
+    _jsh_doctor_record "${component}" optional-missing "${name}" "${detail}"
+  fi
+}
+
+_jsh_doctor_yq() {
+  if command -v yq >/dev/null 2>&1 && yq --version 2>/dev/null | grep -Eq 'version v?4([.]|$)'; then
+    _jsh_doctor_record commands available yq 'Mike Farah yq v4'
+  else
+    _jsh_doctor_record commands optional-missing yq 'Mike Farah yq v4 is required by kubedectl and metadata tasks'
+  fi
+}
+
+_jsh_doctor_label() {
+  case "$1" in
+    base) printf 'Core' ;;
+    runtime) printf 'Runtime' ;;
+    vendor) printf 'Vendored assets' ;;
+    installer) printf 'Installer' ;;
+    commands) printf 'Commands' ;;
+    editors) printf 'Editors' ;;
+    network) printf 'Network operations' ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+_jsh_doctor_render() {
+  local component classification name detail status label position
+  local total=0 rendered=0 available=0 optional=0 required_missing=0
+
+  for component in base runtime vendor installer commands editors network; do
+    total=0
+    while IFS=$'\t' read -r classification name detail; do
+      total=$((total + 1))
+    done < <(awk -F '\t' -v component="${component}" '$1 == component { print $2 "\t" $3 "\t" $4 }' "${JSH_DOCTOR_RECORDS}")
+    ((total > 0)) || continue
+
+    label=$(_jsh_doctor_label "${component}")
+    _jsh_ui_heading "${label}"
+    rendered=0
+    while IFS=$'\t' read -r classification name detail; do
+      rendered=$((rendered + 1))
+      [[ "${rendered}" == "${total}" ]] && position='last' || position='more'
+      case "${classification}:${detail}" in
+        required:missing)
+          status=error
+          required_missing=$((required_missing + 1))
+          ;;
+        optional-missing:*)
+          status=warning
+          optional=$((optional + 1))
+          ;;
+        network-only:*) status=note ;;
+        *)
+          status=current
+          available=$((available + 1))
+          ;;
+      esac
+      _jsh_ui_row "${status}" "${name}" "${detail}" "${position}"
+    done < <(awk -F '\t' -v component="${component}" '$1 == component { print $2 "\t" $3 "\t" $4 }' "${JSH_DOCTOR_RECORDS}")
+  done
+
+  _jsh_ui_heading Summary
+  _jsh_ui_row current Available "${available} checks"
+  _jsh_ui_row "$([[ "${optional}" == 0 ]] && printf current || printf warning)" Optional "${optional} missing"
+  _jsh_ui_row "$([[ "${required_missing}" == 0 ]] && printf current || printf error)" Required "${required_missing} missing" last
+}
+
+_jsh_doctor() {
+  local strict=0 porcelain=0 work_dir component classification name detail result=0
+  while (($# > 0)); do
+    case "$1" in
+      --strict) strict=1 ;;
+      --porcelain) porcelain=1 ;;
+      *)
+        _jsh_error "unknown doctor option: $1"
+        return 2
+        ;;
+    esac
+    shift
+  done
+
+  mkdir -p "${JSH_DIR}/tmp" || return 1
+  work_dir=$(mktemp -d "${JSH_DIR}/tmp/jsh-doctor.XXXXXX") || return 1
+  JSH_DOCTOR_RECORDS="${work_dir}/records"
+  : >"${JSH_DOCTOR_RECORDS}"
+
+  if command -v bash >/dev/null 2>&1; then
+    _jsh_doctor_record base required bash 'available'
+  else
+    _jsh_doctor_record base required bash 'missing'
+    result=1
+  fi
+  for name in bin/jsh dotfiles/.bashrc dotfiles/.zshrc; do
+    if [[ -f "${JSH_DIR}/${name}" ]]; then
+      _jsh_doctor_record base required "${name}" available
+    else
+      _jsh_doctor_record base required "${name}" missing
+      result=1
+    fi
+  done
+
+  _jsh_doctor_command runtime zsh zsh 'enhanced interactive shell'
+  _jsh_doctor_command runtime fzf fzf 'fuzzy history and completion'
+  _jsh_doctor_path vendor fzf-tab "${JSH_DIR}/vendor/fzf-tab/fzf-tab.plugin.zsh" 'Zsh completion plugin source'
+  _jsh_doctor_path vendor zsh-completions "${JSH_DIR}/vendor/zsh-completions/src" 'additional Zsh completion source'
+  _jsh_doctor_path vendor zsh-plugins "${JSH_DIR}/vendor/zsh-plugins/zsh-autosuggestions.zsh" 'tracked Zsh plugin source'
+  _jsh_doctor_path vendor vim-plug "${JSH_DIR}/vendor/vim-config/autoload/plug.vim" 'Vim plugin manager source'
+
+  _jsh_doctor_command installer git git 'clone and update network operation'
+  _jsh_doctor_command installer curl curl 'web installer download'
+
+  _jsh_doctor_command commands gitx git 'Git operations; Bash 4+ also required'
+  if ((BASH_VERSINFO[0] >= 4)); then
+    _jsh_doctor_record commands available bash4 'gitx interpreter'
+  else
+    _jsh_doctor_record commands optional-missing bash4 'gitx requires Bash 4 or newer'
+  fi
+  _jsh_doctor_command commands jssh ssh 'SSH transport'
+  _jsh_doctor_command commands archive tar 'JSSH capsule archive support'
+  _jsh_doctor_command commands python3 python3 'httpstat interpreter'
+  _jsh_doctor_command commands curl curl 'httpstat and proxy probes'
+  _jsh_doctor_command commands docker docker 'dockerctl'
+  _jsh_doctor_command commands kubectl kubectl 'kubectx, kubens, and nukem'
+  _jsh_doctor_yq
+  _jsh_doctor_command editors Vim vim 'core Vim editor'
+  _jsh_doctor_command editors Neovim nvim 'managed wrapper; plugins require explicit network bootstrap'
+  _jsh_doctor_record network network-only j.sh 'clones or updates the repository'
+  _jsh_doctor_record network network-only editor-plugins 'Vim and Neovim plugin installation'
+
+  if [[ "${porcelain}" == 1 ]]; then
+    printf 'jsh-doctor\t1\tcomponent\tclassification\tname\tdetail\n'
+    cat "${JSH_DOCTOR_RECORDS}"
+  else
+    _jsh_doctor_render
+  fi
+  if [[ "${strict}" == 1 ]] && grep -Eq $'\t(optional-missing|unsupported)\t' "${JSH_DOCTOR_RECORDS}"; then
+    result=1
+  fi
+  rm -rf "${work_dir}"
+  return "${result}"
+}
+
+_jsh_uninstall() {
+  local dry_run=0 source destination backup temporary failures=0
+  while (($# > 0)); do
+    case "$1" in --dry-run | -n) dry_run=1 ;; *) return 2 ;; esac
+    shift
+  done
+  _jsh_ui_heading Uninstall
+  _JSH_UI_TREE=1
+  [[ -r "${JSH_LINK_STATE}" ]] || {
+    [[ "${dry_run}" == 1 ]] || rm -f "${JSH_MODE_FILE}"
+    _jsh_ui_row current State 'nothing to uninstall' last
+    _JSH_UI_TREE=0
+    return 0
+  }
+  temporary="${JSH_LINK_STATE}.tmp.$$"
+  [[ "${dry_run}" == 1 ]] || : >"${temporary}"
+  while IFS='|' read -r source destination backup || [[ -n "${source}${destination}${backup}" ]]; do
+    if ! _jsh_link_points_to "${source}" "${destination}" && [[ -e "${destination}" || -L "${destination}" ]]; then
+      _jsh_message changed "retained ${destination}"
+      failures=$((failures + 1))
+      [[ "${dry_run}" == 1 ]] || printf '%s|%s|%s\n' "${source}" "${destination}" "${backup}" >>"${temporary}"
+      continue
+    fi
+    if [[ -n "${backup}" && ! -e "${backup}" && ! -L "${backup}" ]]; then
+      _jsh_message error "missing backup: ${backup}"
+      failures=$((failures + 1))
+      [[ "${dry_run}" == 1 ]] || printf '%s|%s|%s\n' "${source}" "${destination}" "${backup}" >>"${temporary}"
+      continue
+    fi
+    if [[ "${dry_run}" == 1 ]]; then
+      _jsh_message plan "remove ${destination}${backup:+ and restore backup}"
+      continue
+    fi
+    if [[ -L "${destination}" ]]; then
+      if [[ "${destination}" == /usr/local/bin/jsh && ! -w /usr/local/bin ]]; then
+        if ! command -v sudo >/dev/null 2>&1 || ! sudo rm "${destination}"; then
+          failures=$((failures + 1))
+          printf '%s|%s|%s\n' "${source}" "${destination}" "${backup}" >>"${temporary}"
+          continue
+        fi
+      else
+        rm "${destination}" || {
+          failures=$((failures + 1))
+          continue
+        }
+      fi
+    fi
+    if [[ -n "${backup}" ]]; then
+      mkdir -p "$(dirname "${destination}")" && mv "${backup}" "${destination}" || {
+        failures=$((failures + 1))
+        printf '%s|%s|%s\n' "${source}" "${destination}" "${backup}" >>"${temporary}"
+        continue
+      }
+    fi
+    _jsh_message removed "${destination}"
+  done <"${JSH_LINK_STATE}"
+  if [[ "${dry_run}" == 0 ]]; then
+    if [[ -s "${temporary}" ]]; then
+      mv "${temporary}" "${JSH_LINK_STATE}"
+    else rm -f "${temporary}" "${JSH_LINK_STATE}" "${JSH_MODE_FILE}"; fi
+  fi
+  if ((failures == 0)); then
+    _jsh_ui_row success Result "$([[ "${dry_run}" == 1 ]] && printf 'preview complete' || printf 'uninstall complete')" last
+  else
+    _jsh_ui_row warning Result "${failures} retained" last
+  fi
+  _JSH_UI_TREE=0
+  [[ "${failures}" == 0 ]]
+}
+
+usage() {
+  _jsh_banner
+  _jsh_ui_init
+  printf '%s%sUsage%s: jsh [shell [-l] | -c COMMAND [args...]]\n' \
+    "${_JSH_UI_BOLD}" "${_JSH_UI_CYAN}" "${_JSH_UI_RESET}"
+  printf '       jsh <command> [options]\n'
+  _jsh_ui_heading Commands
+  cat <<'USAGE'
+  shell [-l]                          Open the isolated jsh shell runtime
+  -c COMMAND [args...]                Run a command inside the jsh runtime
+  install [--mode runtime|install] [-n]
+                                      Configure a launcher and optional dotfile links
+  status [-v|--verbose] [--porcelain] Show shell mode and managed-link state
+  repair [-n|--dry-run]               Prune dead stale managed-link state
+  doctor [--porcelain] [--strict]     Report runtime and feature dependencies
+  uninstall [-n] [--purge]            Restore originals; optionally remove the checkout
+  version                             Show the jsh version
+  help                                Show this help
+USAGE
+}
+
+purge_checkout() {
+  local dry_run="$1" checkout_root dirty head upstream
+  if [[ "${dry_run}" == 0 && -e "${JSH_LINK_STATE}" ]]; then
+    _jsh_error 'unresolved managed links remain; checkout retained'
+    return 1
+  fi
+  case "${JSH_DIR}" in
+    '' | / | "${HOME}")
+      _jsh_error "unsafe purge path: ${JSH_DIR}"
+      return 1
+      ;;
+    "${HOME}"/*) ;;
+    *)
+      _jsh_error "checkout is outside HOME: ${JSH_DIR}"
+      return 1
+      ;;
+  esac
+  checkout_root=$(git -C "${JSH_DIR}" rev-parse --show-toplevel 2>/dev/null) || {
+    _jsh_error 'checkout is not a Git repository'
+    return 1
+  }
+  checkout_root=$(cd "${checkout_root}" && pwd -P) || return 1
+  [[ "${checkout_root}" == "${JSH_DIR}" ]] || {
+    _jsh_error 'purge path is not the checkout root'
+    return 1
+  }
+  dirty=$(git -C "${JSH_DIR}" status --porcelain --untracked-files=all --ignored)
+  if [[ -n "${dirty}" ]]; then
+    _jsh_error 'checkout has local or ignored files; checkout retained'
+    printf '%s\n' "${dirty}" >&2
+    return 1
+  fi
+  head=$(git -C "${JSH_DIR}" rev-parse HEAD 2>/dev/null) || return 1
+  upstream=$(git -C "${JSH_DIR}" rev-parse '@{upstream}' 2>/dev/null) || {
+    _jsh_error 'checkout has no upstream; checkout retained'
+    return 1
+  }
+  if [[ "${head}" != "${upstream}" ]]; then
+    _jsh_error 'checkout has local or missing upstream commits; checkout retained'
+    return 1
+  fi
+  if [[ "${dry_run}" == 1 ]]; then
+    _jsh_message plan "remove checkout ${JSH_DIR}"
+    return 0
+  fi
+  cd "${HOME}" || return 1
+  command rm -rf "${JSH_DIR}"
+}
+
+if (($# == 0)); then
+  configured_mode=""
+  [[ ! -r "${JSH_MODE_FILE}" ]] || IFS= read -r configured_mode <"${JSH_MODE_FILE}"
+  if [[ "${configured_mode}" == install ]]; then
+    usage
+  else _jsh_launch_runtime; fi
+  exit $?
+fi
+
+command_name="$1"
+shift
+
+case "${command_name}" in
+  shell)
+    _jsh_launch_runtime "$@"
+    ;;
+  -c)
+    _jsh_run_command "$@"
+    ;;
+  install)
+    _jsh_install --mode install "$@"
+    ;;
+  status)
+    _jsh_status "$@"
+    ;;
+  repair)
+    _jsh_repair "$@"
+    ;;
+  doctor)
+    _jsh_doctor "$@"
+    ;;
+  uninstall)
+    uninstall_dry_run=0
+    uninstall_purge=0
+    while (($# > 0)); do
+      case "$1" in
+        --dry-run | -n) uninstall_dry_run=1 ;;
+        --purge) uninstall_purge=1 ;;
+        *)
+          _jsh_error "unknown uninstall option: $1"
+          exit 2
+          ;;
+      esac
+      shift
+    done
+    if [[ "${uninstall_dry_run}" == 1 ]]; then
+      _jsh_uninstall --dry-run
+    else _jsh_uninstall; fi
+    uninstall_status=$?
+    ((uninstall_status == 0)) || exit "${uninstall_status}"
+    ((uninstall_purge == 0)) || purge_checkout "${uninstall_dry_run}"
+    ;;
+  version | --version | -V)
+    printf 'jsh 1.0.0\n'
+    ;;
+  help | --help | -h)
+    usage
+    ;;
+  *)
+    _jsh_error "unknown command: ${command_name}"
+    usage >&2
+    exit 2
+    ;;
+esac

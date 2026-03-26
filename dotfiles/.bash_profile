@@ -5,5 +5,5 @@
 # Source .bashrc for interactive shells
 # This ensures consistent configuration between login and non-login shells
 if [[ -f ~/.bashrc ]]; then
-    source ~/.bashrc
+  source ~/.bashrc
 fi
