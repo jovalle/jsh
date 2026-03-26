@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+
+# Run Neovim with JSH-local runtime files, falling back to Vim or Vi.
+
+set -o errexit
+set -o nounset
+
+jsh_root="${JSH_DIR:-${HOME}/.jsh}"
+jsh_local="${JSH_LOCAL_DIR:-${jsh_root}/local}"
+
+if [[ "${1:-}" == --bootstrap ]]; then
+  [[ "${JSH_OFFLINE:-0}" != 1 ]] || {
+    printf 'nvim: cannot bootstrap plugins while JSH_OFFLINE=1\n' >&2
+    exit 1
+  }
+  export JSH_ALLOW_NETWORK_BOOTSTRAP=1
+  shift
+fi
+
+export XDG_CONFIG_HOME="${JSH_NVIM_CONFIG_HOME:-${jsh_root}/dotfiles/.config}"
+export XDG_DATA_HOME="${JSH_NVIM_DATA_HOME:-${jsh_local}/share}"
+export XDG_CACHE_HOME="${JSH_NVIM_CACHE_HOME:-${jsh_local}/cache}"
+export XDG_STATE_HOME="${JSH_NVIM_STATE_HOME:-${jsh_local}/state}"
+
+mkdir -p \
+  "${XDG_DATA_HOME}/nvim" \
+  "${XDG_CACHE_HOME}/nvim" \
+  "${XDG_STATE_HOME}/nvim"
+
+# JSH's bin directory precedes Homebrew in PATH, so resolve Neovim while
+# explicitly excluding this wrapper's directory to prevent future recursion.
+wrapper_dir="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)"
+search_path=""
+old_ifs="${IFS}"
+IFS=:
+for path_entry in ${PATH}; do
+  if [[ -n "${path_entry}" && "${path_entry}" != "${wrapper_dir}" ]]; then
+    search_path="${search_path:+${search_path}:}${path_entry}"
+  fi
+done
+IFS="${old_ifs}"
+
+editor_bin=""
+for editor in nvim vim vi; do
+  editor_bin="$(PATH="${search_path}" command -v "${editor}" || true)"
+  [[ -z "${editor_bin}" ]] || break
+done
+
+if [[ -z "${editor_bin}" ]]; then
+  printf 'nvim: nvim, vim, and vi are not available in PATH\n' >&2
+  exit 127
+fi
+
+exec "${editor_bin}" "$@"
