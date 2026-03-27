@@ -68,8 +68,8 @@ macos-icon = retro
 # Format: horizontal (left,right) or single value for both
 window-padding-x = 8
 
-# Format: vertical (top,bottom) or single value for both
-window-padding-y = 2,8
+# Balanced vertical padding keeps terminal content centered in the surface.
+window-padding-y = 8
 
 # Confirm before closing a terminal with running processes
 # Prevents accidental data loss
@@ -100,9 +100,8 @@ font-family = JetBrainsMono Nerd Font
 # Font size in points
 font-size = 12
 
-# Enable font thickening (makes fonts appear bolder)
-# Useful for light fonts on dark backgrounds
-font-thicken = true
+# Preserve the font's native weight; the prompt supplies emphasis explicitly.
+font-thicken = false
 
 # Adjust line spacing (1.0 = normal)
 # Slightly increased for readability
@@ -120,8 +119,8 @@ font-feature = liga
 # 4. COLORS & THEME
 # ==============================================================================
 
-# Internal color scheme
-theme = Dark+
+# Global VS Code Dark Modern color scheme
+theme = VS Code Dark Modern
 
 # External theme file (optional)
 # config-file = ~/.config/ghostty/themes/tokyonight

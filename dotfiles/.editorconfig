@@ -16,7 +16,7 @@
 #   3. Web Technologies - JavaScript, TypeScript, HTML, CSS
 #   4. Data Formats - JSON, YAML, TOML, XML
 #   5. Programming Languages - Python, Go, Rust, Ruby, Java, C/C++
-#   6. Shell & Scripts - Bash, Zsh, PowerShell
+#   6. Shell & Scripts - Bash, Zsh, Fish
 #   7. Documentation - Markdown, reStructuredText, AsciiDoc
 #   8. Configuration Files - Dockerfiles, Makefiles, INI
 #   9. Special Cases - Files requiring specific handling
@@ -42,7 +42,6 @@ charset = utf-8
 
 # Unix-style line endings (LF)
 # Prevents CRLF/LF mixing issues in version control
-# Windows users: Git handles conversion automatically
 end_of_line = lf
 
 # Insert a blank line at the end of every file
@@ -217,23 +216,23 @@ indent_size = 4
 # Go uses tabs (gofmt enforces this)
 [*.go]
 indent_style = tab
-indent_size = 4
+indent_size = 2
 max_line_length = off
 
 # Go module files
 [go.mod]
 indent_style = tab
-indent_size = 4
+indent_size = 2
 
 [go.sum]
 indent_style = tab
-indent_size = 4
+indent_size = 2
 
 # ---- Rust ----
-# rustfmt defaults: 4 spaces
+# Project policy overrides rustfmt's usual four-space indentation
 [*.rs]
 indent_style = space
-indent_size = 4
+indent_size = 2
 max_line_length = 100
 
 # ---- Ruby ----
@@ -254,15 +253,15 @@ indent_style = space
 indent_size = 2
 
 # ---- Java / Kotlin / Scala ----
-# 4 spaces is standard for JVM languages
+# Project policy uses two spaces for JVM languages
 [*.java]
 indent_style = space
-indent_size = 4
+indent_size = 2
 max_line_length = 120
 
 [*.{kt,kts}]
 indent_style = space
-indent_size = 4
+indent_size = 2
 max_line_length = 120
 
 [*.{scala,sc}]
@@ -271,39 +270,39 @@ indent_size = 2
 max_line_length = 100
 
 # ---- C / C++ ----
-# Common conventions vary; 4 spaces is popular
+# Project policy uses two spaces for C and C++
 [*.{c,h}]
 indent_style = space
-indent_size = 4
+indent_size = 2
 max_line_length = 100
 
 [*.{cpp,cc,cxx,hpp,hh,hxx}]
 indent_style = space
-indent_size = 4
+indent_size = 2
 max_line_length = 100
 
 # ---- C# ----
 [*.{cs,csx}]
 indent_style = space
-indent_size = 4
+indent_size = 2
 max_line_length = 120
 
 # ---- Swift ----
 [*.swift]
 indent_style = space
-indent_size = 4
+indent_size = 2
 max_line_length = 120
 
 # ---- Objective-C ----
 [*.{m,mm}]
 indent_style = space
-indent_size = 4
+indent_size = 2
 
 # ---- PHP ----
-# PSR-12: 4 spaces
+# Project policy overrides PSR-12 indentation with two spaces
 [*.{php,phtml}]
 indent_style = space
-indent_size = 4
+indent_size = 2
 max_line_length = 120
 
 # ---- Lua ----
@@ -315,7 +314,7 @@ max_line_length = 120
 # ---- Perl ----
 [*.{pl,pm,t}]
 indent_style = space
-indent_size = 4
+indent_size = 2
 
 # ---- R ----
 [*.{r,R,Rmd}]
@@ -325,7 +324,7 @@ indent_size = 2
 # ---- Julia ----
 [*.jl]
 indent_style = space
-indent_size = 4
+indent_size = 2
 
 # ---- Haskell ----
 [*.{hs,lhs}]
@@ -339,7 +338,7 @@ indent_size = 2
 
 [*.{erl,hrl}]
 indent_style = space
-indent_size = 4
+indent_size = 2
 
 # ---- Clojure ----
 [*.{clj,cljs,cljc,edn}]
@@ -359,7 +358,7 @@ indent_size = 2
 # ---- F# ----
 [*.{fs,fsi,fsx}]
 indent_style = space
-indent_size = 4
+indent_size = 2
 
 # ---- Nim ----
 [*.nim]
@@ -369,7 +368,7 @@ indent_size = 2
 # ---- Zig ----
 [*.zig]
 indent_style = space
-indent_size = 4
+indent_size = 2
 
 # ==============================================================================
 # 6. SHELL & SCRIPTS
@@ -389,18 +388,7 @@ indent_size = 2
 # ---- Fish Shell ----
 [*.fish]
 indent_style = space
-indent_size = 4
-
-# ---- PowerShell ----
-[*.{ps1,psm1,psd1}]
-indent_style = space
-indent_size = 4
-
-# ---- Batch / CMD ----
-[*.{bat,cmd}]
-indent_style = space
-indent_size = 4
-end_of_line = crlf
+indent_size = 2
 
 # ---- Vim Script ----
 [*.vim]
@@ -456,7 +444,7 @@ max_line_length = off
 # Makefiles REQUIRE tabs for recipe indentation
 [{Makefile,makefile,*.mk,GNUmakefile}]
 indent_style = tab
-indent_size = 4
+indent_size = 2
 
 # ---- CMake ----
 [{CMakeLists.txt,*.cmake}]
@@ -466,7 +454,7 @@ indent_size = 2
 # ---- Docker ----
 [Dockerfile*]
 indent_style = space
-indent_size = 4
+indent_size = 2
 
 [.dockerignore]
 indent_style = space
@@ -504,21 +492,21 @@ indent_size = 2
 # ---- Nginx ----
 [*.conf]
 indent_style = space
-indent_size = 4
+indent_size = 2
 
 [nginx.conf]
 indent_style = space
-indent_size = 4
+indent_size = 2
 
 # ---- Apache ----
 [.htaccess]
 indent_style = space
-indent_size = 4
+indent_size = 2
 
 # ---- INI / CFG ----
 [*.{ini,cfg,conf}]
 indent_style = space
-indent_size = 4
+indent_size = 2
 
 # ---- EditorConfig itself ----
 [.editorconfig]
@@ -553,7 +541,7 @@ indent_size = 2
 # ---- VS Code ----
 [.vscode/*.json]
 indent_style = space
-indent_size = 4
+indent_size = 2
 
 # ---- JetBrains ----
 [.idea/*.xml]

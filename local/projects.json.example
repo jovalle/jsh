@@ -1,25 +1,32 @@
 {
   "_comment": "Remote project configurations for jsh",
   "_note": "Copy to local/projects.json and customize for your needs",
-  "_usage": "Use 'project -r <name>' to open remote project in VS Code",
+  "_usage": {
+    "vscode": "Use 'j -r <name>' or 'gitx remote <name>' to open a remote project in VS Code",
+    "shell": "Use 'jssh <name>' to connect with the configured host, user, and SSH key"
+  },
+  "_schema": {
+    "host": "(required) SSH host name or address",
+    "path": "(required for VS Code) Absolute remote project path",
+    "user": "(optional) SSH user",
+    "ssh_key": "(optional) SSH private key used by jssh; VS Code uses its SSH configuration"
+  },
   "remotes": {
     "my-project": {
       "host": "devserver",
       "path": "/home/user/projects/my-project",
-      "description": "Main development project"
+      "user": "developer"
     },
     "webapp": {
       "host": "webhost.example.com",
       "path": "/var/www/webapp",
-      "user": "deploy",
-      "description": "Production web application"
+      "user": "deploy"
     },
     "dotfiles": {
       "host": "homelab",
-      "path": "~/.dotfiles",
+      "path": "/home/jay/.dotfiles",
       "user": "jay",
-      "ssh_key": "~/.ssh/homelab_ed25519",
-      "description": "Dotfiles on homelab server"
+      "ssh_key": "~/.ssh/homelab_ed25519"
     }
   }
 }
