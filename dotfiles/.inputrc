@@ -138,13 +138,13 @@ set keymap emacs
 # =============================================================================
 
 $if Bash
-    # Bash-specific: Magic space expands history
-    Space: magic-space
+  # Bash-specific: Magic space expands history
+  Space: magic-space
 $endif
 
 $if Python
-    # Python REPL settings
-    set editing-mode vi
+  # Python REPL settings
+  set editing-mode vi
 $endif
 
 # =============================================================================
