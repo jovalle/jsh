@@ -1,29 +1,26 @@
-<div align="center">
-  <img src=".github/assets/jsh.jpeg" width="200px" height="200px" alt="Jsh logo" />
+# jsh
 
-# Jsh
+## Prerequisites
 
-</div>
+- bash
+- curl
+- git
+- zsh (for full experience)
 
-## Philosophy
+## Install
 
-**Pure shell, no frameworks** - Everything runs in bash/zsh with no external dependencies. No Python, Ruby, or Node required for core functionality.
-
-**Graceful degradation** - Modern tools (fzf, eza, fd, bat, ripgrep) enhance the experience when available, but nothing breaks without them.
-
-## Quick Start
-
-```bash
-git clone https://github.com/jovalle/jsh ~/.jsh
-~/.jsh/jsh setup
+```sh
+curl -fsSL https://raw.githubusercontent.com/jovalle/jsh/main/j.sh | sh
 ```
 
-Clone into `~/.jsh` intentionally so the dotfiles repo stays hidden in your home directory.
+## Modes
 
-## Credits
+- **Runtime** (default): runs `jsh` without changing dotfiles
+- **Install**: additionally links the managed dotfiles into `HOME`, the XDG config
+  directory, and the platform-specific VS Code user directory.
 
-Greatly enhanced with [fzf](https://github.com/junegunn/fzf) and an assortment of Zsh plugins.
+For a noninteractive install, choose the mode explicitly:
 
-## License
-
-[MIT](LICENSE)
+```sh
+curl -fsSL https://raw.githubusercontent.com/jovalle/jsh/main/j.sh | JSH_MODE=runtime sh
+```
