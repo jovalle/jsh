@@ -213,3 +213,45 @@ EOF
     [[ ! -e ${TEST_HOME}/${config_path} ]]
   done
 }
+
+@test "j -c dot opens the working directory before fuzzy matches" {
+  command -v zsh >/dev/null 2>&1 || skip 'zsh not available'
+  project="${BATS_TEST_TMPDIR}/projects/sort-everything"
+  wrong_match="${BATS_TEST_TMPDIR}/.jsh"
+  database="${BATS_TEST_TMPDIR}/j.db"
+  mkdir -p "${project}" "${wrong_match}"
+  printf '%s|100|999999999\n' "${wrong_match}" >"${database}"
+
+  run env HOME="${TEST_HOME}" JSH_DIR="${ROOT}" J_DATA="${database}" \
+    J_NO_HOOK=1 PROJECT="${project}" zsh -dfc '
+      source "$JSH_DIR/dotfiles/.zshrc"
+      builtin cd "$PROJECT"
+      _j_open_code_path() { printf "%s\n" "$1"; }
+      j -c .
+    '
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == "${project}" ]]
+}
+
+@test "Zsh completion registers j aliases and project targets" {
+  command -v zsh >/dev/null 2>&1 || skip 'zsh not available'
+  project="${TEST_HOME}/projects/sort-everything"
+  mkdir -p "${project}"
+
+  run env HOME="${TEST_HOME}" JSH_DIR="${ROOT}" J_DATA="${BATS_TEST_TMPDIR}/missing.db" \
+    JSH_PROJECTS="${project}" J_NO_HOOK=1 zsh -dfc '
+      source "$JSH_DIR/dotfiles/.zshrc"
+      printf "j=%s p=%s\n" "${_comps[j]-missing}" "${_comps[p]-missing}"
+      _arguments() { state=; }
+      source "$JSH_DIR/dotfiles/.config/shell/completions/_j"
+      _describe() { print -rl -- "${targets[@]}"; }
+      _directories() { :; }
+      _j_targets
+    '
+
+  [[ ${status} -eq 0 ]]
+  [[ ${lines[0]} == 'j=_j p=_j' ]]
+  [[ ${output} == *'.:current directory'* ]]
+  [[ ${output} == *'sort-everything:'* ]]
+}

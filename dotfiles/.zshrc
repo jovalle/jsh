@@ -3840,6 +3840,16 @@ j() {
     return $?
   fi
 
+  # A literal dot names the working directory, not a frecency query.
+  if [[ $# -eq 1 ]] && [[ "$1" == "." ]]; then
+    if [[ "${open_code}" == true ]]; then
+      _j_open_code_path "${PWD}"
+    else
+      _j_cd_hook "${PWD}"
+    fi
+    return $?
+  fi
+
   # No arguments - interactive selection
   if [[ $# -eq 0 ]]; then
     local selected
