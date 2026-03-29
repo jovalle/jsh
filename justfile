@@ -12,8 +12,8 @@ install mode="install":
 doctor:
     ./bin/jsh doctor
 
-# Run Bats concurrently when GNU Parallel is available.
-test:
+# Run formatting, lint, and Bats.
+test: fmt-check lint
     #!/usr/bin/env bash
     set -euo pipefail
     files=(tests/*.bats)
@@ -84,9 +84,36 @@ fmt-check:
     shfmt -d -i 2 -ci -bn "${shell_files[@]}"
     shfmt -ln=bats -d -i 2 -ci -bn tests/*.bats
 
-# Install repository Git hooks.
-hooks:
-    pre-commit install --hook-type pre-commit --hook-type pre-push --hook-type commit-msg
+# Prepare a checkout for contributing.
+prepare: hooks
 
-# Run all non-mutating checks.
-check: fmt-check lint test
+# Verify tools required by hooks and repository checks.
+check:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  missing=()
+  for dependency in bats gitleaks jq pre-commit prettier shellcheck shfmt; do
+    command -v "${dependency}" >/dev/null 2>&1 || missing+=("${dependency}")
+  done
+  if ((${#missing[@]})); then
+    printf 'Missing contributor dependencies:' >&2
+    printf ' %s' "${missing[@]}" >&2
+    printf '\nInstall them, then run `just prepare` again.\n' >&2
+    exit 1
+  fi
+
+# Install repository Git hooks and local filters.
+hooks: check
+  #!/usr/bin/env bash
+  set -euo pipefail
+
+  attributes_file="$(git rev-parse --git-path info/attributes)"
+  attribute='dotfiles/.vscode/user/settings.json filter=vscode-local-settings'
+  mkdir -p "$(dirname "${attributes_file}")"
+  touch "${attributes_file}"
+  grep -Fqx "${attribute}" "${attributes_file}" || printf '%s\n' "${attribute}" >>"${attributes_file}"
+
+  git config --local filter.vscode-local-settings.clean ./scripts/filter-vscode-settings.sh
+  git config --local filter.vscode-local-settings.required true
+
+  pre-commit install --hook-type pre-commit --hook-type pre-push --hook-type commit-msg
