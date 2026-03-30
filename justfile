@@ -12,6 +12,11 @@ install mode="install":
 doctor:
     ./bin/jsh doctor
 
+# Update submodules to their latest remote commits.
+update:
+  git submodule sync --recursive
+  git submodule update --init --remote --recursive
+
 # Run formatting, lint, and Bats.
 test: fmt-check lint
     #!/usr/bin/env bash
