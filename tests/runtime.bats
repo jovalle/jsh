@@ -255,3 +255,55 @@ EOF
   [[ ${output} == *'.:current directory'* ]]
   [[ ${output} == *'sort-everything:'* ]]
 }
+
+@test "Zsh just completion shows recipes first and commands later" {
+  command -v zsh >/dev/null 2>&1 || skip 'zsh not available'
+  mkdir -p "${FAKE_BIN}"
+  cat >"${FAKE_BIN}/just" <<'EOF'
+#!/bin/sh
+case "$*" in
+  '--completions zsh') cat <<'COMPLETION'
+_clap_dynamic_completer_just() {
+  return 0
+}
+compdef _clap_dynamic_completer_just just
+COMPLETION
+    ;;
+  '--summary') printf '%s\n' 'build test' ;;
+  '-- just build ')
+    printf '%s\n' \
+      'build:Build the project.' \
+      'archive/' \
+      '--verbose:Use verbose output.' \
+      '--list:List recipes.'
+    ;;
+esac
+EOF
+  chmod +x "${FAKE_BIN}/just"
+
+  run env PATH="${FAKE_BIN}:/usr/bin:/bin" HOME="${TEST_HOME}" JSH_DIR="${ROOT}" \
+    XDG_CACHE_HOME="${BATS_TEST_TMPDIR}/cache" \
+    JSH_BREW_SKIP_SETUP=1 J_NO_HOOK=1 zsh -dfc '
+      source "$JSH_DIR/dotfiles/.zshrc"
+      _describe() {
+        local candidate_name="${@[-1]}"
+        print -rl -- "${(@P)candidate_name}"
+      }
+      words=(just "")
+      CURRENT=2
+      "${_comps[just]}"
+      print -- NEXT
+      words=(just build "")
+      CURRENT=3
+      "${_comps[just]}"
+      zstyle -T ":completion:complete:just::" sort
+      sort_status=$?
+      printf "%s|%s\n" "${_comps[just]-missing}" "$sort_status"
+    '
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == $'build\ntest\nNEXT\nbuild:Build the project.\n--verbose:Use verbose output.\n--list:List recipes.\n_jsh_just_completion|1' ]] || {
+    printf 'unexpected completion state: %s\n' "${output}" >&2
+    return 1
+  }
+}
