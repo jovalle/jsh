@@ -86,6 +86,8 @@ alias gd='git diff'
 alias gl='git log --oneline -20'
 alias gp='git push'
 
+source "${JSH_DIR}/dotfiles/.config/shell/grep.sh"
+
 if [[ -n ${NO_COLOR:-} || ${JSH_PLAIN_OUTPUT:-0} == 1 || ${TERM:-dumb} == dumb ]]; then
   PS1='\u@\h:\w\$ '
 else
