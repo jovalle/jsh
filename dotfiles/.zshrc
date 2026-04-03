@@ -4701,9 +4701,10 @@ _jsh_cached_completion() {
   [[ -f "$cache" ]] && _jsh_defer_completion_if_needed "$cache"
 }
 
-# Task emits completion code for the active shell. Cache it like other tools
-# and source it after compinit becomes available.
+# Task and just emit completion code for the active shell. Cache it like other
+# tools and source it after compinit becomes available.
 _jsh_cached_completion task 7 --completion
+_jsh_cached_completion just 7 --completions
 
 # =============================================================================
 # Load completions for installed tools on first use. Generating and sourcing
@@ -4896,6 +4897,40 @@ if [[ -n "${_JSH_DEFERRED_COMPLETIONS[*]:-}" ]]; then
   unset _JSH_DEFERRED_COMPLETIONS _fn
 fi
 
+# Just's dynamic completer mixes filesystem entries into recipe completion.
+_jsh_just_completion() {
+  local summary recipe completion value
+  local -a recipes completions filtered
+  local -A recipe_names
+  summary="$(just --summary 2>/dev/null)" || summary=""
+  recipes=(${=summary})
+
+  if (( CURRENT == 2 )) && [[ "${words[CURRENT]}" != -* ]]; then
+    (( ${#recipes} )) && _describe 'recipe' recipes
+    return
+  fi
+
+  for recipe in "${recipes[@]}"; do
+    recipe_names[$recipe]=1
+  done
+  completions=("${(@f)$(
+      _CLAP_IFS=$'\n' \
+        _CLAP_COMPLETE_INDEX=$((CURRENT - 1)) \
+        JUST_COMPLETE=zsh \
+        just -- "${words[@]}" 2>/dev/null
+    )}")
+  for completion in "${completions[@]}"; do
+    value="${completion%%:*}"
+    [[ "$value" == */ ]] && continue
+    [[ -e "$completion" && -z "${recipe_names[$completion]-}" ]] && continue
+    filtered+=("$completion")
+  done
+  (( ${#filtered} )) && _describe -V values filtered
+}
+if (( ${+functions[_clap_dynamic_completer_just]} )); then
+  compdef _jsh_just_completion just
+fi
+
 # Completion options
 zstyle ':completion:*' completer _complete _match _approximate
 zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}' 'r:|=*' 'l:|=* r:|=*'
@@ -4913,6 +4948,7 @@ zstyle ':completion:*:messages' format "%F{${JSH_STYLE_INFO}}%d%f"
 zstyle ':completion:*:warnings' format "%F{${JSH_STYLE_ERROR}}no matches found%f"
 
 # Completion for specific commands
+zstyle ':completion:*:just:*' sort false
 zstyle ':completion:*:*:kill:*:processes' list-colors "=(#b) #([0-9]#)*=0=01;${JSH_STYLE_ERROR_SGR}"
 zstyle ':completion:*:kill:*' command 'ps -u $USER -o pid,%cpu,tty,cputime,cmd'
 
