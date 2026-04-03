@@ -299,7 +299,7 @@ _jssh_payload_files() {
     "${JSH_DIR}/bin/jssh" \
     "${JSH_DIR}/dotfiles/.zshrc" \
     "${JSH_DIR}/dotfiles/.bashrc"
-  find "${JSH_DIR}/dotfiles/.config/shell/completions" -type f 2>/dev/null
+  find "${JSH_DIR}/dotfiles/.config/shell" -type f 2>/dev/null
   [[ -f "${JSH_DIR}/dotfiles/.inputrc" ]] && printf '%s\n' "${JSH_DIR}/dotfiles/.inputrc"
   [[ -f "${JSH_DIR}/dotfiles/.tmux.conf" ]] && printf '%s\n' "${JSH_DIR}/dotfiles/.tmux.conf"
 
@@ -373,14 +373,14 @@ _jssh_build_payload() {
   trap 'rm -rf "${tmpdir}"' EXIT
 
   local payload_dir="${tmpdir}/jsh"
-  mkdir -p "${payload_dir}"/{config,bin,vendor} "${payload_dir}/dotfiles/.config/shell/completions"
+  mkdir -p "${payload_dir}"/{config,bin,vendor} "${payload_dir}/dotfiles/.config/shell"
 
   # Copy standalone shell entry points and their optional completion data.
   cp "${JSH_DIR}/dotfiles/.zshrc" "${payload_dir}/dotfiles/.zshrc"
   cp "${JSH_DIR}/dotfiles/.bashrc" "${payload_dir}/dotfiles/.bashrc"
-  if [[ -d "${JSH_DIR}/dotfiles/.config/shell/completions" ]]; then
-    cp -R "${JSH_DIR}/dotfiles/.config/shell/completions/." \
-      "${payload_dir}/dotfiles/.config/shell/completions/"
+  if [[ -d "${JSH_DIR}/dotfiles/.config/shell" ]]; then
+    cp -R "${JSH_DIR}/dotfiles/.config/shell/." \
+      "${payload_dir}/dotfiles/.config/shell/"
   fi
 
   # Copy essential configs.

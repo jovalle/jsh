@@ -1818,9 +1818,7 @@ alias ln='ln -iv'
 # -----------------------------------------------------------------------------
 # Search and Find
 # -----------------------------------------------------------------------------
-alias grep='grep --color=auto'
-alias fgrep='grep -F'
-alias egrep='grep -E'
+source "${JSH_DIR}/dotfiles/.config/shell/grep.sh"
 
 # -----------------------------------------------------------------------------
 # File Viewing
@@ -2181,7 +2179,6 @@ if [[ "${JSH_OS}" == "macos" ]]; then
   has gawk && alias awk='gawk'
   has gsed && alias sed='gsed'
   has gtar && alias tar='gtar'
-  has ggrep && alias grep='ggrep --color=auto'
 fi
 
 # -----------------------------------------------------------------------------
