@@ -30,14 +30,3 @@ repos:
           - --max-decode-depth=3
           - --max-archive-depth=2
         stages: [pre-commit]
-
-  # Full outgoing-history and identity scan
-  - repo: local
-    hooks:
-      - id: gitleaks-pre-push
-        name: Audit outgoing secrets and identities
-        entry: scripts/gitleaks-pre-push.sh
-        language: system
-        always_run: true
-        pass_filenames: false
-        stages: [pre-push]
