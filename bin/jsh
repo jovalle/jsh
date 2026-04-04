@@ -70,6 +70,10 @@ _jsh_ui_status() {
       REPLY_COLOR=${_JSH_UI_CYAN}
       [[ "${_JSH_UI_RICH}" == 1 ]] && REPLY_MARK='›' || REPLY_MARK=note
       ;;
+    info)
+      REPLY_COLOR=${_JSH_UI_DIM}
+      [[ "${_JSH_UI_RICH}" == 1 ]] && REPLY_MARK='•' || REPLY_MARK=info
+      ;;
     error | missing | failed)
       REPLY_COLOR=${_JSH_UI_RED}
       [[ "${_JSH_UI_RICH}" == 1 ]] && REPLY_MARK='✖' || REPLY_MARK=error
@@ -91,63 +95,36 @@ _jsh_ui_heading() {
   printf '\n%s%s%s%s\n' "${_JSH_UI_BOLD}" "${_JSH_UI_CYAN}" "$1" "${_JSH_UI_RESET}"
 }
 
-_jsh_ui_stage() {
-  local current="$1" total="$2" title="$3"
-  _jsh_ui_init
-  printf '\n%s%s[%s/%s] %s%s\n' \
-    "${_JSH_UI_BOLD}" "${_JSH_UI_CYAN}" "${current}" "${total}" "${title}" "${_JSH_UI_RESET}"
-  _JSH_UI_TREE=1
-}
-
 _jsh_ui_row() {
-  local status="$1" key="$2" value="${3:-}" position="${4:-more}"
-  local connector dots dot_count target_width columns row_width
+  local status="$1" key="$2" value="${3:-}"
+  local columns row_width
   _jsh_ui_init
   _jsh_ui_status "${status}"
   _jsh_ui_text "${key}"
   key=${REPLY_TEXT}
   _jsh_ui_text "${value}"
   value=${REPLY_TEXT}
-  if [[ "${_JSH_UI_RICH}" == 1 ]]; then
-    [[ "${position}" == last ]] && connector='└──' || connector='├──'
-  else
-    [[ "${position}" == last ]] && connector='\--' || connector='|--'
-    REPLY_MARK="[${REPLY_MARK}]"
-  fi
+  [[ "${_JSH_UI_RICH}" == 1 ]] || REPLY_MARK="[${REPLY_MARK}]"
 
   if [[ -z "${value}" ]]; then
-    printf '  %s %s%s%s %s\n' "${connector}" "${REPLY_COLOR}" "${REPLY_MARK}" "${_JSH_UI_RESET}" "${key}"
+    printf '%s%s%s %s\n' "${REPLY_COLOR}" "${REPLY_MARK}" "${_JSH_UI_RESET}" "${key}"
     return
   fi
 
-  target_width=${JSH_UI_KEY_WIDTH:-28}
-  dot_count=$((target_width - ${#key}))
-  ((dot_count >= 3)) || dot_count=3
-  printf -v dots '%*s' "${dot_count}" ''
-  dots=${dots// /.}
   columns=${COLUMNS:-80}
   [[ "${columns}" =~ ^[0-9]+$ ]] || columns=80
-  row_width=$((7 + ${#key} + dot_count + ${#REPLY_MARK} + ${#value}))
+  row_width=$((${#REPLY_MARK} + ${#key} + ${#value} + 2))
   if ((columns >= 30 && row_width > columns)); then
-    printf '  %s %s\n' "${connector}" "${key}"
-    printf '      %s%s%s %s\n' "${REPLY_COLOR}" "${REPLY_MARK}" "${_JSH_UI_RESET}" "${value}"
+    printf '%s%s%s %s\n' "${REPLY_COLOR}" "${REPLY_MARK}" "${_JSH_UI_RESET}" "${key}"
+    printf '  %s\n' "${value}"
   else
-    printf '  %s %s %s %s%s%s %s\n' \
-      "${connector}" "${key}" "${dots}" "${REPLY_COLOR}" "${REPLY_MARK}" "${_JSH_UI_RESET}" "${value}"
+    printf '%s%s%s %s %s\n' \
+      "${REPLY_COLOR}" "${REPLY_MARK}" "${_JSH_UI_RESET}" "${key}" "${value}"
   fi
 }
 
 _jsh_message() {
-  local status="$1" message="$2"
-  if [[ "${_JSH_UI_TREE:-0}" == 1 ]]; then
-    _jsh_ui_row "${status}" "${message}"
-    return
-  fi
-  _jsh_ui_init
-  _jsh_ui_status "${status}"
-  _jsh_ui_text "${message}"
-  message=${REPLY_TEXT}
-  printf '%s%-5s%s %s\n' "${REPLY_COLOR}" "${REPLY_MARK}" "${_JSH_UI_RESET}" "${message}"
+  _jsh_ui_row "$1" "$2"
 }
 
 _jsh_error() {
@@ -438,7 +415,7 @@ _jsh_install_launcher() {
 
 _jsh_install() {
   local mode=runtime mode_label=Runtime dry_run=0 source destination failures=0
-  local timestamp backup_root current_mode="" stage_offset stage_total result_status result_detail
+  local timestamp backup_root current_mode=""
   while (($# > 0)); do
     case "$1" in
       --mode)
@@ -466,10 +443,6 @@ _jsh_install() {
     ;;
   esac
   [[ "${mode}" != install ]] || mode_label=Install
-  stage_offset=${JSH_STAGE_OFFSET:-0}
-  [[ "${stage_offset}" =~ ^[0-9]+$ ]] || stage_offset=0
-  stage_total=${JSH_STAGE_TOTAL:-$((stage_offset + 2))}
-  [[ "${stage_total}" =~ ^[0-9]+$ ]] || stage_total=$((stage_offset + 2))
   [[ ! -r "${JSH_MODE_FILE}" ]] || IFS= read -r current_mode <"${JSH_MODE_FILE}"
   if [[ "${current_mode}" == install && "${mode}" == runtime ]]; then
     _jsh_error 'uninstall managed dotfiles before switching to runtime mode'
@@ -477,7 +450,7 @@ _jsh_install() {
   fi
 
   _jsh_banner
-  _jsh_ui_stage "$((stage_offset + 1))" "${stage_total}" "Configuring ${mode_label}"
+  _jsh_ui_heading "Configuring ${mode_label}"
   timestamp=$(date +%Y%m%d-%H%M%S)
   backup_root="${JSH_STATE_DIR}/backups/${timestamp}"
   _jsh_install_launcher "${dry_run}" "${timestamp}" || failures=$((failures + 1))
@@ -487,25 +460,12 @@ _jsh_install() {
         || failures=$((failures + 1))
     done < <(_jsh_install_entries)
   fi
-  if ((failures == 0)); then
-    result_status=success
-    [[ "${dry_run}" == 1 ]] && result_detail='preview complete' || result_detail='links configured'
-  else
-    result_status=error
-    result_detail="${failures} failures"
-  fi
-  _jsh_ui_row "${result_status}" Configuration "${result_detail}" last
-
-  _jsh_ui_stage "$((stage_offset + 2))" "${stage_total}" Finalizing
   if [[ "${dry_run}" == 0 && "${failures}" == 0 ]]; then
     mkdir -p "${JSH_STATE_DIR}" && printf '%s\n' "${mode}" >"${JSH_MODE_FILE}"
   fi
   if [[ -n "${JSH_LAUNCHER_DESTINATION:-}" && ":${PATH}:" != *":${JSH_LAUNCHER_DESTINATION%/*}:"* ]]; then
     _jsh_message note "add ${JSH_LAUNCHER_DESTINATION%/*} to PATH"
   fi
-  [[ "${dry_run}" == 1 ]] && result_detail="${mode} previewed" || result_detail="${mode} configured"
-  _jsh_ui_row "${result_status}" Mode "${result_detail}" last
-  _JSH_UI_TREE=0
   [[ "${failures}" == 0 ]]
 }
 
@@ -593,12 +553,6 @@ _jsh_status_shell() {
   fi
 }
 
-_jsh_status_label() {
-  case "$1" in
-    shell) printf 'Shell' ;;
-  esac
-}
-
 _jsh_status_colors() {
   _jsh_ui_init
   _JSH_STATUS_RESET=${_JSH_UI_RESET}
@@ -611,6 +565,7 @@ _jsh_status_colors() {
 }
 
 _jsh_banner() {
+  [[ "${JSH_BANNER_SHOWN:-0}" != 1 ]] || return 0
   _jsh_status_colors
   printf '%s%s' "${_JSH_STATUS_BOLD}" "${_JSH_STATUS_CYAN}"
   cat <<'BANNER'
@@ -631,86 +586,27 @@ BANNER
   printf '%s\n' "${_JSH_STATUS_RESET}"
 }
 
-_jsh_status_state_color() {
-  case "$1" in
-    current) printf '%s' "${_JSH_STATUS_GREEN}" ;;
-    missing | error) printf '%s' "${_JSH_STATUS_RED}" ;;
-    changed) printf '%s' "${_JSH_STATUS_YELLOW}" ;;
-    optional) printf '%s' "${_JSH_STATUS_CYAN}" ;;
-    skipped) printf '%s' "${_JSH_STATUS_DIM}" ;;
-  esac
-}
-
 _jsh_status_render() {
-  local verbose="$1" component=shell label record_component state name detail summary_status position shell_summary
-  local current problems optional skipped total_problems=0 problem_categories=0 details=0 rendered=0
+  local record_component state name detail total_problems=0
   _jsh_banner
-  current=0 problems=0 optional=0 skipped=0
-  while IFS=$'\t' read -r record_component state name detail; do
-    [[ "${record_component}" == "${component}" ]] || continue
-    case "${state}" in
-      current) current=$((current + 1)) ;;
-      missing | changed | error) problems=$((problems + 1)) ;;
-      optional) optional=$((optional + 1)) ;;
-      skipped) skipped=$((skipped + 1)) ;;
-    esac
-  done <"${JSH_STATUS_RECORDS}"
-  total_problems=${problems}
-  if ((problems > 0)); then
-    problem_categories=1
-    summary_status=error
-  elif ((optional > 0 || skipped > 0)); then
-    summary_status=warning
-  else
-    summary_status=current
-  fi
-  label=$(_jsh_status_label "${component}")
-  shell_summary="${current} current, ${problems} problems"
-  ((optional == 0)) || shell_summary+=", ${optional} optional"
-  ((skipped == 0)) || shell_summary+=", ${skipped} skipped"
   _jsh_ui_heading Status
-  _jsh_ui_row "${summary_status}" "${label}" "${shell_summary}"
-  if ((total_problems > 0)); then
-    _jsh_ui_row "${summary_status}" Overall "${total_problems} problems in ${problem_categories} categories" last
-  else
-    _jsh_ui_row "${summary_status}" Overall '0 problems' last
-  fi
-  _JSH_UI_TREE=0
-
-  if [[ "${verbose}" != 1 ]]; then
-    printf '\n%sRun jsh status --verbose to inspect %s.%s\n' \
-      "${_JSH_UI_DIM}" "$([[ "${total_problems}" == 0 ]] && printf 'all managed items' || printf 'problems')" "${_JSH_UI_RESET}"
-    if awk -F '\t' '$1 == "shell" && (($2 == "changed" && $4 ~ /^stale managed link:/) || ($2 == "error" && $4 == "malformed managed-link state")) { found=1 } END { exit !found }' \
-      "${JSH_STATUS_RECORDS}"; then
-      printf '%sRun jsh repair --dry-run to preview stale managed-link cleanup.%s\n' \
-        "${_JSH_UI_DIM}" "${_JSH_UI_RESET}"
-    fi
-    ((total_problems == 0))
-    return
-  fi
-
   while IFS=$'\t' read -r record_component state name detail; do
-    [[ "${record_component}" == "${component}" ]] || continue
-    details=$((details + 1))
+    _jsh_ui_row "${state}" "${name}" "${detail}"
+    case "${state}" in missing | changed | error) total_problems=$((total_problems + 1)) ;; esac
   done <"${JSH_STATUS_RECORDS}"
-  if ((details > 0)); then
-    label=$(_jsh_status_label "${component}")
-    _jsh_ui_heading "${label} details"
-    while IFS=$'\t' read -r record_component state name detail; do
-      [[ "${record_component}" == "${component}" ]] || continue
-      rendered=$((rendered + 1))
-      [[ "${rendered}" == "${details}" ]] && position='last' || position='more'
-      _jsh_ui_row "${state}" "${name}" "${detail}" "${position}"
-    done <"${JSH_STATUS_RECORDS}"
+
+  if awk -F '\t' '$1 == "shell" && (($2 == "changed" && $4 ~ /^stale managed link:/) || ($2 == "error" && $4 == "malformed managed-link state")) { found=1 } END { exit !found }' \
+    "${JSH_STATUS_RECORDS}"; then
+    printf '\n%sRun jsh repair --dry-run to preview stale managed-link cleanup.%s\n' \
+      "${_JSH_UI_DIM}" "${_JSH_UI_RESET}"
   fi
   ((total_problems == 0))
 }
 
 _jsh_status() {
-  local verbose=0 porcelain=0 work_dir result=0
+  local porcelain=0 work_dir result=0
   while (($# > 0)); do
     case "$1" in
-      --verbose | -v) verbose=1 ;;
       --porcelain) porcelain=1 ;;
       *)
         _jsh_error "unknown status option: $1"
@@ -731,7 +627,7 @@ _jsh_status() {
     cat "${JSH_STATUS_RECORDS}"
     if grep -Eq $'^[^\t]+\t(missing|changed|error)\t' "${JSH_STATUS_RECORDS}"; then result=1; fi
   else
-    _jsh_status_render "${verbose}" || result=$?
+    _jsh_status_render || result=$?
   fi
   rm -rf "${work_dir}"
   return "${result}"
@@ -752,11 +648,9 @@ _jsh_repair() {
   done
 
   _jsh_ui_heading Repair
-  _JSH_UI_TREE=1
 
   if [[ ! -r "${JSH_LINK_STATE}" ]]; then
-    _jsh_ui_row current State 'nothing to repair' last
-    _JSH_UI_TREE=0
+    _jsh_message current 'nothing to repair'
     return 0
   fi
   [[ ! -r "${JSH_MODE_FILE}" ]] || IFS= read -r mode <"${JSH_MODE_FILE}"
@@ -801,12 +695,8 @@ _jsh_repair() {
   if ((retained > 0)); then
     [[ "${retained}" == 1 ]] && suffix= || suffix=s
     _jsh_message retained "${retained} stale record${suffix} with a live destination or backup"
-    _jsh_ui_row warning Result 'repair incomplete' last
-    _JSH_UI_TREE=0
     return 1
   fi
-  _jsh_ui_row success Result "$([[ "${dry_run}" == 1 ]] && printf 'preview complete' || printf 'repair complete')" last
-  _JSH_UI_TREE=0
 }
 
 _jsh_doctor_record() {
@@ -854,8 +744,7 @@ _jsh_doctor_label() {
 }
 
 _jsh_doctor_render() {
-  local component classification name detail status label position
-  local total=0 rendered=0 available=0 optional=0 required_missing=0
+  local component classification name detail status label total=0
 
   for component in base runtime vendor installer commands editors network; do
     total=0
@@ -866,33 +755,16 @@ _jsh_doctor_render() {
 
     label=$(_jsh_doctor_label "${component}")
     _jsh_ui_heading "${label}"
-    rendered=0
     while IFS=$'\t' read -r classification name detail; do
-      rendered=$((rendered + 1))
-      [[ "${rendered}" == "${total}" ]] && position='last' || position='more'
       case "${classification}:${detail}" in
-        required:missing)
-          status=error
-          required_missing=$((required_missing + 1))
-          ;;
-        optional-missing:*)
-          status=warning
-          optional=$((optional + 1))
-          ;;
+        required:missing) status=error ;;
+        optional-missing:*) status=warning ;;
         network-only:*) status=note ;;
-        *)
-          status=current
-          available=$((available + 1))
-          ;;
+        *) status=current ;;
       esac
-      _jsh_ui_row "${status}" "${name}" "${detail}" "${position}"
+      _jsh_ui_row "${status}" "${name}" "${detail}"
     done < <(awk -F '\t' -v component="${component}" '$1 == component { print $2 "\t" $3 "\t" $4 }' "${JSH_DOCTOR_RECORDS}")
   done
-
-  _jsh_ui_heading Summary
-  _jsh_ui_row current Available "${available} checks"
-  _jsh_ui_row "$([[ "${optional}" == 0 ]] && printf current || printf warning)" Optional "${optional} missing"
-  _jsh_ui_row "$([[ "${required_missing}" == 0 ]] && printf current || printf error)" Required "${required_missing} missing" last
 }
 
 _jsh_doctor() {
@@ -977,13 +849,16 @@ _jsh_uninstall() {
     shift
   done
   _jsh_ui_heading Uninstall
-  _JSH_UI_TREE=1
   [[ -r "${JSH_LINK_STATE}" ]] || {
     [[ "${dry_run}" == 1 ]] || rm -f "${JSH_MODE_FILE}"
-    _jsh_ui_row current State 'nothing to uninstall' last
-    _JSH_UI_TREE=0
+    _jsh_message current 'nothing to uninstall'
     return 0
   }
+  if [[ ! -s "${JSH_LINK_STATE}" ]]; then
+    [[ "${dry_run}" == 1 ]] || rm -f "${JSH_LINK_STATE}" "${JSH_MODE_FILE}"
+    _jsh_message current 'nothing to uninstall'
+    return 0
+  fi
   temporary="${JSH_LINK_STATE}.tmp.$$"
   [[ "${dry_run}" == 1 ]] || : >"${temporary}"
   while IFS='|' read -r source destination backup || [[ -n "${source}${destination}${backup}" ]]; do
@@ -1031,12 +906,6 @@ _jsh_uninstall() {
       mv "${temporary}" "${JSH_LINK_STATE}"
     else rm -f "${temporary}" "${JSH_LINK_STATE}" "${JSH_MODE_FILE}"; fi
   fi
-  if ((failures == 0)); then
-    _jsh_ui_row success Result "$([[ "${dry_run}" == 1 ]] && printf 'preview complete' || printf 'uninstall complete')" last
-  else
-    _jsh_ui_row warning Result "${failures} retained" last
-  fi
-  _JSH_UI_TREE=0
   [[ "${failures}" == 0 ]]
 }
 
@@ -1052,7 +921,7 @@ usage() {
   -c COMMAND [args...]                Run a command inside the jsh runtime
   install [--mode runtime|install] [-n]
                                       Configure a launcher and optional dotfile links
-  status [-v|--verbose] [--porcelain] Show shell mode and managed-link state
+  status [--porcelain]                Show shell mode and managed-link state
   repair [-n|--dry-run]               Prune dead stale managed-link state
   doctor [--porcelain] [--strict]     Report runtime and feature dependencies
   uninstall [-n] [--purge]            Restore originals; optionally remove the checkout
