@@ -67,16 +67,6 @@ _jsh_message() {
   shift
   printf '%s%s%s %b\n' "${REPLY_COLOR}" "${REPLY_MARK}" "${C_RESET}" "$*"
 }
-_jsh_row() {
-  local indent="$1" width="$2" label="$3" value="${4:-}" status="${5:-note}" dots dot_count
-  _jsh_status_style "${status}"
-  dot_count=$((width - ${#label}))
-  ((dot_count >= 3)) || dot_count=3
-  printf -v dots '%*s' "${dot_count}" ''
-  dots=${dots// /.}
-  printf '%s%s %s %s%s%s %s\n' \
-    "${indent}" "${label}" "${dots}" "${REPLY_COLOR}" "${REPLY_MARK}" "${C_RESET}" "${value}"
-}
 die() {
   _jsh_message error "$@" >&2
   exit 1
@@ -85,8 +75,8 @@ _debug() { printf '%sdebug:%s %s\n' "${C_DIM}" "${C_RESET}" "$*" >&2; }
 info() { _jsh_message note "$@"; }
 success() { _jsh_message success "$@"; }
 warn() { _jsh_message warn "$@" >&2; }
-jsh_status() { _jsh_row '  ' 18 "$@"; }
-jsh_child() { _jsh_row '    ' 16 "$@"; }
+jsh_status() { _jsh_message "${3:-note}" "$1${2:+ $2}"; }
+jsh_child() { jsh_status "$@"; }
 jsh_detail() { printf '  %s%s%s\n' "${C_DIM}" "$*" "${C_RESET}"; }
 jsh_command_preview() { printf '  %s$%s %s\n' "${C_CYAN}" "${C_RESET}" "$*"; }
 cli_version() { printf 'cafe 1.0.1\n'; }
