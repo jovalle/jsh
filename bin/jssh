@@ -185,7 +185,7 @@ trap '_jssh_on_exit' EXIT
 # =============================================================================
 _jssh_check_setup() {
   # Validate jssh setup - returns 0 if OK, 1 if issues found
-  local errors=0 warnings=0
+  local errors=0
 
   status "Checking jssh setup..."
 
@@ -215,7 +215,6 @@ _jssh_check_setup() {
     success "FZF: installed (v${fzf_version})"
   else
     jsh_ui_message warn "FZF not installed (optional - install via package manager)" >&2
-    warnings=$((warnings + 1))
   fi
 
   # Check config files
@@ -234,18 +233,7 @@ _jssh_check_setup() {
     jsh_ui_note "No cached payload (will build on first use)" >&2
   fi
 
-  # Summary
-  echo "" >&2
-  if [[ ${errors} -gt 0 ]]; then
-    jsh_ui_message error "Setup incomplete: ${errors} error(s), ${warnings} warning(s)" >&2
-    return 1
-  elif [[ ${warnings} -gt 0 ]]; then
-    jsh_ui_message warn "Setup OK with ${warnings} warning(s)" >&2
-    return 0
-  else
-    jsh_ui_message success "Setup complete - ready to use" >&2
-    return 0
-  fi
+  ((errors == 0))
 }
 
 # =============================================================================
