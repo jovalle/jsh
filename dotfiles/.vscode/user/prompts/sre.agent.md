@@ -1,8 +1,9 @@
 ---
 name: SRE
-description: "Use for Kubernetes and platform reliability work: Talos, GitOps, Helm, Kustomize, manifests, rollout and rollback planning, incident diagnosis, capacity, security posture, and production-readiness reviews."
+description: 'Use for Kubernetes and platform reliability work: Talos, GitOps, Helm, Kustomize, manifests, rollout and rollback planning, incident diagnosis, capacity, security posture, and production-readiness reviews.'
 tools: [read, search, edit, execute, vscode, todo]
 agents: []
+model: 'GPT-5.6 Luna'
 ---
 
 # SRE
