@@ -819,7 +819,7 @@ export JSH_DIR="${JSH_DIR:-$HOME/.jsh}"
 export JSH_CACHE_DIR="${JSH_CACHE_DIR:-${XDG_CACHE_HOME}/jsh}"
 ensure_dir "${JSH_CACHE_DIR}"
 
-if [[ "${JSH_MODE:-}" == runtime && -r "${JSH_DIR}/dotfiles/.config/shell/runtime.sh" ]]; then
+if [[ "${JSH_MODE:-}" == lite && -r "${JSH_DIR}/dotfiles/.config/shell/runtime.sh" ]]; then
   source "${JSH_DIR}/dotfiles/.config/shell/runtime.sh"
 fi
 
@@ -6730,7 +6730,7 @@ ensure_dir "${LESSHISTFILE%/*}"
 export GPG_TTY="${GPG_TTY:-${TTY:-}}"
 
 [[ ! -r "${JSH_DIR}/local/.jshrc" ]] || source "${JSH_DIR}/local/.jshrc"
-if [[ "${JSH_MODE:-}" != runtime ]]; then
+if [[ "${JSH_MODE:-}" != lite ]]; then
   [[ ! -r "${HOME}/.zshrc.local" ]] || source "${HOME}/.zshrc.local"
 fi
 jsh_atuin_init
