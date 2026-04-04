@@ -6249,13 +6249,8 @@ _prompt_precmd() {
 }
 
 _prompt_render_zsh() {
-  local _p_width=80 _p_left="" _p_right="" _p_character=""
-  _prompt_terminal_width; _p_width="${REPLY}"
-  _prompt_build_left "${_p_width}"; _p_left="${REPLY}"
-  _prompt_build_right "${_p_width}"; _p_right="${REPLY}"
-  _prompt_segment_character; _p_character="${REPLY}"
-  PROMPT="${_p_left}"$'\n'"${_p_character}"
-  RPROMPT="${_p_right}"
+  _prompt_render_bash
+  RPROMPT=""
 }
 
 _prompt_render_bash() {
@@ -6666,7 +6661,7 @@ _jsh_env_usage() {
 
 jsh() {
   case "${1:-}" in
-    reload)
+    reload | -r)
       [[ $# -eq 1 ]] || { printf 'Usage: jsh reload\n' >&2; return 2; }
       unset _JSH_DOTFILES_ZSH_LOADED
       source "${JSH_DIR}/dotfiles/.zshrc"
