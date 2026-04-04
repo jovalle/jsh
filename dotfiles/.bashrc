@@ -55,7 +55,7 @@ for _jsh_path in "${HOME}/.local/bin" "${JSH_DIR}/local/bin" "${JSH_DIR}/bin"; d
 done
 unset _jsh_path _jsh_path_entries
 
-if [[ ${JSH_MODE:-} == runtime && -r ${JSH_DIR}/dotfiles/.config/shell/runtime.sh ]]; then
+if [[ ${JSH_MODE:-} == lite && -r ${JSH_DIR}/dotfiles/.config/shell/runtime.sh ]]; then
   source "${JSH_DIR}/dotfiles/.config/shell/runtime.sh"
 fi
 

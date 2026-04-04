@@ -4,7 +4,6 @@ _jsh() {
   local -a commands
   commands=(
   'shell:open the isolated jsh runtime'
-  'setup:configure runtime or install mode'
   'install:install the launcher and managed dotfile links'
   'status:show shell mode and managed-link state'
   'repair:prune stale managed-link state'
@@ -23,18 +22,13 @@ _jsh() {
   shell)
   _arguments '-l[open a login shell]'
   ;;
-  setup)
+  install)
   _arguments \
     '(-n --dry-run)'{-n,--dry-run}'[preview changes]' \
     '--mode=[select setup mode]:mode:(runtime install)'
   ;;
-  install)
-  _arguments '(-n --dry-run)'{-n,--dry-run}'[preview changes]'
-  ;;
   status)
-  _arguments \
-    '(-v --verbose)'{-v,--verbose}'[show all managed items]' \
-    '--porcelain[print machine-readable state]'
+  _arguments '--porcelain[print machine-readable state]'
   ;;
   repair)
   _arguments '(-n --dry-run)'{-n,--dry-run}'[preview changes]'
