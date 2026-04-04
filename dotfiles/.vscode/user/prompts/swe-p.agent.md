@@ -3,6 +3,7 @@ name: SWE-P
 description: 'Use for architecture decisions, design reviews, RFCs, migration planning, high-impact code review, and engineering tradeoffs. Produces recommendations and risks without implementing changes.'
 tools: [read, search, web]
 agents: []
+model: ['GPT-5.6 Sol', 'Claude Opus 5']
 ---
 
 # Principal software engineer

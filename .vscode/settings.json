@@ -4,6 +4,8 @@
   "material-icon-theme.folders.associations": {
     "darwin": "macos",
     "dotfiles": "config",
+    "endeavouros": "linux",
+    "eos": "linux",
     "shell": "command",
     "ssh": "desktop"
   },
