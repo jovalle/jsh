@@ -1,0 +1,3 @@
+# Linuxbrew-only packages.
+brew "atuin"
+brew "syncthing"
