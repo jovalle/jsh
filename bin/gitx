@@ -125,7 +125,7 @@ jsh_fragment() {
 }
 jsh_row() {
   local label="$1" value="${2:-}" target_width="${3:-24}"
-  local plain_label="$label" plain_value="$value" color dots dot_count columns row_width
+  local plain_label="$label" plain_value="$value" color padding padding_width columns row_width
 
   for color in "${C_CYAN}" "${C_GREEN}" "${C_YELLOW}" "${C_RED}" \
     "${C_BLUE}" "${C_BOLD}" "${C_DIM}" "${C_RESET}"; do
@@ -134,25 +134,28 @@ jsh_row() {
     plain_value=${plain_value//"$color"/}
   done
 
-  dot_count=$((target_width - ${#plain_label}))
-  ((dot_count >= 3)) || dot_count=3
-  printf -v dots '%*s' "${dot_count}" ''
-  dots=${dots// /.}
+  padding_width=$((target_width - ${#plain_label}))
+  ((padding_width >= 1)) || padding_width=1
+  printf -v padding '%*s' "${padding_width}" ''
   columns=${COLUMNS:-80}
   [[ "$columns" =~ ^[0-9]+$ ]] || columns=80
-  row_width=$((4 + ${#plain_label} + dot_count + ${#plain_value}))
+  row_width=$((3 + ${#plain_label} + padding_width + ${#plain_value}))
 
   if ((columns >= 30 && row_width > columns)); then
-    printf '  %s %s\n' "$label" "$dots"
+    printf '  %s\n' "$label"
     printf '    %s\n' "$value"
   else
-    printf '  %s %s %s\n' "$label" "$dots" "$value"
+    printf '  %s%s%s\n' "$label" "$padding" "$value"
   fi
 }
 jsh_field() { jsh_row "$1" "${2:-}" "${3:-24}"; }
 jsh_status() {
   jsh_fragment "${3:-note}" "${2:-}"
   jsh_row "$1" "${REPLY_FRAGMENT}"
+}
+jsh_colored_field() {
+  _jsh_status_style "${3:-note}"
+  jsh_row "$1" "${REPLY_COLOR}${2:-}${C_RESET}"
 }
 jsh_tree_group() {
   local label="$1" position="${2:-more}" connector
@@ -165,7 +168,7 @@ jsh_tree_group() {
 }
 jsh_tree_status() {
   local parent_position="$1" position="$2" label="$3" value="$4" status="$5"
-  local stem connector dots dot_count columns row_width plain_value="$value" color
+  local stem connector padding padding_width columns row_width plain_value="$value" color
   if [[ -n "${C_RESET}" ]]; then
     [[ "$parent_position" == last ]] && stem='    ' || stem='│   '
     [[ "$position" == last ]] && connector='└──' || connector='├──'
@@ -180,19 +183,18 @@ jsh_tree_status() {
     [[ -n "$color" ]] || continue
     plain_value=${plain_value//"$color"/}
   done
-  dot_count=$((28 - ${#label}))
-  ((dot_count >= 3)) || dot_count=3
-  printf -v dots '%*s' "$dot_count" ''
-  dots=${dots// /.}
+  padding_width=$((28 - ${#label}))
+  ((padding_width >= 1)) || padding_width=1
+  printf -v padding '%*s' "$padding_width" ''
   columns=${COLUMNS:-80}
   [[ "$columns" =~ ^[0-9]+$ ]] || columns=80
-  row_width=$((10 + ${#label} + dot_count + ${#REPLY_MARK} + ${#plain_value}))
+  row_width=$((9 + ${#label} + padding_width + ${#REPLY_MARK} + ${#plain_value}))
 
   if ((columns >= 30 && row_width > columns)); then
-    printf '  %s%s %s %s\n' "$stem" "$connector" "$label" "$dots"
+    printf '  %s%s %s\n' "$stem" "$connector" "$label"
     printf '      %s\n' "$REPLY_FRAGMENT"
   else
-    printf '  %s%s %s %s %s\n' "$stem" "$connector" "$label" "$dots" "$REPLY_FRAGMENT"
+    printf '  %s%s %s%s%s\n' "$stem" "$connector" "$label" "$padding" "$REPLY_FRAGMENT"
   fi
 }
 jsh_note() { printf '  %s%s%s\n' "${C_DIM}" "$*" "${C_RESET}"; }
@@ -392,10 +394,25 @@ _profiles_list() {
 
   # Use jq for JSON, yq for YAML
   if [[ "$JSH_PROFILES" == *.json ]] && command -v jq &>/dev/null; then
-    jq -r '.profiles | keys[]' "$JSH_PROFILES" 2>/dev/null
+    jq -r '.profiles | to_entries[].key' "$JSH_PROFILES" 2>/dev/null
   elif command -v yq &>/dev/null; then
-    yq -r '.profiles | keys | .[]' "$JSH_PROFILES" 2>/dev/null
+    yq -r '.profiles | to_entries | .[].key' "$JSH_PROFILES" 2>/dev/null
   fi
+}
+
+_profile_label() {
+  local target="$1" profile_name index=0
+  local -a colors=("$C_CYAN" "$C_GREEN" "$C_YELLOW" "$C_BLUE" "$C_RED")
+
+  while IFS= read -r profile_name; do
+    if [[ "$profile_name" == "$target" ]]; then
+      printf '%s%s%s' "${colors[$((index % ${#colors[@]}))]}" "$target" "$C_RESET"
+      return
+    fi
+    index=$((index + 1))
+  done < <(_profiles_list)
+
+  printf '%s%s%s' "$C_DIM" "$target" "$C_RESET"
 }
 
 # Check if profile exists
@@ -1149,10 +1166,10 @@ cmd_profile_status() {
   ssh_cmd=$(git config --local core.sshCommand 2>/dev/null) || true
   origin_url=$(git remote get-url origin 2>/dev/null) || true
 
-  jsh_field "Profile" "${assigned_profile:-none}"
-  jsh_field "Name" "${current_name:-(not set)}"
-  jsh_field "Email" "${current_email:-(not set)}"
-  jsh_field "Origin" "${origin_url:-(not set)}"
+  jsh_section "Profile $(_profile_label "${assigned_profile:-none}")" first
+  jsh_field "Name" "${current_name:-(not set)}" 9
+  jsh_field "Email" "${current_email:-(not set)}" 9
+  jsh_field "Origin" "${origin_url:-(not set)}" 9
 
   # Show SSH key info
   if [[ -n "$ssh_cmd" ]]; then
@@ -1167,10 +1184,10 @@ cmd_profile_status() {
       fingerprint="$(_ssh_key_fingerprint "$key_pub_path")" || true
       [[ -z "$fingerprint" ]] || REPLY_SSH_VALUE+="${JSH_SEPARATOR}${fingerprint}"
     fi
-    jsh_status "SSH key" "$REPLY_SSH_VALUE" "$REPLY_SSH_STATUS"
+    jsh_field "SSH key" "$REPLY_SSH_VALUE" 9
   else
     _ssh_key_health ""
-    jsh_status "SSH key" "$REPLY_SSH_VALUE" "$REPLY_SSH_STATUS"
+    jsh_field "SSH key" "$REPLY_SSH_VALUE" 9
   fi
 
   # Show signing status
@@ -1180,39 +1197,26 @@ cmd_profile_status() {
   if [[ -n "$signingkey" ]] && [[ "$gpgsign" == "true" ]]; then
     local format
     format=$(git config --local gpg.format 2>/dev/null) || true
-    jsh_status "Signing" "${signingkey##*/}${JSH_SEPARATOR}${format:-gpg}" ok
+    jsh_field "Signing" "${signingkey##*/}${JSH_SEPARATOR}${format:-gpg}" 9
   else
-    jsh_status "Signing" "off" skip
+    jsh_field "Signing" "off" 9
   fi
 
   # Identity leak check
-  jsh_section "Identity environment"
-  local has_leak=false
+  if [[ -n "${GIT_AUTHOR_NAME:-}" || -n "${GIT_AUTHOR_EMAIL:-}" ||
+    -n "${GIT_COMMITTER_NAME:-}" || -n "${GIT_COMMITTER_EMAIL:-}" ]]; then
+    jsh_section "Identity environment"
 
-  if [[ -n "${GIT_AUTHOR_NAME:-}" ]]; then
-    jsh_status "GIT_AUTHOR_NAME" "\"${GIT_AUTHOR_NAME}\" overrides profile" warn
-    has_leak=true
-  fi
+    [[ -z "${GIT_AUTHOR_NAME:-}" ]] \
+      || jsh_colored_field "GIT_AUTHOR_NAME" "\"${GIT_AUTHOR_NAME}\" overrides profile" warn
+    [[ -z "${GIT_AUTHOR_EMAIL:-}" ]] \
+      || jsh_colored_field "GIT_AUTHOR_EMAIL" "\"${GIT_AUTHOR_EMAIL}\" overrides profile" warn
+    [[ -z "${GIT_COMMITTER_NAME:-}" ]] \
+      || jsh_colored_field "GIT_COMMITTER_NAME" "\"${GIT_COMMITTER_NAME}\" overrides profile" warn
+    [[ -z "${GIT_COMMITTER_EMAIL:-}" ]] \
+      || jsh_colored_field "GIT_COMMITTER_EMAIL" "\"${GIT_COMMITTER_EMAIL}\" overrides profile" warn
 
-  if [[ -n "${GIT_AUTHOR_EMAIL:-}" ]]; then
-    jsh_status "GIT_AUTHOR_EMAIL" "\"${GIT_AUTHOR_EMAIL}\" overrides profile" warn
-    has_leak=true
-  fi
-
-  if [[ -n "${GIT_COMMITTER_NAME:-}" ]]; then
-    jsh_status "GIT_COMMITTER_NAME" "\"${GIT_COMMITTER_NAME}\" overrides profile" warn
-    has_leak=true
-  fi
-
-  if [[ -n "${GIT_COMMITTER_EMAIL:-}" ]]; then
-    jsh_status "GIT_COMMITTER_EMAIL" "\"${GIT_COMMITTER_EMAIL}\" overrides profile" warn
-    has_leak=true
-  fi
-
-  if [[ "$has_leak" == "true" ]]; then
     jsh_note "gitx commit will override these variables with profile values."
-  else
-    jsh_status "Environment" "clear" ok
   fi
 }
 
@@ -1246,7 +1250,7 @@ cmd_profile_list() {
     signingkey=$(_profile_field "$profile_data" "signingkey")
     signingformat=$(_profile_field "$profile_data" "signingformat")
 
-    label="$profile_name"
+    label="$(_profile_label "$profile_name")"
     if [[ "$profile_name" == "$current_profile" ]]; then
       label+=" ${C_CYAN}(active)${C_RESET}"
     fi
@@ -1279,7 +1283,7 @@ cmd_profile_apply() {
     error "A profile name is required"
     jsh_command_preview "gitx profile <name>" >&2
     jsh_section "Available profiles" >&2
-    _profiles_list | while read -r p; do jsh_detail "$p" >&2; done
+    _profiles_list | while read -r p; do jsh_detail "$(_profile_label "$p")" >&2; done
     return 1
   fi
 
@@ -1292,7 +1296,7 @@ cmd_profile_apply() {
     return 1
   fi
 
-  jsh_status "Profile" "${profile_name} applied" changed
+  jsh_status "Profile" "$(_profile_label "$profile_name") applied" changed
   cmd_profile_status
 }
 
@@ -1416,7 +1420,7 @@ cmd_repo_info() {
 
   _section "Repository" first
   _row "Name" "$repo_name"
-  [[ -z "$detected_profile" ]] || _row "Profile" "$detected_profile"
+  [[ -z "$detected_profile" ]] || _row "Profile" "$(_profile_label "$detected_profile")"
 
   # Branch with indicator
   _row "Branch" "$branch"
@@ -1521,7 +1525,7 @@ cmd_repo_info() {
   local commit_hash commit_msg commit_time
   while IFS='|' read -r commit_hash commit_msg commit_time; do
     [[ -z "$commit_hash" ]] && continue
-    jsh_detail "${commit_hash}  ${commit_msg}  (${commit_time})"
+    printf '  %s\n' "${commit_hash}  ${commit_msg}  (${commit_time})"
   done < <(git log -3 --format="%h|%s|%cr" 2>/dev/null)
 }
 
@@ -1664,11 +1668,22 @@ cmd_list() {
   local verbose=false
   [[ "${1:-}" == "-v" || "${1:-}" == "--verbose" ]] && verbose=true
 
-  local all_dirs=()
+  local all_dirs=() display_names=() branches=()
+  local project_width=0 branch_width=0
   while IFS= read -r dir; do
     [[ -n "$dir" ]] || continue
     git -C "$dir" rev-parse --git-dir &>/dev/null || continue
+
+    local display_name branch
+    display_name="$(_projects_display_name "$dir")"
+    branch=$(git -C "$dir" branch --show-current 2>/dev/null)
+    [[ -z "$branch" ]] && branch="detached@$(git -C "$dir" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+
     all_dirs+=("$dir")
+    display_names+=("$display_name")
+    branches+=("$branch")
+    ((${#display_name} > project_width)) && project_width=${#display_name}
+    ((${#branch} > branch_width)) && branch_width=${#branch}
   done < <(_projects_get_all)
 
   local total=${#all_dirs[@]}
@@ -1678,13 +1693,10 @@ cmd_list() {
     return 0
   fi
 
-  # Projects
-  for dir in "${all_dirs[@]}"; do
-    local display_name branch status_str profile_name=""
-    display_name="$(_projects_display_name "$dir")"
-
-    branch=$(git -C "$dir" branch --show-current 2>/dev/null)
-    [[ -z "$branch" ]] && branch="detached@$(git -C "$dir" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  local index
+  for index in "${!all_dirs[@]}"; do
+    local dir="${all_dirs[$index]}" display_name="${display_names[$index]}"
+    local branch="${branches[$index]}" branch_color status_str profile_name=""
 
     # Compact status
     local staged unstaged untracked status_text=""
@@ -1707,15 +1719,20 @@ cmd_list() {
     else
       jsh_fragment changed "$status_text"
     fi
-    status_str="${branch}${JSH_SEPARATOR}${REPLY_FRAGMENT}"
+    status_str="${REPLY_FRAGMENT}"
 
     if [[ "$verbose" == true ]]; then
       profile_name="$(_profiles_detect "$dir" 2>/dev/null)" || true
       [[ -z "$profile_name" ]] && profile_name="none"
-      status_str+="${JSH_SEPARATOR}${profile_name}"
+      status_str+="${JSH_SEPARATOR}$(_profile_label "$profile_name")"
     fi
 
-    jsh_row "$display_name" "$status_str" 30
+    case "$branch" in
+      main | master) branch_color=$C_GREEN ;;
+      *) branch_color=$C_YELLOW ;;
+    esac
+    printf '%-*s  %s%-*s%s  %s\n' \
+      "$project_width" "$display_name" "$branch_color" "$branch_width" "$branch" "$C_RESET" "$status_str"
   done
 }
 
