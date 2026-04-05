@@ -2,15 +2,30 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 
 # List available recipes.
 default:
-    @just --list
+  @just --list
 
-# Install jsh locally in runtime or install mode.
-install mode="install":
-    ./bin/jsh install --mode "{{ mode }}"
+# Install jsh locally, or install and update workstation packages.
+install target="full":
+  #!/usr/bin/env bash
+  set -euo pipefail
+  case "{{ target }}" in
+    lite) ./bin/jsh install --mode runtime ;;
+    full) ./bin/jsh install --mode install ;;
+    packages) task packages ;;
+    *) printf 'Unknown install target: %s\n' "{{ target }}" >&2; exit 2 ;;
+  esac
+
+# Install declared Homebrew packages and upgrade installed formulae and casks.
+brew:
+  task brew
+
+# Configure every component for this platform, or one named component.
+configure component="":
+  task configure COMPONENT="{{ component }}"
 
 # Report runtime and managed-link health.
 doctor:
-    ./bin/jsh doctor
+  ./bin/jsh doctor
 
 # Update submodules to their latest remote commits.
 update:
@@ -111,7 +126,7 @@ check:
   #!/usr/bin/env bash
   set -euo pipefail
   missing=()
-  for dependency in bats gitleaks jq pre-commit prettier shellcheck shfmt; do
+  for dependency in bats gitleaks jq pre-commit prettier shellcheck shfmt task; do
     command -v "${dependency}" >/dev/null 2>&1 || missing+=("${dependency}")
   done
   if ((${#missing[@]})); then
