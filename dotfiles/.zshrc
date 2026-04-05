@@ -4896,20 +4896,43 @@ fi
 
 # Just's dynamic completer mixes filesystem entries into recipe completion.
 _jsh_just_completion() {
-  local summary recipe completion value
-  local -a recipes completions filtered
+  local summary recipe completion value output task component
+  local -a recipes completions filtered targets components
   local -A recipe_names
   summary="$(just --summary 2>/dev/null)" || summary=""
   recipes=(${=summary})
+
+  for recipe in "${recipes[@]}"; do
+    recipe_names[$recipe]=1
+  done
 
   if (( CURRENT == 2 )) && [[ "${words[CURRENT]}" != -* ]]; then
     (( ${#recipes} )) && _describe 'recipe' recipes
     return
   fi
 
-  for recipe in "${recipes[@]}"; do
-    recipe_names[$recipe]=1
-  done
+  if [[ -n "${recipe_names[${words[2]}]-}" ]]; then
+    if [[ "${words[2]}" == install ]] && (( CURRENT == 3 )); then
+      targets=(
+        'lite:configure the isolated shell runtime'
+        'full:configure the launcher and managed dotfile links'
+        'packages:install and update workstation packages'
+      )
+      _describe 'install target' targets
+    elif [[ "${words[2]}" == configure ]] && (( CURRENT == 3 )); then
+      components=(all)
+      output="$(task --list-all 2>/dev/null)" || output=""
+      for completion in "${(@)${(f)output}[2,-1]#\* }"; do
+        task="${completion%%:[[:space:]]*}"
+        [[ "$task" == configure:* ]] || continue
+        component="${task#configure:}"
+        [[ "$component" == *:* ]] || components+=("$component")
+      done
+      _describe 'configure component' components
+    fi
+    return
+  fi
+
   completions=("${(@f)$(
       _CLAP_IFS=$'\n' \
         _CLAP_COMPLETE_INDEX=$((CURRENT - 1)) \
