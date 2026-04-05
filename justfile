@@ -118,21 +118,52 @@ fmt-check:
     shfmt -ln=bats -d -i 2 -ci -bn "${bats_files[@]}"
   fi
 
-# Prepare a checkout for contributing.
-prepare: hooks
+# Prepare a checkout for contributing, installing core tools first when needed.
+prepare:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  root="$(git rev-parse --show-toplevel)"
+  for brew_bin in /opt/homebrew/bin /usr/local/bin /home/linuxbrew/.linuxbrew/bin; do
+    if [[ -x "${brew_bin}/brew" ]]; then
+      PATH="${brew_bin}${PATH:+:${PATH}}"
+      export PATH
+      break
+    fi
+  done
+  if ! command -v brew >/dev/null 2>&1; then
+    printf 'Homebrew is required for `just prepare`. Run the full jsh installer first.\n' >&2
+    exit 1
+  fi
+  eval "$(brew shellenv)"
+  brew update
+  brew bundle install --file "${root}/config/homebrew/Brewfile.core"
+  brew bundle install --file "${root}/config/homebrew/Brewfile.contrib"
+  just hooks
 
 # Verify tools required by hooks and repository checks.
 check:
   #!/usr/bin/env bash
   set -euo pipefail
-  missing=()
-  for dependency in bats gitleaks jq pre-commit prettier shellcheck shfmt task; do
-    command -v "${dependency}" >/dev/null 2>&1 || missing+=("${dependency}")
+  missing_core=()
+  missing_contributor=()
+  for dependency in jq task; do
+    command -v "${dependency}" >/dev/null 2>&1 || missing_core+=("${dependency}")
   done
-  if ((${#missing[@]})); then
+  for dependency in bats gitleaks pre-commit prettier shellcheck shfmt; do
+    command -v "${dependency}" >/dev/null 2>&1 || missing_contributor+=("${dependency}")
+  done
+  if ((${#missing_core[@]})); then
+    printf 'Missing core dependencies:' >&2
+    printf ' %s' "${missing_core[@]}" >&2
+    printf '\n' >&2
+  fi
+  if ((${#missing_contributor[@]})); then
     printf 'Missing contributor dependencies:' >&2
-    printf ' %s' "${missing[@]}" >&2
-    printf '\nInstall them, then run `just prepare` again.\n' >&2
+    printf ' %s' "${missing_contributor[@]}" >&2
+    printf '\n' >&2
+  fi
+  if ((${#missing_core[@]} || ${#missing_contributor[@]})); then
+    printf 'Run `just prepare` to bootstrap them.\n' >&2
     exit 1
   fi
 
