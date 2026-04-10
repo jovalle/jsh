@@ -9,8 +9,8 @@ install target="full":
   #!/usr/bin/env bash
   set -euo pipefail
   case "{{ target }}" in
-    lite) ./bin/jsh install --mode runtime ;;
-    full) ./bin/jsh install --mode install ;;
+    lite) JSH_MODE=lite ./j.sh ;;
+    full) JSH_MODE=full ./j.sh ;;
     packages) task packages ;;
     *) printf 'Unknown install target: %s\n' "{{ target }}" >&2; exit 2 ;;
   esac
