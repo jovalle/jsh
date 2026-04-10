@@ -96,8 +96,8 @@ _jsh_ui_heading() {
 }
 
 _jsh_ui_row() {
-  local status="$1" key="$2" value="${3:-}"
-  local columns row_width
+  local status="$1" key="$2" value="${3:-}" value_style="${4:-}"
+  local columns row_width value_reset=
   _jsh_ui_init
   _jsh_ui_status "${status}"
   _jsh_ui_text "${key}"
@@ -105,6 +105,12 @@ _jsh_ui_row() {
   _jsh_ui_text "${value}"
   value=${REPLY_TEXT}
   [[ "${_JSH_UI_RICH}" == 1 ]] || REPLY_MARK="[${REPLY_MARK}]"
+  if [[ "${value_style}" == muted && "${_JSH_UI_RICH}" == 1 ]]; then
+    value_style=${_JSH_UI_DIM}
+    value_reset=${_JSH_UI_RESET}
+  else
+    value_style=
+  fi
 
   if [[ -z "${value}" ]]; then
     printf '%s%s%s %s\n' "${REPLY_COLOR}" "${REPLY_MARK}" "${_JSH_UI_RESET}" "${key}"
@@ -116,10 +122,11 @@ _jsh_ui_row() {
   row_width=$((${#REPLY_MARK} + ${#key} + ${#value} + 2))
   if ((columns >= 30 && row_width > columns)); then
     printf '%s%s%s %s\n' "${REPLY_COLOR}" "${REPLY_MARK}" "${_JSH_UI_RESET}" "${key}"
-    printf '  %s\n' "${value}"
+    printf '  %s%s%s\n' "${value_style}" "${value}" "${value_reset}"
   else
-    printf '%s%s%s %s %s\n' \
-      "${REPLY_COLOR}" "${REPLY_MARK}" "${_JSH_UI_RESET}" "${key}" "${value}"
+    printf '%s%s%s %s %s%s%s\n' \
+      "${REPLY_COLOR}" "${REPLY_MARK}" "${_JSH_UI_RESET}" "${key}" \
+      "${value_style}" "${value}" "${value_reset}"
   fi
 }
 
@@ -359,6 +366,34 @@ _jsh_install_launcher() {
   local dry_run="$1" timestamp="$2" backup_root destination directory
   backup_root="${JSH_STATE_DIR}/backups/${timestamp}"
 
+  if [[ -n "${JSH_LAUNCHER_DESTINATION:-}" ]]; then
+    [[ "${JSH_LAUNCHER_DESTINATION}" == /* ]] || {
+      _jsh_message error 'JSH_LAUNCHER_DESTINATION must be an absolute path'
+      return 1
+    }
+    directory="${JSH_LAUNCHER_DESTINATION%/*}"
+    if [[ ! -e "${JSH_LAUNCHER_DESTINATION}" && ! -L "${JSH_LAUNCHER_DESTINATION}" &&
+      ! -w "${directory}" ]] \
+      && command -v sudo >/dev/null 2>&1 \
+      && sudo -n true 2>/dev/null; then
+      if [[ "${dry_run}" == 1 ]]; then
+        _jsh_message plan "link ${JSH_LAUNCHER_DESTINATION} -> ${JSH_DIR}/bin/jsh"
+        return 0
+      fi
+      if sudo mkdir -p "${directory}" \
+        && sudo ln -s "${JSH_DIR}/bin/jsh" "${JSH_LAUNCHER_DESTINATION}"; then
+        if _jsh_state_add "${JSH_DIR}/bin/jsh" "${JSH_LAUNCHER_DESTINATION}" ""; then
+          _jsh_message linked "${JSH_LAUNCHER_DESTINATION}"
+          return 0
+        fi
+        sudo rm -f "${JSH_LAUNCHER_DESTINATION}" || true
+      fi
+      return 1
+    fi
+    _jsh_manage_link "${JSH_DIR}/bin/jsh" "${JSH_LAUNCHER_DESTINATION}" "${backup_root}" "${dry_run}"
+    return
+  fi
+
   if [[ -n "${JSH_BIN_DIR:-}" ]]; then
     [[ "${JSH_BIN_DIR}" == /* ]] || {
       _jsh_message error 'JSH_BIN_DIR must be an absolute path'
@@ -413,8 +448,9 @@ _jsh_install_launcher() {
   done
 }
 
-_jsh_install() {
+_jsh_apply_links() {
   local mode=runtime mode_label=Runtime dry_run=0 source destination failures=0
+  local apply_launcher=1 apply_config=0 quiet=0
   local timestamp backup_root current_mode=""
   while (($# > 0)); do
     case "$1" in
@@ -443,27 +479,55 @@ _jsh_install() {
     ;;
   esac
   [[ "${mode}" != install ]] || mode_label=Install
+  if [[ -n "${JSH_INSTALL_COMPONENTS:-}" ]]; then
+    apply_launcher=0
+    apply_config=0
+    case ",${JSH_INSTALL_COMPONENTS}," in
+      *,launcher,*) apply_launcher=1 ;;
+    esac
+    case ",${JSH_INSTALL_COMPONENTS}," in
+      *,config,*) apply_config=1 ;;
+    esac
+  else
+    [[ "${mode}" == install ]] && apply_config=1
+  fi
+  [[ "${JSH_INSTALL_QUIET:-0}" == 1 ]] && quiet=1
   [[ ! -r "${JSH_MODE_FILE}" ]] || IFS= read -r current_mode <"${JSH_MODE_FILE}"
   if [[ "${current_mode}" == install && "${mode}" == runtime ]]; then
     _jsh_error 'uninstall managed dotfiles before switching to runtime mode'
     return 1
   fi
 
-  _jsh_banner
-  _jsh_ui_heading "Configuring ${mode_label}"
+  if [[ "${quiet}" == 0 ]]; then
+    _jsh_banner
+    _jsh_ui_heading "Configuring ${mode_label}"
+  fi
   timestamp=$(date +%Y%m%d-%H%M%S)
   backup_root="${JSH_STATE_DIR}/backups/${timestamp}"
-  _jsh_install_launcher "${dry_run}" "${timestamp}" || failures=$((failures + 1))
-  if [[ "${mode}" == install ]]; then
-    while IFS='|' read -r source destination; do
-      _jsh_manage_link "${source}" "${destination}" "${backup_root}" "${dry_run}" \
+  if [[ "${apply_launcher}" == 1 ]]; then
+    if [[ "${quiet}" == 1 ]]; then
+      _jsh_install_launcher "${dry_run}" "${timestamp}" >/dev/null 2>&1 \
         || failures=$((failures + 1))
+    else
+      _jsh_install_launcher "${dry_run}" "${timestamp}" || failures=$((failures + 1))
+    fi
+  fi
+  if [[ "${apply_config}" == 1 ]]; then
+    while IFS='|' read -r source destination; do
+      if [[ "${quiet}" == 1 ]]; then
+        _jsh_manage_link "${source}" "${destination}" "${backup_root}" "${dry_run}" \
+          >/dev/null 2>&1 || failures=$((failures + 1))
+      else
+        _jsh_manage_link "${source}" "${destination}" "${backup_root}" "${dry_run}" \
+          || failures=$((failures + 1))
+      fi
     done < <(_jsh_install_entries)
   fi
   if [[ "${dry_run}" == 0 && "${failures}" == 0 ]]; then
     mkdir -p "${JSH_STATE_DIR}" && printf '%s\n' "${mode}" >"${JSH_MODE_FILE}"
   fi
-  if [[ -n "${JSH_LAUNCHER_DESTINATION:-}" && ":${PATH}:" != *":${JSH_LAUNCHER_DESTINATION%/*}:"* ]]; then
+  if [[ "${quiet}" == 0 && -n "${JSH_LAUNCHER_DESTINATION:-}" &&
+    ":${PATH}:" != *":${JSH_LAUNCHER_DESTINATION%/*}:"* ]]; then
     _jsh_message note "add ${JSH_LAUNCHER_DESTINATION%/*} to PATH"
   fi
   [[ "${failures}" == 0 ]]
@@ -587,10 +651,10 @@ BANNER
 }
 
 _jsh_status_render() {
-  local record_component state name detail total_problems=0
+  local _record_component state name detail total_problems=0
   _jsh_banner
   _jsh_ui_heading Status
-  while IFS=$'\t' read -r record_component state name detail; do
+  while IFS=$'\t' read -r _record_component state name detail; do
     _jsh_ui_row "${state}" "${name}" "${detail}"
     case "${state}" in missing | changed | error) total_problems=$((total_problems + 1)) ;; esac
   done <"${JSH_STATUS_RECORDS}"
@@ -762,7 +826,7 @@ _jsh_doctor_render() {
         network-only:*) status=note ;;
         *) status=current ;;
       esac
-      _jsh_ui_row "${status}" "${name}" "${detail}"
+      _jsh_ui_row "${status}" "${name}" "${detail}" muted
     done < <(awk -F '\t' -v component="${component}" '$1 == component { print $2 "\t" $3 "\t" $4 }' "${JSH_DOCTOR_RECORDS}")
   done
 }
@@ -909,6 +973,1555 @@ _jsh_uninstall() {
   [[ "${failures}" == 0 ]]
 }
 
+# Canonical component reconciliation used by the public `jsh install` command.
+
+# The curl bootstrap acquires a checkout and then hands control to this flow.
+
+jsh_ui_init() {
+  JSH_UI_RICH=0
+  if [ "${JSH_PLAIN_OUTPUT:-0}" != 1 ] && [ "${TERM:-dumb}" != dumb ] && [ -z "${NO_COLOR+x}" ]; then
+    case "${JSH_COLOR:-auto}" in
+      always) JSH_UI_RICH=1 ;;
+      auto) [ -t 1 ] && JSH_UI_RICH=1 ;;
+    esac
+  fi
+  if [ "${JSH_UI_RICH}" = 1 ]; then
+    JSH_UI_RESET=$(printf '\033[0m')
+    JSH_UI_BOLD=$(printf '\033[1m')
+    JSH_UI_DIM=$(printf '\033[2m')
+    JSH_UI_RED=$(printf '\033[31m')
+    JSH_UI_GREEN=$(printf '\033[32m')
+    JSH_UI_YELLOW=$(printf '\033[33m')
+    JSH_UI_CYAN=$(printf '\033[36m')
+  else
+    JSH_UI_RESET=''
+    JSH_UI_BOLD=''
+    JSH_UI_DIM=''
+    JSH_UI_RED=''
+    JSH_UI_GREEN=''
+    JSH_UI_YELLOW=''
+    JSH_UI_CYAN=''
+  fi
+}
+
+jsh_ui_status() {
+  case "$1" in
+    current | success)
+      JSH_UI_COLOR=${JSH_UI_GREEN}
+      [ "${JSH_UI_RICH}" = 1 ] && JSH_UI_MARK='✔' || JSH_UI_MARK=ok
+      ;;
+    plan | planned | missing | changed)
+      JSH_UI_COLOR=${JSH_UI_CYAN}
+      [ "${JSH_UI_RICH}" = 1 ] && JSH_UI_MARK='➜' || JSH_UI_MARK=plan
+      ;;
+    warning)
+      JSH_UI_COLOR=${JSH_UI_YELLOW}
+      [ "${JSH_UI_RICH}" = 1 ] && JSH_UI_MARK='▲' || JSH_UI_MARK=warn
+      ;;
+    note)
+      JSH_UI_COLOR=${JSH_UI_CYAN}
+      [ "${JSH_UI_RICH}" = 1 ] && JSH_UI_MARK='›' || JSH_UI_MARK=note
+      ;;
+    info)
+      JSH_UI_COLOR=${JSH_UI_DIM}
+      [ "${JSH_UI_RICH}" = 1 ] && JSH_UI_MARK='•' || JSH_UI_MARK=info
+      ;;
+    skipped)
+      JSH_UI_COLOR=${JSH_UI_DIM}
+      [ "${JSH_UI_RICH}" = 1 ] && JSH_UI_MARK='–' || JSH_UI_MARK=skip
+      ;;
+    error)
+      JSH_UI_COLOR=${JSH_UI_RED}
+      [ "${JSH_UI_RICH}" = 1 ] && JSH_UI_MARK='✖' || JSH_UI_MARK=error
+      ;;
+    *)
+      JSH_UI_COLOR=${JSH_UI_DIM}
+      JSH_UI_MARK=$1
+      ;;
+  esac
+}
+
+jsh_ui_row() {
+  status=$1
+  message=$2
+  stream=${3:-stdout}
+  jsh_ui_init
+  jsh_ui_status "${status}"
+  [ "${JSH_UI_RICH}" = 1 ] || JSH_UI_MARK="[${JSH_UI_MARK}]"
+  if [ "${stream}" = stderr ]; then
+    printf '%s%s%s %s\n' "${JSH_UI_COLOR}" "${JSH_UI_MARK}" "${JSH_UI_RESET}" "${message}" >&2
+  else
+    printf '%s%s%s %s\n' "${JSH_UI_COLOR}" "${JSH_UI_MARK}" "${JSH_UI_RESET}" "${message}"
+  fi
+}
+
+jsh_display_path() {
+  case "$1" in
+    "${HOME}") printf '~\n' ;;
+    "${HOME}"/*) printf '%s/%s\n' '~' "${1#"${HOME}"/}" ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
+jsh_display_repo() {
+  case "$1" in
+    [Hh][Tt][Tt][Pp]://* | [Hh][Tt][Tt][Pp][Ss]://*)
+      printf '%s\n' "$1" | sed 's#^\([^:]*://\)[^/@]*@#\1#'
+      ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
+jsh_ui_text() {
+  REPLY_TEXT=$1
+  case "${REPLY_TEXT}" in
+    "${HOME}") REPLY_TEXT='~' ;;
+    "${HOME}"/*) REPLY_TEXT=$(printf '%s/%s' '~' "${REPLY_TEXT#"${HOME}"/}") ;;
+  esac
+}
+
+jsh_ui_heading() {
+  jsh_ui_init
+  printf '\n%s%s%s%s\n' "${JSH_UI_BOLD}" "${JSH_UI_CYAN}" "$1" "${JSH_UI_RESET}"
+}
+
+jsh_banner() {
+  jsh_ui_init
+  printf '%s%s' "${JSH_UI_BOLD}" "${JSH_UI_CYAN}"
+  cat <<'BANNER'
+   :%@@@@@@@@@#*#@%-              +-:##
+  :#    -#%%+=#:@#                :@@%:
+   %@@     +@++@@-            *-   @@%:
+          *@%:%@@:    :%@@@@*%+  *@@@%::*@@#
+     -###%@@+:%@@:  :%@#:--=%:    -@@@#: #@@=
+       :#@@@+:%@@:  :%@#  -#-     -@@%   *@@=
+      *#:#@@+:%@@:  :%@@@@@@@@*   -@@%   *@@=
+       -#@@@+:%@%:     *%  -@@*   -@@%   *@@=
+         :@@+:%@*     -*   -@@*   -@@%   *@@=
+          +@+:%*     *@@@@@%@%-   #@@@+  *@@-
+   :==--::*#:#-     -:   -*:        +   =@@=
+ :@@@@@@@@#@-                         +@#:
+ =   :-=-:                          -:
+BANNER
+  printf '%s\n' "${JSH_UI_RESET}"
+}
+
+jsh_spinner_start() {
+  JSH_SPINNER_LABEL=$1
+  JSH_SPINNER_STARTED=$(date +%s 2>/dev/null || printf 0)
+  JSH_SPINNER_PID=
+  jsh_ui_init
+  if [ "${JSH_SPINNER:-auto}" = never ] || [ "${JSH_UI_RICH}" != 1 ] || [ ! -t 2 ]; then
+    return 0
+  fi
+
+  (
+    visible=0
+    trap '[ "${visible}" = 0 ] || printf "\033[?25h\r\033[K" >&2' 0
+    trap 'exit 0' 1 2 15
+    sleep "${JSH_SPINNER_DELAY:-1}"
+    visible=1
+    frame=0
+    printf '\033[?25l' >&2
+    while :; do
+      case "${frame}" in
+        0) glyph='⠋' ;; 1) glyph='⠙' ;; 2) glyph='⠹' ;; 3) glyph='⠸' ;; 4) glyph='⠼' ;;
+        5) glyph='⠴' ;; 6) glyph='⠦' ;; 7) glyph='⠧' ;; 8) glyph='⠇' ;; *) glyph='⠏' ;;
+      esac
+      printf '\r\033[K%s %s' "${glyph}" "${JSH_SPINNER_LABEL}" >&2
+      frame=$(((frame + 1) % 10))
+      sleep 0.1
+    done
+  ) &
+  JSH_SPINNER_PID=$!
+}
+
+jsh_spinner_cleanup() {
+  if [ -n "${JSH_SPINNER_PID:-}" ]; then
+    kill "${JSH_SPINNER_PID}" 2>/dev/null || true
+    wait "${JSH_SPINNER_PID}" 2>/dev/null || true
+    JSH_SPINNER_PID=
+  fi
+}
+
+jsh_spinner_stop() {
+  spinner_status=$1
+  spinner_label=$2
+  jsh_spinner_cleanup
+  spinner_finished=$(date +%s 2>/dev/null || printf 0)
+  spinner_elapsed=$((spinner_finished - JSH_SPINNER_STARTED))
+  [ "${spinner_elapsed}" -ge 0 ] || spinner_elapsed=0
+  if [ "${spinner_elapsed}" -ge 5 ]; then
+    spinner_label="${spinner_label} (${spinner_elapsed}s)"
+  fi
+  if [ "${spinner_status}" = error ]; then
+    jsh_ui_row error "${spinner_label}" stderr
+  else
+    jsh_ui_row "${spinner_status}" "${spinner_label}"
+  fi
+}
+
+fail() {
+  jsh_ui_init
+  jsh_ui_status error
+  if [ "${JSH_UI_RICH}" = 1 ]; then
+    printf '%s%s%s jsh: %s\n' "${JSH_UI_COLOR}" "${JSH_UI_MARK}" "${JSH_UI_RESET}" "$*" >&2
+  else
+    printf '[%s] jsh: %s\n' "${JSH_UI_MARK}" "$*" >&2
+  fi
+  exit 1
+}
+
+JSH_TTY_STATE=
+
+jsh_tty_restore() {
+  if [ -n "${JSH_TTY_STATE}" ]; then
+    stty "${JSH_TTY_STATE}" </dev/tty 2>/dev/null || true
+    JSH_TTY_STATE=
+  fi
+}
+
+jsh_read_key() {
+  prompt=$1
+  JSH_KEY=
+  printf '%s' "${prompt}" >/dev/tty
+  if command -v stty >/dev/null 2>&1 && command -v dd >/dev/null 2>&1 \
+    && JSH_TTY_STATE=$(stty -g </dev/tty 2>/dev/null); then
+    stty -icanon -echo min 1 time 0 </dev/tty
+    JSH_KEY=$(dd bs=1 count=1 </dev/tty 2>/dev/null || true)
+    jsh_tty_restore
+  else
+    IFS= read -r JSH_KEY </dev/tty || return 1
+  fi
+  printf '\n' >/dev/tty
+}
+
+jsh_interrupted() {
+  trap - 1 2 15
+  jsh_spinner_cleanup
+  jsh_tty_restore
+  jsh_ui_row error 'Interrupted' stderr
+  exit 130
+}
+
+choose_mode() {
+  if [ -n "${JSH_MODE:-}" ]; then
+    case "${JSH_MODE}" in lite | full) return 0 ;; *) fail 'JSH_MODE must be lite or full' ;; esac
+  fi
+
+  if [ -t 1 ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
+    jsh_ui_init
+    printf '%s%sChoose a setup mode%s\n' "${JSH_UI_BOLD}" "${JSH_UI_CYAN}" "${JSH_UI_RESET}" >/dev/tty
+    case "${COLUMNS:-}" in
+      '' | *[!0-9]*) narrow=0 ;;
+      *) [ "${COLUMNS}" -lt 72 ] && narrow=1 || narrow=0 ;;
+    esac
+    if [ "${narrow}" = 1 ]; then
+      printf '  %sL%s  Lite\n      Isolated shell without HOME config links\n' \
+        "${JSH_UI_CYAN}" "${JSH_UI_RESET}" >/dev/tty
+      printf '  %sF%s  Full\n      Reversible HOME, XDG, and VS Code config links\n' \
+        "${JSH_UI_CYAN}" "${JSH_UI_RESET}" >/dev/tty
+    else
+      printf '  %sL%s  Lite  Isolated shell without HOME config links\n' \
+        "${JSH_UI_CYAN}" "${JSH_UI_RESET}" >/dev/tty
+      printf '  %sF%s  Full  Reversible HOME, XDG, and VS Code config links\n' \
+        "${JSH_UI_CYAN}" "${JSH_UI_RESET}" >/dev/tty
+    fi
+    jsh_read_key 'Mode [L]: ' || exit 130
+    case "${JSH_KEY}" in
+      '' | l | L) JSH_MODE=lite ;;
+      f | F) JSH_MODE=full ;;
+      *) fail 'Selection must be L or F' ;;
+    esac
+    export JSH_MODE
+    return 0
+  fi
+
+  fail 'Noninteractive installation requires JSH_MODE=lite or JSH_MODE=full'
+}
+
+jsh_parse_options() {
+  JSH_ASSUME_YES=0
+  JSH_DRY_RUN=0
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --mode)
+        [ "$#" -ge 2 ] || fail 'Missing value for --mode'
+        case "$2" in
+          lite | runtime) JSH_MODE=lite ;;
+          full | install) JSH_MODE=full ;;
+          *) fail 'Mode must be lite or full' ;;
+        esac
+        shift
+        ;;
+      --mode=*)
+        case "${1#*=}" in
+          lite | runtime) JSH_MODE=lite ;;
+          full | install) JSH_MODE=full ;;
+          *) fail 'Mode must be lite or full' ;;
+        esac
+        ;;
+      --yes | -y) JSH_ASSUME_YES=1 ;;
+      --dry-run | -n) JSH_DRY_RUN=1 ;;
+      *)
+        jsh_ui_row error "Unknown installer option '$1'" stderr
+        printf 'Usage: jsh install [--mode lite|full] [-n|--dry-run] [-y|--yes]\n' >&2
+        jsh_ui_row note 'Run jsh install --dry-run to preview installation' stderr
+        exit 2
+        ;;
+    esac
+    shift
+  done
+}
+
+# The setup flow is deliberately data-driven.  Checks only describe the
+# state of a component; apply functions are called later, after the complete
+# plan has been rendered and the user has approved the applicable actions.
+jsh_component_registry() {
+  cat <<'JSH_COMPONENT_REGISTRY'
+host|Host prerequisites||jsh_component_check_host|verify host prerequisites|jsh_component_apply_host|both
+checkout|Git checkout|host|jsh_component_check_checkout|clone or fast-forward the checkout|jsh_component_apply_checkout|both
+xcode|Apple Command Line Tools|host|jsh_component_check_xcode|install Apple Command Line Tools when missing|jsh_component_apply_xcode|full
+brew|Homebrew / Linuxbrew|host xcode|jsh_component_check_brew|install Homebrew / Linuxbrew when missing|jsh_component_apply_brew|full
+core|Core dependencies|host checkout xcode brew|jsh_component_check_core|install formulas from Brewfile.core|jsh_component_apply_core|full
+vendor|Submodules and vendored assets|host checkout|jsh_component_check_vendor|initialize submodules and restore vendored assets|jsh_component_apply_vendor|full
+launcher|Launcher|host checkout|jsh_component_check_launcher|link the jsh launcher safely|jsh_component_apply_launcher|both
+config|Managed configuration|host checkout vendor launcher|jsh_component_check_config|link HOME, XDG, and VS Code configuration safely|jsh_component_apply_config|full
+JSH_COMPONENT_REGISTRY
+}
+
+jsh_component_mode_allowed() {
+  case "$1" in
+    both) return 0 ;;
+    full) [ "${JSH_MODE}" = full ] ;;
+    *) return 1 ;;
+  esac
+}
+
+jsh_component_set() {
+  component_name=$1
+  component_state=$2
+  component_detail=$3
+  component_action=${4:-}
+  case "${component_name}" in
+    host)
+      JSH_STATE_host=${component_state}
+      JSH_DETAIL_host=${component_detail}
+      JSH_ACTION_host=${component_action}
+      ;;
+    checkout)
+      JSH_STATE_checkout=${component_state}
+      JSH_DETAIL_checkout=${component_detail}
+      JSH_ACTION_checkout=${component_action}
+      ;;
+    xcode)
+      JSH_STATE_xcode=${component_state}
+      JSH_DETAIL_xcode=${component_detail}
+      JSH_ACTION_xcode=${component_action}
+      ;;
+    brew)
+      JSH_STATE_brew=${component_state}
+      JSH_DETAIL_brew=${component_detail}
+      JSH_ACTION_brew=${component_action}
+      ;;
+    core)
+      JSH_STATE_core=${component_state}
+      JSH_DETAIL_core=${component_detail}
+      JSH_ACTION_core=${component_action}
+      ;;
+    vendor)
+      JSH_STATE_vendor=${component_state}
+      JSH_DETAIL_vendor=${component_detail}
+      JSH_ACTION_vendor=${component_action}
+      ;;
+    launcher)
+      JSH_STATE_launcher=${component_state}
+      JSH_DETAIL_launcher=${component_detail}
+      JSH_ACTION_launcher=${component_action}
+      ;;
+    config)
+      JSH_STATE_config=${component_state}
+      JSH_DETAIL_config=${component_detail}
+      JSH_ACTION_config=${component_action}
+      ;;
+  esac
+}
+
+jsh_component_state() {
+  case "$1" in
+    host) printf '%s\n' "${JSH_STATE_host:-skipped}" ;;
+    checkout) printf '%s\n' "${JSH_STATE_checkout:-skipped}" ;;
+    xcode) printf '%s\n' "${JSH_STATE_xcode:-skipped}" ;;
+    brew) printf '%s\n' "${JSH_STATE_brew:-skipped}" ;;
+    core) printf '%s\n' "${JSH_STATE_core:-skipped}" ;;
+    vendor) printf '%s\n' "${JSH_STATE_vendor:-skipped}" ;;
+    launcher) printf '%s\n' "${JSH_STATE_launcher:-skipped}" ;;
+    config) printf '%s\n' "${JSH_STATE_config:-skipped}" ;;
+  esac
+}
+
+jsh_component_detail() {
+  case "$1" in
+    host) printf '%s\n' "${JSH_DETAIL_host:-}" ;;
+    checkout) printf '%s\n' "${JSH_DETAIL_checkout:-}" ;;
+    xcode) printf '%s\n' "${JSH_DETAIL_xcode:-}" ;;
+    brew) printf '%s\n' "${JSH_DETAIL_brew:-}" ;;
+    core) printf '%s\n' "${JSH_DETAIL_core:-}" ;;
+    vendor) printf '%s\n' "${JSH_DETAIL_vendor:-}" ;;
+    launcher) printf '%s\n' "${JSH_DETAIL_launcher:-}" ;;
+    config) printf '%s\n' "${JSH_DETAIL_config:-}" ;;
+  esac
+}
+
+jsh_component_action() {
+  case "$1" in
+    host) printf '%s\n' "${JSH_ACTION_host:-}" ;;
+    checkout) printf '%s\n' "${JSH_ACTION_checkout:-}" ;;
+    xcode) printf '%s\n' "${JSH_ACTION_xcode:-}" ;;
+    brew) printf '%s\n' "${JSH_ACTION_brew:-}" ;;
+    core) printf '%s\n' "${JSH_ACTION_core:-}" ;;
+    vendor) printf '%s\n' "${JSH_ACTION_vendor:-}" ;;
+    launcher) printf '%s\n' "${JSH_ACTION_launcher:-}" ;;
+    config) printf '%s\n' "${JSH_ACTION_config:-}" ;;
+  esac
+}
+
+jsh_component_set_approved() {
+  case "$1" in
+    host) JSH_APPROVED_host=$2 ;;
+    checkout) JSH_APPROVED_checkout=$2 ;;
+    xcode) JSH_APPROVED_xcode=$2 ;;
+    brew) JSH_APPROVED_brew=$2 ;;
+    core) JSH_APPROVED_core=$2 ;;
+    vendor) JSH_APPROVED_vendor=$2 ;;
+    launcher) JSH_APPROVED_launcher=$2 ;;
+    config) JSH_APPROVED_config=$2 ;;
+  esac
+}
+
+jsh_component_approved() {
+  case "$1" in
+    host) [ "${JSH_APPROVED_host:-0}" = 1 ] ;;
+    checkout) [ "${JSH_APPROVED_checkout:-0}" = 1 ] ;;
+    xcode) [ "${JSH_APPROVED_xcode:-0}" = 1 ] ;;
+    brew) [ "${JSH_APPROVED_brew:-0}" = 1 ] ;;
+    core) [ "${JSH_APPROVED_core:-0}" = 1 ] ;;
+    vendor) [ "${JSH_APPROVED_vendor:-0}" = 1 ] ;;
+    launcher) [ "${JSH_APPROVED_launcher:-0}" = 1 ] ;;
+    config) [ "${JSH_APPROVED_config:-0}" = 1 ] ;;
+    *) return 1 ;;
+  esac
+}
+
+jsh_component_set_succeeded() {
+  case "$1" in
+    host) JSH_SUCCEEDED_host=$2 ;;
+    checkout) JSH_SUCCEEDED_checkout=$2 ;;
+    xcode) JSH_SUCCEEDED_xcode=$2 ;;
+    brew) JSH_SUCCEEDED_brew=$2 ;;
+    core) JSH_SUCCEEDED_core=$2 ;;
+    vendor) JSH_SUCCEEDED_vendor=$2 ;;
+    launcher) JSH_SUCCEEDED_launcher=$2 ;;
+    config) JSH_SUCCEEDED_config=$2 ;;
+  esac
+}
+
+jsh_component_succeeded() {
+  case "$1" in
+    host) [ "${JSH_SUCCEEDED_host:-0}" = 1 ] ;;
+    checkout) [ "${JSH_SUCCEEDED_checkout:-0}" = 1 ] ;;
+    xcode) [ "${JSH_SUCCEEDED_xcode:-0}" = 1 ] ;;
+    brew) [ "${JSH_SUCCEEDED_brew:-0}" = 1 ] ;;
+    core) [ "${JSH_SUCCEEDED_core:-0}" = 1 ] ;;
+    vendor) [ "${JSH_SUCCEEDED_vendor:-0}" = 1 ] ;;
+    launcher) [ "${JSH_SUCCEEDED_launcher:-0}" = 1 ] ;;
+    config) [ "${JSH_SUCCEEDED_config:-0}" = 1 ] ;;
+    *) return 1 ;;
+  esac
+}
+
+jsh_component_is_actionable() {
+  case "$1" in
+    missing | changed | planned) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+jsh_component_dependencies_allowed() {
+  JSH_DEPENDENCY_REASON=
+  for dependency_name in $1; do
+    dependency_state=$(jsh_component_state "${dependency_name}")
+    case "${dependency_state}" in
+      error | skipped)
+        JSH_DEPENDENCY_REASON="${dependency_name} is ${dependency_state}"
+        return 1
+        ;;
+    esac
+  done
+  return 0
+}
+
+jsh_component_dependencies_checkable() {
+  JSH_DEPENDENCY_REASON=
+  for dependency_name in $1; do
+    dependency_state=$(jsh_component_state "${dependency_name}")
+    case "${dependency_state}" in
+      skipped)
+        JSH_DEPENDENCY_REASON="${dependency_name} was skipped"
+        return 1
+        ;;
+      error)
+        case "${dependency_name}" in
+          host)
+            JSH_DEPENDENCY_REASON="${dependency_name} is ${dependency_state}"
+            return 1
+            ;;
+          *) ;;
+        esac
+        ;;
+    esac
+  done
+  return 0
+}
+
+jsh_component_dependencies_ready_to_apply() {
+  JSH_DEPENDENCY_REASON=
+  for dependency_name in $1; do
+    if ! jsh_component_approved "${dependency_name}" || ! jsh_component_succeeded "${dependency_name}"; then
+      JSH_DEPENDENCY_REASON="${dependency_name} was not completed"
+      return 1
+    fi
+  done
+  return 0
+}
+
+jsh_component_initialize() {
+  for component_name in host checkout xcode brew core vendor launcher config; do
+    jsh_component_set "${component_name}" skipped 'not evaluated' ''
+    jsh_component_set_approved "${component_name}" 0
+    jsh_component_set_succeeded "${component_name}" 0
+  done
+}
+
+jsh_component_seed_current() {
+  while IFS='|' read -r component_name component_display component_dependencies component_check _component_plan component_apply component_modes; do
+    jsh_component_mode_allowed "${component_modes}" || continue
+    component_state=$(jsh_component_state "${component_name}")
+    case "${component_state}" in
+      current | warning)
+        jsh_component_set_approved "${component_name}" 1
+        jsh_component_set_succeeded "${component_name}" 1
+        ;;
+    esac
+  done <<JSH_COMPONENTS
+$(jsh_component_registry)
+JSH_COMPONENTS
+}
+
+jsh_component_core_formulas() {
+  core_file="${JSH_SOURCE_ROOT}/config/homebrew/Brewfile.core"
+  JSH_CORE_FORMULAS=
+  if [ -r "${core_file}" ]; then
+    JSH_CORE_FORMULAS=$(sed -n 's/^[[:space:]]*brew[[:space:]]*"\([^"]*\)".*/\1/p' "${core_file}")
+  fi
+  [ -n "${JSH_CORE_FORMULAS}" ] || JSH_CORE_FORMULAS='fzf go-task jq just'
+  core_has_zsh=0
+  for formula_name in ${JSH_CORE_FORMULAS}; do
+    [ "${formula_name}" = zsh ] && core_has_zsh=1
+  done
+  [ "${core_has_zsh}" = 1 ] || JSH_CORE_FORMULAS="${JSH_CORE_FORMULAS} zsh"
+  JSH_CORE_MISSING_FORMULAS=
+  for formula_name in ${JSH_CORE_FORMULAS}; do
+    case "${formula_name}" in
+      go-task) core_command_name=task ;;
+      *) core_command_name=${formula_name} ;;
+    esac
+    if ! command -v "${core_command_name}" >/dev/null 2>&1; then
+      JSH_CORE_MISSING_FORMULAS="${JSH_CORE_MISSING_FORMULAS}${JSH_CORE_MISSING_FORMULAS:+ }${formula_name}"
+    fi
+  done
+}
+
+jsh_component_vendor_needs_network() {
+  [ "${JSH_MODE}" = full ] || return 1
+  [ -d "${install_dir}" ] || return 0
+  [ -r "${install_dir}/.gitmodules" ] || return 0
+  submodule_paths=$(git -C "${install_dir}" config --file .gitmodules --get-regexp '\.path$' 2>/dev/null | sed 's/^[^ ]* //') || true
+  for submodule_path in ${submodule_paths}; do
+    submodule_status=$(git -C "${install_dir}" submodule status -- "${submodule_path}" 2>/dev/null || true)
+    case "${submodule_status}" in
+      -* | +* | U*) return 0 ;;
+    esac
+    [ -d "${install_dir}/${submodule_path}" ] || return 0
+  done
+  for vendored_asset in \
+    vendor/fzf-tab/fzf-tab.plugin.zsh \
+    vendor/zsh-completions/src \
+    vendor/zsh-plugins/zsh-autosuggestions.zsh \
+    vendor/vim-config/autoload/plug.vim; do
+    [ -e "${install_dir}/${vendored_asset}" ] || return 0
+  done
+  return 1
+}
+
+jsh_component_local_upstream() {
+  JSH_CHECKOUT_REMOTE=
+  JSH_CHECKOUT_REF=
+  checkout_branch=$(git -C "${install_dir}" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+  [ -n "${checkout_branch}" ] || return 1
+  checkout_remote=$(git -C "${install_dir}" config --get \
+    "branch.${checkout_branch}.remote" 2>/dev/null || true)
+  checkout_merge_ref=$(git -C "${install_dir}" config --get \
+    "branch.${checkout_branch}.merge" 2>/dev/null || true)
+  [ -n "${checkout_remote}" ] || checkout_remote=origin
+  [ "${checkout_remote}" != . ] || return 1
+  git -C "${install_dir}" remote get-url "${checkout_remote}" >/dev/null 2>&1 || return 1
+  if [ -n "${checkout_merge_ref}" ]; then
+    checkout_ref=${checkout_merge_ref#refs/heads/}
+  else
+    checkout_ref=${checkout_branch}
+  fi
+  [ -n "${checkout_ref}" ] || return 1
+  JSH_CHECKOUT_REMOTE=${checkout_remote}
+  JSH_CHECKOUT_REF=${checkout_ref}
+  return 0
+}
+
+jsh_component_network_needed() {
+  JSH_NETWORK_NEEDED=0
+  if [ "${JSH_NETWORK_CHECK:-auto}" = always ]; then
+    JSH_NETWORK_NEEDED=1
+  elif [ "${JSH_NETWORK_CHECK:-auto}" = never ]; then
+    JSH_NETWORK_NEEDED=0
+  elif [ -z "${local_checkout}" ]; then
+    case "${install_repo}" in
+      /* | ./* | ../* | file:*) ;;
+      *) JSH_NETWORK_NEEDED=1 ;;
+    esac
+    if [ "${JSH_MODE}" = full ] \
+      && { [ -n "${JSH_CORE_MISSING_FORMULAS}" ] || [ ! -d "${install_dir}" ]; }; then
+      JSH_NETWORK_NEEDED=1
+    fi
+  elif [ -n "${local_checkout}" ]; then
+    local_checkout_dirty=$(git -C "${install_dir}" status --porcelain \
+      --untracked-files=all --ignore-submodules=none 2>/dev/null || true)
+    if [ -z "${local_checkout_dirty}" ] && jsh_component_local_upstream; then
+      JSH_NETWORK_NEEDED=1
+    fi
+    if [ "${JSH_MODE}" = full ]; then
+      if [ -n "${JSH_CORE_MISSING_FORMULAS}" ]; then
+        JSH_NETWORK_NEEDED=1
+      fi
+      if jsh_component_vendor_needs_network; then
+        JSH_NETWORK_NEEDED=1
+      fi
+    fi
+  elif [ "${JSH_MODE}" = full ]; then
+    if [ -n "${JSH_CORE_MISSING_FORMULAS}" ]; then
+      JSH_NETWORK_NEEDED=1
+    fi
+    if jsh_component_vendor_needs_network; then
+      JSH_NETWORK_NEEDED=1
+    fi
+  fi
+  return 0
+}
+
+jsh_component_add_host_error() {
+  JSH_HOST_ERRORS="${JSH_HOST_ERRORS}${JSH_HOST_ERRORS:+; }$1"
+}
+
+jsh_component_install_dir_safe() {
+  if [ -n "${local_checkout}" ] && [ "${install_dir}" = "${local_checkout}" ]; then
+    return 0
+  fi
+  case "${install_dir}" in
+    '' | / | "${HOME}") return 1 ;;
+    "${HOME}"/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+jsh_component_parent_writable() {
+  write_path=$(dirname "$1")
+  while [ ! -d "${write_path}" ]; do
+    [ "${write_path}" != / ] || return 1
+    next_write_path=$(dirname "${write_path}")
+    [ "${next_write_path}" != "${write_path}" ] || return 1
+    write_path=${next_write_path}
+  done
+  [ -w "${write_path}" ]
+}
+
+jsh_component_check_host() {
+  JSH_HOST_ERRORS=
+  [ -n "${HOME:-}" ] || jsh_component_add_host_error 'HOME is not set'
+  for required_command in bash git curl uname id; do
+    command -v "${required_command}" >/dev/null 2>&1 \
+      || jsh_component_add_host_error "${required_command} is unavailable"
+  done
+
+  host_platform=$(uname -s 2>/dev/null || printf unknown)
+  case "${host_platform}" in
+    Darwin | Linux) ;;
+    *) jsh_component_add_host_error "unsupported platform: ${host_platform}" ;;
+  esac
+  if command -v id >/dev/null 2>&1 && [ "$(id -u)" -eq 0 ]; then
+    jsh_component_add_host_error 'do not run the installer as root'
+  fi
+  jsh_component_install_dir_safe || jsh_component_add_host_error "unsafe install directory: ${install_dir}"
+  [ -d "${HOME:-}" ] && [ -w "${HOME}" ] \
+    || jsh_component_add_host_error 'HOME is not writable'
+  if [ ! -e "${install_dir}" ] && [ ! -L "${install_dir}" ]; then
+    jsh_component_parent_writable "${install_dir}" \
+      || jsh_component_add_host_error "install parent is not writable: $(dirname "${install_dir}")"
+  fi
+
+  if [ "${JSH_NETWORK_NEEDED}" = 1 ] && [ "${JSH_NETWORK_CHECK:-auto}" != never ] \
+    && command -v curl >/dev/null 2>&1; then
+    jsh_spinner_start 'Checking network access'
+    if curl -fsSL --max-time "${JSH_NETWORK_TIMEOUT:-5}" \
+      "${JSH_NETWORK_URL:-https://github.com}" >/dev/null 2>&1; then
+      jsh_spinner_stop success 'Network access is available'
+    else
+      jsh_spinner_stop error 'Network access is unavailable'
+      jsh_component_add_host_error 'network access is unavailable'
+    fi
+  fi
+
+  if [ -n "${JSH_HOST_ERRORS}" ]; then
+    jsh_component_set host error "${JSH_HOST_ERRORS}" ''
+  elif [ "${JSH_NETWORK_NEEDED}" = 1 ]; then
+    jsh_component_set host current 'bash, git, curl, platform, permissions, and network are ready' ''
+  else
+    jsh_component_set host current 'bash, git, curl, platform, and permissions are ready; network is not required' ''
+  fi
+}
+
+jsh_component_apply_host() {
+  return 0
+}
+
+jsh_component_check_checkout() {
+  JSH_CHECKOUT_ACTION=none
+  if [ -n "${local_checkout}" ]; then
+    if [ ! -d "${install_dir}" ]; then
+      jsh_component_set checkout error "local checkout is missing: ${install_dir}" ''
+      return 0
+    fi
+    checkout_root=$(git -C "${install_dir}" rev-parse --show-toplevel 2>/dev/null || true)
+    if [ -z "${checkout_root}" ]; then
+      jsh_component_set checkout error 'local setup source is not a Git checkout' ''
+      return 0
+    fi
+    checkout_root=$(CDPATH='' cd -- "${checkout_root}" 2>/dev/null && pwd -P || true)
+    install_root=$(CDPATH='' cd -- "${install_dir}" 2>/dev/null && pwd -P || true)
+    if [ "${checkout_root}" != "${install_root}" ]; then
+      jsh_component_set checkout error 'local setup source is not the checkout root' ''
+      return 0
+    fi
+    dirty_checkout=$(git -C "${install_dir}" status --porcelain --untracked-files=all --ignore-submodules=none)
+    if [ -n "${dirty_checkout}" ]; then
+      jsh_component_set checkout warning \
+        'local checkout has local changes; using current files without updating' ''
+      return 0
+    fi
+    if ! jsh_component_local_upstream; then
+      jsh_component_set checkout current \
+        "using local checkout $(jsh_display_path "${install_dir}"); no upstream is configured" ''
+      return 0
+    fi
+    remote_ref_lines=$(git -C "${install_dir}" ls-remote "${JSH_CHECKOUT_REMOTE}" \
+      "refs/heads/${JSH_CHECKOUT_REF}" 2>/dev/null || true)
+    remote_ref_hash=$(printf '%s\n' "${remote_ref_lines}" | awk \
+      -v ref="refs/heads/${JSH_CHECKOUT_REF}" '$2 == ref { print $1; exit }' || true)
+    if [ -z "${remote_ref_hash}" ]; then
+      jsh_component_set checkout warning \
+        "could not verify upstream ${JSH_CHECKOUT_REMOTE}/${JSH_CHECKOUT_REF}; using current checkout" ''
+      return 0
+    fi
+    checkout_head=$(git -C "${install_dir}" rev-parse HEAD 2>/dev/null || true)
+    if [ "${checkout_head}" = "${remote_ref_hash}" ]; then
+      jsh_component_set checkout current \
+        "local checkout is current with ${JSH_CHECKOUT_REMOTE}/${JSH_CHECKOUT_REF}" ''
+    else
+      JSH_CHECKOUT_ACTION=update
+      jsh_component_set checkout changed \
+        "${JSH_CHECKOUT_REMOTE}/${JSH_CHECKOUT_REF} has an update available" \
+        "fast-forward local checkout to ${JSH_CHECKOUT_REMOTE}/${JSH_CHECKOUT_REF}"
+    fi
+    return 0
+  fi
+
+  if [ ! -e "${install_dir}" ] && [ ! -L "${install_dir}" ]; then
+    JSH_CHECKOUT_ACTION=clone
+    jsh_component_set checkout missing "checkout will be created at $(jsh_display_path "${install_dir}")" \
+      "clone ${install_repo_display} at ${install_ref}"
+    return 0
+  fi
+  if [ ! -d "${install_dir}" ]; then
+    jsh_component_set checkout error "install path is not a directory: ${install_dir}" ''
+    return 0
+  fi
+
+  checkout_root=$(git -C "${install_dir}" rev-parse --show-toplevel 2>/dev/null || true)
+  if [ -z "${checkout_root}" ]; then
+    jsh_component_set checkout error "existing path is not a Git checkout: ${install_dir}" ''
+    return 0
+  fi
+  checkout_root=$(CDPATH='' cd -- "${checkout_root}" 2>/dev/null && pwd -P || true)
+  install_root=$(CDPATH='' cd -- "${install_dir}" 2>/dev/null && pwd -P || true)
+  if [ "${checkout_root}" != "${install_root}" ]; then
+    jsh_component_set checkout error 'install path is not the checkout root' ''
+    return 0
+  fi
+
+  checkout_origin=$(git -C "${install_dir}" remote get-url origin 2>/dev/null || true)
+  if [ -z "${checkout_origin}" ]; then
+    jsh_component_set checkout error 'existing checkout has no origin remote' ''
+    return 0
+  fi
+  if [ "${checkout_origin}" != "${install_repo}" ]; then
+    jsh_component_set checkout error "checkout origin does not match ${install_repo_display}" ''
+    return 0
+  fi
+  dirty_checkout=$(git -C "${install_dir}" status --porcelain --untracked-files=all --ignore-submodules=none)
+  if [ -n "${dirty_checkout}" ]; then
+    jsh_component_set checkout warning \
+      'existing checkout has local changes; using current files without updating' ''
+    return 0
+  fi
+  if [ "${JSH_MODE}" = full ] \
+    && ! git -C "${install_dir}" submodule foreach --quiet --recursive \
+      'test -z "$(git status --porcelain --untracked-files=all)"' >/dev/null 2>&1; then
+    jsh_component_set checkout warning \
+      'a submodule has local changes; using current files without updating' ''
+    return 0
+  fi
+
+  checkout_branch=$(git -C "${install_dir}" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+  checkout_ref=${install_ref#refs/heads/}
+  checkout_ref=${checkout_ref#refs/tags/}
+  if [ -z "${checkout_branch}" ] || [ "${checkout_branch}" != "${checkout_ref}" ]; then
+    jsh_component_set checkout error "checkout branch/ref does not match ${install_ref}" ''
+    return 0
+  fi
+
+  remote_ref_lines=$(git -C "${install_dir}" ls-remote origin \
+    "refs/heads/${checkout_ref}" "refs/tags/${checkout_ref}" 2>/dev/null || true)
+  remote_ref_hash=$(printf '%s\n' "${remote_ref_lines}" | awk \
+    -v branch="refs/heads/${checkout_ref}" -v tag="refs/tags/${checkout_ref}" \
+    '$2 == branch { print $1; found=1; exit } $2 == tag { print $1; found=1; exit }')
+  if [ -z "${remote_ref_hash}" ]; then
+    jsh_component_set checkout error "origin does not provide ref ${install_ref}" ''
+    return 0
+  fi
+  JSH_CHECKOUT_REMOTE=origin
+  JSH_CHECKOUT_REF=${checkout_ref}
+  checkout_head=$(git -C "${install_dir}" rev-parse HEAD 2>/dev/null || true)
+  if [ "${checkout_head}" = "${remote_ref_hash}" ]; then
+    jsh_component_set checkout current "${install_ref} is current at $(printf '%s' "${checkout_head}" | cut -c1-12)" ''
+  else
+    JSH_CHECKOUT_ACTION=update
+    jsh_component_set checkout changed "${install_ref} has an update available" 'fast-forward checkout to origin'
+  fi
+}
+
+jsh_xcode_ready_for_component() {
+  [ "$(uname -s 2>/dev/null)" != Darwin ] || {
+    command -v xcode-select >/dev/null 2>&1 && xcode-select -p >/dev/null 2>&1
+  }
+}
+
+jsh_component_check_xcode() {
+  if [ "$(uname -s 2>/dev/null)" != Darwin ]; then
+    jsh_component_set xcode current 'not required on this platform' ''
+  elif jsh_xcode_ready_for_component; then
+    jsh_component_set xcode current 'Apple Command Line Tools are ready' ''
+  else
+    jsh_component_set xcode missing 'Apple Command Line Tools are not installed' 'install Apple Command Line Tools'
+  fi
+}
+
+jsh_brew_path_for_component() {
+  brew_search_paths=${JSH_BREW_PATHS:-'/opt/homebrew/bin /usr/local/bin /home/linuxbrew/.linuxbrew/bin'}
+  for brew_bin in ${brew_search_paths}; do
+    if [ -x "${brew_bin}/brew" ]; then
+      case ":${PATH:-}:" in
+        *":${brew_bin}:"*) ;;
+        *)
+          PATH="${brew_bin}${PATH:+:${PATH}}"
+          export PATH
+          ;;
+      esac
+      break
+    fi
+  done
+  if command -v brew >/dev/null 2>&1; then
+    brew_shellenv=$(brew shellenv 2>/dev/null || true)
+    [ -z "${brew_shellenv}" ] || eval "${brew_shellenv}"
+  fi
+}
+
+jsh_component_check_brew() {
+  jsh_brew_path_for_component
+  jsh_component_core_formulas
+  if command -v brew >/dev/null 2>&1; then
+    JSH_BREW_AVAILABLE=1
+    brew_display=$(command -v brew)
+    jsh_component_set brew current "available at ${brew_display}; PATH initialized" ''
+  elif [ -z "${JSH_CORE_MISSING_FORMULAS}" ]; then
+    JSH_BREW_AVAILABLE=0
+    jsh_component_set brew current 'not required; core commands are already available' ''
+  else
+    JSH_BREW_AVAILABLE=0
+    jsh_component_set brew missing 'Homebrew / Linuxbrew is not available' 'install Homebrew / Linuxbrew'
+  fi
+}
+
+jsh_component_check_core() {
+  if [ "$(jsh_component_state checkout)" = changed ]; then
+    jsh_component_set core planned 'checkout update may change Brewfile.core' \
+      're-read Brewfile.core and install missing packages after checkout update'
+  elif [ -z "${JSH_CORE_MISSING_FORMULAS}" ]; then
+    jsh_component_set core current 'fzf, task, jq, just, and zsh are available' ''
+  elif [ "${JSH_BREW_AVAILABLE}" = 1 ]; then
+    jsh_component_set core missing "missing: ${JSH_CORE_MISSING_FORMULAS}" \
+      "install core packages from Brewfile.core"
+  else
+    jsh_component_set core planned "missing: ${JSH_CORE_MISSING_FORMULAS}" \
+      'install core packages after Homebrew / Linuxbrew is ready'
+  fi
+}
+
+jsh_component_check_vendor() {
+  JSH_VENDOR_MISSING=
+  JSH_VENDOR_ERRORS=
+  if [ "$(jsh_component_state checkout)" = changed ]; then
+    jsh_component_set vendor planned 'checkout update may change vendored assets' \
+      'initialize submodules and restore vendored assets after checkout update'
+    return 0
+  fi
+  if [ ! -d "${install_dir}" ]; then
+    jsh_component_set vendor planned 'checkout must be ready first' 'initialize submodules and verify vendored assets'
+    return 0
+  fi
+  if [ ! -r "${install_dir}/.gitmodules" ]; then
+    jsh_component_set vendor error 'checkout has no .gitmodules file' ''
+    return 0
+  fi
+  submodule_paths=$(git -C "${install_dir}" config --file .gitmodules --get-regexp '\.path$' 2>/dev/null | sed 's/^[^ ]* //') || true
+  for submodule_path in ${submodule_paths}; do
+    submodule_status=$(git -C "${install_dir}" submodule status -- "${submodule_path}" 2>/dev/null || true)
+    case "${submodule_status}" in
+      -*) JSH_VENDOR_MISSING="${JSH_VENDOR_MISSING}${JSH_VENDOR_MISSING:+, }${submodule_path}" ;;
+      +* | U*) JSH_VENDOR_ERRORS="${JSH_VENDOR_ERRORS}${JSH_VENDOR_ERRORS:+, }${submodule_path} has local changes" ;;
+      *)
+        if [ ! -d "${install_dir}/${submodule_path}" ]; then
+          JSH_VENDOR_MISSING="${JSH_VENDOR_MISSING}${JSH_VENDOR_MISSING:+, }${submodule_path}"
+        elif ! git -C "${install_dir}/${submodule_path}" rev-parse --git-dir >/dev/null 2>&1; then
+          JSH_VENDOR_MISSING="${JSH_VENDOR_MISSING}${JSH_VENDOR_MISSING:+, }${submodule_path}"
+        elif [ -n "$(git -C "${install_dir}/${submodule_path}" status --porcelain --untracked-files=all)" ]; then
+          JSH_VENDOR_ERRORS="${JSH_VENDOR_ERRORS}${JSH_VENDOR_ERRORS:+, }${submodule_path} has local changes"
+        fi
+        ;;
+    esac
+  done
+  for vendored_asset in \
+    vendor/fzf-tab/fzf-tab.plugin.zsh \
+    vendor/zsh-completions/src \
+    vendor/zsh-plugins/zsh-autosuggestions.zsh \
+    vendor/vim-config/autoload/plug.vim; do
+    [ -e "${install_dir}/${vendored_asset}" ] \
+      || JSH_VENDOR_MISSING="${JSH_VENDOR_MISSING}${JSH_VENDOR_MISSING:+, }${vendored_asset}"
+  done
+  if [ -n "${JSH_VENDOR_ERRORS}" ]; then
+    jsh_component_set vendor error "${JSH_VENDOR_ERRORS}" ''
+  elif [ -n "${JSH_VENDOR_MISSING}" ]; then
+    jsh_component_set vendor missing "missing: ${JSH_VENDOR_MISSING}" 'initialize submodules and restore vendored assets'
+  else
+    jsh_component_set vendor current 'submodules and vendored assets are ready' ''
+  fi
+}
+
+jsh_component_resolve_path() {
+  resolve_parent=$(CDPATH='' cd -- "$(dirname "$1")" 2>/dev/null && pwd -P) || return 1
+  printf '%s/%s\n' "${resolve_parent}" "$(basename "$1")"
+}
+
+jsh_component_link_target() {
+  link_target=$(readlink "$1") || return 1
+  case "${link_target}" in
+    /*) jsh_component_resolve_path "${link_target}" ;;
+    *) jsh_component_resolve_path "$(dirname "$1")/${link_target}" ;;
+  esac
+}
+
+jsh_component_link_points_to() {
+  [ -L "$2" ] || return 1
+  link_source_path=$(jsh_component_resolve_path "$1") || return 1
+  link_target_path=$(jsh_component_link_target "$2") || return 1
+  [ "${link_source_path}" = "${link_target_path}" ]
+}
+
+jsh_component_state_has_link() {
+  [ -r "${JSH_LINK_STATE}" ] || return 1
+  while IFS='|' read -r managed_source managed_destination managed_backup || [ -n "${managed_source}${managed_destination}${managed_backup}" ]; do
+    [ "${managed_source}" = "$1" ] && [ "${managed_destination}" = "$2" ] && return 0
+  done <"${JSH_LINK_STATE}"
+  return 1
+}
+
+jsh_component_vscode_user_dir() {
+  case "$(uname -s 2>/dev/null)" in
+    Darwin) printf '%s\n' "${HOME}/Library/Application Support/Code/User" ;;
+    *) printf '%s\n' "${XDG_CONFIG_HOME:-${HOME}/.config}/Code/User" ;;
+  esac
+}
+
+jsh_component_install_entries() {
+  for relative_path in .zshrc .bashrc .bash_profile .gitconfig .inputrc .tmux.conf \
+    .vimrc .editorconfig .shellcheckrc .markdownlint.jsonc .prettierrc.json \
+    .czrc .ripgreprc; do
+    source_path="${install_dir}/dotfiles/${relative_path}"
+    if [ -e "${source_path}" ] || [ -L "${source_path}" ]; then
+      printf '%s|%s\n' "${source_path}" "${HOME}/${relative_path}"
+    fi
+  done
+  config_source="${install_dir}/dotfiles/.config"
+  if [ -d "${config_source}" ]; then
+    for config_child in "${config_source}"/*; do
+      [ -e "${config_child}" ] || [ -L "${config_child}" ] || continue
+      printf '%s|%s\n' "${config_child}" "${XDG_CONFIG_HOME:-${HOME}/.config}/${config_child##*/}"
+    done
+  fi
+  vscode_source="${install_dir}/dotfiles/.vscode/user"
+  vscode_destination=$(jsh_component_vscode_user_dir)
+  if [ -d "${vscode_source}" ]; then
+    for vscode_child in "${vscode_source}"/*; do
+      [ -e "${vscode_child}" ] || [ -L "${vscode_child}" ] || continue
+      printf '%s|%s\n' "${vscode_child}" "${vscode_destination}/${vscode_child##*/}"
+    done
+  fi
+}
+
+jsh_component_choose_launcher() {
+  if [ -n "${JSH_BIN_DIR:-}" ]; then
+    case "${JSH_BIN_DIR}" in
+      '' | /) ;;
+      /*)
+        JSH_LAUNCHER_DESTINATION="${JSH_BIN_DIR%/}/jsh"
+        return 0
+        ;;
+      *)
+        JSH_LAUNCHER_DESTINATION=
+        return 1
+        ;;
+    esac
+  fi
+  system_launcher=/usr/local/bin/jsh
+  if jsh_component_link_points_to "${install_dir}/bin/jsh" "${system_launcher}" \
+    || { [ ! -e "${system_launcher}" ] && [ ! -L "${system_launcher}" ] \
+      && jsh_component_parent_writable "${system_launcher}"; } \
+    || { [ ! -e "${system_launcher}" ] && [ ! -L "${system_launcher}" ] \
+      && command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; }; then
+    JSH_LAUNCHER_DESTINATION=${system_launcher}
+  else
+    JSH_LAUNCHER_DESTINATION="${HOME}/.local/bin/jsh"
+  fi
+  return 0
+}
+
+jsh_component_check_launcher() {
+  if ! jsh_component_choose_launcher; then
+    jsh_component_set launcher error 'JSH_BIN_DIR must be an absolute non-root path' ''
+    return 0
+  fi
+  launcher_mode=
+  [ ! -r "${JSH_MODE_FILE}" ] || IFS= read -r launcher_mode <"${JSH_MODE_FILE}"
+  if [ "${JSH_MODE}" = lite ] && [ "${launcher_mode}" = install ]; then
+    jsh_component_set launcher error 'managed full-mode links must be uninstalled before switching to lite mode' ''
+    return 0
+  fi
+  launcher_source="${install_dir}/bin/jsh"
+  launcher_display=$(jsh_display_path "${JSH_LAUNCHER_DESTINATION}")
+  if [ "$(jsh_component_state checkout)" = changed ]; then
+    jsh_component_set launcher planned "${launcher_display} will be rechecked after checkout update" \
+      "reconcile launcher after checkout update"
+    return 0
+  fi
+  if [ ! -e "${launcher_source}" ] && [ ! -L "${launcher_source}" ]; then
+    jsh_component_set launcher planned "launcher source will be available after checkout" \
+      "link ${launcher_display}"
+  elif jsh_component_link_points_to "${launcher_source}" "${JSH_LAUNCHER_DESTINATION}"; then
+    if jsh_component_state_has_link "${launcher_source}" "${JSH_LAUNCHER_DESTINATION}"; then
+      if [ "${launcher_mode}" != "${install_mode}" ]; then
+        jsh_component_set launcher changed "${launcher_display} is linked; setup mode needs recording" \
+          "record ${JSH_MODE} mode"
+      else
+        jsh_component_set launcher current "${launcher_display} points to the checkout" ''
+      fi
+    else
+      jsh_component_set launcher changed "${launcher_display} is correct but unmanaged" 'record managed launcher state'
+    fi
+  elif [ -e "${JSH_LAUNCHER_DESTINATION}" ] || [ -L "${JSH_LAUNCHER_DESTINATION}" ]; then
+    jsh_component_set launcher changed "${launcher_display} points somewhere else" \
+      "backup existing launcher and link ${launcher_display}"
+  else
+    jsh_component_set launcher missing "${launcher_display} is not linked" "link ${launcher_display}"
+  fi
+}
+
+jsh_component_check_config() {
+  if [ "$(jsh_component_state checkout)" = changed ]; then
+    jsh_component_set config planned 'checkout update may change managed sources' \
+      'reconcile managed links after checkout update'
+    return 0
+  fi
+  if [ ! -d "${install_dir}/dotfiles" ]; then
+    jsh_component_set config planned 'managed sources will be available after checkout' \
+      'link managed HOME, XDG, and VS Code configuration'
+    return 0
+  fi
+  config_entries=$(jsh_component_install_entries)
+  config_entry_count=0
+  config_missing_count=0
+  config_changed_count=0
+  config_first_problem=
+  while IFS='|' read -r config_source_path config_destination_path; do
+    [ -n "${config_source_path}" ] || continue
+    config_entry_count=$((config_entry_count + 1))
+    if jsh_component_link_points_to "${config_source_path}" "${config_destination_path}"; then
+      if ! jsh_component_state_has_link "${config_source_path}" "${config_destination_path}"; then
+        config_changed_count=$((config_changed_count + 1))
+        [ -n "${config_first_problem}" ] || config_first_problem="${config_destination_path} is unmanaged"
+      fi
+    elif [ -e "${config_destination_path}" ] || [ -L "${config_destination_path}" ]; then
+      config_changed_count=$((config_changed_count + 1))
+      [ -n "${config_first_problem}" ] || config_first_problem="${config_destination_path} has an existing file"
+    else
+      config_missing_count=$((config_missing_count + 1))
+      [ -n "${config_first_problem}" ] || config_first_problem="${config_destination_path} is missing"
+    fi
+  done <<JSH_CONFIG_ENTRIES
+${config_entries}
+JSH_CONFIG_ENTRIES
+
+  if [ "${config_entry_count}" -eq 0 ]; then
+    jsh_component_set config error 'no managed configuration sources were found' ''
+  elif [ "${config_changed_count}" -gt 0 ]; then
+    jsh_component_set config changed "${config_first_problem}" \
+      'reconcile managed HOME, XDG, and VS Code links (back up existing files)'
+  elif [ "${config_missing_count}" -gt 0 ]; then
+    jsh_component_set config missing "${config_first_problem}" \
+      'link managed HOME, XDG, and VS Code configuration'
+  else
+    jsh_component_set config current 'managed HOME, XDG, and VS Code links are current' ''
+  fi
+}
+
+jsh_component_evaluate() {
+  while IFS='|' read -r component_name component_display component_dependencies component_check _component_plan component_apply component_modes; do
+    jsh_component_mode_allowed "${component_modes}" || continue
+    if ! jsh_component_dependencies_checkable "${component_dependencies}"; then
+      jsh_component_set "${component_name}" skipped "blocked: ${JSH_DEPENDENCY_REASON}" ''
+    elif ! "${component_check}"; then
+      jsh_component_set "${component_name}" error 'component check failed' ''
+    fi
+  done <<JSH_COMPONENTS
+$(jsh_component_registry)
+JSH_COMPONENTS
+}
+
+jsh_component_render_row() {
+  component_name=$1
+  component_display=$2
+  component_state=$(jsh_component_state "${component_name}")
+  component_detail=$(jsh_component_detail "${component_name}")
+  component_action=$(jsh_component_action "${component_name}")
+  case "${component_state}" in
+    missing | changed | planned)
+      [ -z "${component_action}" ] || component_detail="${component_detail}; ${component_action}"
+      ;;
+  esac
+  jsh_ui_init
+  jsh_ui_status "${component_state}"
+  [ "${JSH_UI_RICH}" = 1 ] || JSH_UI_MARK="[${JSH_UI_MARK}]"
+  jsh_ui_text "${component_detail}"
+  component_detail=${REPLY_TEXT}
+  printf '%s%s%s %-29s %s\n' \
+    "${JSH_UI_COLOR}" "${JSH_UI_MARK}" "${JSH_UI_RESET}" \
+    "${component_display}" "${component_detail}"
+}
+
+jsh_component_render_plan() {
+  if [ "${JSH_MODE}" = full ]; then
+    jsh_ui_heading 'Setup plan (full)'
+  else
+    jsh_ui_heading 'Setup plan (lite)'
+  fi
+  while IFS='|' read -r component_name component_display component_dependencies component_check _component_plan component_apply component_modes; do
+    jsh_component_mode_allowed "${component_modes}" || continue
+    jsh_component_render_row "${component_name}" "${component_display}"
+  done <<JSH_COMPONENTS
+$(jsh_component_registry)
+JSH_COMPONENTS
+}
+
+jsh_component_plan_has_errors() {
+  for component_name in host checkout xcode brew core vendor launcher config; do
+    case "$(jsh_component_state "${component_name}")" in
+      error)
+        JSH_PLAN_ERROR_COMPONENT=${component_name}
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
+jsh_component_refresh_checkout_dependents() {
+  jsh_component_core_formulas
+  if [ "${JSH_MODE}" = full ]; then
+    jsh_component_check_core
+    jsh_component_check_vendor
+  fi
+  jsh_component_check_launcher
+  if [ "${JSH_MODE}" = full ]; then
+    jsh_component_check_config
+  fi
+  jsh_component_seed_current
+  return 0
+}
+
+jsh_component_prompt() {
+  [ "${JSH_DRY_RUN}" = 1 ] && return 0
+  JSH_DECLINED=0
+  while IFS='|' read -r component_name component_display component_dependencies component_check _component_plan component_apply component_modes; do
+    jsh_component_mode_allowed "${component_modes}" || continue
+    component_state=$(jsh_component_state "${component_name}")
+    jsh_component_is_actionable "${component_state}" || continue
+    if ! jsh_component_dependencies_allowed "${component_dependencies}"; then
+      jsh_component_set "${component_name}" skipped "blocked: ${JSH_DEPENDENCY_REASON:-a dependency was not approved}" ''
+      jsh_ui_row warning "${component_display} skipped: ${JSH_DEPENDENCY_REASON:-a dependency was not approved}"
+      continue
+    fi
+    if [ "${JSH_ASSUME_YES}" = 1 ]; then
+      jsh_component_set_approved "${component_name}" 1
+      continue
+    fi
+    if ! [ -t 1 ] || ! [ -r /dev/tty ] || ! [ -w /dev/tty ]; then
+      fail 'Noninteractive setup requires --yes when a component needs changes'
+    fi
+    component_action=$(jsh_component_action "${component_name}")
+    prompt_verb=Apply
+    if [ "${component_name}" = checkout ] && [ "${JSH_CHECKOUT_ACTION}" = update ]; then
+      prompt_verb=Update
+    fi
+    jsh_read_key "${prompt_verb} ${component_display}? ${component_action} [y/N] " || exit 130
+    case "${JSH_KEY}" in
+      y | Y) jsh_component_set_approved "${component_name}" 1 ;;
+      *)
+        if [ "${component_name}" = checkout ] && [ "${JSH_CHECKOUT_ACTION}" = update ]; then
+          JSH_CHECKOUT_ACTION=none
+          jsh_component_set checkout warning 'upstream update declined; using current checkout' ''
+          jsh_component_set_approved checkout 1
+          jsh_component_set_succeeded checkout 1
+          jsh_ui_row warning 'Keeping the current Git checkout'
+          jsh_component_refresh_checkout_dependents
+        else
+          JSH_DECLINED=1
+          jsh_component_set "${component_name}" skipped 'declined by user' ''
+          jsh_ui_row note "${component_display} was skipped"
+        fi
+        ;;
+    esac
+  done <<JSH_COMPONENTS
+$(jsh_component_registry)
+JSH_COMPONENTS
+}
+
+jsh_component_apply_checkout() {
+  case "${JSH_CHECKOUT_ACTION}" in
+    clone)
+      mkdir -p "$(dirname "${install_dir}")" || return 1
+      jsh_spinner_start 'Cloning repository'
+      if git clone --quiet --branch "${install_ref}" "${install_repo}" "${install_dir}" 2>/dev/null; then
+        jsh_spinner_stop success 'Cloned repository'
+      else
+        jsh_spinner_stop error 'Failed to clone repository'
+        return 1
+      fi
+      ;;
+    update)
+      checkout_remote=${JSH_CHECKOUT_REMOTE:-origin}
+      checkout_ref=${JSH_CHECKOUT_REF:-${install_ref}}
+      jsh_spinner_start 'Fetching repository updates'
+      if git -C "${install_dir}" fetch --quiet "${checkout_remote}" "${checkout_ref}" 2>/dev/null; then
+        jsh_spinner_stop success 'Fetched repository updates'
+      else
+        jsh_spinner_stop error 'Failed to fetch repository updates'
+        return 1
+      fi
+      git -C "${install_dir}" merge-base --is-ancestor HEAD FETCH_HEAD \
+        || {
+          jsh_ui_row error 'Checkout has diverged; refusing to overwrite it' stderr
+          return 1
+        }
+      if [ "$(git -C "${install_dir}" rev-parse HEAD)" != "$(git -C "${install_dir}" rev-parse FETCH_HEAD)" ]; then
+        git -C "${install_dir}" merge --quiet --ff-only FETCH_HEAD \
+          || {
+            jsh_ui_row error 'Failed to fast-forward checkout' stderr
+            return 1
+          }
+        jsh_ui_row success 'Fast-forwarded checkout'
+      fi
+      ;;
+  esac
+  return 0
+}
+
+jsh_component_apply_xcode() {
+  [ "$(uname -s 2>/dev/null)" = Darwin ] || return 0
+  command -v xcode-select >/dev/null 2>&1 || {
+    jsh_ui_row error 'xcode-select is unavailable' stderr
+    return 1
+  }
+  xcode-select --install >/dev/null 2>&1 || {
+    jsh_ui_row error 'Failed to start Apple Command Line Tools installation' stderr
+    return 1
+  }
+  xcode_wait_attempts=${JSH_XCODE_WAIT_ATTEMPTS:-900}
+  xcode_wait_interval=${JSH_XCODE_POLL_INTERVAL:-2}
+  case "${xcode_wait_attempts}" in '' | *[!0-9]*) xcode_wait_attempts=900 ;; esac
+  case "${xcode_wait_interval}" in '' | *[!0-9]*) xcode_wait_interval=2 ;; esac
+  jsh_spinner_start 'Waiting for Apple Command Line Tools'
+  while [ "${xcode_wait_attempts}" -gt 0 ]; do
+    if jsh_xcode_ready_for_component; then
+      jsh_spinner_stop success 'Apple Command Line Tools are ready'
+      return 0
+    fi
+    xcode_wait_attempts=$((xcode_wait_attempts - 1))
+    sleep "${xcode_wait_interval}"
+  done
+  jsh_spinner_stop error 'Apple Command Line Tools did not become ready'
+  jsh_ui_row note 'Complete the Apple Command Line Tools dialog, then rerun jsh' stderr
+  return 1
+}
+
+jsh_component_install_homebrew() {
+  jsh_brew_path_for_component
+  command -v brew >/dev/null 2>&1 && return 0
+  command -v curl >/dev/null 2>&1 || {
+    jsh_ui_row error 'curl is required to install Homebrew / Linuxbrew' stderr
+    return 1
+  }
+  jsh_spinner_start 'Installing Homebrew / Linuxbrew'
+  brew_install_script=$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh 2>/dev/null) || {
+    jsh_spinner_stop error 'Failed to download the Homebrew / Linuxbrew installer'
+    return 1
+  }
+  if [ "${JSH_ASSUME_YES}" = 1 ] && ! [ -t 0 ]; then
+    if NONINTERACTIVE=1 bash -c "${brew_install_script}" >/dev/null 2>&1; then
+      brew_install_status=0
+    else
+      brew_install_status=$?
+    fi
+  elif [ -r /dev/tty ] && [ -w /dev/tty ]; then
+    if bash -c "${brew_install_script}" </dev/tty >/dev/null 2>&1; then
+      brew_install_status=0
+    else
+      brew_install_status=$?
+    fi
+  else
+    if bash -c "${brew_install_script}" >/dev/null 2>&1; then
+      brew_install_status=0
+    else
+      brew_install_status=$?
+    fi
+  fi
+  if [ "${brew_install_status}" -ne 0 ]; then
+    jsh_spinner_stop error 'Homebrew / Linuxbrew installation failed'
+    return 1
+  fi
+  jsh_brew_path_for_component
+  if command -v brew >/dev/null 2>&1; then
+    jsh_spinner_stop success 'Homebrew / Linuxbrew is available'
+    return 0
+  fi
+  jsh_spinner_stop error 'Homebrew / Linuxbrew was installed but is not on PATH'
+  return 1
+}
+
+jsh_component_apply_brew() {
+  jsh_component_install_homebrew
+}
+
+jsh_component_apply_core() {
+  jsh_brew_path_for_component
+  jsh_component_core_formulas
+  command -v brew >/dev/null 2>&1 || {
+    jsh_ui_row error 'Core dependencies require Homebrew / Linuxbrew' stderr
+    return 1
+  }
+  for formula_name in ${JSH_CORE_MISSING_FORMULAS}; do
+    jsh_spinner_start "Installing ${formula_name}"
+    if brew install "${formula_name}" >/dev/null 2>&1; then
+      jsh_spinner_stop success "Installed ${formula_name}"
+    else
+      jsh_spinner_stop error "Failed to install ${formula_name}"
+      return 1
+    fi
+  done
+  jsh_brew_path_for_component
+  jsh_component_core_formulas
+  if [ -n "${JSH_CORE_MISSING_FORMULAS}" ]; then
+    jsh_ui_row error "Core dependencies are still missing: ${JSH_CORE_MISSING_FORMULAS}" stderr
+    return 1
+  fi
+  return 0
+}
+
+jsh_component_apply_vendor() {
+  jsh_spinner_start 'Initializing submodules and vendored assets'
+  if git -C "${install_dir}" submodule sync --recursive >/dev/null 2>&1 \
+    && git -C "${install_dir}" submodule update --quiet --init --recursive >/dev/null 2>&1; then
+    jsh_spinner_stop success 'Initialized submodules and vendored assets'
+    return 0
+  fi
+  jsh_spinner_stop error 'Failed to initialize submodules and vendored assets'
+  return 1
+}
+
+jsh_component_apply_links() {
+  link_component=$1
+  JSH_DIR="${install_dir}" \
+    JSH_STATE_DIR="${JSH_STATE_DIR}" \
+    JSH_LINK_STATE="${JSH_LINK_STATE}" \
+    JSH_MODE_FILE="${JSH_MODE_FILE}" \
+    JSH_BANNER_SHOWN=1 \
+    JSH_INSTALL_QUIET=1 \
+    JSH_INSTALL_COMPONENTS="${link_component}" \
+    JSH_LAUNCHER_DESTINATION="${JSH_LAUNCHER_DESTINATION}" \
+    bash "${install_dir}/bin/jsh" __apply-links --mode "${install_mode}"
+}
+
+jsh_component_apply_launcher() {
+  jsh_component_apply_links launcher
+}
+
+jsh_component_apply_config() {
+  jsh_component_apply_links config
+}
+
+jsh_component_apply() {
+  JSH_APPLY_FAILURES=0
+  JSH_APPLY_PRINTED=0
+  while IFS='|' read -r component_name component_display component_dependencies component_check _component_plan component_apply component_modes; do
+    jsh_component_mode_allowed "${component_modes}" || continue
+    component_state=$(jsh_component_state "${component_name}")
+    jsh_component_is_actionable "${component_state}" || continue
+    if ! jsh_component_approved "${component_name}"; then
+      continue
+    fi
+    if ! jsh_component_dependencies_ready_to_apply "${component_dependencies}"; then
+      if [ "${JSH_APPLY_PRINTED}" = 0 ]; then
+        jsh_ui_heading Apply
+        JSH_APPLY_PRINTED=1
+      fi
+      jsh_component_set "${component_name}" skipped "blocked: ${JSH_DEPENDENCY_REASON}" ''
+      jsh_ui_row warning "${component_display} skipped: ${JSH_DEPENDENCY_REASON}"
+      JSH_APPLY_FAILURES=$((JSH_APPLY_FAILURES + 1))
+      continue
+    fi
+    if [ "${JSH_APPLY_PRINTED}" = 0 ]; then
+      jsh_ui_heading Apply
+      JSH_APPLY_PRINTED=1
+    fi
+    if "${component_apply}"; then
+      jsh_component_set "${component_name}" current 'reconciled' ''
+      jsh_component_set_succeeded "${component_name}" 1
+      jsh_ui_row success "${component_display} reconciled"
+    else
+      jsh_component_set "${component_name}" error 'apply failed; dependent actions were not run' ''
+      jsh_component_set_succeeded "${component_name}" 0
+      jsh_ui_row error "${component_display} failed" stderr
+      JSH_APPLY_FAILURES=$((JSH_APPLY_FAILURES + 1))
+    fi
+  done <<JSH_COMPONENTS
+$(jsh_component_registry)
+JSH_COMPONENTS
+  [ "${JSH_APPLY_FAILURES}" -eq 0 ]
+}
+
+jsh_component_finish() {
+  jsh_ui_heading Complete
+  if jsh_component_plan_has_errors; then
+    jsh_ui_row warning "Setup completed with unresolved ${JSH_PLAN_ERROR_COMPONENT} state"
+    jsh_ui_row note 'Resolve the reported component issue, then rerun jsh'
+  elif [ "${JSH_DECLINED}" = 1 ]; then
+    jsh_ui_row warning 'Setup completed with skipped components'
+  elif [ "${JSH_MODE}" = full ]; then
+    jsh_ui_row success 'Full setup is complete'
+  else
+    jsh_ui_row success 'Lite setup is complete'
+    jsh_ui_row note 'Full-mode components were left unchanged'
+  fi
+  jsh_ui_row note 'Run `jsh doctor` to verify the installation'
+  jsh_component_plan_has_errors && return 1
+  return 0
+}
+
+jsh_install_reconcile() {
+  jsh_parse_options "$@"
+  JSH_TTY_STATE=
+  trap 'jsh_spinner_cleanup; jsh_tty_restore' 0
+  trap 'jsh_interrupted' 1 2 15
+  HOME=${HOME:-}
+  jsh_banner
+  choose_mode
+  install_mode=runtime
+  [ "${JSH_MODE}" != full ] || install_mode=install
+
+  local_checkout=
+  if [ -z "${JSH_INSTALL_DIR:-}" ]; then
+    local_checkout=${JSH_DIR}
+  fi
+  if [ -n "${local_checkout}" ]; then
+    install_dir=${JSH_INSTALL_DIR:-${local_checkout}}
+  else
+    install_dir=${JSH_INSTALL_DIR:-${HOME}/.jsh}
+  fi
+  install_repo=${JSH_INSTALL_REPO:-https://github.com/jovalle/jsh.git}
+  install_repo_display=$(jsh_display_repo "${install_repo}")
+  install_ref=${JSH_INSTALL_REF:-main}
+  JSH_SOURCE_ROOT=${install_dir}
+  JSH_STATE_DIR=${JSH_STATE_DIR:-${XDG_STATE_HOME:-${HOME}/.local/state}/jsh}
+  JSH_LINK_STATE=${JSH_LINK_STATE:-${JSH_STATE_DIR}/managed-links}
+  JSH_MODE_FILE=${JSH_MODE_FILE:-${JSH_STATE_DIR}/mode}
+
+  jsh_component_core_formulas
+  jsh_component_network_needed
+  jsh_component_initialize
+  jsh_component_evaluate
+  jsh_component_render_plan
+  jsh_component_seed_current
+  if [ "${JSH_DRY_RUN}" = 1 ]; then
+    jsh_ui_row note 'Dry run: no files, checkout, submodules, packages, or links were changed'
+    jsh_component_plan_has_errors && return 1
+    return 0
+  fi
+  jsh_component_prompt
+  if ! jsh_component_apply; then
+    return 1
+  fi
+  jsh_component_finish
+  if [ "${JSH_DECLINED}" = 1 ]; then
+    return 1
+  fi
+  return 0
+}
+
 usage() {
   _jsh_banner
   _jsh_ui_init
@@ -919,8 +2532,8 @@ usage() {
   cat <<'USAGE'
   shell [-l]                          Open the isolated jsh shell runtime
   -c COMMAND [args...]                Run a command inside the jsh runtime
-  install [--mode runtime|install] [-n]
-                                      Configure a launcher and optional dotfile links
+  install [--mode lite|full] [-n] [-y]
+                                      Reconcile the checkout and configured components
   status [--porcelain]                Show shell mode and managed-link state
   repair [-n|--dry-run]               Prune dead stale managed-link state
   doctor [--porcelain] [--strict]     Report runtime and feature dependencies
@@ -999,7 +2612,10 @@ case "${command_name}" in
     _jsh_run_command "$@"
     ;;
   install)
-    _jsh_install --mode install "$@"
+    jsh_install_reconcile "$@"
+    ;;
+  __apply-links)
+    _jsh_apply_links "$@"
     ;;
   status)
     _jsh_status "$@"
