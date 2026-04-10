@@ -1,0 +1,374 @@
+#!/usr/bin/env bats
+
+setup() {
+  project_root=$(cd "${BATS_TEST_DIRNAME}/.." && pwd -P)
+  test_root=$(mktemp -d "${BATS_TEST_TMPDIR}/jsh.XXXXXX")
+  source_root=${test_root}/source
+  home_root=${test_root}/home
+  state_root=${test_root}/state
+  bin_root=${test_root}/bin
+  mkdir -p "${source_root}/bin" "${source_root}/dotfiles" \
+    "${source_root}/config/homebrew" "${home_root}" "${bin_root}"
+}
+
+make_fixture() {
+  fixture_mode=${1:-lite}
+  cp "${project_root}/j.sh" "${source_root}/j.sh"
+  cp "${project_root}/bin/jsh" "${source_root}/bin/jsh"
+  cp "${project_root}/dotfiles/.bashrc" "${source_root}/dotfiles/.bashrc"
+  cp "${project_root}/dotfiles/.zshrc" "${source_root}/dotfiles/.zshrc"
+  cp "${project_root}/dotfiles/.bash_profile" "${source_root}/dotfiles/.bash_profile"
+  cp "${project_root}/config/homebrew/Brewfile.core" \
+    "${source_root}/config/homebrew/Brewfile.core"
+
+  if [[ "${fixture_mode}" == full ]]; then
+    mkdir -p "${source_root}/dotfiles/.config/example" \
+      "${source_root}/dotfiles/.vscode/user" \
+      "${source_root}/vendor/fzf-tab" \
+      "${source_root}/vendor/zsh-completions/src" \
+      "${source_root}/vendor/zsh-plugins" \
+      "${source_root}/vendor/vim-config/autoload"
+    printf '%s\n' \
+      '[submodule "vendor/fzf-tab"]' \
+      '  path = vendor/fzf-tab' \
+      '  url = https://example.invalid/fzf-tab.git' \
+      '[submodule "vendor/zsh-completions"]' \
+      '  path = vendor/zsh-completions' \
+      '  url = https://example.invalid/zsh-completions.git' \
+      >"${source_root}/.gitmodules"
+    printf '%s\n' plugin >"${source_root}/vendor/fzf-tab/fzf-tab.plugin.zsh"
+    printf '%s\n' completion >"${source_root}/vendor/zsh-completions/src/_example"
+    printf '%s\n' autosuggest >"${source_root}/vendor/zsh-plugins/zsh-autosuggestions.zsh"
+    printf '%s\n' plug >"${source_root}/vendor/vim-config/autoload/plug.vim"
+    printf '%s\n' example >"${source_root}/dotfiles/.config/example/config"
+    printf '%s\n' '{}' >"${source_root}/dotfiles/.vscode/user/settings.json"
+  fi
+
+  git -C "${source_root}" init -q
+  git -C "${source_root}" config user.email test@example.invalid
+  git -C "${source_root}" config user.name test
+  git -C "${source_root}" add .
+  git -C "${source_root}" commit -qm initial
+}
+
+run_installer() {
+  run_mode=$1
+  shift
+  env \
+    "HOME=${home_root}" \
+    "XDG_STATE_HOME=${state_root}" \
+    "JSH_BIN_DIR=${bin_root}" \
+    "JSH_MODE=${run_mode}" \
+    'JSH_PLAIN_OUTPUT=1' \
+    'JSH_COLOR=never' \
+    'JSH_NETWORK_CHECK=never' \
+    "${source_root}/j.sh" "$@"
+}
+
+@test "lite dry-run resolves only checkout and launcher" {
+  make_fixture lite
+  run run_installer lite --dry-run
+
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"Setup plan (lite)"* ]]
+  [[ "${output}" == *"Git checkout"* ]]
+  [[ "${output}" == *"Launcher"* ]]
+  [[ "${output}" != *"Homebrew"* ]]
+  [[ "${output}" != *"Managed configuration"* ]]
+  [ ! -e "${bin_root}/jsh" ]
+  [ ! -e "${state_root}" ]
+}
+
+@test "full dry-run shows missing Homebrew, core, and zsh without mutation" {
+  make_fixture full
+  tools_root=${test_root}/tools
+  mkdir -p "${tools_root}"
+  for tool in bash git curl sed awk cut dirname basename uname id readlink cat date sleep; do
+    ln -s "$(command -v "${tool}")" "${tools_root}/${tool}"
+  done
+  run env PATH="${tools_root}" JSH_BREW_PATHS=none \
+    HOME="${home_root}" XDG_STATE_HOME="${state_root}" JSH_BIN_DIR="${bin_root}" \
+    JSH_MODE=full JSH_PLAIN_OUTPUT=1 JSH_COLOR=never JSH_NETWORK_CHECK=never \
+    "${source_root}/j.sh" --dry-run
+
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"Homebrew / Linuxbrew"* ]]
+  [[ "${output}" == *"Core dependencies"* ]]
+  [[ "${output}" == *"zsh"* ]]
+  [[ "${output}" == *"Submodules and vendored assets"* ]]
+  [ ! -e "${bin_root}/jsh" ]
+  [ ! -e "${state_root}" ]
+}
+
+@test "full mode renders its plan with the default network check" {
+  make_fixture full
+  tools_root=${test_root}/tools
+  mkdir -p "${tools_root}"
+  for tool in bash git curl sed awk cut dirname basename uname id readlink cat date sleep; do
+    ln -s "$(command -v "${tool}")" "${tools_root}/${tool}"
+  done
+  run env \
+    PATH="${tools_root}" \
+    HOME="${home_root}" \
+    XDG_STATE_HOME="${state_root}" \
+    JSH_BIN_DIR="${bin_root}" \
+    JSH_MODE=full \
+    JSH_PLAIN_OUTPUT=1 \
+    JSH_COLOR=never \
+    JSH_NETWORK_CHECK=auto \
+    JSH_NETWORK_URL=file:///dev/null \
+    JSH_BREW_PATHS=none \
+    "${source_root}/j.sh" --dry-run
+
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"Setup plan (full)"* ]]
+  [[ "${output}" == *"Network access is available"* ]]
+  [ ! -e "${state_root}" ]
+}
+
+@test "dirty checkout is reported without hiding the lite plan" {
+  make_fixture lite
+  printf '%s\n' dirty >>"${source_root}/dotfiles/.bashrc"
+  run run_installer lite --dry-run
+
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"local changes"* ]]
+  [ ! -e "${bin_root}/jsh" ]
+}
+
+@test "dirty lite checkout still applies the launcher from current files" {
+  make_fixture lite
+  printf '%s\n' dirty >>"${source_root}/dotfiles/.bashrc"
+  run run_installer lite --yes
+
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"local changes"* ]]
+  [ -L "${bin_root}/jsh" ]
+}
+
+@test "dirty full checkout still resolves downstream components" {
+  make_fixture full
+  printf '%s\n' dirty >>"${source_root}/dotfiles/.zshrc"
+  run run_installer full --dry-run
+
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"local checkout has local changes"* ]]
+  [[ "${output}" != *"[skip] Core dependencies"* ]]
+  [[ "${output}" != *"[skip] Submodules and vendored assets"* ]]
+  [[ "${output}" != *"[skip] Launcher"* ]]
+  [[ "${output}" != *"[skip] Managed configuration"* ]]
+}
+
+@test "full setup backs up an existing dotfile before linking" {
+  make_fixture full
+  printf '%s\n' preserve >"${home_root}/.zshrc"
+  run run_installer full --yes
+
+  [ "${status}" -eq 0 ]
+  [ -L "${bin_root}/jsh" ]
+  [ -L "${home_root}/.zshrc" ]
+  backup=$(find "${state_root}/jsh/backups" -type f -name .zshrc -print -quit)
+  [ -n "${backup}" ]
+  [ "$(sed -n '1p' "${backup}")" = preserve ]
+  [ "$(readlink "${home_root}/.zshrc")" = "$(cd "${source_root}/dotfiles" && pwd -P)/.zshrc" ]
+}
+
+@test "a declined launcher prevents its dependent configuration action" {
+  make_fixture full
+  run expect -c "
+    set timeout 10
+    spawn env HOME=${home_root} XDG_STATE_HOME=${state_root} JSH_BIN_DIR=${bin_root} JSH_MODE=full JSH_PLAIN_OUTPUT=1 JSH_COLOR=never JSH_NETWORK_CHECK=never ${source_root}/j.sh
+    expect \"Apply Launcher?\"
+    send \"n\"
+    expect \"Managed configuration skipped\"
+    expect eof
+    exit 1
+  "
+
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"Managed configuration skipped"* ]]
+  [ ! -e "${bin_root}/jsh" ]
+  [ ! -e "${home_root}/.zshrc" ]
+}
+
+@test "noninteractive changes require --yes" {
+  make_fixture lite
+  run run_installer lite
+
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"requires --yes"* ]]
+  [ ! -e "${bin_root}/jsh" ]
+}
+
+@test "colored output is opt-in and plain output has no escape codes" {
+  make_fixture lite
+  run env -u NO_COLOR HOME="${home_root}" XDG_STATE_HOME="${state_root}" JSH_BIN_DIR="${bin_root}" \
+    JSH_MODE=lite JSH_PLAIN_OUTPUT=0 JSH_COLOR=always TERM=xterm \
+    JSH_NETWORK_CHECK=never "${source_root}/j.sh" --dry-run
+
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *$'\033['* ]]
+
+  run run_installer lite --dry-run
+  [ "${status}" -eq 0 ]
+  [[ "${output}" != *$'\033['* ]]
+}
+
+@test "current lite setup has no planned action on the next run" {
+  make_fixture lite
+  run run_installer lite --yes
+  [ "${status}" -eq 0 ]
+  first_state_checksum=$(cksum "${state_root}/jsh/managed-links")
+
+  run run_installer lite
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"[ok] Launcher"* ]]
+  [[ "${output}" != *"[plan] Launcher"* ]]
+  second_state_checksum=$(cksum "${state_root}/jsh/managed-links")
+  [ "${first_state_checksum}" = "${second_state_checksum}" ]
+}
+
+@test "checkout updates plan downstream reconciliation" {
+  make_fixture full
+  runner=${test_root}/runner.sh
+  remote_root=${test_root}/remote.git
+  checkout_root=${home_root}/checkout
+  cp "${project_root}/j.sh" "${runner}"
+  git clone --bare -q "${source_root}" "${remote_root}"
+  branch=$(git -C "${source_root}" symbolic-ref --short HEAD)
+  git clone -q "${remote_root}" "${checkout_root}"
+  git -C "${checkout_root}" remote set-url origin "${remote_root}"
+  old_head=$(git -C "${checkout_root}" rev-parse HEAD)
+  printf '%s\n' updated >>"${source_root}/dotfiles/.config/example/config"
+  git -C "${source_root}" add dotfiles/.config/example/config
+  git -C "${source_root}" commit -qm update
+  git -C "${source_root}" push -q "${remote_root}" "HEAD:${branch}"
+
+  run env \
+    HOME="${home_root}" \
+    XDG_STATE_HOME="${state_root}" \
+    JSH_BIN_DIR="${bin_root}" \
+    JSH_INSTALL_DIR="${checkout_root}" \
+    JSH_INSTALL_REPO="${remote_root}" \
+    JSH_INSTALL_REF="${branch}" \
+    JSH_MODE=full \
+    JSH_PLAIN_OUTPUT=1 \
+    JSH_COLOR=never \
+    JSH_NETWORK_CHECK=never \
+    JSH_BREW_PATHS=none \
+    "${runner}" --dry-run
+
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"update available"* ]]
+  [[ "${output}" == *"checkout update may change Brewfile.core"* ]]
+  [[ "${output}" == *"checkout update may change vendored assets"* ]]
+  [[ "${output}" == *"checkout update may change managed sources"* ]]
+  [ "$(git -C "${checkout_root}" rev-parse HEAD)" = "${old_head}" ]
+  [ ! -e "${state_root}" ]
+}
+
+@test "local checkout detects and can decline an upstream update" {
+  make_fixture lite
+  remote_root=${test_root}/remote.git
+  updater_root=${test_root}/updater
+  git clone --bare -q "${source_root}" "${remote_root}"
+  branch=$(git -C "${source_root}" symbolic-ref --short HEAD)
+  git -C "${source_root}" remote add origin "${remote_root}"
+  git clone -q "${remote_root}" "${updater_root}"
+  git -C "${updater_root}" config user.email test@example.invalid
+  git -C "${updater_root}" config user.name test
+  old_head=$(git -C "${source_root}" rev-parse HEAD)
+  printf '%s\n' upstream >>"${updater_root}/dotfiles/.bashrc"
+  git -C "${updater_root}" add dotfiles/.bashrc
+  git -C "${updater_root}" commit -qm upstream
+  git -C "${updater_root}" push -q origin "HEAD:${branch}"
+
+  run expect -c "
+    set timeout 10
+    spawn env HOME=${home_root} XDG_STATE_HOME=${state_root} JSH_BIN_DIR=${bin_root} JSH_MODE=lite JSH_PLAIN_OUTPUT=1 JSH_COLOR=never JSH_NETWORK_CHECK=never ${source_root}/j.sh
+    expect \"Update Git checkout?\"
+    send \"n\"
+    expect \"Apply Launcher?\"
+    send \"y\"
+    expect \"Lite setup is complete\"
+    expect eof
+  "
+
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"Keeping the current Git checkout"* ]]
+  [ "$(git -C "${source_root}" rev-parse HEAD)" = "${old_head}" ]
+  [ -L "${bin_root}/jsh" ]
+}
+
+@test "bin/jsh install is the canonical reconciliation command" {
+  make_fixture lite
+  run env \
+    HOME="${home_root}" \
+    XDG_STATE_HOME="${state_root}" \
+    JSH_DIR="$(cd "${source_root}" && pwd -P)" \
+    JSH_BIN_DIR="${bin_root}" \
+    JSH_MODE=lite \
+    JSH_PLAIN_OUTPUT=1 \
+    JSH_COLOR=never \
+    JSH_NETWORK_CHECK=never \
+    "${source_root}/bin/jsh" install --dry-run
+
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"Setup plan (lite)"* ]]
+  [[ "${output}" == *"Git checkout"* ]]
+  [[ "${output}" == *"Launcher"* ]]
+  [ ! -e "${bin_root}/jsh" ]
+  [ ! -e "${state_root}" ]
+}
+
+@test "curl bootstrap acquires a checkout before delegating install" {
+  make_fixture lite
+  runner=${test_root}/runner.sh
+  checkout_root=${home_root}/.jsh
+  branch=$(git -C "${source_root}" symbolic-ref --short HEAD)
+  cp "${project_root}/j.sh" "${runner}"
+
+  run env \
+    HOME="${home_root}" \
+    XDG_STATE_HOME="${state_root}" \
+    JSH_BIN_DIR="${bin_root}" \
+    JSH_INSTALL_DIR="${checkout_root}" \
+    JSH_INSTALL_REPO="${source_root}" \
+    JSH_INSTALL_REF="${branch}" \
+    JSH_MODE=lite \
+    JSH_PLAIN_OUTPUT=1 \
+    JSH_COLOR=never \
+    JSH_NETWORK_CHECK=never \
+    "${runner}" --yes
+
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"Setup plan (lite)"* ]]
+  [ -d "${checkout_root}/.git" ]
+  [ -L "${bin_root}/jsh" ]
+}
+
+@test "curl bootstrap dry-run does not create a checkout" {
+  make_fixture lite
+  runner=${test_root}/runner.sh
+  checkout_root=${home_root}/.jsh
+  branch=$(git -C "${source_root}" symbolic-ref --short HEAD)
+  cp "${project_root}/j.sh" "${runner}"
+
+  run env \
+    HOME="${home_root}" \
+    XDG_STATE_HOME="${state_root}" \
+    JSH_INSTALL_DIR="${checkout_root}" \
+    JSH_INSTALL_REPO="${source_root}" \
+    JSH_INSTALL_REF="${branch}" \
+    JSH_MODE=lite \
+    JSH_PLAIN_OUTPUT=1 \
+    JSH_COLOR=never \
+    JSH_NETWORK_CHECK=never \
+    "${runner}" --dry-run
+
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"Setup plan (lite)"* ]]
+  [[ "${output}" == *"Git checkout"* ]]
+  [ ! -e "${checkout_root}" ]
+  [ ! -e "${state_root}" ]
+}
