@@ -2,8 +2,12 @@ version: "3"
 
 tasks:
   brew:
-    desc: Install and upgrade shared and platform-specific Homebrew packages
+    desc: Install and upgrade shared, platform, and node-specific Homebrew packages
     platforms: [darwin, linux]
+    deps: [brew:trust]
+    vars:
+      NODE:
+        sh: hostname -s | tr '[:upper:]' '[:lower:]'
     preconditions:
       - sh: command -v brew
         msg: Homebrew is required
@@ -14,9 +18,33 @@ tasks:
       - brew bundle install --file "{{.ROOT_DIR}}/config/homebrew/Brewfile"
       - cmd: brew bundle install --file "{{.ROOT_DIR}}/config/homebrew/Brewfile.macos"
         platforms: [darwin]
-      - cmd: brew bundle install --file "{{.ROOT_DIR}}/config/homebrew/Brewfile.linux"
+      - cmd: |
+          linux_brewfile="{{.ROOT_DIR}}/config/homebrew/Brewfile.linux"
+          if [ -r "${linux_brewfile}" ]; then
+            brew bundle install --file "${linux_brewfile}"
+          fi
         platforms: [linux]
+      - |
+        node_brewfile="{{.ROOT_DIR}}/config/homebrew/Brewfile.{{.NODE}}"
+        if [ -r "${node_brewfile}" ]; then
+          brew bundle install --file "${node_brewfile}"
+        fi
       - brew upgrade
+
+  brew:trust:
+    desc: Trust third-party taps used by the macOS package manifest
+    internal: true
+    platforms: [darwin]
+    preconditions:
+      - sh: command -v brew
+        msg: Homebrew is required
+    vars:
+      TAPS: [gromgit/fuse, xguot/difi]
+    cmds:
+      - for:
+          var: TAPS
+          as: TAP
+        cmd: brew tap "{{.TAP}}" && brew trust --tap "{{.TAP}}"
 
   packages:
     desc: Install and upgrade packages for the current platform

@@ -1,0 +1,5 @@
+# Applications specific to the Archon workstation.
+cask "bambu-studio"
+cask "elgato-stream-deck"
+cask "macfuse"
+cask "mounty"
