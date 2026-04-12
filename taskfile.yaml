@@ -64,9 +64,33 @@ tasks:
   configure:all:
     internal: true
     cmds:
+      - task: configure:permissions
+      - task: configure:hostname
       - task: configure:settings
       - task: configure:dock
       - task: configure:gecko
+
+  configure:permissions:
+    desc: Check and guide terminal privacy permissions before configuration
+    platforms: [darwin]
+    vars:
+      APP: '{{default "Terminal.app" .APP}}'
+    preconditions:
+      - sh: command -v sqlite3
+        msg: sqlite3 is required to inspect macOS privacy permissions
+      - sh: command -v open
+        msg: open is required to guide macOS privacy permissions
+    cmds:
+      - bash ./scripts/macos/permissions.sh "{{.APP}}"
+
+  configure:hostname:
+    desc: Offer to configure a custom macOS hostname
+    platforms: [darwin]
+    preconditions:
+      - sh: command -v scutil
+        msg: scutil is required to configure the macOS hostname
+    cmds:
+      - bash ./scripts/macos/hostname.sh
 
   configure:gecko:
     desc: Configure Firefox-family browser profiles

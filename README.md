@@ -66,6 +66,11 @@ Later runs re-evaluate the same matrix and leave current components alone, so
 rerunning the installer is safe and idempotent. Use `jsh doctor` or the
 component plan to investigate anything that remains unavailable.
 
+On macOS, `task configure` starts with a terminal privacy preflight so TCC
+prompts appear before the rest of the configuration. It checks `Terminal.app`
+by default; use `task configure:permissions APP=iTerm.app` for another
+terminal. macOS still requires the user to approve protected-data access.
+
 Contributors can install the core and contributor check/hook tooling from a
 checkout with:
 
