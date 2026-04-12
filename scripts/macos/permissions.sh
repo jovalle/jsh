@@ -110,6 +110,11 @@ databases=(
   '/Library/Application Support/com.apple.TCC/TCC.db'
 )
 
+command -v sqlite3 >/dev/null 2>&1 || {
+  printf 'sqlite3 is required to inspect macOS privacy permissions.\n' >&2
+  exit 1
+}
+
 # Label, TCC service, Settings pane, description.
 permissions=()
 permission() {
@@ -151,12 +156,16 @@ permission Notifications kJSHServiceNotifications Notifications 'notification de
 
 permission_records=''
 databases_read=0
+databases_present=0
 refresh_permissions() {
   local database rows
 
   permission_records=''
   databases_read=0
+  databases_present=0
   for database in "${databases[@]}"; do
+    [[ -e ${database} ]] || continue
+    ((databases_present += 1))
     if rows=$(sqlite3 -readonly "${database}" \
       "SELECT service, auth_value FROM access WHERE client = '${bundle_id}' ORDER BY last_modified;" 2>/dev/null); then
       ((databases_read += 1))
@@ -224,7 +233,7 @@ permission_status() {
     2) printf 'granted\n' ;;
     3) printf 'limited\n' ;;
     '')
-      ((${databases_read} == ${#databases[@]})) && printf 'not requested\n' || printf 'unknown\n'
+      ((databases_read == ${#databases[@]})) && printf 'not requested\n' || printf 'unknown\n'
       ;;
     *) printf 'unknown\n' ;;
   esac
@@ -300,9 +309,17 @@ collect_permissions() {
   done <<<"${requested_services}"
 }
 
-collect_permissions
 heading "${app_name} permissions"
 printf '%b%s%b\n' "${dim}" "${app_path}" "${reset}"
+refresh_permissions
+if ((databases_present > 0 && databases_read == 0)); then
+  printf '\n%bThe terminal running this check cannot read macOS privacy records.%b\n' "${red}" "${reset}"
+  printf 'If macOS asks whether the terminal may access data from other apps, choose Allow. '
+  printf "If you chose Don't Allow, rerun this command and allow it.\n"
+  printf 'If the check remains blocked, add the terminal to Privacy & Security > Full Disk Access, then rerun.\n'
+  exit 1
+fi
+collect_permissions
 for row in "${detected[@]}"; do
   IFS=$'\t' read -r label service panel reason <<<"${row}"
   status_row "${label}" "$(permission_status "${service}")"
@@ -338,7 +355,7 @@ IFS= read -r -s -n 1 answer </dev/tty || answer=
 printf '\n'
 [[ ${answer} == [yY] ]] || {
   printf '\nNo changes made.\n'
-  exit 1
+  exit 0
 }
 
 open_with_retry() {
