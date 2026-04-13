@@ -93,7 +93,7 @@ tasks:
       - bash ./scripts/macos/hostname.sh
 
   configure:gecko:
-    desc: Configure Firefox-family browser profiles
+    desc: Configure Firefox-family browser profiles (bootstraps installed browsers)
     platforms: [darwin, linux]
     preconditions:
       - sh: command -v curl
