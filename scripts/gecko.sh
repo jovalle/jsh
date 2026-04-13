@@ -13,7 +13,8 @@ mkdir -p "${tmp_dir}"
 composed_user_js=$(mktemp "${tmp_dir}/gecko-user.XXXXXX")
 downloaded_betterfox=""
 downloaded_xpi=""
-trap 'rm -f -- "${composed_user_js}" ${downloaded_betterfox:+"${downloaded_betterfox}"} ${downloaded_xpi:+"${downloaded_xpi}"}' EXIT
+bootstrap_ini_tmp=""
+trap 'rm -f -- "${composed_user_js}" ${downloaded_betterfox:+"${downloaded_betterfox}"} ${downloaded_xpi:+"${downloaded_xpi}"} ${bootstrap_ini_tmp:+"${bootstrap_ini_tmp}"}' EXIT
 
 betterfox_version() {
   sed -n 's/^[[:space:]]*\*[[:space:]]*version:[[:space:]]*\([^[:space:]]*\).*/\1/p' "$1" | head -1
@@ -125,6 +126,83 @@ profile_roots() {
   esac
 }
 
+browser_binary() {
+  local browser=$1 candidate override
+  case ${browser} in
+    waterfox) override=${GECKO_WATERFOX_BIN:-} ;;
+    firefox) override=${GECKO_FIREFOX_BIN:-} ;;
+    *) return 1 ;;
+  esac
+
+  if [[ -n ${override} ]]; then
+    [[ -x ${override} ]] || return 1
+    printf '%s\n' "${override}"
+    return
+  fi
+
+  if [[ $(uname -s) == Darwin ]]; then
+    case ${browser} in
+      waterfox)
+        for candidate in \
+          "/Applications/Waterfox.app/Contents/MacOS/waterfox" \
+          "${HOME}/Applications/Waterfox.app/Contents/MacOS/waterfox"; do
+          [[ -x ${candidate} ]] || continue
+          printf '%s\n' "${candidate}"
+          return
+        done
+        ;;
+      firefox)
+        for candidate in \
+          "/Applications/Firefox.app/Contents/MacOS/firefox" \
+          "/Applications/Firefox.app/Contents/MacOS/firefox-bin" \
+          "${HOME}/Applications/Firefox.app/Contents/MacOS/firefox" \
+          "${HOME}/Applications/Firefox.app/Contents/MacOS/firefox-bin"; do
+          [[ -x ${candidate} ]] || continue
+          printf '%s\n' "${candidate}"
+          return
+        done
+        ;;
+    esac
+    return 1
+  fi
+
+  candidate=$(command -v "${browser}" 2>/dev/null || true)
+  [[ -x ${candidate} ]] || return 1
+  printf '%s\n' "${candidate}"
+}
+
+bootstrap_profile() {
+  local browser=$1 root=$2 ini profile_dir
+  ini="${root}/profiles.ini"
+
+  # An existing profiles.ini is authoritative. Do not replace or reinterpret it.
+  [[ -e ${ini} || -L ${ini} ]] && return
+  # Do not silently hide an existing profile if the registry file was removed.
+  [[ -e ${root}/installs.ini || -L ${root}/installs.ini ]] && return
+  if [[ -d ${root}/Profiles && ! -d ${root}/Profiles/jsh-default ]]; then
+    return
+  fi
+  browser_binary "${browser}" >/dev/null || return 0
+  profile_dir="${root}/Profiles/jsh-default"
+
+  install -d -m 0700 -- "${root}" "${root}/Profiles" "${profile_dir}"
+  [[ -e ${ini} || -L ${ini} ]] && return
+
+  bootstrap_ini_tmp=$(mktemp "${root}/profiles.ini.XXXXXX")
+  printf '[General]\nStartWithLastProfile=1\nVersion=2\n\n[Profile0]\nName=jsh-default\nIsRelative=1\nPath=Profiles/jsh-default\nDefault=1\n' >"${bootstrap_ini_tmp}"
+  install -m 0600 -- "${bootstrap_ini_tmp}" "${ini}"
+  rm -f -- "${bootstrap_ini_tmp}"
+  bootstrap_ini_tmp=""
+  printf 'Bootstrapped %s profile for %s.\n' "jsh-default" "${browser}"
+}
+
+bootstrap_profiles() {
+  local browser root
+  while IFS=$'\t' read -r browser root; do
+    bootstrap_profile "${browser}" "${root}"
+  done < <(profile_roots)
+}
+
 profiles() {
   local browser root ini path relative
   while IFS=$'\t' read -r browser root; do
@@ -145,6 +223,8 @@ profiles() {
     ' "${ini}")
   done < <(profile_roots)
 }
+
+bootstrap_profiles
 
 install_preferences() {
   local browser=$1 profile=$2 target backup
