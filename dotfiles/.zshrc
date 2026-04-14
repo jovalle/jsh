@@ -5056,7 +5056,7 @@ jsh_hook_add precmd _jsh_set_title 50
 # Falls back to zsh's native incremental search (bck-i-search) if fzf goes missing.
 
 _jsh_history_search() {
-  if (( $+commands[fzf] )); then
+  if command -v fzf >/dev/null 2>&1; then
     # fzf available - use fzf-history-widget if loaded
     if (( $+widgets[fzf-history-widget] )); then
       zle fzf-history-widget
@@ -5071,9 +5071,7 @@ _jsh_history_search() {
       zle redisplay
     fi
   else
-    # fzf not available - rebind to native and invoke it
-    # This ensures the native bck-i-search mode is properly entered
-    bindkey '^R' history-incremental-search-backward
+    # Keep Ctrl-R useful when fzf is absent or disappears after startup.
     zle history-incremental-search-backward
   fi
 }
@@ -5356,18 +5354,15 @@ _vimode_setup_zsh() {
 
   # Undo/redo
   bindkey -M vicmd 'u' undo
-  # Ctrl+R: use redo only if fzf available (fzf overrides for history search)
-  # Otherwise, use history-beginning-search (works with complex multi-line prompts)
+  # Ctrl+R is redo in vi command mode when fzf is available. In insert mode,
+  # always use the wrapper so native reverse search remains a fallback.
   if has fzf; then
     bindkey -M vicmd '^R' redo
   else
-    # history-beginning-search: type prefix, then Ctrl+R cycles through matches
-    # More compatible with multi-line prompts than incremental search
-    bindkey -M vicmd '^R' history-beginning-search-backward
-    bindkey -M viins '^R' history-beginning-search-backward
-    bindkey -M vicmd '^S' history-beginning-search-forward
-    bindkey -M viins '^S' history-beginning-search-forward
+    bindkey -M vicmd '^R' history-incremental-search-backward
   fi
+  bindkey -M viins '^R' _jsh_history_search
+  bindkey -M viins '^S' history-incremental-search-forward
 
   # Beginning/end of history
   bindkey -M vicmd 'gg' beginning-of-buffer-or-history
