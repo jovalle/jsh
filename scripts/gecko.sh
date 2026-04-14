@@ -14,7 +14,8 @@ composed_user_js=$(mktemp "${tmp_dir}/gecko-user.XXXXXX")
 downloaded_betterfox=""
 downloaded_xpi=""
 bootstrap_ini_tmp=""
-trap 'rm -f -- "${composed_user_js}" ${downloaded_betterfox:+"${downloaded_betterfox}"} ${downloaded_xpi:+"${downloaded_xpi}"} ${bootstrap_ini_tmp:+"${bootstrap_ini_tmp}"}' EXIT
+policy_tmp=""
+trap 'rm -f -- "${composed_user_js}" ${downloaded_betterfox:+"${downloaded_betterfox}"} ${downloaded_xpi:+"${downloaded_xpi}"} ${bootstrap_ini_tmp:+"${bootstrap_ini_tmp}"} ${policy_tmp:+"${policy_tmp}"}' EXIT
 
 betterfox_version() {
   sed -n 's/^[[:space:]]*\*[[:space:]]*version:[[:space:]]*\([^[:space:]]*\).*/\1/p' "$1" | head -1
@@ -171,6 +172,109 @@ browser_binary() {
   printf '%s\n' "${candidate}"
 }
 
+waterfox_policy_file() {
+  local binary app bundle_id
+  if [[ -n ${GECKO_WATERFOX_POLICY_FILE:-} ]]; then
+    printf '%s\n' "${GECKO_WATERFOX_POLICY_FILE}"
+    return
+  fi
+
+  binary=$(browser_binary waterfox) || return 1
+  if [[ $(uname -s) == Darwin ]]; then
+    app=${binary%/Contents/MacOS/*}
+    [[ ${app} != "${binary}" && -r ${app}/Contents/Info.plist ]] || return 1
+    bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \
+      "${app}/Contents/Info.plist" 2>/dev/null) || return 1
+    [[ -n ${bundle_id} ]] || return 1
+    printf '/Library/Preferences/%s.plist\n' "${bundle_id}"
+  else
+    binary=$(realpath "${binary}" 2>/dev/null || printf '%s' "${binary}")
+    printf '%s/distribution/policies.json\n' "${binary%/*}"
+  fi
+}
+
+install_policy_file() {
+  local source=$1 target=$2 target_dir=${2%/*}
+  if [[ $(uname -s) == Darwin && ${target} == /Library/Preferences/*.plist ]]; then
+    command -v sudo >/dev/null 2>&1 || {
+      printf 'sudo is required to install the Waterfox policy.\n' >&2
+      return 1
+    }
+    sudo /usr/bin/defaults import "${target%.plist}" "${source}" >/dev/null
+    return
+  fi
+
+  if install -d -- "${target_dir}" 2>/dev/null \
+    && install -m 0644 -- "${source}" "${target}" 2>/dev/null; then
+    return
+  fi
+  command -v sudo >/dev/null 2>&1 || {
+    printf 'sudo is required to install the Waterfox policy.\n' >&2
+    return 1
+  }
+  sudo install -d -- "${target_dir}"
+  sudo install -m 0644 -- "${source}" "${target}"
+}
+
+configure_waterfox_policy() {
+  local target existing merged current
+  policy_changed=0
+  browser_binary waterfox >/dev/null || return 0
+  target=$(waterfox_policy_file) || {
+    printf 'Could not resolve the Waterfox policy file; skipping policy installation.\n' >&2
+    return
+  }
+
+  existing='{}'
+  if [[ -e ${target} ]]; then
+    [[ -r ${target} ]] || {
+      printf 'Waterfox policy is not readable: %s\n' "${target}" >&2
+      return 1
+    }
+    if [[ $(uname -s) == Darwin ]]; then
+      existing=$(plutil -convert json -o - -- "${target}") || return 1
+    else
+      existing=$(jq -c . "${target}") || return 1
+    fi
+  fi
+
+  if [[ $(uname -s) == Darwin ]]; then
+    merged=$(jq -c '
+      .EnterprisePoliciesEnabled = true
+      | .AutoLaunchProtocolsFromOrigins = (
+          [(.AutoLaunchProtocolsFromOrigins // [])[] | select(.protocol != "receiver")]
+          + [{"protocol":"receiver","allowed_origins":["https://jpmchase.com"]}]
+        )
+    ' <<<"${existing}") || return 1
+  else
+    merged=$(jq -c '
+      .policies = (.policies // {})
+      | .policies.AutoLaunchProtocolsFromOrigins = (
+          [(.policies.AutoLaunchProtocolsFromOrigins // [])[] | select(.protocol != "receiver")]
+          + [{"protocol":"receiver","allowed_origins":["https://jpmchase.com"]}]
+        )
+    ' <<<"${existing}") || return 1
+  fi
+
+  current=$(jq -Sc . <<<"${existing}") || return 1
+  if [[ ${current} == "$(jq -Sc . <<<"${merged}")" ]]; then
+    printf 'Waterfox JPMorgan Chase Citrix policy current.\n'
+    return
+  fi
+
+  policy_tmp=$(mktemp "${tmp_dir}/gecko-policy.XXXXXX")
+  if [[ $(uname -s) == Darwin ]]; then
+    plutil -convert xml1 -o "${policy_tmp}" -- - <<<"${merged}"
+  else
+    jq -S . <<<"${merged}" >"${policy_tmp}"
+  fi
+  install_policy_file "${policy_tmp}" "${target}"
+  rm -f -- "${policy_tmp}"
+  policy_tmp=""
+  policy_changed=1
+  printf 'Waterfox JPMorgan Chase Citrix policy updated.\n'
+}
+
 bootstrap_profile() {
   local browser=$1 root=$2 ini profile_dir
   ini="${root}/profiles.ini"
@@ -224,6 +328,7 @@ profiles() {
   done < <(profile_roots)
 }
 
+configure_waterfox_policy
 bootstrap_profiles
 
 install_preferences() {
@@ -297,7 +402,7 @@ install_addons() {
 }
 
 found=0
-changed=0
+changed=${policy_changed}
 while IFS=$'\t' read -r browser profile; do
   [[ -d ${profile} ]] || continue
   ((found += 1))
