@@ -5,3 +5,6 @@
 	path = vendor/fzf-tab
 	url = https://github.com/Aloxaf/fzf-tab.git
   ignore = dirty
+[submodule "vendor/fzf"]
+	path = vendor/fzf
+	url = https://github.com/junegunn/fzf.git

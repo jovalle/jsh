@@ -1334,6 +1334,7 @@ path_prepend "${HOME}/go/bin"
 path_prepend "${HOME}/.npm-global/bin"
 path_prepend "${HOME}/.local/share/pnpm/bin"
 path_prepend "${HOME}/.cache/.bun/bin"
+path_prepend "${JSH_DIR}/vendor/fzf/bin"
 path_prepend "${JSH_DIR}/bin"
 
 # =============================================================================
@@ -1738,44 +1739,44 @@ alias ~='cd ~'
 # Directory Listing
 # -----------------------------------------------------------------------------
 # Smart ls: use eza if available, else ls with colors
+unalias ls 2>/dev/null || true
 if has eza; then
-  unalias ls 2>/dev/null || true
-  ls() {
-  local -a eza_args=("--group-directories-first")
-  local arg cluster flag
+  function ls {
+    local -a eza_args=("--group-directories-first")
+    local arg cluster flag
 
-  while [[ $# -gt 0 ]]; do
-    arg="$1"
-    shift
+    while [[ $# -gt 0 ]]; do
+      arg="$1"
+      shift
 
-    case "${arg}" in
-    --)
-      eza_args+=("--" "$@")
-      break
-      ;;
-    --*|-)
-      eza_args+=("${arg}")
-      ;;
-    -?*)
-      cluster="${arg#-}"
-      while [[ -n "${cluster}" ]]; do
-      flag="${cluster%"${cluster#?}"}"
-      cluster="${cluster#?}"
-      case "${flag}" in
-        t) eza_args+=("--sort=modified") ;;
-        S) eza_args+=("--sort=size") ;;
-        h) ;; # eza is human-readable by default; do not enable its header.
-        *) eza_args+=("-${flag}") ;;
+      case "${arg}" in
+      --)
+        eza_args+=("--" "$@")
+        break
+        ;;
+      --*|-)
+        eza_args+=("${arg}")
+        ;;
+      -?*)
+        cluster="${arg#-}"
+        while [[ -n "${cluster}" ]]; do
+        flag="${cluster%"${cluster#?}"}"
+        cluster="${cluster#?}"
+        case "${flag}" in
+          t) eza_args+=("--sort=modified") ;;
+          S) eza_args+=("--sort=size") ;;
+          h) ;; # eza is human-readable by default; do not enable its header.
+          *) eza_args+=("-${flag}") ;;
+        esac
+        done
+        ;;
+      *)
+        eza_args+=("${arg}")
+        ;;
       esac
-      done
-      ;;
-    *)
-      eza_args+=("${arg}")
-      ;;
-    esac
-  done
+    done
 
-  command eza "${eza_args[@]}"
+    command eza "${eza_args[@]}"
   }
   alias l='eza -la --group-directories-first --git'
   alias ll='eza -l --group-directories-first'
@@ -1835,14 +1836,16 @@ fi
 # -----------------------------------------------------------------------------
 # Quick Commands
 # -----------------------------------------------------------------------------
-alias c='clear'
-alias e='exit'
-alias q='exit'
-alias cls='clear'
-alias clr='clear'
 
-alias path='echo "$PATH" | tr ":" "\n"'
+alias c='clear'
+alias clr='clear'
+alias cls='clear'
+alias e='exit'
 alias now='date "+%Y-%m-%d %H:%M:%S"'
+alias path='echo "$PATH" | tr ":" "\n"'
+alias q='exit'
+alias reload='jsh reload'
+alias rl='jsh reload'
 alias ts='date +%s'
 alias week='date +%V'
 
@@ -1982,7 +1985,9 @@ if has kubectl; then
   alias k='kubectl'
   alias kx='kubectx 2>/dev/null || kubectl config get-contexts'
   alias kn='kubens 2>/dev/null || kubectl config set-context --current --namespace'
+  alias kci='kubectl cluster-info'
   alias kg='kubectl get'
+  alias kgg='kubectl get events --sort-by=".metadata.creationTimestamp"'
   alias kgp='kubectl get pods'
   alias kgpa='kubectl get pods --all-namespaces'
   alias kgd='kubectl get deployments'
@@ -2001,7 +2006,6 @@ if has kubectl; then
   alias kex='kubectl exec -it'
   alias kaf='kubectl apply -f'
   alias kdf='kubectl delete -f'
-  alias kctx='kubectl config current-context'
   alias kns='kubectl config view --minify -o jsonpath="{..namespace}"'
   alias ktop='kubectl top'
   alias ktopp='kubectl top pods'
@@ -2076,8 +2080,40 @@ if has python3 || has python; then
   alias py3='python3'
   alias pip='pip3 2>/dev/null || pip'
   alias venv='python3 -m venv'
-  alias activate='source venv/bin/activate 2>/dev/null || source .venv/bin/activate'
   alias deact='deactivate'
+
+  unalias activate 2>/dev/null || true
+  function activate {
+    local activate_file="${PWD}/.venv/bin/activate"
+    [[ -r "$activate_file" ]] || return 0
+    source "$activate_file"
+  }
+
+  _JSH_AUTO_VIRTUAL_ENV="${_JSH_AUTO_VIRTUAL_ENV:-}"
+  _JSH_AUTO_VIRTUAL_ENV_ROOT="${_JSH_AUTO_VIRTUAL_ENV_ROOT:-}"
+  _jsh_python_env_refresh() {
+    local current_dir="${PWD:A}" auto_root=""
+
+    if [[ -n "${_JSH_AUTO_VIRTUAL_ENV:-}" ]]; then
+      auto_root="${_JSH_AUTO_VIRTUAL_ENV_ROOT:-${_JSH_AUTO_VIRTUAL_ENV:h}}"
+      auto_root="${auto_root:A}"
+      if [[ "$current_dir" == "$auto_root" || "$current_dir" == "$auto_root/"* ]]; then
+        return 0
+      fi
+      if [[ "${VIRTUAL_ENV:-}" == "$_JSH_AUTO_VIRTUAL_ENV" ]] && (( $+functions[deactivate] )); then
+        deactivate
+      fi
+      _JSH_AUTO_VIRTUAL_ENV=""
+      _JSH_AUTO_VIRTUAL_ENV_ROOT=""
+    fi
+
+    [[ -z "${VIRTUAL_ENV:-}" ]] || return 0
+    local activate_file="${PWD}/.venv/bin/activate"
+    [[ -r "$activate_file" ]] || return 0
+    source "$activate_file" || return
+    _JSH_AUTO_VIRTUAL_ENV="${VIRTUAL_ENV:-${PWD}/.venv}"
+    _JSH_AUTO_VIRTUAL_ENV_ROOT="$current_dir"
+  }
 fi
 
 # -----------------------------------------------------------------------------
@@ -6722,6 +6758,10 @@ jsh_plugins_load
 
 if jsh_feature_enabled project-env; then
   jsh_hook_add chpwd jsh_project_env_refresh 40
+  if (( $+functions[_jsh_python_env_refresh] )); then
+    jsh_hook_add chpwd _jsh_python_env_refresh 40
+    _jsh_python_env_refresh
+  fi
   jsh_project_env_refresh
 fi
 

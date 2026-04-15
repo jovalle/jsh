@@ -50,7 +50,8 @@ _jsh_path_prepend() {
   export PATH
 }
 
-for _jsh_path in "${HOME}/.local/bin" "${JSH_DIR}/local/bin" "${JSH_DIR}/bin"; do
+for _jsh_path in "${HOME}/.local/bin" "${JSH_DIR}/local/bin" \
+  "${JSH_DIR}/vendor/fzf/bin" "${JSH_DIR}/bin"; do
   _jsh_path_prepend "${_jsh_path}"
 done
 unset _jsh_path _jsh_path_entries
@@ -96,6 +97,9 @@ fi
 
 if command -v task >/dev/null 2>&1; then
   eval "$(task --completion bash 2>/dev/null)"
+fi
+if command -v fzf >/dev/null 2>&1; then
+  eval "$(fzf --bash 2>/dev/null)"
 fi
 if command -v direnv >/dev/null 2>&1; then
   eval "$(direnv hook bash)"
