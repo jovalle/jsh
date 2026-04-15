@@ -1,5 +1,4 @@
 # Core tools installed by the full jsh installer and required by workstation tasks.
-brew "fzf"
 brew "go-task"
 brew "jq"
 brew "just"
