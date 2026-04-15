@@ -1,7 +1,6 @@
 local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
 if not (vim.uv or vim.loop).fs_stat(lazypath) then
   if vim.env.JSH_OFFLINE == "1" or vim.env.JSH_ALLOW_NETWORK_BOOTSTRAP ~= "1" then
-    vim.notify("LazyVim is not installed. Run nvim --bootstrap when network access is allowed.", vim.log.levels.WARN)
     return
   end
   local lazyrepo = "https://github.com/folke/lazy.nvim.git"

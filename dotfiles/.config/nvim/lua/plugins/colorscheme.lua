@@ -51,6 +51,7 @@ return {
 
   {
     "nvim-telescope/telescope.nvim",
+    cmd = "Telescope",
     opts = {
       defaults = {
         selection_caret = " ",
