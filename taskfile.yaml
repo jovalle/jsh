@@ -117,8 +117,8 @@ tasks:
       - defaults write com.apple.Siri UserHasDeclinedEnable -bool true
       - defaults write com.apple.assistant.support 'Dictation Enabled' -bool false
       - defaults write com.apple.lookup.shared LookupSuggestionsDisabled -bool true
-      - defaults write "$HOME/Library/Preferences/ByHost/com.apple.coreservices.useractivityd" ActivityAdvertisingAllowed -bool false
-      - defaults write "$HOME/Library/Preferences/ByHost/com.apple.coreservices.useractivityd" ActivityReceivingAllowed -bool false
+      - defaults write "$HOME/Library/Preferences/ByHost/com.apple.coreservices.useractivityd" ActivityAdvertisingAllowed -bool true
+      - defaults write "$HOME/Library/Preferences/ByHost/com.apple.coreservices.useractivityd" ActivityReceivingAllowed -bool true
       - defaults write com.apple.CrashReporter DialogType -string none
       - defaults write NSGlobalDomain AppleInterfaceStyle -string Dark
       - defaults write com.apple.Spotlight MenuItemHidden -bool true
