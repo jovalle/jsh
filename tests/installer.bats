@@ -24,6 +24,7 @@ make_fixture() {
   if [[ "${fixture_mode}" == full ]]; then
     mkdir -p "${source_root}/dotfiles/.config/example" \
       "${source_root}/dotfiles/.vscode/user" \
+      "${source_root}/vendor/fzf" \
       "${source_root}/vendor/fzf-tab" \
       "${source_root}/vendor/zsh-completions/src" \
       "${source_root}/vendor/zsh-plugins" \
@@ -32,10 +33,21 @@ make_fixture() {
       '[submodule "vendor/fzf-tab"]' \
       '  path = vendor/fzf-tab' \
       '  url = https://example.invalid/fzf-tab.git' \
+      '[submodule "vendor/fzf"]' \
+      '  path = vendor/fzf' \
+      '  url = https://example.invalid/fzf.git' \
       '[submodule "vendor/zsh-completions"]' \
       '  path = vendor/zsh-completions' \
       '  url = https://example.invalid/zsh-completions.git' \
       >"${source_root}/.gitmodules"
+    cat >"${source_root}/vendor/fzf/install" <<'EOF'
+#!/usr/bin/env bash
+[[ " $* " == *" --bin "* ]] || exit 2
+mkdir -p "$(dirname "$0")/bin"
+printf '#!/usr/bin/env bash\n' >"$(dirname "$0")/bin/fzf"
+chmod +x "$(dirname "$0")/bin/fzf"
+EOF
+    chmod +x "${source_root}/vendor/fzf/install"
     printf '%s\n' plugin >"${source_root}/vendor/fzf-tab/fzf-tab.plugin.zsh"
     printf '%s\n' completion >"${source_root}/vendor/zsh-completions/src/_example"
     printf '%s\n' autosuggest >"${source_root}/vendor/zsh-plugins/zsh-autosuggestions.zsh"
@@ -455,6 +467,9 @@ UNAME
   [ "${status}" -eq 0 ]
   [ -L "${bin_root}/jsh" ]
   [ -L "${home_root}/.zshrc" ]
+  [ -x "${source_root}/vendor/fzf/bin/fzf" ]
+  [ ! -e "${home_root}/.fzf.bash" ]
+  [ ! -e "${home_root}/.fzf.zsh" ]
   backup=$(find "${state_root}/jsh/backups" -type f -name .zshrc -print -quit)
   [ -n "${backup}" ]
   [ "$(sed -n '1p' "${backup}")" = preserve ]
