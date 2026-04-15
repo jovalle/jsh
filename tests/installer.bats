@@ -65,6 +65,294 @@ run_installer() {
     "${source_root}/j.sh" "$@"
 }
 
+assert_banner_spacing() {
+  local expected_next=$1
+  local banner_end=$' =   :-=-:                          -:\n\n'"${expected_next}"
+
+  [[ "${output}" == $'\n   :%@@@@@@@@@#*#@%-              +-:##'* ]]
+  [[ "${output}" == *"${banner_end}"* ]]
+}
+
+assert_embedded_banner_header() {
+  local header=$1 gap_width=26 left_width right_width banner_end
+  left_width=$(((gap_width - ${#header}) / 2))
+  right_width=$((gap_width - ${#header} - left_width))
+  printf -v banner_end ' =   :-=-:%*s%s%*s-:\n\n' \
+    "${left_width}" '' "${header}" "${right_width}" ''
+
+  [[ "${output}" == $'\n   :%@@@@@@@@@#*#@%-              +-:##'* ]]
+  [[ "${output}" == *"${banner_end}"* ]]
+  [[ "${output}" != *$'\n'"${header}"$'\n'* ]]
+}
+
+@test "status embeds its header in the banner" {
+  make_fixture lite
+  run env \
+    COLUMNS=200 \
+    HOME="${home_root}" \
+    XDG_STATE_HOME="${state_root}" \
+    JSH_DIR="${source_root}" \
+    JSH_PLAIN_OUTPUT=1 \
+    JSH_COLOR=never \
+    "${source_root}/bin/jsh" status
+
+  [ "${status}" -eq 1 ]
+  assert_embedded_banner_header Status
+}
+
+@test "status shows and clears a loading spinner" {
+  make_fixture lite
+  cat >"${bin_root}/brew" <<'BREW'
+#!/bin/sh
+case "$1:$2" in
+  list:--formula) printf '%s\n' fzf go-task jq just zsh ;;
+  list:--cask) ;;
+  *) exit 2 ;;
+esac
+BREW
+  chmod +x "${bin_root}/brew"
+
+  run env \
+    PATH="${bin_root}:${PATH}" \
+    HOME="${home_root}" \
+    XDG_STATE_HOME="${state_root}" \
+    JSH_DIR="${source_root}" \
+    JSH_STATUS_CHECK_UPDATES=never \
+    JSH_SPINNER=always \
+    JSH_SPINNER_DELAY=0 \
+    JSH_COLOR=always \
+    TERM=xterm-256color \
+    "${source_root}/bin/jsh" status
+
+  [[ "${output}" == *$'\033[?25l'* ]]
+  [[ "${output}" == *'Loading...'* ]]
+  [[ "${output}" == *$'\033[?25h\r\033[K'* ]]
+}
+
+@test "status aligns component summaries and counts Git changes" {
+  make_fixture full
+  printf '%s\n' staged >>"${source_root}/dotfiles/.bashrc"
+  git -C "${source_root}" add dotfiles/.bashrc
+  printf '%s\n' unstaged >>"${source_root}/dotfiles/.zshrc"
+  printf '%s\n' untracked >"${source_root}/untracked.txt"
+
+  run env \
+    COLUMNS=200 \
+    HOME="${home_root}" \
+    XDG_STATE_HOME="${state_root}" \
+    JSH_DIR="${source_root}" \
+    JSH_STATUS_CHECK_UPDATES=never \
+    JSH_PLAIN_OUTPUT=1 \
+    JSH_COLOR=never \
+    "${source_root}/bin/jsh" status
+
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *$'[error] Shell                unconfigured, '* ]]
+  [[ "${output}" == *$'[warn]  Repository           '* ]]
+  [[ "${output}" == *'3 changes - 1 staged, 1 unstaged, 1 untracked'* ]]
+  [[ "${output}" == *$'[error] Submodules           '* ]]
+  [[ "${output}" == *$'[error] Packages             5 defined'* ]]
+}
+
+@test "status accepts installed Homebrew formula aliases" {
+  make_fixture lite
+  printf '%s\n' 'brew "python"' >"${source_root}/config/homebrew/Brewfile.core"
+  cat >"${bin_root}/brew" <<'BREW'
+#!/bin/sh
+case "$1:$2:$3" in
+  list:--formula:-1) printf '%s\n' python@3.14 ;;
+  list:--formula:python) ;;
+  list:--cask:-1) ;;
+  *) exit 2 ;;
+esac
+BREW
+  chmod +x "${bin_root}/brew"
+
+  run env \
+    PATH="${bin_root}:${PATH}" \
+    HOME="${home_root}" \
+    XDG_STATE_HOME="${state_root}" \
+    JSH_DIR="${source_root}" \
+    JSH_STATUS_CHECK_UPDATES=never \
+    JSH_PLAIN_OUTPUT=1 \
+    JSH_COLOR=never \
+    "${source_root}/bin/jsh" status --verbose
+
+  [[ "${output}" == *$'[ok]    Packages             1 defined, 1 installed, 0 updates'* ]]
+}
+
+@test "verbose status highlights package versions and update command" {
+  make_fixture lite
+  cat >"${bin_root}/brew" <<'BREW'
+#!/bin/sh
+case "$1:$2" in
+  list:--formula) printf '%s\n' fzf go-task jq just zsh ;;
+  list:--cask) ;;
+  outdated:--json=v2)
+    printf '%s\n' '{"formulae":[{"name":"jq","installed_versions":["1.7"],"current_version":"1.8"}],"casks":[]}'
+    ;;
+  *) exit 2 ;;
+esac
+BREW
+  chmod +x "${bin_root}/brew"
+
+  run env -u NO_COLOR \
+    PATH="${bin_root}:${PATH}" \
+    HOME="${home_root}" \
+    XDG_STATE_HOME="${state_root}" \
+    JSH_DIR="${source_root}" \
+    JSH_COLOR=always \
+    JSH_PLAIN_OUTPUT=0 \
+    TERM=xterm-256color \
+    COLORTERM=truecolor \
+    "${source_root}/bin/jsh" status --verbose
+
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *'5 defined, 5 installed, 1 update'* ]]
+  [[ "${output}" == *$'\033[38;2;255;233;0m1.7\033[0m'* ]]
+  [[ "${output}" == *$'\033[38;2;0;208;132m1.8\033[0m'* ]]
+  [[ "${output}" == *$'Run \033[1m\033[38;2;0;183;255mjsh update\033[0m'* ]]
+}
+
+@test "doctor uses comprehensive verbose status output" {
+  make_fixture lite
+  run env \
+    HOME="${home_root}" \
+    XDG_STATE_HOME="${state_root}" \
+    JSH_DIR="${source_root}" \
+    JSH_STATUS_CHECK_UPDATES=never \
+    JSH_PLAIN_OUTPUT=1 \
+    JSH_COLOR=never \
+    "${source_root}/bin/jsh" doctor
+
+  [[ "${output}" == *'Shell'* ]]
+  [[ "${output}" == *'Working tree'* ]]
+  [[ "${output}" == *'Repository'* ]]
+  [[ "${output}" == *'Packages'* ]]
+  [[ "${output}" == *'Commands'* ]]
+  [[ "${output}" != *$'\nInstaller\n'* ]]
+}
+
+@test "update coordinates submodule and package workflows" {
+  make_fixture lite
+  trace_file=${test_root}/update.trace
+  cat >"${bin_root}/just" <<'JUST'
+#!/bin/sh
+printf 'just:%s\n' "$*" >>"${TRACE_FILE}"
+printf 'just output\n'
+JUST
+  cat >"${bin_root}/task" <<'TASK'
+#!/bin/sh
+printf 'task:%s\n' "$*" >>"${TRACE_FILE}"
+printf 'task output\n'
+TASK
+  chmod +x "${bin_root}/just" "${bin_root}/task"
+
+  run env \
+    PATH="${bin_root}:${PATH}" \
+    TRACE_FILE="${trace_file}" \
+    HOME="${home_root}" \
+    XDG_STATE_HOME="${state_root}" \
+    JSH_DIR="${source_root}" \
+    JSH_PLAIN_OUTPUT=1 \
+    JSH_COLOR=never \
+    "${source_root}/bin/jsh" update
+
+  [ "${status}" -eq 0 ]
+  [ "$(cat "${trace_file}")" = $'just:update\ntask:packages' ]
+  [[ "${output}" == *'just output'* ]]
+  [[ "${output}" == *'task output'* ]]
+  assert_embedded_banner_header Update
+  [[ "${output}" == *'[ok] Submodules updated from their configured remotes'* ]]
+  [[ "${output}" == *'[ok] Packages installed and upgraded'* ]]
+}
+
+@test "help surrounds its banner with one blank line" {
+  make_fixture lite
+  run env \
+    HOME="${home_root}" \
+    XDG_STATE_HOME="${state_root}" \
+    JSH_DIR="${source_root}" \
+    JSH_PLAIN_OUTPUT=1 \
+    JSH_COLOR=never \
+    "${source_root}/bin/jsh" help
+
+  [ "${status}" -eq 0 ]
+  assert_banner_spacing Usage
+}
+
+@test "audit reports unmanaged Linuxbrew leaves and casks in columns" {
+  make_fixture lite
+  cat >"${source_root}/config/homebrew/Brewfile" <<'BREWFILE'
+brew "managed-parent"
+cask "managed-cask"
+BREWFILE
+  cat >"${source_root}/config/homebrew/Brewfile.linux" <<'BREWFILE'
+brew "managed-linux"
+BREWFILE
+  cat >"${bin_root}/brew" <<'BREW'
+#!/bin/sh
+case "$1" in
+  shellenv) ;;
+  leaves) printf '%s\n' managed-parent managed-linux extra-a extra-b extra-c ;;
+  list) printf '%s\n' managed-cask unmanaged-cask extra-cask ;;
+  *) exit 2 ;;
+esac
+BREW
+  cat >"${bin_root}/uname" <<'UNAME'
+#!/bin/sh
+printf '%s\n' Linux
+UNAME
+  chmod +x "${bin_root}/brew" "${bin_root}/uname"
+
+  run env \
+    PATH="${bin_root}:${PATH}" \
+    COLUMNS=24 \
+    HOME="${home_root}" \
+    XDG_STATE_HOME="${state_root}" \
+    JSH_DIR="${source_root}" \
+    JSH_AUDIT_HOSTNAME=test \
+    JSH_PLAIN_OUTPUT=1 \
+    JSH_COLOR=never \
+    "${source_root}/bin/jsh" audit
+
+  [ "${status}" -eq 0 ]
+  assert_embedded_banner_header Audit
+  printf '%s\n' "${output}" | grep -Eq 'extra-[abc].*extra-'
+  [[ "${output}" == *extra-cask* ]]
+  [[ "${output}" == *extra-b* ]]
+  [[ "${output}" == *unmanaged-cask* ]]
+  [[ "${output}" != *managed-parent* ]]
+  [[ "${output}" != *managed-linux* ]]
+  [[ "${output}" != *$'\nmanaged-cask'* ]]
+  [[ "${output}" != *Applications* ]]
+  [[ "${output}" != *"System packages"* ]]
+}
+
+@test "installer surrounds its banner with one blank line" {
+  make_fixture lite
+  run run_installer lite --dry-run
+
+  [ "${status}" -eq 0 ]
+  assert_banner_spacing 'Setup plan (lite)'
+}
+
+@test "curl bootstrap surrounds its banner with one blank line" {
+  runner=${test_root}/runner.sh
+  checkout_root=${home_root}/.jsh
+  cp "${project_root}/j.sh" "${runner}"
+
+  run env \
+    HOME="${home_root}" \
+    JSH_INSTALL_DIR="${checkout_root}" \
+    JSH_INSTALL_REPO=https://example.invalid/jsh.git \
+    JSH_MODE=lite \
+    "${runner}" --dry-run
+
+  [ "${status}" -eq 0 ]
+  assert_banner_spacing 'Setup plan (lite)'
+}
+
 @test "lite dry-run resolves only checkout and launcher" {
   make_fixture lite
   run run_installer lite --dry-run

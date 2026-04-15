@@ -274,10 +274,19 @@ use_external_ca() {
 }
 
 # Local output helpers keep kubectx usable without the former shared library.
-info() { printf '\033[0;34m·\033[0m %s\n' "$*" >&2; }
-success() { printf '\033[0;32m✓\033[0m %s\n' "$*" >&2; }
-error() { printf '\033[0;31m✗\033[0m %s\n' "$*" >&2; }
-warn() { printf '\033[0;33m!\033[0m %s\n' "$*" >&2; }
+log() {
+  local color="$1"
+  shift
+  if _jsh_color_enabled; then
+    printf '\033[0;%sm%s\033[0m\n' "$color" "$*" >&2
+  else
+    printf '%s\n' "$*" >&2
+  fi
+}
+info() { log 34 "$@"; }
+success() { log 32 "$@"; }
+error() { log 31 "$@"; }
+warn() { log 33 "$@"; }
 
 # Add context from kubeconfig file (kctx+ functionality)
 add_context() {
@@ -348,7 +357,7 @@ add_context() {
   KUBECONFIG="$KUBECONFIG_SRC" $KUBECTL config view --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' | base64 -d >"$ca_tmp"
 
   # Add cluster with CA file
-  $KUBECTL config set-cluster "$cluster_name" --server="$server" --certificate-authority="$ca_tmp" --embed-certs=true
+  $KUBECTL config set-cluster "$cluster_name" --server="$server" --certificate-authority="$ca_tmp" --embed-certs=true >/dev/null
 
   # Extract and write user credentials
   local user_cert
@@ -359,13 +368,13 @@ add_context() {
   if [[ -n "$user_cert" && -n "$user_key" ]]; then
     echo "$user_cert" | base64 -d >"$cert_tmp"
     echo "$user_key" | base64 -d >"$key_tmp"
-    $KUBECTL config set-credentials "$unique_authinfo" --client-certificate="$cert_tmp" --client-key="$key_tmp" --embed-certs=true
+    $KUBECTL config set-credentials "$unique_authinfo" --client-certificate="$cert_tmp" --client-key="$key_tmp" --embed-certs=true >/dev/null
   else
     # Try token-based auth
     local token
     token=$(KUBECONFIG="$KUBECONFIG_SRC" $KUBECTL config view --raw -o jsonpath='{.users[0].user.token}')
     if [[ -n "$token" ]]; then
-      $KUBECTL config set-credentials "$unique_authinfo" --token="$token"
+      $KUBECTL config set-credentials "$unique_authinfo" --token="$token" >/dev/null
     else
       error "No valid credentials found in source kubeconfig"
       rm -f "$ca_tmp" "$cert_tmp" "$key_tmp"
@@ -377,7 +386,7 @@ add_context() {
   rm -f "$ca_tmp" "$cert_tmp" "$key_tmp"
 
   # Create context
-  $KUBECTL config set-context "$context_name" --cluster="$cluster_name" --user="$unique_authinfo"
+  $KUBECTL config set-context "$context_name" --cluster="$cluster_name" --user="$unique_authinfo" >/dev/null
 
   # Switch to the new context
   $KUBECTL config use-context "$context_name" &>/dev/null \
