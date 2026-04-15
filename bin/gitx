@@ -211,6 +211,7 @@ Commands:
   list [-v]             List projects and repository state
   path NAME             Print a project path
   profile [NAME|list]   Inspect or apply an identity profile
+  profiles              List all configured identity profiles
   update                Stash, fetch, rebase, and restore
   commit [-i] [-t TIME] Commit with the assigned identity
   amend [-t TIME]       Amend the latest commit timestamp
@@ -301,8 +302,40 @@ _ts_parse() {
     _ts_parse_absolute "${input}"
   fi
 }
-_ts_detect_precision() { printf 'full\n'; }
-_ts_randomize() { printf '%s\n' "$1"; }
+_ts_detect_precision() {
+  local input="$1" remaining
+  if [[ "${input}" =~ ^[+-] ]]; then
+    remaining="${input#[+-]}"
+    if [[ "${remaining}" =~ [0-9]+s ]]; then printf 'full\n'
+    elif [[ "${remaining}" =~ [0-9]+m ]]; then printf 'minute\n'
+    elif [[ "${remaining}" =~ [0-9]+h ]]; then printf 'hour\n'
+    elif [[ "${remaining}" =~ [0-9]+[dwMy] ]]; then printf 'day\n'
+    else printf 'full\n'; fi
+  elif [[ "${input}" =~ ^[0-9]{4}[-/][0-9]{2}[-/][0-9]{2}$ ]]; then printf 'day\n'
+  elif [[ "${input}" =~ ^[0-9]{4}[-/][0-9]{2}[-/][0-9]{2}[[:space:]]+[0-9]{1,2}$ ||
+    "${input}" =~ ^[0-9]{1,2}$ ]]; then printf 'hour\n'
+  elif [[ "${input}" =~ ^[0-9]{4}[-/][0-9]{2}[-/][0-9]{2}[[:space:]]+[0-9]{1,2}:[0-9]{2}$ ||
+    "${input}" =~ ^[0-9]{1,2}:[0-9]{2}$ ]]; then printf 'minute\n'
+  else printf 'full\n'; fi
+}
+_ts_randomize() {
+  local epoch="$1" precision="${2:-full}" clock hour minute second elapsed span random
+  [[ "${precision}" != full ]] || {
+    printf '%s\n' "${epoch}"
+    return
+  }
+  if _ts_is_gnu_date; then
+    clock=$(date -d "@${epoch}" '+%H:%M:%S')
+  else clock=$(date -r "${epoch}" '+%H:%M:%S'); fi
+  IFS=: read -r hour minute second <<<"${clock}"
+  case "${precision}" in
+    minute | second) elapsed=$((10#${second})); span=60 ;;
+    hour) elapsed=$((10#${minute} * 60 + 10#${second})); span=3600 ;;
+    day) elapsed=$((10#${hour} * 3600 + 10#${minute} * 60 + 10#${second})); span=86400 ;;
+  esac
+  random=$((((RANDOM << 15) | RANDOM) % span))
+  printf '%s\n' "$((epoch - elapsed + random))"
+}
 _ts_ensure_after() {
   local proposed="$1" minimum="$2" gap="${3:-60}"
   if ((proposed < minimum + gap)); then
@@ -2260,7 +2293,7 @@ cmd_commit() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       -t | --timestamp)
-        if [[ -n "${2:-}" ]] && [[ "$2" != -* ]]; then
+        if [[ -n "${2:-}" ]]; then
           timestamp_arg="$2"
           shift 2
         else
@@ -2308,7 +2341,14 @@ cmd_commit() {
 
   # Step 2: Load and validate profile
   local profile_data
-  profile_data="$(_profiles_get "$profile_name")"
+  if [[ ! -f "$JSH_PROFILES" ]]; then
+    error "Profiles file not found: $JSH_PROFILES"
+    return 1
+  fi
+  if ! profile_data="$(_profiles_get "$profile_name")"; then
+    error "Could not read profiles file: $JSH_PROFILES"
+    return 1
+  fi
   if [[ -z "$profile_data" ]]; then
     error "Profile '${profile_name}' not found in ${JSH_PROFILES}"
     return 1
@@ -2336,6 +2376,7 @@ cmd_commit() {
   local -a git_args=()
   local -a sign_args=()
   local -a date_args=()
+  local git_date=""
 
   # Handle timestamp if provided
   if [[ -n "$timestamp_arg" ]]; then
@@ -2396,7 +2437,6 @@ cmd_commit() {
     fi
 
     # Convert to git format
-    local git_date
     git_date=$(_ts_to_git_format "$parsed_epoch")
     date_args+=(--date="$git_date")
 
@@ -2418,6 +2458,17 @@ cmd_commit() {
   else
     sign_args+=("--no-gpg-sign")
   fi
+
+  jsh_section "Commit" first
+  jsh_field "Profile" "$profile_name" 12
+  jsh_field "Author" "${p_name} <${email}>" 12
+  jsh_field "Timestamp" "${git_date:-Git default}" 12
+  if [[ "$should_sign" == "true" ]]; then
+    jsh_field "Signing" "${signingkey##*/}${JSH_SEPARATOR}${signingformat:-ssh}" 12
+  else
+    jsh_field "Signing" "off" 12
+  fi
+  printf '\n'
 
   # Step 5: Execute with profile identity (env vars override everything)
   GIT_AUTHOR_NAME="$p_name" \
@@ -2443,7 +2494,7 @@ cmd_amend() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       -t | --timestamp)
-        if [[ -n "${2:-}" ]] && [[ "$2" != -* ]]; then
+        if [[ -n "${2:-}" ]]; then
           timestamp_arg="$2"
           shift 2
         else
@@ -2670,6 +2721,10 @@ case "${1:-}" in
   profile)
     shift
     cmd_profile "$@"
+    ;;
+  profiles)
+    shift
+    cmd_profile list "$@"
     ;;
 
   # Update command
