@@ -18,7 +18,7 @@ jsh_ui_init() {
 
 jsh_banner() {
   jsh_ui_init
-  printf '%s%s' "${JSH_UI_BOLD}" "${JSH_UI_CYAN}"
+  printf '\n%s%s' "${JSH_UI_BOLD}" "${JSH_UI_CYAN}"
   cat <<'BANNER'
    :%@@@@@@@@@#*#@%-              +-:##
   :#    -#%%+=#:@#                :@@%:
@@ -160,7 +160,7 @@ if [ "${jsh_bootstrap_dry_run}" = 1 ]; then
   fi
 
   jsh_banner
-  printf '\nSetup plan (%s)\n' "${jsh_bootstrap_plan_mode}"
+  printf 'Setup plan (%s)\n' "${jsh_bootstrap_plan_mode}"
   printf '[plan] Git checkout                  clone %s at %s\n' "${jsh_bootstrap_install_dir}" "${jsh_bootstrap_ref}"
   printf '[note] Dry run: no checkout, packages, submodules, or links were changed\n'
   exit 0

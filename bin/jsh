@@ -34,11 +34,35 @@ _jsh_ui_init() {
     _JSH_UI_RICH=1
     _JSH_UI_RESET=$'\033[0m'
     _JSH_UI_BOLD=$'\033[1m'
-    _JSH_UI_DIM=$'\033[2m'
-    _JSH_UI_RED=$'\033[31m'
-    _JSH_UI_GREEN=$'\033[32m'
-    _JSH_UI_YELLOW=$'\033[33m'
-    _JSH_UI_CYAN=$'\033[36m'
+    case "${COLORTERM:-}:${TERM:-}" in
+      *truecolor* | *24bit* | *direct*)
+        _JSH_UI_DIM=$'\033[38;2;139;148;158m'
+        _JSH_UI_RED=$'\033[38;2;255;82;99m'
+        _JSH_UI_GREEN=$'\033[38;2;0;208;132m'
+        _JSH_UI_YELLOW=$'\033[38;2;255;233;0m'
+        _JSH_UI_CYAN=$'\033[38;2;0;183;255m'
+        _JSH_UI_ACCENT=$'\033[38;2;0;168;232m'
+        _JSH_UI_GIT=$'\033[38;2;240;80;50m'
+        ;;
+      *256color*)
+        _JSH_UI_DIM=$'\033[38;5;247m'
+        _JSH_UI_RED=$'\033[38;5;203m'
+        _JSH_UI_GREEN=$'\033[38;5;42m'
+        _JSH_UI_YELLOW=$'\033[38;5;226m'
+        _JSH_UI_CYAN=$'\033[38;5;39m'
+        _JSH_UI_ACCENT=$'\033[38;5;38m'
+        _JSH_UI_GIT=$'\033[38;5;202m'
+        ;;
+      *)
+        _JSH_UI_DIM=$'\033[90m'
+        _JSH_UI_RED=$'\033[31m'
+        _JSH_UI_GREEN=$'\033[32m'
+        _JSH_UI_YELLOW=$'\033[33m'
+        _JSH_UI_CYAN=$'\033[34m'
+        _JSH_UI_ACCENT=$'\033[36m'
+        _JSH_UI_GIT=$'\033[31m'
+        ;;
+    esac
   else
     _JSH_UI_RICH=0
     _JSH_UI_RESET=''
@@ -48,6 +72,8 @@ _jsh_ui_init() {
     _JSH_UI_GREEN=''
     _JSH_UI_YELLOW=''
     _JSH_UI_CYAN=''
+    _JSH_UI_ACCENT=''
+    _JSH_UI_GIT=''
   fi
 }
 
@@ -91,8 +117,10 @@ _jsh_ui_text() {
 }
 
 _jsh_ui_heading() {
+  local separator='\n'
+  [[ "${2:-}" != after-banner ]] || separator=
   _jsh_ui_init
-  printf '\n%s%s%s%s\n' "${_JSH_UI_BOLD}" "${_JSH_UI_CYAN}" "$1" "${_JSH_UI_RESET}"
+  printf '%b%s%s%s%s\n' "${separator}" "${_JSH_UI_BOLD}" "${_JSH_UI_CYAN}" "$1" "${_JSH_UI_RESET}"
 }
 
 _jsh_ui_row() {
@@ -499,8 +527,7 @@ _jsh_apply_links() {
   fi
 
   if [[ "${quiet}" == 0 ]]; then
-    _jsh_banner
-    _jsh_ui_heading "Configuring ${mode_label}"
+    _jsh_banner "Configuring ${mode_label}"
   fi
   timestamp=$(date +%Y%m%d-%H%M%S)
   backup_root="${JSH_STATE_DIR}/backups/${timestamp}"
@@ -601,20 +628,561 @@ _jsh_status_shell() {
       fi
 
       if [[ "${source}" == "${JSH_DIR}/bin/jsh" ]]; then
-        _jsh_status_emit shell "${state}" launcher "${detail}"
+        _jsh_status_emit launcher "${state}" launcher "${detail}"
       else
-        _jsh_status_emit shell "${state}" "${destination}" "${detail}"
+        _jsh_status_emit configuration "${state}" "${destination}" "${detail}"
       fi
     done <"${JSH_LINK_STATE}"
   fi
-  [[ "${seen_launcher}" == 1 ]] || _jsh_status_emit shell missing launcher 'managed launcher is not recorded'
+  [[ "${seen_launcher}" == 1 ]] || _jsh_status_emit launcher missing launcher 'managed launcher is not recorded'
 
   if [[ "${mode}" == install ]]; then
     while IFS='|' read -r source destination; do
       _jsh_state_has_destination "${destination}" \
-        || _jsh_status_emit shell missing "${destination}" "not linked from ${source}"
+        || _jsh_status_emit configuration missing "${destination}" "not linked from ${source}"
     done < <(_jsh_install_entries)
   fi
+}
+
+_jsh_status_git_operation() {
+  local git_dir current='' total=''
+  REPLY=
+  git_dir=$(git -C "${JSH_DIR}" rev-parse --absolute-git-dir 2>/dev/null) || return 0
+  if [[ -d "${git_dir}/rebase-merge" ]]; then
+    REPLY=REBASE
+    IFS= read -r current <"${git_dir}/rebase-merge/msgnum" 2>/dev/null || true
+    IFS= read -r total <"${git_dir}/rebase-merge/end" 2>/dev/null || true
+  elif [[ -d "${git_dir}/rebase-apply" ]]; then
+    [[ -f "${git_dir}/rebase-apply/applying" ]] && REPLY=AM || REPLY=REBASE
+    IFS= read -r current <"${git_dir}/rebase-apply/next" 2>/dev/null || true
+    IFS= read -r total <"${git_dir}/rebase-apply/last" 2>/dev/null || true
+  elif [[ -f "${git_dir}/MERGE_HEAD" ]]; then
+    REPLY=MERGE
+  elif [[ -f "${git_dir}/CHERRY_PICK_HEAD" ]]; then
+    REPLY=CHERRY-PICK
+  elif [[ -f "${git_dir}/REVERT_HEAD" ]]; then
+    REPLY=REVERT
+  elif [[ -f "${git_dir}/BISECT_LOG" ]]; then
+    REPLY=BISECT
+  fi
+  if [[ -n "${REPLY}" && "${current}" =~ ^[0-9]+$ && "${total}" =~ ^[0-9]+$ ]]; then
+    REPLY+=" ${current}/${total}"
+  fi
+}
+
+_jsh_status_repository() {
+  local output line xy state=current
+  JSH_STATUS_GIT_BRANCH=unknown
+  JSH_STATUS_GIT_HEAD=
+  JSH_STATUS_GIT_CHANGES=0
+  JSH_STATUS_GIT_STAGED=0
+  JSH_STATUS_GIT_UNSTAGED=0
+  JSH_STATUS_GIT_UNTRACKED=0
+  JSH_STATUS_GIT_CONFLICTS=0
+  JSH_STATUS_GIT_AHEAD=0
+  JSH_STATUS_GIT_BEHIND=0
+  JSH_STATUS_GIT_STASH=0
+  JSH_STATUS_GIT_OPERATION=
+
+  output=$(GIT_OPTIONAL_LOCKS=0 git -C "${JSH_DIR}" status \
+    --porcelain=v2 --branch --show-stash --untracked-files=normal -- . \
+    ':(exclude,glob)tmp/jsh-status.*/**' 2>/dev/null) || {
+    _jsh_status_emit repository error Repository 'jsh is not a readable Git checkout'
+    return
+  }
+  while IFS= read -r line; do
+    case "${line}" in
+      '# branch.oid '*) JSH_STATUS_GIT_HEAD=${line#\# branch.oid } ;;
+      '# branch.head '*) JSH_STATUS_GIT_BRANCH=${line#\# branch.head } ;;
+      '# branch.ab '*)
+        line=${line#\# branch.ab }
+        JSH_STATUS_GIT_AHEAD=${line%% *}
+        JSH_STATUS_GIT_BEHIND=${line##* }
+        JSH_STATUS_GIT_AHEAD=${JSH_STATUS_GIT_AHEAD#+}
+        JSH_STATUS_GIT_BEHIND=${JSH_STATUS_GIT_BEHIND#-}
+        ;;
+      '# stash '*) JSH_STATUS_GIT_STASH=${line#\# stash } ;;
+      '1 '* | '2 '*)
+        xy=${line:2:2}
+        JSH_STATUS_GIT_CHANGES=$((JSH_STATUS_GIT_CHANGES + 1))
+        [[ ${xy:0:1} == . ]] || JSH_STATUS_GIT_STAGED=$((JSH_STATUS_GIT_STAGED + 1))
+        [[ ${xy:1:1} == . ]] || JSH_STATUS_GIT_UNSTAGED=$((JSH_STATUS_GIT_UNSTAGED + 1))
+        ;;
+      'u '*)
+        JSH_STATUS_GIT_CHANGES=$((JSH_STATUS_GIT_CHANGES + 1))
+        JSH_STATUS_GIT_CONFLICTS=$((JSH_STATUS_GIT_CONFLICTS + 1))
+        ;;
+      '? '*)
+        JSH_STATUS_GIT_CHANGES=$((JSH_STATUS_GIT_CHANGES + 1))
+        JSH_STATUS_GIT_UNTRACKED=$((JSH_STATUS_GIT_UNTRACKED + 1))
+        ;;
+    esac
+  done <<<"${output}"
+  JSH_STATUS_GIT_HEAD=${JSH_STATUS_GIT_HEAD:0:7}
+  _jsh_status_git_operation
+  JSH_STATUS_GIT_OPERATION=${REPLY}
+
+  if ((JSH_STATUS_GIT_CONFLICTS > 0)) || [[ -n "${JSH_STATUS_GIT_OPERATION}" ]]; then
+    state=error
+  elif ((JSH_STATUS_GIT_CHANGES > 0 || JSH_STATUS_GIT_BEHIND > 0)); then
+    state=warning
+  fi
+  _jsh_status_emit repository "${state}" Repository \
+    "${JSH_STATUS_GIT_BRANCH} @ ${JSH_STATUS_GIT_HEAD}, ${JSH_STATUS_GIT_CHANGES} changes - ${JSH_STATUS_GIT_STAGED} staged, ${JSH_STATUS_GIT_UNSTAGED} unstaged, ${JSH_STATUS_GIT_UNTRACKED} untracked"
+}
+
+_jsh_status_submodules() {
+  local module_path module_status module_state module_detail state=current
+  local initialized=0 total=0 dirty=0 missing=0 drifted=0
+  if [[ ! -r "${JSH_DIR}/.gitmodules" ]]; then
+    _jsh_status_emit submodules error Submodules '.gitmodules is missing'
+    return
+  fi
+  while IFS= read -r module_path; do
+    [[ -n "${module_path}" ]] || continue
+    total=$((total + 1))
+    module_status=$(git -C "${JSH_DIR}" submodule status -- "${module_path}" 2>/dev/null || true)
+    module_state=current
+    module_detail=initialized
+    case "${module_status}" in
+      '')
+        missing=$((missing + 1))
+        module_state=error
+        module_detail='not initialized'
+        state=error
+        ;;
+      -*)
+        missing=$((missing + 1))
+        module_state=error
+        module_detail='not initialized'
+        state=error
+        ;;
+      +*)
+        initialized=$((initialized + 1))
+        drifted=$((drifted + 1))
+        module_state=warning
+        module_detail='checked out at a different commit'
+        [[ "${state}" == error ]] || state=warning
+        ;;
+      U*)
+        initialized=$((initialized + 1))
+        module_state=error
+        module_detail='merge conflict'
+        state=error
+        ;;
+      *) initialized=$((initialized + 1)) ;;
+    esac
+    if [[ "${module_state}" != error && -d "${JSH_DIR}/${module_path}" ]] \
+      && git -C "${JSH_DIR}/${module_path}" rev-parse --git-dir >/dev/null 2>&1 \
+      && [[ -n $(git -C "${JSH_DIR}/${module_path}" status --porcelain --untracked-files=all 2>/dev/null) ]]; then
+      dirty=$((dirty + 1))
+      module_state=warning
+      module_detail='local changes'
+      [[ "${state}" == error ]] || state=warning
+    fi
+    _jsh_status_emit submodule-item "${module_state}" "${module_path}" "${module_detail}"
+  done < <(git -C "${JSH_DIR}" config --file .gitmodules --get-regexp '\.path$' 2>/dev/null | sed 's/^[^ ]* //')
+  JSH_STATUS_SUBMODULE_TOTAL=${total}
+  JSH_STATUS_SUBMODULE_INITIALIZED=${initialized}
+  JSH_STATUS_SUBMODULE_DIRTY=${dirty}
+  JSH_STATUS_SUBMODULE_MISSING=${missing}
+  JSH_STATUS_SUBMODULE_DRIFTED=${drifted}
+  _jsh_status_emit submodules "${state}" Submodules \
+    "${initialized}/${total} initialized, ${dirty} dirty, ${drifted} drifted"
+}
+
+_jsh_status_package_manifests() {
+  local host manifest platform_manifest=
+  host=${JSH_STATUS_HOSTNAME:-$(hostname -s 2>/dev/null || true)}
+  host=${host,,}
+  case $(uname -s 2>/dev/null) in
+    Darwin) platform_manifest="${JSH_DIR}/config/homebrew/Brewfile.macos" ;;
+    Linux) platform_manifest="${JSH_DIR}/config/homebrew/Brewfile.linux" ;;
+  esac
+  for manifest in \
+    "${JSH_DIR}/config/homebrew/Brewfile.core" \
+    "${JSH_DIR}/config/homebrew/Brewfile" \
+    "${platform_manifest}" \
+    "${JSH_DIR}/config/homebrew/Brewfile.${host}"; do
+    [[ -n "${manifest}" && -r "${manifest}" ]] && printf '%s\n' "${manifest}"
+  done
+}
+
+_jsh_status_declared_packages() {
+  local manifest kind name
+  while IFS= read -r manifest; do
+    while IFS=$'\t' read -r kind name; do
+      [[ "${kind}" != formula ]] || name=${name##*/}
+      printf '%s\t%s\n' "${kind}" "${name}"
+    done < <(sed -n \
+      -e 's/^[[:space:]]*brew[[:space:]]*"\([^"]*\)".*/formula\	\1/p' \
+      -e 's/^[[:space:]]*cask[[:space:]]*"\([^"]*\)".*/cask\	\1/p' \
+      "${manifest}")
+  done < <(_jsh_status_package_manifests) | sort -u
+}
+
+_jsh_status_packages() {
+  local declared installed_formulae='' installed_casks='' kind name state=current item_state
+  local outdated_json='' current_version latest_version update_label item_detail
+  local brew_available=0
+  JSH_STATUS_PACKAGE_TOTAL=0
+  JSH_STATUS_PACKAGE_INSTALLED=0
+  JSH_STATUS_PACKAGE_MISSING=0
+  JSH_STATUS_PACKAGE_UPDATES=0
+  : >"${JSH_STATUS_UPDATE_RECORDS}"
+  declared=$(_jsh_status_declared_packages)
+
+  if command -v brew >/dev/null 2>&1; then
+    brew_available=1
+    installed_formulae=$(brew list --formula -1 2>/dev/null || true)
+    installed_casks=$(brew list --cask -1 2>/dev/null || true)
+  else
+    state=warning
+  fi
+
+  while IFS=$'\t' read -r kind name; do
+    [[ -n "${kind}" && -n "${name}" ]] || continue
+    JSH_STATUS_PACKAGE_TOTAL=$((JSH_STATUS_PACKAGE_TOTAL + 1))
+    item_state=warning
+    item_detail="${kind}, missing"
+    if [[ "${kind}" == formula ]] \
+      && { grep -Fqx "${name}" <<<"${installed_formulae}" \
+        || { ((brew_available)) && brew list --formula "${name}" >/dev/null 2>&1; }; }; then
+      item_state=current
+      item_detail=${kind}
+    elif [[ "${kind}" == cask ]] && grep -Fqx "${name}" <<<"${installed_casks}"; then
+      item_state=current
+      item_detail=${kind}
+    fi
+    if [[ "${item_state}" == current ]]; then
+      JSH_STATUS_PACKAGE_INSTALLED=$((JSH_STATUS_PACKAGE_INSTALLED + 1))
+    else
+      JSH_STATUS_PACKAGE_MISSING=$((JSH_STATUS_PACKAGE_MISSING + 1))
+      if [[ "${kind}" == formula ]] \
+        && sed -n 's/^[[:space:]]*brew[[:space:]]*"\([^"]*\)".*/\1/p' \
+          "${JSH_DIR}/config/homebrew/Brewfile.core" 2>/dev/null \
+        | sed 's|.*/||' | grep -Fqx "${name}"; then
+        item_state=error
+        state=error
+      elif [[ "${state}" != error ]]; then
+        state=warning
+      fi
+    fi
+    _jsh_status_emit package-item "${item_state}" "${name}" "${item_detail}"
+  done <<<"${declared}"
+
+  if command -v brew >/dev/null 2>&1 && [[ "${JSH_STATUS_CHECK_UPDATES:-auto}" != never ]]; then
+    outdated_json=$(HOMEBREW_NO_AUTO_UPDATE=1 brew outdated --json=v2 2>/dev/null || true)
+    if [[ -n "${outdated_json}" ]] && command -v jq >/dev/null 2>&1; then
+      while IFS=$'\t' read -r name current_version latest_version; do
+        [[ -n "${name}" ]] || continue
+        printf '%s\t%s\t%s\n' "${name}" "${current_version}" "${latest_version}" \
+          >>"${JSH_STATUS_UPDATE_RECORDS}"
+        _jsh_status_emit package-update warning "${name}" "${current_version} -> ${latest_version}"
+        JSH_STATUS_PACKAGE_UPDATES=$((JSH_STATUS_PACKAGE_UPDATES + 1))
+      done < <(jq -r '
+        ((.formulae // [])[] | [.name, ((.installed_versions // []) | join(",")), .current_version]),
+        ((.casks // [])[] | [.name, ((.installed_versions // []) | join(",")), .current_version])
+        | @tsv' <<<"${outdated_json}" 2>/dev/null)
+    fi
+  fi
+  if ((JSH_STATUS_PACKAGE_UPDATES > 0)) && [[ "${state}" != error ]]; then
+    state=warning
+  fi
+  [[ "${JSH_STATUS_PACKAGE_UPDATES}" == 1 ]] && update_label=update || update_label=updates
+  _jsh_status_emit packages "${state}" Packages \
+    "${JSH_STATUS_PACKAGE_TOTAL} defined, ${JSH_STATUS_PACKAGE_INSTALLED} installed, ${JSH_STATUS_PACKAGE_UPDATES} ${update_label}"
+}
+
+_jsh_status_project_find() {
+  local search_dir=${PWD}
+  REPLY=
+  while [[ -n "${search_dir}" ]]; do
+    if [[ -r "${search_dir}/.jshenv" ]]; then
+      REPLY="${search_dir}/.jshenv"
+      return 0
+    fi
+    if [[ -r "${search_dir}/.jshrc" ]]; then
+      REPLY="${search_dir}/.jshrc"
+      return 0
+    fi
+    [[ "${search_dir}" == / ]] && break
+    search_dir=${search_dir%/*}
+    [[ -n "${search_dir}" ]] || search_dir=/
+  done
+  return 1
+}
+
+_jsh_status_project_trusted() {
+  local file="$1" hash='' trusted_file trusted_hash
+  if command -v shasum >/dev/null 2>&1; then
+    hash=$(shasum -a 256 "${file}" 2>/dev/null)
+    hash=${hash%% *}
+  elif command -v sha256sum >/dev/null 2>&1; then
+    hash=$(sha256sum "${file}" 2>/dev/null)
+    hash=${hash%% *}
+  fi
+  [[ -n "${hash}" && -r "${JSH_PROJECT_TRUST_FILE:-${XDG_CONFIG_HOME:-${HOME}/.config}/jsh/trusted-projects}" ]] || return 1
+  while IFS='|' read -r trusted_file trusted_hash; do
+    [[ "${trusted_file}" == "${file}" && "${trusted_hash}" == "${hash}" ]] && return 0
+  done <"${JSH_PROJECT_TRUST_FILE:-${XDG_CONFIG_HOME:-${HOME}/.config}/jsh/trusted-projects}"
+  return 1
+}
+
+_jsh_status_environment() {
+  local selected_nvim project_file
+  selected_nvim=$(command -v nvim 2>/dev/null || true)
+  if [[ "${selected_nvim}" == "${JSH_DIR}/bin/nvim" ]]; then
+    _jsh_status_emit editors current Neovim "jsh wrapper active, runtime stored under ${JSH_LOCAL_DIR:-${JSH_DIR}/local}"
+    _jsh_status_emit path current PATH "${JSH_DIR}/bin takes precedence"
+  else
+    _jsh_status_emit editors warning Neovim "jsh wrapper is not selected by PATH"
+    _jsh_status_emit path warning PATH "add ${JSH_DIR}/bin before other executable directories"
+  fi
+
+  if _jsh_status_project_find; then
+    project_file=${REPLY}
+    if [[ "${project_file}" == *.jshrc ]] && ! _jsh_status_project_trusted "${project_file}"; then
+      _jsh_status_emit project warning 'Project environment' "${project_file}, trust required"
+    else
+      _jsh_status_emit project current 'Project environment' "${project_file}, ready"
+    fi
+  else
+    _jsh_status_emit project current 'Project environment' 'no project environment discovered'
+  fi
+
+  if [[ -r "${JSH_DIR}/dotfiles/.gitconfig" ]]; then
+    _jsh_status_emit runtime-git current 'Runtime Git' 'isolated writable overlay'
+  else
+    _jsh_status_emit runtime-git error 'Runtime Git' 'managed Git baseline is missing'
+  fi
+}
+
+_jsh_status_component_state() {
+  local wanted="$1" component state _name _detail rank=0 current_rank
+  REPLY_STATE=current
+  while IFS=$'\t' read -r component state _name _detail; do
+    [[ "${component}" == "${wanted}" ]] || continue
+    case "${state}" in
+      error | missing | failed) current_rank=2 ;;
+      changed | retained | warning) current_rank=1 ;;
+      *) current_rank=0 ;;
+    esac
+    if ((current_rank > rank)); then
+      rank=${current_rank}
+      ((rank == 2)) && REPLY_STATE=error || REPLY_STATE=warning
+    fi
+  done <"${JSH_STATUS_RECORDS}"
+}
+
+_jsh_status_component_counts() {
+  local wanted="$1" component state _name _detail
+  REPLY_TOTAL=0
+  REPLY_CURRENT=0
+  while IFS=$'\t' read -r component state _name _detail; do
+    [[ "${component}" == "${wanted}" ]] || continue
+    REPLY_TOTAL=$((REPLY_TOTAL + 1))
+    case "${state}" in current | linked | success) REPLY_CURRENT=$((REPLY_CURRENT + 1)) ;; esac
+  done <"${JSH_STATUS_RECORDS}"
+}
+
+_jsh_status_doctor_counts() {
+  local components="$1" component classification _name _detail
+  REPLY_TOTAL=0
+  REPLY_CURRENT=0
+  REPLY_STATE=current
+  while IFS=$'\t' read -r component classification _name _detail; do
+    case " ${components} " in *" ${component} "*) ;; *) continue ;; esac
+    [[ "${classification}" != network-only ]] || continue
+    REPLY_TOTAL=$((REPLY_TOTAL + 1))
+    case "${classification}:${_detail}" in
+      available:* | required:available) REPLY_CURRENT=$((REPLY_CURRENT + 1)) ;;
+      required:missing) REPLY_STATE=error ;;
+      optional-missing:*) [[ "${REPLY_STATE}" == error ]] || REPLY_STATE=warning ;;
+    esac
+  done <"${JSH_DOCTOR_RECORDS}"
+}
+
+_jsh_status_worst_state() {
+  local candidate state=current
+  for candidate in "$@"; do
+    case "${candidate}" in
+      error | missing | failed)
+        state=error
+        break
+        ;;
+      warning | changed | retained) [[ "${state}" == error ]] || state=warning ;;
+    esac
+  done
+  REPLY_STATE=${state}
+}
+
+_jsh_status_doctor_summaries() {
+  _jsh_status_doctor_counts 'installer commands'
+  _jsh_status_emit commands "${REPLY_STATE}" Commands "${REPLY_CURRENT}/${REPLY_TOTAL} available"
+  _jsh_status_doctor_counts editors
+  _jsh_status_emit editor-tools "${REPLY_STATE}" Editors "${REPLY_CURRENT}/${REPLY_TOTAL} available"
+}
+
+_jsh_status_summary_width() {
+  local label component state name detail
+  JSH_STATUS_LABEL_WIDTH=0
+  JSH_STATUS_DETAIL_WIDTH=18
+  for label in Shell Repository Submodules Packages Launcher Configuration Commands Editors PATH 'Runtime Git' 'Project environment'; do
+    ((${#label} > JSH_STATUS_LABEL_WIDTH)) && JSH_STATUS_LABEL_WIDTH=${#label}
+  done
+  while IFS=$'\t' read -r component state name detail; do
+    ((${#name} > JSH_STATUS_DETAIL_WIDTH)) && JSH_STATUS_DETAIL_WIDTH=${#name}
+  done <"${JSH_STATUS_RECORDS}"
+  while IFS=$'\t' read -r component state name detail; do
+    ((${#name} > JSH_STATUS_DETAIL_WIDTH)) && JSH_STATUS_DETAIL_WIDTH=${#name}
+  done <"${JSH_DOCTOR_RECORDS}"
+  ((JSH_STATUS_DETAIL_WIDTH <= 30)) || JSH_STATUS_DETAIL_WIDTH=30
+}
+
+_jsh_status_detail_row() {
+  local state="$1" name="$2" detail="${3:-}" prefix
+  _jsh_ui_init
+  _jsh_ui_status "${state}"
+  _jsh_ui_text "${name}"
+  name=${REPLY_TEXT}
+  _jsh_ui_text "${detail}"
+  detail=${REPLY_TEXT}
+  if [[ "${_JSH_UI_RICH}" == 1 ]]; then
+    prefix="${REPLY_COLOR}${REPLY_MARK}${_JSH_UI_RESET}"
+  else
+    printf -v prefix '%-7s' "[${REPLY_MARK}]"
+  fi
+  printf '  %s %s%-*s%s  %s%s%s\n' "${prefix}" "${_JSH_UI_BOLD}" \
+    "${JSH_STATUS_DETAIL_WIDTH}" "${name}" "${_JSH_UI_RESET}" \
+    "${_JSH_UI_DIM}" "${detail}" "${_JSH_UI_RESET}"
+}
+
+_jsh_status_verbose_records() {
+  local wanted="$1" component state name detail
+  while IFS=$'\t' read -r component state name detail; do
+    [[ "${component}" == "${wanted}" ]] || continue
+    _jsh_status_detail_row "${state}" "${name}" "${detail}"
+  done <"${JSH_STATUS_RECORDS}"
+}
+
+_jsh_status_verbose_doctor() {
+  local components="$1" component classification name detail state
+  while IFS=$'\t' read -r component classification name detail; do
+    case " ${components} " in *" ${component} "*) ;; *) continue ;; esac
+    case "${classification}:${detail}" in
+      required:missing) state=error ;;
+      optional-missing:*) state=warning ;;
+      network-only:*)
+        printf '    %s%-18s  %s%s\n' "${_JSH_UI_DIM}" "${name}" "${detail}" "${_JSH_UI_RESET}"
+        continue
+        ;;
+      *) state=current ;;
+    esac
+    _jsh_status_detail_row "${state}" "${name}" "${detail}"
+  done <"${JSH_DOCTOR_RECORDS}"
+}
+
+_jsh_status_verbose_repository() {
+  _jsh_status_detail_row current Branch "${JSH_STATUS_GIT_BRANCH}"
+  _jsh_status_detail_row current Commit "${JSH_STATUS_GIT_HEAD}"
+  _jsh_status_detail_row "$([[ ${JSH_STATUS_GIT_CHANGES} == 0 ]] && printf current || printf warning)" \
+    'Working tree' "${JSH_STATUS_GIT_STAGED} staged, ${JSH_STATUS_GIT_UNSTAGED} unstaged, ${JSH_STATUS_GIT_UNTRACKED} untracked"
+  ((JSH_STATUS_GIT_CONFLICTS == 0)) \
+    || _jsh_status_detail_row error Conflicts "${JSH_STATUS_GIT_CONFLICTS}"
+  ((JSH_STATUS_GIT_AHEAD == 0 && JSH_STATUS_GIT_BEHIND == 0)) \
+    || _jsh_status_detail_row "$([[ ${JSH_STATUS_GIT_BEHIND} == 0 ]] && printf current || printf warning)" \
+      Upstream "${JSH_STATUS_GIT_AHEAD} ahead, ${JSH_STATUS_GIT_BEHIND} behind"
+  ((JSH_STATUS_GIT_STASH == 0)) \
+    || _jsh_status_detail_row current Stash "${JSH_STATUS_GIT_STASH} entries"
+  [[ -z "${JSH_STATUS_GIT_OPERATION}" ]] \
+    || _jsh_status_detail_row error Operation "${JSH_STATUS_GIT_OPERATION}"
+}
+
+_jsh_status_verbose_updates() {
+  local name current_version latest_version
+  while IFS=$'\t' read -r name current_version latest_version; do
+    [[ -n "${name}" ]] || continue
+    _jsh_ui_init
+    _jsh_ui_status warning
+    if [[ "${_JSH_UI_RICH}" == 1 ]]; then
+      printf '  %s%s%s %s%s%s  %s%s%s %s->%s %s%s%s\n' \
+        "${REPLY_COLOR}" "${REPLY_MARK}" "${_JSH_UI_RESET}" \
+        "${_JSH_UI_BOLD}" "${name}" "${_JSH_UI_RESET}" \
+        "${_JSH_UI_YELLOW}" "${current_version}" "${_JSH_UI_RESET}" \
+        "${_JSH_UI_DIM}" "${_JSH_UI_RESET}" \
+        "${_JSH_UI_GREEN}" "${latest_version}" "${_JSH_UI_RESET}"
+    else
+      printf '  [warn] %s  %s -> %s\n' "${name}" "${current_version}" "${latest_version}"
+    fi
+  done <"${JSH_STATUS_UPDATE_RECORDS}"
+  ((JSH_STATUS_PACKAGE_UPDATES == 0)) && return 0
+  printf '    %sRun %s%sjsh update%s\n' "${_JSH_UI_DIM}" \
+    "${_JSH_UI_BOLD}" "${_JSH_UI_CYAN}" "${_JSH_UI_RESET}"
+}
+
+_jsh_status_summary_row() {
+  local state="$1" label="$2" plain_value="$3" formatted_value="${4:-$3}"
+  local prefix prefix_width columns row_width indent
+  _jsh_ui_init
+  _jsh_ui_status "${state}"
+  if [[ "${_JSH_UI_RICH}" == 1 ]]; then
+    prefix="${REPLY_COLOR}${REPLY_MARK}${_JSH_UI_RESET} "
+    prefix_width=2
+  else
+    printf -v prefix '%-8s' "[${REPLY_MARK}]"
+    prefix_width=8
+  fi
+  columns=${COLUMNS:-80}
+  [[ "${columns}" =~ ^[0-9]+$ ]] || columns=80
+  row_width=$((prefix_width + JSH_STATUS_LABEL_WIDTH + 2 + ${#plain_value}))
+  if ((columns >= 30 && row_width > columns)); then
+    printf '%s%s%-*s%s\n' "${prefix}" "${_JSH_UI_BOLD}" \
+      "${JSH_STATUS_LABEL_WIDTH}" "${label}" "${_JSH_UI_RESET}"
+    printf -v indent '%*s' "$((prefix_width + JSH_STATUS_LABEL_WIDTH + 2))" ''
+    printf '%s%s\n' "${indent}" "${formatted_value}"
+  else
+    printf '%s%s%-*s%s  %s\n' "${prefix}" "${_JSH_UI_BOLD}" \
+      "${JSH_STATUS_LABEL_WIDTH}" "${label}" "${_JSH_UI_RESET}" "${formatted_value}"
+  fi
+}
+
+_jsh_status_repository_values() {
+  local plain suffix='' formatted_changes=''
+  plain="${JSH_STATUS_GIT_BRANCH} @ ${JSH_STATUS_GIT_HEAD}, ${JSH_STATUS_GIT_CHANGES} changes"
+  REPLY_FORMATTED="${_JSH_UI_GIT}${JSH_STATUS_GIT_BRANCH}${_JSH_UI_RESET} ${_JSH_UI_DIM}@ ${JSH_STATUS_GIT_HEAD}${_JSH_UI_RESET}, ${JSH_STATUS_GIT_CHANGES} changes"
+  if ((JSH_STATUS_GIT_CHANGES > 0)); then
+    if ((JSH_STATUS_GIT_STAGED > 0)); then
+      suffix="${JSH_STATUS_GIT_STAGED} staged"
+      formatted_changes="${_JSH_UI_GREEN}${JSH_STATUS_GIT_STAGED} staged${_JSH_UI_RESET}"
+    fi
+    if ((JSH_STATUS_GIT_UNSTAGED > 0)); then
+      suffix+="${suffix:+, }${JSH_STATUS_GIT_UNSTAGED} unstaged"
+      formatted_changes+="${formatted_changes:+, }${_JSH_UI_YELLOW}${JSH_STATUS_GIT_UNSTAGED} unstaged${_JSH_UI_RESET}"
+    fi
+    if ((JSH_STATUS_GIT_UNTRACKED > 0)); then
+      suffix+="${suffix:+, }${JSH_STATUS_GIT_UNTRACKED} untracked"
+      formatted_changes+="${formatted_changes:+, }${_JSH_UI_CYAN}${JSH_STATUS_GIT_UNTRACKED} untracked${_JSH_UI_RESET}"
+    fi
+    plain+=" - ${suffix}"
+    REPLY_FORMATTED+=" - ${formatted_changes}"
+  fi
+  suffix=
+  ((JSH_STATUS_GIT_BEHIND > 0)) && suffix="${JSH_STATUS_GIT_BEHIND} behind"
+  ((JSH_STATUS_GIT_AHEAD > 0)) && suffix="${suffix}${suffix:+, }${JSH_STATUS_GIT_AHEAD} ahead"
+  if [[ -n "${suffix}" ]]; then
+    plain+=", ${suffix}"
+    REPLY_FORMATTED+=", ${_JSH_UI_GREEN}${suffix}${_JSH_UI_RESET}"
+  fi
+  if ((JSH_STATUS_GIT_STASH > 0)); then
+    plain+=", ${JSH_STATUS_GIT_STASH} stashed"
+    REPLY_FORMATTED+=", ${_JSH_UI_ACCENT}${JSH_STATUS_GIT_STASH} stashed${_JSH_UI_RESET}"
+  fi
+  if [[ -n "${JSH_STATUS_GIT_OPERATION}" ]]; then
+    plain+=", ${JSH_STATUS_GIT_OPERATION}"
+    REPLY_FORMATTED+=", ${_JSH_UI_RED}${JSH_STATUS_GIT_OPERATION}${_JSH_UI_RESET}"
+  fi
+  REPLY_PLAIN=${plain}
 }
 
 _jsh_status_colors() {
@@ -629,9 +1197,16 @@ _jsh_status_colors() {
 }
 
 _jsh_banner() {
+  local header="${1:-}" gap_width=26 header_width left_width right_width
   [[ "${JSH_BANNER_SHOWN:-0}" != 1 ]] || return 0
+  if ((${#header} > gap_width - 2)); then
+    header="${header:0:gap_width-5}..."
+  fi
+  header_width=${#header}
+  left_width=$(((gap_width - header_width) / 2))
+  right_width=$((gap_width - header_width - left_width))
   _jsh_status_colors
-  printf '%s%s' "${_JSH_STATUS_BOLD}" "${_JSH_STATUS_CYAN}"
+  printf '\n%s%s' "${_JSH_STATUS_BOLD}" "${_JSH_STATUS_CYAN}"
   cat <<'BANNER'
    :%@@@@@@@@@#*#@%-              +-:##
   :#    -#%%+=#:@#                :@@%:
@@ -645,33 +1220,126 @@ _jsh_banner() {
           +@+:%*     *@@@@@%@%-   #@@@+  *@@-
    :==--::*#:#-     -:   -*:        +   =@@=
  :@@@@@@@@#@-                         +@#:
- =   :-=-:                          -:
 BANNER
+  printf ' =   :-=-:%*s%s%*s-:\n' \
+    "${left_width}" '' "${header}" "${right_width}" ''
   printf '%s\n' "${_JSH_STATUS_RESET}"
 }
 
 _jsh_status_render() {
-  local _record_component state name detail total_problems=0
-  _jsh_banner
-  _jsh_ui_heading Status
-  while IFS=$'\t' read -r _record_component state name detail; do
-    _jsh_ui_row "${state}" "${name}" "${detail}"
-    case "${state}" in missing | changed | error) total_problems=$((total_problems + 1)) ;; esac
-  done <"${JSH_STATUS_RECORDS}"
+  local verbose="$1" state secondary_state mode mode_state shell_name shell_value value formatted
+  local total_problems=0 component record_state name detail
+  _jsh_banner Status
 
-  if awk -F '\t' '$1 == "shell" && (($2 == "changed" && $4 ~ /^stale managed link:/) || ($2 == "error" && $4 == "malformed managed-link state")) { found=1 } END { exit !found }' \
+  _jsh_status_summary_width
+  mode=$(awk -F '\t' '$1 == "shell" && $3 == "mode" { print $4; exit }' "${JSH_STATUS_RECORDS}")
+  mode_state=$(awk -F '\t' '$1 == "shell" && $3 == "mode" { print $2; exit }' "${JSH_STATUS_RECORDS}")
+  case "${mode}" in install) mode=full ;; runtime) mode=lite ;; esac
+  [[ "${mode_state}" == current ]] || mode=unconfigured
+  shell_name=${JSH_SHELL:-${SHELL##*/}}
+  shell_name=${shell_name:-bash}
+  shell_value="${mode}, ${shell_name}, ${JSH_RUNTIME_PROFILE:-standard} profile"
+  _jsh_status_doctor_counts 'base runtime'
+  _jsh_status_worst_state "${mode_state}" "${REPLY_STATE}"
+  _jsh_status_summary_row "${REPLY_STATE}" Shell "${shell_value}"
+  [[ "${verbose}" != 1 ]] || _jsh_status_verbose_doctor 'base runtime'
+
+  _jsh_status_component_state repository
+  state=${REPLY_STATE}
+  _jsh_status_repository_values
+  _jsh_status_summary_row "${state}" Repository "${REPLY_PLAIN}" "${REPLY_FORMATTED}"
+  [[ "${verbose}" != 1 ]] || _jsh_status_verbose_repository
+
+  _jsh_status_component_state submodules
+  state=${REPLY_STATE}
+  _jsh_status_doctor_counts vendor
+  secondary_state=${REPLY_STATE}
+  value="${JSH_STATUS_SUBMODULE_INITIALIZED:-0}/${JSH_STATUS_SUBMODULE_TOTAL:-0} initialized, ${REPLY_CURRENT}/${REPLY_TOTAL} assets"
+  ((JSH_STATUS_SUBMODULE_DIRTY == 0)) || value+=", ${JSH_STATUS_SUBMODULE_DIRTY} dirty"
+  ((JSH_STATUS_SUBMODULE_DRIFTED == 0)) || value+=", ${JSH_STATUS_SUBMODULE_DRIFTED} drifted"
+  _jsh_status_worst_state "${state}" "${secondary_state}"
+  _jsh_status_summary_row "${REPLY_STATE}" Submodules "${value}"
+  if [[ "${verbose}" == 1 ]]; then
+    _jsh_status_verbose_records submodule-item
+    _jsh_status_verbose_doctor vendor
+  fi
+
+  state=$(awk -F '\t' '$1 == "packages" { print $2; exit }' "${JSH_STATUS_RECORDS}")
+  value=$(awk -F '\t' '$1 == "packages" { print $4; exit }' "${JSH_STATUS_RECORDS}")
+  _jsh_status_summary_row "${state}" Packages "${value}"
+  if [[ "${verbose}" == 1 ]]; then
+    _jsh_status_verbose_records package-item
+    _jsh_status_verbose_updates
+  fi
+
+  _jsh_status_component_state launcher
+  state=${REPLY_STATE}
+  value=$(awk -F '\t' '$1 == "launcher" { print $4; exit }' "${JSH_STATUS_RECORDS}")
+  _jsh_ui_text "${value}"
+  value=${REPLY_TEXT}
+  formatted="${_JSH_UI_CYAN}${value}${_JSH_UI_RESET}"
+  _jsh_status_summary_row "${state}" Launcher "${value}" "${formatted}"
+  [[ "${verbose}" != 1 ]] || _jsh_status_verbose_records launcher
+
+  _jsh_status_component_state configuration
+  state=${REPLY_STATE}
+  _jsh_status_component_counts configuration
+  _jsh_status_summary_row "${state}" Configuration "${REPLY_CURRENT}/${REPLY_TOTAL} linked"
+  [[ "${verbose}" != 1 ]] || _jsh_status_verbose_records configuration
+
+  printf '\n'
+  state=$(awk -F '\t' '$1 == "commands" { print $2; exit }' "${JSH_STATUS_RECORDS}")
+  value=$(awk -F '\t' '$1 == "commands" { print $4; exit }' "${JSH_STATUS_RECORDS}")
+  _jsh_status_summary_row "${state}" Commands "${value}"
+  if [[ "${verbose}" == 1 ]]; then
+    _jsh_status_verbose_doctor 'installer commands'
+    _jsh_status_verbose_doctor network
+  fi
+
+  state=$(awk -F '\t' '$1 == "editor-tools" { print $2; exit }' "${JSH_STATUS_RECORDS}")
+  value=$(awk -F '\t' '$1 == "editor-tools" { print $4; exit }' "${JSH_STATUS_RECORDS}")
+  _jsh_status_component_state editors
+  _jsh_status_worst_state "${state}" "${REPLY_STATE}"
+  value+=", jsh wrapper $([[ $(awk -F '\t' '$1 == "editors" { print $2; exit }' "${JSH_STATUS_RECORDS}") == current ]] && printf active || printf inactive)"
+  _jsh_status_summary_row "${REPLY_STATE}" Editors "${value}"
+  if [[ "${verbose}" == 1 ]]; then
+    _jsh_status_verbose_doctor editors
+    _jsh_status_verbose_records editors
+  fi
+
+  state=$(awk -F '\t' '$1 == "path" { print $2; exit }' "${JSH_STATUS_RECORDS}")
+  value=$(awk -F '\t' '$1 == "path" { print $4; exit }' "${JSH_STATUS_RECORDS}")
+  _jsh_ui_text "${value}"
+  value=${REPLY_TEXT}
+  _jsh_status_summary_row "${state}" PATH "${value}" "${_JSH_UI_CYAN}${value}${_JSH_UI_RESET}"
+
+  state=$(awk -F '\t' '$1 == "runtime-git" { print $2; exit }' "${JSH_STATUS_RECORDS}")
+  value=$(awk -F '\t' '$1 == "runtime-git" { print $4; exit }' "${JSH_STATUS_RECORDS}")
+  _jsh_status_summary_row "${state}" 'Runtime Git' "${value}"
+
+  state=$(awk -F '\t' '$1 == "project" { print $2; exit }' "${JSH_STATUS_RECORDS}")
+  value=$(awk -F '\t' '$1 == "project" { print $4; exit }' "${JSH_STATUS_RECORDS}")
+  _jsh_ui_text "${value}"
+  value=${REPLY_TEXT}
+  _jsh_status_summary_row "${state}" 'Project environment' "${value}"
+
+  if awk -F '\t' '$1 == "configuration" && (($2 == "changed" && $4 ~ /^stale managed link:/) || ($2 == "error" && $4 == "malformed managed-link state")) { found=1 } END { exit !found }' \
     "${JSH_STATUS_RECORDS}"; then
     printf '\n%sRun jsh repair --dry-run to preview stale managed-link cleanup.%s\n' \
       "${_JSH_UI_DIM}" "${_JSH_UI_RESET}"
   fi
+  while IFS=$'\t' read -r component state name detail; do
+    case "${state}" in error | missing | changed | warning | retained) total_problems=$((total_problems + 1)) ;; esac
+  done <"${JSH_STATUS_RECORDS}"
   ((total_problems == 0))
 }
 
 _jsh_status() {
-  local porcelain=0 work_dir result=0
+  local porcelain=0 verbose=0 work_dir result=0
   while (($# > 0)); do
     case "$1" in
       --porcelain) porcelain=1 ;;
+      --verbose | -v) verbose=1 ;;
       *)
         _jsh_error "unknown status option: $1"
         return 2
@@ -683,15 +1351,209 @@ _jsh_status() {
   mkdir -p "${JSH_DIR}/tmp" || return 1
   work_dir=$(mktemp -d "${JSH_DIR}/tmp/jsh-status.XXXXXX") || return 1
   JSH_STATUS_RECORDS="${work_dir}/records"
+  JSH_STATUS_UPDATE_RECORDS="${work_dir}/updates"
+  JSH_DOCTOR_RECORDS="${work_dir}/doctor"
   : >"${JSH_STATUS_RECORDS}"
+  : >"${JSH_STATUS_UPDATE_RECORDS}"
+  : >"${JSH_DOCTOR_RECORDS}"
+  if [[ "${porcelain}" == 0 ]]; then
+    _jsh_banner Status
+    jsh_spinner_start 'Loading...'
+  fi
   _jsh_status_shell
+  _jsh_status_repository
+  _jsh_status_submodules
+  _jsh_status_packages
+  _jsh_doctor_collect
+  _jsh_status_doctor_summaries
+  _jsh_status_environment
+  [[ "${porcelain}" == 1 ]] || jsh_spinner_hide
 
   if [[ "${porcelain}" == 1 ]]; then
     printf 'jsh-status\t1\tcomponent\tstate\tname\tdetail\n'
     cat "${JSH_STATUS_RECORDS}"
-    if grep -Eq $'^[^\t]+\t(missing|changed|error)\t' "${JSH_STATUS_RECORDS}"; then result=1; fi
+    if grep -Eq $'^[^\t]+\t(missing|changed|warning|error|failed)\t' "${JSH_STATUS_RECORDS}"; then result=1; fi
   else
-    _jsh_status_render || result=$?
+    _jsh_status_render "${verbose}" || result=$?
+  fi
+  if [[ "${JSH_STATUS_RESULT_POLICY:-status}" == doctor ]]; then
+    result=0
+    if awk -F '\t' '$2 == "required" && $4 == "missing" { found=1 } END { exit !found }' \
+      "${JSH_DOCTOR_RECORDS}"; then
+      result=1
+    elif [[ "${JSH_STATUS_DOCTOR_STRICT:-0}" == 1 ]] \
+      && grep -Eq $'\t(optional-missing|unsupported)\t' "${JSH_DOCTOR_RECORDS}"; then
+      result=1
+    fi
+  fi
+  rm -rf "${work_dir}"
+  return "${result}"
+}
+
+_jsh_audit_contains() {
+  local needle="$1" item
+  while IFS= read -r item; do
+    [[ "${item}" != "${needle}" ]] || return 0
+  done <<<"$2"
+  return 1
+}
+
+_jsh_audit_manifests() {
+  local host platform_manifest manifest
+  host=${JSH_AUDIT_HOSTNAME:-$(hostname -s 2>/dev/null || true)}
+  host=$(printf '%s' "${host}" | tr '[:upper:]' '[:lower:]')
+  case "$(uname -s 2>/dev/null)" in
+    Darwin) platform_manifest="${JSH_DIR}/config/homebrew/Brewfile.macos" ;;
+    Linux) platform_manifest="${JSH_DIR}/config/homebrew/Brewfile.linux" ;;
+    *) platform_manifest= ;;
+  esac
+  for manifest in \
+    "${JSH_DIR}/config/homebrew/Brewfile" \
+    "${JSH_DIR}/config/homebrew/Brewfile.core" \
+    "${JSH_DIR}/config/homebrew/Brewfile.contrib" \
+    "${platform_manifest}" \
+    "${JSH_DIR}/config/homebrew/Brewfile.${host}"; do
+    [[ -n "${manifest}" && -r "${manifest}" ]] && printf '%s\n' "${manifest}"
+  done
+}
+
+_jsh_audit_declared() {
+  local kind="$1" manifest value
+  while IFS= read -r manifest; do
+    while IFS= read -r value; do
+      [[ "${kind}" != brew ]] || value=${value##*/}
+      printf '%s\n' "${value}"
+    done < <(sed -n "s/^[[:space:]]*${kind}[[:space:]]*\"\([^\"]*\)\".*/\1/p" "${manifest}")
+  done < <(_jsh_audit_manifests)
+}
+
+_jsh_audit_collect() {
+  local records="$1" declared_formulae declared_casks formula cask
+
+  jsh_brew_path_for_component
+  command -v brew >/dev/null 2>&1 || {
+    _jsh_error 'Homebrew or Linuxbrew is required for jsh audit'
+    return 1
+  }
+
+  declared_formulae=$(_jsh_audit_declared brew)
+  declared_casks=$(_jsh_audit_declared cask)
+
+  while IFS= read -r formula; do
+    [[ -n "${formula}" ]] || continue
+    _jsh_audit_contains "${formula##*/}" "${declared_formulae}" \
+      || printf 'formula\t%s\n' "${formula}" >>"${records}"
+  done < <(brew leaves 2>/dev/null)
+
+  while IFS= read -r cask; do
+    [[ -n "${cask}" ]] || continue
+    _jsh_audit_contains "${cask}" "${declared_casks}" \
+      || printf 'cask\t%s\n' "${cask}" >>"${records}"
+  done < <(brew list --cask -1 2>/dev/null)
+}
+
+_jsh_audit_render_group() {
+  local category="$1" heading="$2" empty="$3" names columns
+  names="${JSH_AUDIT_WORK_DIR}/${category}"
+  awk -F '\t' -v category="${category}" '$1 == category { print $2 }' \
+    "${JSH_AUDIT_RECORDS}" >"${names}"
+  _jsh_ui_heading "${heading}"
+  if [[ ! -s "${names}" ]]; then
+    _jsh_ui_row current "${empty}"
+    return
+  fi
+  columns=${COLUMNS:-}
+  if [[ ! "${columns}" =~ ^[0-9]+$ || "${columns}" -lt 20 ]]; then
+    columns=$(tput cols 2>/dev/null || printf 80)
+  fi
+  awk -v width="${columns}" '
+    { item[NR] = $0 }
+    END {
+      for (candidate = NR; candidate >= 1; candidate--) {
+        rows = int((NR + candidate - 1) / candidate)
+        total = (candidate - 1) * 2
+        for (column = 0; column < candidate; column++) {
+          column_width[column] = 0
+          for (row = 1; row <= rows; row++) {
+            item_index = row + column * rows
+            if (item_index <= NR && length(item[item_index]) > column_width[column])
+              column_width[column] = length(item[item_index])
+          }
+          total += column_width[column]
+        }
+        if (total <= width) break
+      }
+      for (row = 1; row <= rows; row++) {
+        for (column = 0; column < candidate; column++) {
+          item_index = row + column * rows
+          if (item_index > NR) continue
+          next_item = row + (column + 1) * rows
+          if (next_item <= NR)
+            printf "%-*s  ", column_width[column], item[item_index]
+          else
+            print item[item_index]
+        }
+      }
+    }
+  ' "${names}"
+}
+
+_jsh_audit_remove() {
+  local category name failures=0 total
+  local -a formulae=() casks=()
+  while IFS=$'\t' read -r category name; do
+    case "${category}" in
+      formula) formulae+=("${name}") ;;
+      cask) casks+=("${name}") ;;
+    esac
+  done <"${JSH_AUDIT_RECORDS}"
+  total=$((${#formulae[@]} + ${#casks[@]}))
+  ((total > 0)) || return 0
+
+  [[ -t 1 && -r /dev/tty && -w /dev/tty ]] || {
+    _jsh_ui_row note 'Run jsh audit in a terminal to remove unmanaged items'
+    return 0
+  }
+
+  _jsh_ui_heading Remove
+  jsh_read_key "Uninstall all ${total} unmanaged Homebrew items? [y/N] " || return 130
+  case "${JSH_KEY}" in y | Y) ;; *) return 0 ;; esac
+  if ((${#formulae[@]})) && ! brew uninstall "${formulae[@]}"; then
+    failures=$((failures + 1))
+  fi
+  if ((${#casks[@]})) && ! brew uninstall --cask "${casks[@]}"; then
+    failures=$((failures + 1))
+  fi
+  ((failures > 0)) || _jsh_ui_row removed "${total} Homebrew items"
+  ((failures == 0))
+}
+
+_jsh_audit() {
+  local work_dir result=0
+  (($# == 0)) || {
+    _jsh_error "unknown audit option: $1"
+    return 2
+  }
+  case "$(uname -s 2>/dev/null)" in Darwin | Linux) ;; *)
+    _jsh_error 'jsh audit supports macOS and Linux only'
+    return 2
+    ;;
+  esac
+
+  mkdir -p "${JSH_DIR}/tmp" || return 1
+  work_dir=$(mktemp -d "${JSH_DIR}/tmp/jsh-audit.XXXXXX") || return 1
+  JSH_AUDIT_WORK_DIR=${work_dir}
+  JSH_AUDIT_RECORDS="${work_dir}/records"
+  : >"${JSH_AUDIT_RECORDS}"
+  _jsh_banner Audit
+  jsh_spinner_start 'Loading...'
+  _jsh_audit_collect "${JSH_AUDIT_RECORDS}" || result=$?
+  jsh_spinner_hide
+  if ((result == 0)); then
+    _jsh_banner Audit
+    _jsh_audit_render_group formula Formulae 'No unmanaged formulae'
+    _jsh_audit_render_group cask Casks 'No unmanaged casks'
+    _jsh_audit_remove || result=$?
   fi
   rm -rf "${work_dir}"
   return "${result}"
@@ -831,6 +1693,48 @@ _jsh_doctor_render() {
   done
 }
 
+_jsh_doctor_collect() {
+  local name
+  if command -v bash >/dev/null 2>&1; then
+    _jsh_doctor_record base required bash available
+  else
+    _jsh_doctor_record base required bash missing
+  fi
+  for name in bin/jsh dotfiles/.bashrc dotfiles/.zshrc; do
+    if [[ -f "${JSH_DIR}/${name}" ]]; then
+      _jsh_doctor_record base required "${name}" available
+    else
+      _jsh_doctor_record base required "${name}" missing
+    fi
+  done
+
+  _jsh_doctor_command runtime zsh zsh 'enhanced interactive shell'
+  _jsh_doctor_command runtime fzf fzf 'fuzzy history and completion'
+  _jsh_doctor_path vendor fzf-tab "${JSH_DIR}/vendor/fzf-tab/fzf-tab.plugin.zsh" 'Zsh completion plugin source'
+  _jsh_doctor_path vendor zsh-completions "${JSH_DIR}/vendor/zsh-completions/src" 'additional Zsh completion source'
+  _jsh_doctor_path vendor zsh-plugins "${JSH_DIR}/vendor/zsh-plugins/zsh-autosuggestions.zsh" 'tracked Zsh plugin source'
+  _jsh_doctor_path vendor vim-plug "${JSH_DIR}/vendor/vim-config/autoload/plug.vim" 'Vim plugin manager source'
+  _jsh_doctor_command installer git git 'clone and update network operation'
+  _jsh_doctor_command installer curl curl 'web installer download'
+  _jsh_doctor_command commands gitx git 'Git operations; Bash 4+ also required'
+  if ((BASH_VERSINFO[0] >= 4)); then
+    _jsh_doctor_record commands available bash4 'gitx interpreter'
+  else
+    _jsh_doctor_record commands optional-missing bash4 'gitx requires Bash 4 or newer'
+  fi
+  _jsh_doctor_command commands jssh ssh 'SSH transport'
+  _jsh_doctor_command commands archive tar 'JSSH capsule archive support'
+  _jsh_doctor_command commands python3 python3 'httpstat interpreter'
+  _jsh_doctor_command commands curl curl 'httpstat and proxy probes'
+  _jsh_doctor_command commands docker docker 'dockerctl'
+  _jsh_doctor_command commands kubectl kubectl 'kubectx, kubens, and nukem'
+  _jsh_doctor_yq
+  _jsh_doctor_command editors Vim vim 'core Vim editor'
+  _jsh_doctor_command editors Neovim nvim 'managed wrapper; plugins require explicit network bootstrap'
+  _jsh_doctor_record network network-only j.sh 'clones or updates the repository'
+  _jsh_doctor_record network network-only editor-plugins 'Vim and Neovim plugin installation'
+}
+
 _jsh_doctor() {
   local strict=0 porcelain=0 work_dir component classification name detail result=0
   while (($# > 0)); do
@@ -844,6 +1748,11 @@ _jsh_doctor() {
     esac
     shift
   done
+
+  if [[ "${porcelain}" == 0 ]]; then
+    JSH_STATUS_RESULT_POLICY=doctor JSH_STATUS_DOCTOR_STRICT=${strict} _jsh_status --verbose
+    return
+  fi
 
   mkdir -p "${JSH_DIR}/tmp" || return 1
   work_dir=$(mktemp -d "${JSH_DIR}/tmp/jsh-doctor.XXXXXX") || return 1
@@ -1081,13 +1990,16 @@ jsh_ui_text() {
 }
 
 jsh_ui_heading() {
+  JSH_UI_HEADING_SEPARATOR='\n'
+  [ "${2:-}" != after-banner ] || JSH_UI_HEADING_SEPARATOR=
   jsh_ui_init
-  printf '\n%s%s%s%s\n' "${JSH_UI_BOLD}" "${JSH_UI_CYAN}" "$1" "${JSH_UI_RESET}"
+  printf '%b%s%s%s%s\n' "${JSH_UI_HEADING_SEPARATOR}" \
+    "${JSH_UI_BOLD}" "${JSH_UI_CYAN}" "$1" "${JSH_UI_RESET}"
 }
 
 jsh_banner() {
   jsh_ui_init
-  printf '%s%s' "${JSH_UI_BOLD}" "${JSH_UI_CYAN}"
+  printf '\n%s%s' "${JSH_UI_BOLD}" "${JSH_UI_CYAN}"
   cat <<'BANNER'
    :%@@@@@@@@@#*#@%-              +-:##
   :#    -#%%+=#:@#                :@@%:
@@ -1111,15 +2023,17 @@ jsh_spinner_start() {
   JSH_SPINNER_STARTED=$(date +%s 2>/dev/null || printf 0)
   JSH_SPINNER_PID=
   jsh_ui_init
-  if [ "${JSH_SPINNER:-auto}" = never ] || [ "${JSH_UI_RICH}" != 1 ] || [ ! -t 2 ]; then
-    return 0
-  fi
+  case "${JSH_SPINNER:-auto}" in
+    never) return 0 ;;
+    always) ;;
+    *) [ -t 2 ] || return 0 ;;
+  esac
 
   (
     visible=0
     trap '[ "${visible}" = 0 ] || printf "\033[?25h\r\033[K" >&2' 0
     trap 'exit 0' 1 2 15
-    sleep "${JSH_SPINNER_DELAY:-1}"
+    sleep "${JSH_SPINNER_DELAY:-0.15}"
     visible=1
     frame=0
     printf '\033[?25l' >&2
@@ -1141,6 +2055,20 @@ jsh_spinner_cleanup() {
     kill "${JSH_SPINNER_PID}" 2>/dev/null || true
     wait "${JSH_SPINNER_PID}" 2>/dev/null || true
     JSH_SPINNER_PID=
+  fi
+}
+
+jsh_spinner_hide() {
+  jsh_spinner_cleanup
+}
+
+jsh_spinner_exec() {
+  spinner_output=$1
+  shift
+  if [ -n "${JSH_SPINNER_PID:-}" ]; then
+    "$@" >"${spinner_output}" 2>&1
+  else
+    "$@"
   fi
 }
 
@@ -1524,7 +2452,7 @@ jsh_component_core_formulas() {
   if [ -r "${core_file}" ]; then
     JSH_CORE_FORMULAS=$(sed -n 's/^[[:space:]]*brew[[:space:]]*"\([^"]*\)".*/\1/p' "${core_file}")
   fi
-  [ -n "${JSH_CORE_FORMULAS}" ] || JSH_CORE_FORMULAS='fzf go-task jq just'
+  [ -n "${JSH_CORE_FORMULAS}" ] || JSH_CORE_FORMULAS='go-task jq just'
   core_has_zsh=0
   for formula_name in ${JSH_CORE_FORMULAS}; do
     [ "${formula_name}" = zsh ] && core_has_zsh=1
@@ -1555,6 +2483,8 @@ jsh_component_vendor_needs_network() {
     [ -d "${install_dir}/${submodule_path}" ] || return 0
   done
   for vendored_asset in \
+    vendor/fzf/install \
+    vendor/fzf/bin/fzf \
     vendor/fzf-tab/fzf-tab.plugin.zsh \
     vendor/zsh-completions/src \
     vendor/zsh-plugins/zsh-autosuggestions.zsh \
@@ -1884,7 +2814,7 @@ jsh_component_check_core() {
     jsh_component_set core planned 'checkout update may change Brewfile.core' \
       're-read Brewfile.core and install missing packages after checkout update'
   elif [ -z "${JSH_CORE_MISSING_FORMULAS}" ]; then
-    jsh_component_set core current 'fzf, task, jq, just, and zsh are available' ''
+    jsh_component_set core current 'task, jq, just, and zsh are available' ''
   elif [ "${JSH_BREW_AVAILABLE}" = 1 ]; then
     jsh_component_set core missing "missing: ${JSH_CORE_MISSING_FORMULAS}" \
       "install core packages from Brewfile.core"
@@ -1928,6 +2858,8 @@ jsh_component_check_vendor() {
     esac
   done
   for vendored_asset in \
+    vendor/fzf/install \
+    vendor/fzf/bin/fzf \
     vendor/fzf-tab/fzf-tab.plugin.zsh \
     vendor/zsh-completions/src \
     vendor/zsh-plugins/zsh-autosuggestions.zsh \
@@ -2155,10 +3087,11 @@ jsh_component_render_row() {
 }
 
 jsh_component_render_plan() {
+  JSH_PLAN_HEADING_SPACING=${1:-}
   if [ "${JSH_MODE}" = full ]; then
-    jsh_ui_heading 'Setup plan (full)'
+    jsh_ui_heading 'Setup plan (full)' "${JSH_PLAN_HEADING_SPACING}"
   else
-    jsh_ui_heading 'Setup plan (lite)'
+    jsh_ui_heading 'Setup plan (lite)' "${JSH_PLAN_HEADING_SPACING}"
   fi
   while IFS='|' read -r component_name component_display component_dependencies component_check _component_plan component_apply component_modes; do
     jsh_component_mode_allowed "${component_modes}" || continue
@@ -2385,7 +3318,8 @@ jsh_component_apply_core() {
 jsh_component_apply_vendor() {
   jsh_spinner_start 'Initializing submodules and vendored assets'
   if git -C "${install_dir}" submodule sync --recursive >/dev/null 2>&1 \
-    && git -C "${install_dir}" submodule update --quiet --init --recursive >/dev/null 2>&1; then
+    && git -C "${install_dir}" submodule update --quiet --init --recursive >/dev/null 2>&1 \
+    && "${install_dir}/vendor/fzf/install" --bin >/dev/null 2>&1; then
     jsh_spinner_stop success 'Initialized submodules and vendored assets'
     return 0
   fi
@@ -2478,6 +3412,8 @@ jsh_install_reconcile() {
   trap 'jsh_spinner_cleanup; jsh_tty_restore' 0
   trap 'jsh_interrupted' 1 2 15
   HOME=${HOME:-}
+  JSH_PLAN_HEADING_SPACING=
+  [ -z "${JSH_MODE:-}" ] || JSH_PLAN_HEADING_SPACING=after-banner
   jsh_banner
   choose_mode
   install_mode=runtime
@@ -2504,7 +3440,7 @@ jsh_install_reconcile() {
   jsh_component_network_needed
   jsh_component_initialize
   jsh_component_evaluate
-  jsh_component_render_plan
+  jsh_component_render_plan "${JSH_PLAN_HEADING_SPACING}"
   jsh_component_seed_current
   if [ "${JSH_DRY_RUN}" = 1 ]; then
     jsh_ui_row note 'Dry run: no files, checkout, submodules, packages, or links were changed'
@@ -2522,6 +3458,52 @@ jsh_install_reconcile() {
   return 0
 }
 
+_jsh_update() {
+  local failures=0 work_dir command_output
+  (($# == 0)) || {
+    _jsh_error "unknown update option: $1"
+    return 2
+  }
+
+  mkdir -p "${JSH_DIR}/tmp" || return 1
+  work_dir=$(mktemp -d "${JSH_DIR}/tmp/jsh-update.XXXXXX") || return 1
+  command_output="${work_dir}/output"
+  _jsh_banner Update
+  if ! command -v just >/dev/null 2>&1; then
+    _jsh_ui_row error 'Submodules' 'just is required'
+    failures=$((failures + 1))
+  else
+    jsh_spinner_start 'Updating submodules...'
+    if (cd "${JSH_DIR}" && jsh_spinner_exec "${command_output}" just update); then
+      jsh_spinner_hide
+      _jsh_ui_row success 'Submodules' 'updated from their configured remotes'
+    else
+      jsh_spinner_hide
+      [[ ! -s "${command_output}" ]] || cat "${command_output}" >&2
+      _jsh_ui_row error 'Submodules' 'update failed'
+      failures=$((failures + 1))
+    fi
+  fi
+
+  if ! command -v task >/dev/null 2>&1; then
+    _jsh_ui_row error 'Packages' 'task is required'
+    failures=$((failures + 1))
+  else
+    jsh_spinner_start 'Updating packages...'
+    if (cd "${JSH_DIR}" && jsh_spinner_exec "${command_output}" task packages); then
+      jsh_spinner_hide
+      _jsh_ui_row success 'Packages' 'installed and upgraded'
+    else
+      jsh_spinner_hide
+      [[ ! -s "${command_output}" ]] || cat "${command_output}" >&2
+      _jsh_ui_row error 'Packages' 'update failed'
+      failures=$((failures + 1))
+    fi
+  fi
+  rm -rf "${work_dir}"
+  ((failures == 0))
+}
+
 usage() {
   _jsh_banner
   _jsh_ui_init
@@ -2534,9 +3516,11 @@ usage() {
   -c COMMAND [args...]                Run a command inside the jsh runtime
   install [--mode lite|full] [-n] [-y]
                                       Reconcile the checkout and configured components
-  status [--porcelain]                Show shell mode and managed-link state
+  status [-v|--verbose] [--porcelain] Summarize jsh and workstation health
+  update                              Update submodules and managed packages
+  audit                               Find and optionally remove unmanaged Homebrew packages
   repair [-n|--dry-run]               Prune dead stale managed-link state
-  doctor [--porcelain] [--strict]     Report runtime and feature dependencies
+  doctor [--porcelain] [--strict]     Show comprehensive status diagnostics
   uninstall [-n] [--purge]            Restore originals; optionally remove the checkout
   version                             Show the jsh version
   help                                Show this help
@@ -2592,6 +3576,8 @@ purge_checkout() {
   command rm -rf "${JSH_DIR}"
 }
 
+trap 'jsh_spinner_cleanup' EXIT
+
 if (($# == 0)); then
   configured_mode=""
   [[ ! -r "${JSH_MODE_FILE}" ]] || IFS= read -r configured_mode <"${JSH_MODE_FILE}"
@@ -2619,6 +3605,12 @@ case "${command_name}" in
     ;;
   status)
     _jsh_status "$@"
+    ;;
+  update)
+    _jsh_update "$@"
+    ;;
+  audit)
+    _jsh_audit "$@"
     ;;
   repair)
     _jsh_repair "$@"
