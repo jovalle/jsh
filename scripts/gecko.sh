@@ -308,23 +308,56 @@ bootstrap_profiles() {
 }
 
 profiles() {
-  local browser root ini path relative
+  local browser root ini install_path path relative
   while IFS=$'\t' read -r browser root; do
     ini="${root}/profiles.ini"
     [[ -r ${ini} ]] || continue
-    while IFS='|' read -r relative path; do
-      [[ -n ${path} ]] || continue
-      if [[ ${relative} == 0 ]]; then
-        printf '%s\t%s\n' "${browser}" "${path}"
-      else
-        printf '%s\t%s\n' "${browser}" "${root}/${path}"
+    install_path=""
+    if [[ -r ${root}/installs.ini ]]; then
+      install_path=$(awk -F= '$1 == "Default" { print substr($0, index($0, "=") + 1); exit }' \
+        "${root}/installs.ini")
+    fi
+    if [[ -z ${install_path} ]]; then
+      install_path=$(awk -F= '
+        /^\[Install[^]]+\]$/ { install=1; next }
+        /^\[/ { install=0 }
+        install && $1 == "Default" { print substr($0, index($0, "=") + 1); exit }
+      ' "${ini}")
+    fi
+    if [[ -n ${install_path} ]]; then
+      [[ ${install_path} == /* ]] || install_path="${root}/${install_path}"
+      if [[ -d ${install_path} ]]; then
+        printf '%s\t%s\n' "${browser}" "${install_path}"
+        continue
       fi
-    done < <(awk -F= '
-      /^\[/ { if (path != "") print relative "|" path; path=""; relative=1; next }
-      $1 == "Path" { path=substr($0, index($0, "=") + 1) }
-      $1 == "IsRelative" { relative=$2 }
-      END { if (path != "") print relative "|" path }
+    fi
+
+    IFS='|' read -r relative path < <(awk -F= '
+      function select_profile() {
+        if (!profile || path == "") return
+        if (first_path == "") { first_relative=relative; first_path=path }
+        if (default_profile == 1) { print relative "|" path; selected=1; exit }
+      }
+      /^\[/ {
+        select_profile()
+        profile=($0 ~ /^\[Profile[0-9]+\]$/)
+        path=""; relative=1; default_profile=0
+        next
+      }
+      profile && $1 == "Path" { path=substr($0, index($0, "=") + 1) }
+      profile && $1 == "IsRelative" { relative=$2 }
+      profile && $1 == "Default" { default_profile=$2 }
+      END {
+        select_profile()
+        if (!selected && first_path != "") print first_relative "|" first_path
+      }
     ' "${ini}")
+    [[ -n ${path} ]] || continue
+    if [[ ${relative} == 0 ]]; then
+      printf '%s\t%s\n' "${browser}" "${path}"
+    else
+      printf '%s\t%s\n' "${browser}" "${root}/${path}"
+    fi
   done < <(profile_roots)
 }
 

@@ -77,7 +77,7 @@ run_gecko() {
 
 @test "existing profile registry is preserved" {
   root=$(profile_root)
-  mkdir -p "${root}/Profiles/existing-profile"
+  mkdir -p "${root}/Profiles/existing-profile" "${root}/Profiles/other-profile"
   printf '%s\n' \
     '[General]' \
     'StartWithLastProfile=1' \
@@ -87,15 +87,51 @@ run_gecko() {
     'Name=existing-profile' \
     'IsRelative=1' \
     'Path=Profiles/existing-profile' \
-    'Default=1' >"${root}/profiles.ini"
+    'Default=1' \
+    '' \
+    '[Profile1]' \
+    'Name=other-profile' \
+    'IsRelative=1' \
+    'Path=Profiles/other-profile' >"${root}/profiles.ini"
 
   run_gecko
 
   [ "${status}" -eq 0 ]
   [[ "${output}" != *"Bootstrapped"* ]]
+  [[ "${output}" == *"Gecko configuration updated: 1 profiles checked."* ]]
+  [[ "${output}" != *"Waterfox other-profile:"* ]]
   grep -q '^Name=existing-profile$' "${root}/profiles.ini"
   [ ! -d "${root}/Profiles/jsh-default" ]
   [ -r "${root}/Profiles/existing-profile/user.js" ]
+  [ ! -e "${root}/Profiles/other-profile/user.js" ]
+}
+
+@test "configures only the install default profile" {
+  root=$(profile_root)
+  mkdir -p "${root}/Profiles/old-profile" "${root}/Profiles/main-profile"
+  printf '%s\n' \
+    '[Profile0]' \
+    'Name=old-profile' \
+    'IsRelative=1' \
+    'Path=Profiles/old-profile' \
+    'Default=1' \
+    '' \
+    '[Profile1]' \
+    'Name=main-profile' \
+    'IsRelative=1' \
+    'Path=Profiles/main-profile' >"${root}/profiles.ini"
+  printf '%s\n' \
+    '[TESTINSTALL]' \
+    'Default=Profiles/main-profile' \
+    'Locked=1' >"${root}/installs.ini"
+
+  run_gecko
+
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"Waterfox main-profile: preferences updated"* ]]
+  [[ "${output}" != *"Waterfox old-profile:"* ]]
+  [ -r "${root}/Profiles/main-profile/user.js" ]
+  [ ! -e "${root}/Profiles/old-profile/user.js" ]
 }
 
 @test "does not create a profile when no browser is installed" {
