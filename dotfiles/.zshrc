@@ -4939,6 +4939,27 @@ if [[ -n "${_JSH_DEFERRED_COMPLETIONS[*]:-}" ]]; then
   unset _JSH_DEFERRED_COMPLETIONS _fn
 fi
 
+# Delegate unknown Just recipes to Task.
+just() {
+  local recipe
+  local -a recipes
+
+  if (( $# == 0 )) || [[ "$1" == -* ]]; then
+    command just "$@"
+    return
+  fi
+
+  recipes=(${=$(command just --summary 2>/dev/null)})
+  for recipe in "${recipes[@]}"; do
+    if [[ "$recipe" == "$1" ]]; then
+      command just "$@"
+      return
+    fi
+  done
+
+  command task "$1" -- "${@:2}"
+}
+
 # Just's dynamic completer mixes filesystem entries into recipe completion.
 _jsh_just_completion() {
   local summary recipe completion value output task component
@@ -4949,6 +4970,14 @@ _jsh_just_completion() {
 
   for recipe in "${recipes[@]}"; do
     recipe_names[$recipe]=1
+  done
+
+  output="$(task --list-all 2>/dev/null)" || output=""
+  for completion in "${(@)${(f)output}[2,-1]#\* }"; do
+    task="${completion%%:[[:space:]]*}"
+    [[ -n "$task" && -z "${recipe_names[$task]-}" ]] || continue
+    recipes+=("$task")
+    recipe_names[$task]=1
   done
 
   if (( CURRENT == 2 )) && [[ "${words[CURRENT]}" != -* ]]; then
@@ -4966,7 +4995,6 @@ _jsh_just_completion() {
       _describe 'install target' targets
     elif [[ "${words[2]}" == configure ]] && (( CURRENT == 3 )); then
       components=(all)
-      output="$(task --list-all 2>/dev/null)" || output=""
       for completion in "${(@)${(f)output}[2,-1]#\* }"; do
         task="${completion%%:[[:space:]]*}"
         [[ "$task" == configure:* ]] || continue
