@@ -24,3 +24,44 @@ setup() {
   [ "${lines[0]#*|}" = "${exact_dir}" ]
   [ "${lines[1]#*|}" = "${nested_dir}" ]
 }
+
+@test "missing directory message is colored and starts in column one" {
+  run env \
+    HOME="${test_root}/home" \
+    J_DATA="${database}" \
+    JSH_COLOR=always \
+    TERM=xterm-256color \
+    PROJECT_ROOT="${project_root}" \
+    zsh -dfc 'source "${PROJECT_ROOT}/dotfiles/.zshrc" >/dev/null 2>&1; j nientienod'
+
+  [ "${status}" -eq 1 ]
+  [ "${#lines[@]}" -eq 1 ]
+  [[ "${output}" == $'\033['*'✕ No matching directory · nientienod'$'\033[0m' ]]
+}
+
+@test "NO_COLOR suppresses forced color in shell messages" {
+  run env \
+    HOME="${test_root}/home" \
+    J_DATA="${database}" \
+    JSH_COLOR=always \
+    NO_COLOR=1 \
+    TERM=xterm-256color \
+    PROJECT_ROOT="${project_root}" \
+    zsh -dfc 'source "${PROJECT_ROOT}/dotfiles/.zshrc" >/dev/null 2>&1; j nientienod'
+
+  [ "${status}" -eq 1 ]
+  [ "${output}" = '✕ No matching directory · nientienod' ]
+}
+
+@test "shell utility errors use the standalone message renderer" {
+  run env \
+    HOME="${test_root}/home" \
+    JSH_COLOR=always \
+    TERM=xterm-256color \
+    PROJECT_ROOT="${project_root}" \
+    zsh -dfc 'source "${PROJECT_ROOT}/dotfiles/.zshrc" >/dev/null 2>&1; bak missing-file'
+
+  [ "${status}" -eq 1 ]
+  [ "${#lines[@]}" -eq 1 ]
+  [[ "${output}" == $'\033['*'✕ File not found: missing-file'$'\033[0m' ]]
+}
