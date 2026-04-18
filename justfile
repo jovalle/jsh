@@ -15,14 +15,6 @@ install target="full":
     *) printf 'Unknown install target: %s\n' "{{ target }}" >&2; exit 2 ;;
   esac
 
-# Install declared Homebrew packages and upgrade installed formulae and casks.
-brew:
-  task brew
-
-# Configure every component for this platform, or one named component.
-configure component="":
-  task configure COMPONENT="{{ component }}"
-
 # Report runtime and managed-link health.
 doctor:
   ./bin/jsh doctor
