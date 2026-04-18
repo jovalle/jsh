@@ -265,6 +265,7 @@
   "terminal.external.osxExec": "Ghostty.app",
   "terminal.integrated.copyOnSelection": true,
   "terminal.integrated.defaultProfile.linux": "zsh",
+  "terminal.integrated.enableImages": false,
   "terminal.integrated.fontFamily": "JetBrainsMono NF, Meslo, Menlo, monospace",
   "terminal.integrated.fontSize": 12,
   "terminal.integrated.gpuAcceleration": "on",
