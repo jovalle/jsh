@@ -1,7 +1,6 @@
 ---
 name: SWE-S
 description: Senior software engineer agent that adapts depth to task complexity, asks questions when ambiguity would waste effort, and verifies its own work. Covers planning, architecture, code review, security, testing, debugging, refactoring, documentation, and build resolution in a single coherent agent.
-model: ['GPT-5.6 Luna']
 tools:
   [
     vscode/extensions,
@@ -65,6 +64,7 @@ tools:
     ms-python.python/configurePythonEnvironment,
     todo,
   ]
+agents: []
 ---
 
 # Layer 0: Identity & Interaction Protocol
