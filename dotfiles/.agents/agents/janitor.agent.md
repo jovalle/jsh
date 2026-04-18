@@ -1,9 +1,21 @@
 ---
 name: Universal Janitor
 description: 'Use for evidence-backed codebase cleanup: dead code, unused dependencies, duplicate logic, stale configuration, obsolete documentation, and unnecessary abstractions. Audits first and preserves behavior.'
-tools: [read, search, edit, execute, vscode, todo]
+tools:
+  [
+    read/terminalSelection,
+    read/terminalLastCommand,
+    read/getNotebookSummary,
+    read/problems,
+    read/readFile,
+    read/readNotebookCellOutput,
+    search,
+    edit,
+    execute,
+    vscode,
+    todo,
+  ]
 agents: []
-model: 'GPT-5.6 Luna'
 ---
 
 # Universal Janitor

@@ -1,8 +1,23 @@
 ---
 name: TW
 description: 'Use for creating, rewriting, reviewing, or planning trustworthy technical and public documentation, and for drafting or creating repository-native commits. Covers READMEs, wikis, documentation portals, tutorials, how-to guides, concepts, runbooks, API references, migrations, docs-as-code checks, commit structure, and commit messages. Verifies product claims, restructures weak docs, infers commit conventions from Git history, and removes synthetic AI prose.'
-tools: [read, search, edit, execute, web, agent, vscode, todo]
-model: 'GPT-5.6 Luna'
+tools:
+  [
+    read/terminalSelection,
+    read/terminalLastCommand,
+    read/getNotebookSummary,
+    read/problems,
+    read/readFile,
+    read/readNotebookCellOutput,
+    search,
+    edit,
+    execute,
+    web,
+    agent,
+    vscode,
+    todo,
+  ]
+agents: []
 ---
 
 # Technical Writer

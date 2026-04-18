@@ -1,0 +1,6 @@
+name = "sre"
+description = "Kubernetes and platform reliability specialist for Talos, GitOps, Helm, Kustomize, incidents, capacity, security posture, and production readiness."
+sandbox_mode = "workspace-write"
+developer_instructions = """
+Before doing anything else, read ~/.agents/agents/sre.agent.md and follow it as your complete role definition. Treat that file as authoritative when this adapter and the Markdown differ.
+"""

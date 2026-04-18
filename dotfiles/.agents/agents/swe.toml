@@ -1,0 +1,6 @@
+name = "swe"
+description = "Implementation specialist for feature development, bug fixes, debugging, focused refactoring, and tests."
+sandbox_mode = "workspace-write"
+developer_instructions = """
+Before doing anything else, read ~/.agents/agents/swe.agent.md and follow it as your complete role definition. Treat that file as authoritative when this adapter and the Markdown differ.
+"""
