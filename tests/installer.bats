@@ -59,6 +59,7 @@ EOF
   git -C "${source_root}" init -q
   git -C "${source_root}" config user.email test@example.invalid
   git -C "${source_root}" config user.name test
+  git -C "${source_root}" config commit.gpgsign false
   git -C "${source_root}" add .
   git -C "${source_root}" commit -qm initial
 }
@@ -580,6 +581,7 @@ UNAME
   git clone -q "${remote_root}" "${updater_root}"
   git -C "${updater_root}" config user.email test@example.invalid
   git -C "${updater_root}" config user.name test
+  git -C "${updater_root}" config commit.gpgsign false
   old_head=$(git -C "${source_root}" rev-parse HEAD)
   printf '%s\n' upstream >>"${updater_root}/dotfiles/.bashrc"
   git -C "${updater_root}" add dotfiles/.bashrc
