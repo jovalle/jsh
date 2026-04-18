@@ -302,9 +302,23 @@ _jsh_install_entries() {
   if [[ -d "${source}" ]]; then
     for child in "${source}"/*; do
       [[ -e "${child}" ]] || continue
+      [[ "${child##*/}" != prompts ]] || continue
       printf '%s|%s\n' "${child}" "${destination}/${child##*/}"
     done
   fi
+
+  source="${JSH_DIR}/dotfiles/.agents/agents"
+  if [[ -d "${source}" ]]; then
+    printf '%s|%s\n' "${source}" "${HOME}/.agents/agents"
+    printf '%s|%s\n' "${source}" "${HOME}/.copilot/agents"
+    printf '%s|%s\n' "${source}" "${HOME}/.codex/agents"
+  fi
+
+  source="${JSH_DIR}/dotfiles/.codex/AGENTS.md"
+  [[ -e "${source}" ]] && printf '%s|%s\n' "${source}" "${HOME}/.codex/AGENTS.md"
+
+  source="${JSH_DIR}/dotfiles/.copilot/copilot-instructions.md"
+  [[ -e "${source}" ]] && printf '%s|%s\n' "${source}" "${HOME}/.copilot/copilot-instructions.md"
 }
 
 _jsh_resolve_path() {
@@ -344,6 +358,143 @@ _jsh_state_add() {
   _jsh_state_has_destination "${destination}" && return 0
   mkdir -p "${JSH_STATE_DIR}"
   printf '%s|%s|%s\n' "${source}" "${destination}" "${backup}" >>"${JSH_LINK_STATE}"
+}
+
+_jsh_migrate_vscode_prompts() {
+  local dry_run="$1" source destination line managed_source managed_destination backup
+  local legacy_backup="" found=0 child target recovery_backup temporary
+  source="${JSH_DIR}/dotfiles/.vscode/user/prompts"
+  destination="$(_jsh_vscode_user_dir)/prompts"
+  [[ -r "${JSH_LINK_STATE}" ]] || return 0
+
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    IFS='|' read -r managed_source managed_destination backup <<<"${line}"
+    if [[ "${managed_source}" == "${source}" && "${managed_destination}" == "${destination}" ]]; then
+      legacy_backup="${backup}"
+      found=1
+      break
+    fi
+  done <"${JSH_LINK_STATE}"
+  ((found == 1)) || return 0
+
+  if [[ "${dry_run}" == 1 ]]; then
+    _jsh_message plan "migrate ${destination} to individual managed links"
+    return 0
+  fi
+  if [[ -e "${destination}" || -L "${destination}" ]]; then
+    if ! _jsh_link_points_to "${source}" "${destination}" \
+      && [[ ! -L "${destination}" || "$(readlink "${destination}")" != "${source}" ]]; then
+      _jsh_message error "cannot migrate changed legacy link: ${destination}"
+      return 1
+    fi
+  fi
+  if [[ -n "${legacy_backup}" && ! -e "${legacy_backup}" && ! -L "${legacy_backup}" ]]; then
+    _jsh_message error "missing backup: ${legacy_backup}"
+    return 1
+  fi
+
+  for child in "${source}"/*.agent.md; do
+    [[ -L "${child}" ]] || continue
+    target=$(readlink "${child}" 2>/dev/null) || continue
+    [[ "${target}" == "${child}" ]] || continue
+    recovery_backup=""
+    while IFS='|' read -r managed_source managed_destination backup \
+      || [[ -n "${managed_source}${managed_destination}${backup}" ]]; do
+      if [[ "${managed_source}" == "${child}" &&
+        "${managed_destination}" == "${destination}/${child##*/}" ]]; then
+        recovery_backup="${backup}"
+        break
+      fi
+    done <"${JSH_LINK_STATE}"
+    if [[ -z "${recovery_backup}" || ! -e "${recovery_backup}" ]]; then
+      _jsh_message error "cannot recover managed source: ${child}"
+      return 1
+    fi
+  done
+
+  for child in "${source}"/*.agent.md; do
+    [[ -L "${child}" ]] || continue
+    target=$(readlink "${child}" 2>/dev/null) || continue
+    [[ "${target}" == "${child}" ]] || continue
+    while IFS='|' read -r managed_source managed_destination backup \
+      || [[ -n "${managed_source}${managed_destination}${backup}" ]]; do
+      if [[ "${managed_source}" == "${child}" &&
+        "${managed_destination}" == "${destination}/${child##*/}" ]]; then
+        rm "${child}" && mv "${backup}" "${child}" || return 1
+        break
+      fi
+    done <"${JSH_LINK_STATE}"
+  done
+
+  [[ ! -L "${destination}" ]] || rm "${destination}" || return 1
+  if [[ -n "${legacy_backup}" ]]; then
+    mkdir -p "$(dirname "${destination}")" && mv "${legacy_backup}" "${destination}" || return 1
+  else
+    mkdir -p "${destination}" || return 1
+  fi
+
+  temporary="${JSH_LINK_STATE}.prompts.$$"
+  : >"${temporary}" || return 1
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    IFS='|' read -r managed_source managed_destination backup <<<"${line}"
+    if [[ "${managed_destination}" == "${destination}" ||
+      "${managed_destination}" == "${destination}/"* ]]; then
+      continue
+    fi
+    printf '%s\n' "${line}" >>"${temporary}" || {
+      rm -f "${temporary}"
+      return 1
+    }
+  done <"${JSH_LINK_STATE}"
+  mv "${temporary}" "${JSH_LINK_STATE}"
+}
+
+_jsh_retire_legacy_agent_links() {
+  local dry_run="$1" source_dir vscode_destination_dir line source destination backup temporary
+  local source_dir_path source_path expected_source_path failures=0
+  source_dir="${JSH_DIR}/dotfiles/.vscode/user/prompts"
+  source_dir_path=$(_jsh_resolve_path "${source_dir}") || return 1
+  vscode_destination_dir="$(_jsh_vscode_user_dir)/prompts"
+  [[ -r "${JSH_LINK_STATE}" ]] || return 0
+  temporary="${JSH_LINK_STATE}.agents.$$"
+  [[ "${dry_run}" == 1 ]] || : >"${temporary}" || return 1
+
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    IFS='|' read -r source destination backup <<<"${line}"
+    source_path=$(_jsh_resolve_path "${source}" 2>/dev/null || printf '%s\n' "${source}")
+    expected_source_path="${source_dir_path}/${source##*/}"
+    if [[ "${source}" != *.agent.md || "${source_path}" != "${expected_source_path}" ||
+      ("${destination}" != "${vscode_destination_dir}/${source##*/}" &&
+      "${destination}" != "${HOME}/.copilot/agents/${source##*/}") ]]; then
+      [[ "${dry_run}" == 1 ]] || printf '%s\n' "${line}" >>"${temporary}" || return 1
+      continue
+    fi
+    if ! _jsh_link_points_to "${source}" "${destination}" \
+      && [[ -e "${destination}" || -L "${destination}" ]]; then
+      _jsh_message changed "retained ${destination}"
+      failures=$((failures + 1))
+      [[ "${dry_run}" == 1 ]] || printf '%s\n' "${line}" >>"${temporary}" || return 1
+      continue
+    fi
+    if [[ -n "${backup}" && ! -e "${backup}" && ! -L "${backup}" ]]; then
+      _jsh_message error "missing backup: ${backup}"
+      failures=$((failures + 1))
+      [[ "${dry_run}" == 1 ]] || printf '%s\n' "${line}" >>"${temporary}" || return 1
+      continue
+    fi
+    if [[ "${dry_run}" == 1 ]]; then
+      _jsh_message plan "remove ${destination}${backup:+ and restore backup}"
+      continue
+    fi
+    [[ ! -L "${destination}" ]] || rm "${destination}" || return 1
+    if [[ -n "${backup}" ]]; then
+      mkdir -p "$(dirname "${destination}")" && mv "${backup}" "${destination}" || return 1
+    fi
+    _jsh_message removed "${destination}"
+  done <"${JSH_LINK_STATE}"
+
+  [[ "${dry_run}" == 1 ]] || mv "${temporary}" "${JSH_LINK_STATE}"
+  return "${failures}"
 }
 
 _jsh_backup_path() {
@@ -540,15 +691,20 @@ _jsh_apply_links() {
     fi
   fi
   if [[ "${apply_config}" == 1 ]]; then
-    while IFS='|' read -r source destination; do
-      if [[ "${quiet}" == 1 ]]; then
-        _jsh_manage_link "${source}" "${destination}" "${backup_root}" "${dry_run}" \
-          >/dev/null 2>&1 || failures=$((failures + 1))
-      else
-        _jsh_manage_link "${source}" "${destination}" "${backup_root}" "${dry_run}" \
-          || failures=$((failures + 1))
-      fi
-    done < <(_jsh_install_entries)
+    if ! _jsh_migrate_vscode_prompts "${dry_run}" \
+      || ! _jsh_retire_legacy_agent_links "${dry_run}"; then
+      failures=$((failures + 1))
+    else
+      while IFS='|' read -r source destination; do
+        if [[ "${quiet}" == 1 ]]; then
+          _jsh_manage_link "${source}" "${destination}" "${backup_root}" "${dry_run}" \
+            >/dev/null 2>&1 || failures=$((failures + 1))
+        else
+          _jsh_manage_link "${source}" "${destination}" "${backup_root}" "${dry_run}" \
+            || failures=$((failures + 1))
+        fi
+      done < <(_jsh_install_entries)
+    fi
   fi
   if [[ "${dry_run}" == 0 && "${failures}" == 0 ]]; then
     mkdir -p "${JSH_STATE_DIR}" && printf '%s\n' "${mode}" >"${JSH_MODE_FILE}"
@@ -2932,8 +3088,23 @@ jsh_component_install_entries() {
   if [ -d "${vscode_source}" ]; then
     for vscode_child in "${vscode_source}"/*; do
       [ -e "${vscode_child}" ] || [ -L "${vscode_child}" ] || continue
+      [ "${vscode_child##*/}" != prompts ] || continue
       printf '%s|%s\n' "${vscode_child}" "${vscode_destination}/${vscode_child##*/}"
     done
+  fi
+  agents_source="${install_dir}/dotfiles/.agents/agents"
+  if [ -d "${agents_source}" ]; then
+    printf '%s|%s\n' "${agents_source}" "${HOME}/.agents/agents"
+    printf '%s|%s\n' "${agents_source}" "${HOME}/.copilot/agents"
+    printf '%s|%s\n' "${agents_source}" "${HOME}/.codex/agents"
+  fi
+  source_path="${install_dir}/dotfiles/.codex/AGENTS.md"
+  if [ -e "${source_path}" ] || [ -L "${source_path}" ]; then
+    printf '%s|%s\n' "${source_path}" "${HOME}/.codex/AGENTS.md"
+  fi
+  source_path="${install_dir}/dotfiles/.copilot/copilot-instructions.md"
+  if [ -e "${source_path}" ] || [ -L "${source_path}" ]; then
+    printf '%s|%s\n' "${source_path}" "${HOME}/.copilot/copilot-instructions.md"
   fi
 }
 
@@ -3013,6 +3184,13 @@ jsh_component_check_config() {
   if [ ! -d "${install_dir}/dotfiles" ]; then
     jsh_component_set config planned 'managed sources will be available after checkout' \
       'link managed HOME, XDG, and VS Code configuration'
+    return 0
+  fi
+  legacy_prompts_source="${install_dir}/dotfiles/.vscode/user/prompts"
+  legacy_prompts_destination="$(jsh_component_vscode_user_dir)/prompts"
+  if jsh_component_state_has_link "${legacy_prompts_source}" "${legacy_prompts_destination}"; then
+    jsh_component_set config changed "${legacy_prompts_destination} uses the legacy directory link" \
+      'migrate VS Code prompts to individual managed links'
     return 0
   fi
   config_entries=$(jsh_component_install_entries)
