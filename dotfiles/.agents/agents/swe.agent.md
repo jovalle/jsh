@@ -1,9 +1,21 @@
 ---
 name: SWE
 description: 'Use for implementation tasks: feature development, bug fixes, debugging, focused refactoring, and tests. Makes scoped code changes and verifies them.'
-tools: [read, search, edit, execute, vscode, todo]
+tools:
+  [
+    read/terminalSelection,
+    read/terminalLastCommand,
+    read/getNotebookSummary,
+    read/problems,
+    read/readFile,
+    read/readNotebookCellOutput,
+    search,
+    edit,
+    execute,
+    vscode,
+    todo,
+  ]
 agents: []
-model: ['GPT-5.6 Sol', 'Claude Opus 5']
 ---
 
 # SWE
