@@ -1952,14 +1952,6 @@ fi
 # =============================================================================
 
 # -----------------------------------------------------------------------------
-# Claude
-# -----------------------------------------------------------------------------
-if has claude; then
-  alias claude-mem='bun "$HOME/.claude/plugins/marketplaces/thedotmack/plugin/scripts/worker-service.cjs"'
-  alias claudia='claude --permission-mode plan --allow-dangerously-skip-permissions'
-fi
-
-# -----------------------------------------------------------------------------
 # Docker
 # -----------------------------------------------------------------------------
 if has docker; then
