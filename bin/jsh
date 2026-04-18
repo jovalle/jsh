@@ -116,6 +116,11 @@ _jsh_ui_text() {
   [[ -z "${HOME:-}" ]] || REPLY_TEXT=${REPLY_TEXT//"${HOME}"/\~}
 }
 
+_jsh_ui_path() {
+  _jsh_ui_text "$1"
+  [[ "${REPLY_TEXT}" != *[[:space:]]* ]] || printf -v REPLY_TEXT '"%s"' "${REPLY_TEXT}"
+}
+
 _jsh_ui_heading() {
   local separator='\n'
   [[ "${2:-}" != after-banner ]] || separator=
@@ -889,6 +894,7 @@ _jsh_status_repository() {
 
 _jsh_status_submodules() {
   local module_path module_status module_state module_detail state=current
+  local commit_id commit_tag commit_date commit_detail
   local initialized=0 total=0 dirty=0 missing=0 drifted=0
   if [[ ! -r "${JSH_DIR}/.gitmodules" ]]; then
     _jsh_status_emit submodules error Submodules '.gitmodules is missing'
@@ -935,6 +941,17 @@ _jsh_status_submodules() {
       module_state=warning
       module_detail='local changes'
       [[ "${state}" == error ]] || state=warning
+    fi
+    if [[ "${module_state}" != error ]] \
+      && commit_id=$(git -C "${JSH_DIR}/${module_path}" rev-parse --short=7 HEAD 2>/dev/null) \
+      && commit_date=$(git -C "${JSH_DIR}/${module_path}" show -s --format=%cs HEAD 2>/dev/null); then
+      commit_tag=$(git -C "${JSH_DIR}/${module_path}" describe --tags --exact-match HEAD 2>/dev/null || true)
+      commit_detail="${commit_id}${commit_tag:+ (${commit_tag})}, ${commit_date}"
+      if [[ "${module_detail}" == initialized ]]; then
+        module_detail=${commit_detail}
+      else
+        module_detail="${commit_detail}, ${module_detail}"
+      fi
     fi
     _jsh_status_emit submodule-item "${module_state}" "${module_path}" "${module_detail}"
   done < <(git -C "${JSH_DIR}" config --file .gitmodules --get-regexp '\.path$' 2>/dev/null | sed 's/^[^ ]* //')
@@ -1099,12 +1116,12 @@ _jsh_status_environment() {
   if _jsh_status_project_find; then
     project_file=${REPLY}
     if [[ "${project_file}" == *.jshrc ]] && ! _jsh_status_project_trusted "${project_file}"; then
-      _jsh_status_emit project warning 'Project environment' "${project_file}, trust required"
+      _jsh_status_emit project warning 'Project shell config' "${project_file}, trust required"
     else
-      _jsh_status_emit project current 'Project environment' "${project_file}, ready"
+      _jsh_status_emit project current 'Project shell config' "${project_file}, ready"
     fi
   else
-    _jsh_status_emit project current 'Project environment' 'no project environment discovered'
+    _jsh_status_emit project current 'Project shell config' 'none discovered'
   fi
 
   if [[ -r "${JSH_DIR}/dotfiles/.gitconfig" ]]; then
@@ -1184,7 +1201,7 @@ _jsh_status_summary_width() {
   local label component state name detail
   JSH_STATUS_LABEL_WIDTH=0
   JSH_STATUS_DETAIL_WIDTH=18
-  for label in Shell Repository Submodules Packages Launcher Configuration Commands Editors PATH 'Runtime Git' 'Project environment'; do
+  for label in Shell Repository Submodules Packages Launcher Configuration Commands Editors PATH 'Runtime Git' 'Project shell config'; do
     ((${#label} > JSH_STATUS_LABEL_WIDTH)) && JSH_STATUS_LABEL_WIDTH=${#label}
   done
   while IFS=$'\t' read -r component state name detail; do
@@ -1194,6 +1211,7 @@ _jsh_status_summary_width() {
     ((${#name} > JSH_STATUS_DETAIL_WIDTH)) && JSH_STATUS_DETAIL_WIDTH=${#name}
   done <"${JSH_DOCTOR_RECORDS}"
   ((JSH_STATUS_DETAIL_WIDTH <= 30)) || JSH_STATUS_DETAIL_WIDTH=30
+  JSH_STATUS_LABEL_WIDTH=$((JSH_STATUS_DETAIL_WIDTH + 2))
 }
 
 _jsh_status_detail_row() {
@@ -1214,11 +1232,51 @@ _jsh_status_detail_row() {
     "${_JSH_UI_DIM}" "${detail}" "${_JSH_UI_RESET}"
 }
 
+_jsh_status_relationship_row() {
+  local state="$1" destination="$2" source="$3" prefix
+  _jsh_ui_init
+  _jsh_ui_status "${state}"
+  _jsh_ui_path "${destination}"
+  destination=${REPLY_TEXT}
+  _jsh_ui_path "${source}"
+  source=${REPLY_TEXT}
+  if [[ "${_JSH_UI_RICH}" == 1 ]]; then
+    prefix="${REPLY_COLOR}${REPLY_MARK}${_JSH_UI_RESET}"
+  else
+    printf -v prefix '%-7s' "[${REPLY_MARK}]"
+  fi
+  printf '  %s %s%s%s\n' "${prefix}" "${_JSH_UI_BOLD}" "${destination}" "${_JSH_UI_RESET}"
+  printf '    %s→%s %s%s%s\n' "${_JSH_UI_CYAN}" "${_JSH_UI_RESET}" \
+    "${_JSH_UI_DIM}" "${source}" "${_JSH_UI_RESET}"
+}
+
 _jsh_status_verbose_records() {
   local wanted="$1" component state name detail
   while IFS=$'\t' read -r component state name detail; do
     [[ "${component}" == "${wanted}" ]] || continue
     _jsh_status_detail_row "${state}" "${name}" "${detail}"
+  done <"${JSH_STATUS_RECORDS}"
+}
+
+_jsh_status_verbose_relationships() {
+  local wanted="$1" component state name detail source
+  while IFS=$'\t' read -r component state name detail; do
+    [[ "${component}" == "${wanted}" ]] || continue
+    if [[ "${state}" == current || "${state}" == linked ]]; then
+      _jsh_status_relationship_row "${state}" "${name}" "${detail}"
+    else
+      _jsh_ui_path "${name}"
+      name=${REPLY_TEXT}
+      case "${detail}" in
+        'not linked from '* | 'stale managed link: '*)
+          source=${detail#* from }
+          [[ "${detail}" == 'not linked from '* ]] || source=${detail#*: }
+          _jsh_ui_path "${source}"
+          detail="${detail%"${source}"}${REPLY_TEXT}"
+          ;;
+      esac
+      _jsh_status_detail_row "${state}" "${name}" "${detail}"
+    fi
   done <"${JSH_STATUS_RECORDS}"
 }
 
@@ -1230,7 +1288,7 @@ _jsh_status_verbose_doctor() {
       required:missing) state=error ;;
       optional-missing:*) state=warning ;;
       network-only:*)
-        printf '    %s%-18s  %s%s\n' "${_JSH_UI_DIM}" "${name}" "${detail}" "${_JSH_UI_RESET}"
+        _jsh_status_detail_row info "${name}" "${detail}"
         continue
         ;;
       *) state=current ;;
@@ -1279,7 +1337,7 @@ _jsh_status_verbose_updates() {
 
 _jsh_status_summary_row() {
   local state="$1" label="$2" plain_value="$3" formatted_value="${4:-$3}"
-  local prefix prefix_width columns row_width indent
+  local prefix prefix_width columns row_width
   _jsh_ui_init
   _jsh_ui_status "${state}"
   if [[ "${_JSH_UI_RICH}" == 1 ]]; then
@@ -1293,10 +1351,8 @@ _jsh_status_summary_row() {
   [[ "${columns}" =~ ^[0-9]+$ ]] || columns=80
   row_width=$((prefix_width + JSH_STATUS_LABEL_WIDTH + 2 + ${#plain_value}))
   if ((columns >= 30 && row_width > columns)); then
-    printf '%s%s%-*s%s\n' "${prefix}" "${_JSH_UI_BOLD}" \
-      "${JSH_STATUS_LABEL_WIDTH}" "${label}" "${_JSH_UI_RESET}"
-    printf -v indent '%*s' "$((prefix_width + JSH_STATUS_LABEL_WIDTH + 2))" ''
-    printf '%s%s\n' "${indent}" "${formatted_value}"
+    printf '%s%s%s%s\n' "${prefix}" "${_JSH_UI_BOLD}" "${label}" "${_JSH_UI_RESET}"
+    printf '  %s\n' "${formatted_value}"
   else
     printf '%s%s%-*s%s  %s\n' "${prefix}" "${_JSH_UI_BOLD}" \
       "${JSH_STATUS_LABEL_WIDTH}" "${label}" "${_JSH_UI_RESET}" "${formatted_value}"
@@ -1355,6 +1411,7 @@ _jsh_status_colors() {
 _jsh_banner() {
   local header="${1:-}" gap_width=26 header_width left_width right_width
   [[ "${JSH_BANNER_SHOWN:-0}" != 1 ]] || return 0
+  JSH_BANNER_SHOWN=1
   if ((${#header} > gap_width - 2)); then
     header="${header:0:gap_width-5}..."
   fi
@@ -1435,13 +1492,19 @@ _jsh_status_render() {
   value=${REPLY_TEXT}
   formatted="${_JSH_UI_CYAN}${value}${_JSH_UI_RESET}"
   _jsh_status_summary_row "${state}" Launcher "${value}" "${formatted}"
-  [[ "${verbose}" != 1 ]] || _jsh_status_verbose_records launcher
+  if [[ "${verbose}" == 1 ]]; then
+    if [[ "${state}" == current ]]; then
+      _jsh_status_relationship_row "${state}" "${value}" "${JSH_DIR}/bin/jsh"
+    else
+      _jsh_status_verbose_records launcher
+    fi
+  fi
 
   _jsh_status_component_state configuration
   state=${REPLY_STATE}
   _jsh_status_component_counts configuration
   _jsh_status_summary_row "${state}" Configuration "${REPLY_CURRENT}/${REPLY_TOTAL} linked"
-  [[ "${verbose}" != 1 ]] || _jsh_status_verbose_records configuration
+  [[ "${verbose}" != 1 ]] || _jsh_status_verbose_relationships configuration
 
   printf '\n'
   state=$(awk -F '\t' '$1 == "commands" { print $2; exit }' "${JSH_STATUS_RECORDS}")
@@ -1475,9 +1538,14 @@ _jsh_status_render() {
 
   state=$(awk -F '\t' '$1 == "project" { print $2; exit }' "${JSH_STATUS_RECORDS}")
   value=$(awk -F '\t' '$1 == "project" { print $4; exit }' "${JSH_STATUS_RECORDS}")
-  _jsh_ui_text "${value}"
-  value=${REPLY_TEXT}
-  _jsh_status_summary_row "${state}" 'Project environment' "${value}"
+  if [[ "${value}" == *,\ * ]]; then
+    formatted=${value%, *}
+    _jsh_ui_path "${formatted}"
+    formatted="${REPLY_TEXT}, ${value##*, }"
+  else
+    formatted=${value}
+  fi
+  _jsh_status_summary_row "${state}" 'Project shell config' "${value}" "${formatted}"
 
   if awk -F '\t' '$1 == "configuration" && (($2 == "changed" && $4 ~ /^stale managed link:/) || ($2 == "error" && $4 == "malformed managed-link state")) { found=1 } END { exit !found }' \
     "${JSH_STATUS_RECORDS}"; then
@@ -1812,6 +1880,21 @@ _jsh_doctor_yq() {
   fi
 }
 
+_jsh_doctor_zsh() {
+  local zsh_path brew_prefix='' version variant=system _name
+  zsh_path=$(command -v zsh 2>/dev/null) || {
+    _jsh_doctor_record runtime optional-missing zsh 'enhanced interactive shell'
+    return
+  }
+  version=$("${zsh_path}" --version 2>/dev/null || true)
+  read -r _name version _ <<<"${version}"
+  if command -v brew >/dev/null 2>&1; then
+    brew_prefix=$(brew --prefix 2>/dev/null || true)
+    [[ -z "${brew_prefix}" || "${zsh_path}" != "${brew_prefix}/"* ]] || variant=Homebrew
+  fi
+  _jsh_doctor_record runtime available zsh "${variant} zsh ${version:-unknown}"
+}
+
 _jsh_doctor_label() {
   case "$1" in
     base) printf 'Core' ;;
@@ -1864,8 +1947,7 @@ _jsh_doctor_collect() {
     fi
   done
 
-  _jsh_doctor_command runtime zsh zsh 'enhanced interactive shell'
-  _jsh_doctor_command runtime fzf fzf 'fuzzy history and completion'
+  _jsh_doctor_zsh
   _jsh_doctor_path vendor fzf-tab "${JSH_DIR}/vendor/fzf-tab/fzf-tab.plugin.zsh" 'Zsh completion plugin source'
   _jsh_doctor_path vendor zsh-completions "${JSH_DIR}/vendor/zsh-completions/src" 'additional Zsh completion source'
   _jsh_doctor_path vendor zsh-plugins "${JSH_DIR}/vendor/zsh-plugins/zsh-autosuggestions.zsh" 'tracked Zsh plugin source'
@@ -1930,8 +2012,7 @@ _jsh_doctor() {
     fi
   done
 
-  _jsh_doctor_command runtime zsh zsh 'enhanced interactive shell'
-  _jsh_doctor_command runtime fzf fzf 'fuzzy history and completion'
+  _jsh_doctor_zsh
   _jsh_doctor_path vendor fzf-tab "${JSH_DIR}/vendor/fzf-tab/fzf-tab.plugin.zsh" 'Zsh completion plugin source'
   _jsh_doctor_path vendor zsh-completions "${JSH_DIR}/vendor/zsh-completions/src" 'additional Zsh completion source'
   _jsh_doctor_path vendor zsh-plugins "${JSH_DIR}/vendor/zsh-plugins/zsh-autosuggestions.zsh" 'tracked Zsh plugin source'
