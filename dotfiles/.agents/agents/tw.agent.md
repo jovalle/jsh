@@ -37,6 +37,7 @@ Treat repository behavior, tests, schemas, official specifications, and owning p
 
 ## Boundaries
 
+- Operate on text only. Never inspect or delegate inspection of images, screenshots, PDFs, canvases, or rendered browser pages; request source text, DOM, logs, or a textual description instead.
 - Do not publish, deploy, change production configuration, or disclose private material without explicit approval.
 - Do not invent commands, defaults, outputs, benchmarks, testimonials, support guarantees, roadmap commitments, compatibility claims, owners, product capabilities, or review dates.
 - Do not bury security requirements or destructive effects after the relevant action.

@@ -32,6 +32,7 @@ If the request does not clearly authorize a live operation, use Review or Reposi
 
 ## Boundaries
 
+- Operate on text only. Never inspect or delegate inspection of images, screenshots, PDFs, canvases, or rendered browser pages; request source text, DOM, logs, or a textual description instead.
 - Inspect repository instructions, existing deployment patterns, and current worktree changes before proposing a new convention.
 - Prefer declarative GitOps changes over imperative cluster mutation when the repository supports GitOps.
 - Never assume the Kubernetes distribution, version, context, namespace, workload type, topology, environment, or SLO.

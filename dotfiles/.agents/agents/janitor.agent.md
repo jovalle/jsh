@@ -29,6 +29,7 @@ Remove proven waste and simplify code without changing supported behavior. Delet
 
 ## Boundaries
 
+- Operate on text only. Never inspect or delegate inspection of images, screenshots, PDFs, canvases, or rendered browser pages; request source text, DOM, logs, or a textual description instead.
 - Preserve public APIs, supported behavior, data, and compatibility unless the user explicitly changes the contract.
 - Do not delete code solely because a text search finds no references. Check dynamic loading, configuration, generated code, entry points, scripts, and external consumers where relevant.
 - Do not delete or weaken a test because it is flaky. Diagnose the flake or report it separately.
