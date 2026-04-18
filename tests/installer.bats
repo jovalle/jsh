@@ -23,6 +23,9 @@ make_fixture() {
 
   if [[ "${fixture_mode}" == full ]]; then
     mkdir -p "${source_root}/dotfiles/.config/example" \
+      "${source_root}/dotfiles/.agents/agents" \
+      "${source_root}/dotfiles/.codex" \
+      "${source_root}/dotfiles/.copilot" \
       "${source_root}/dotfiles/.vscode/user" \
       "${source_root}/vendor/fzf" \
       "${source_root}/vendor/fzf-tab" \
@@ -53,7 +56,11 @@ EOF
     printf '%s\n' autosuggest >"${source_root}/vendor/zsh-plugins/zsh-autosuggestions.zsh"
     printf '%s\n' plug >"${source_root}/vendor/vim-config/autoload/plug.vim"
     printf '%s\n' example >"${source_root}/dotfiles/.config/example/config"
+    printf '%s\n' instructions >"${source_root}/dotfiles/.codex/AGENTS.md"
+    printf '%s\n' instructions >"${source_root}/dotfiles/.copilot/copilot-instructions.md"
     printf '%s\n' '{}' >"${source_root}/dotfiles/.vscode/user/settings.json"
+    printf '%s\n' agent >"${source_root}/dotfiles/.agents/agents/swe.agent.md"
+    printf '%s\n' 'name = "swe"' >"${source_root}/dotfiles/.agents/agents/swe.toml"
   fi
 
   git -C "${source_root}" init -q
@@ -477,14 +484,155 @@ UNAME
   [ "$(readlink "${home_root}/.zshrc")" = "$(cd "${source_root}/dotfiles" && pwd -P)/.zshrc" ]
 }
 
+@test "full setup links one canonical agent directory into every client" {
+  make_fixture full
+  canonical_agents=$(cd "${source_root}/dotfiles/.agents/agents" && pwd -P)
+  mkdir -p "${home_root}/.agents/agents" \
+    "${home_root}/.copilot/agents" \
+    "${home_root}/.codex/agents" \
+    "${home_root}/Library/Application Support/Code/User/prompts"
+  printf '%s\n' keep >"${home_root}/.agents/agents/generated.md"
+  printf '%s\n' keep >"${home_root}/.copilot/agents/generated.md"
+  printf '%s\n' keep >"${home_root}/.codex/agents/generated.toml"
+  printf '%s\n' keep >"${home_root}/Library/Application Support/Code/User/prompts/local.prompt.md"
+  run run_installer full --yes
+
+  [ "${status}" -eq 0 ]
+  [ "$(readlink "${home_root}/.agents/agents")" = "${canonical_agents}" ]
+  [ "$(readlink "${home_root}/.copilot/agents")" = "${canonical_agents}" ]
+  [ "$(readlink "${home_root}/.codex/agents")" = "${canonical_agents}" ]
+  [ -f "${home_root}/.copilot/agents/swe.agent.md" ]
+  [ -f "${home_root}/.codex/agents/swe.toml" ]
+  [ -f "${home_root}/Library/Application Support/Code/User/prompts/local.prompt.md" ]
+  [ ! -e "${home_root}/Library/Application Support/Code/User/prompts/swe.agent.md" ]
+  [ -L "${home_root}/.codex/AGENTS.md" ]
+  [ -L "${home_root}/.copilot/copilot-instructions.md" ]
+  [ -f "$(find "${state_root}/jsh/backups" -path '*/.agents/agents/generated.md' -print -quit)" ]
+  [ -f "$(find "${state_root}/jsh/backups" -path '*/.copilot/agents/generated.md' -print -quit)" ]
+  [ -f "$(find "${state_root}/jsh/backups" -path '*/.codex/agents/generated.toml' -print -quit)" ]
+}
+
+@test "full setup retires managed VS Code profile agent links" {
+  make_fixture full
+  mkdir -p "${source_root}/dotfiles/.vscode/user/prompts"
+  source_prompts=$(cd "${source_root}/dotfiles/.vscode/user/prompts" && pwd -P)
+  source_agent=${source_prompts}/swe.agent.md
+  printf '%s\n' legacy >"${source_agent}"
+  git -C "${source_root}" add dotfiles/.vscode/user/prompts/swe.agent.md
+  git -C "${source_root}" commit -qm legacy
+  vscode_prompts="${home_root}/Library/Application Support/Code/User/prompts"
+  vscode_agent=${vscode_prompts}/swe.agent.md
+  mkdir -p "${vscode_prompts}" "${state_root}/jsh"
+  printf '%s\n' keep >"${vscode_prompts}/local.prompt.md"
+  ln -s "${source_agent}" "${vscode_agent}"
+  printf '%s|%s|\n' "${source_agent}" "${vscode_agent}" \
+    >"${state_root}/jsh/managed-links"
+  printf '%s\n' install >"${state_root}/jsh/mode"
+
+  run run_installer full --yes
+
+  [ "${status}" -eq 0 ]
+  [ ! -e "${vscode_agent}" ]
+  [ -f "${vscode_prompts}/local.prompt.md" ]
+  [ -f "${home_root}/.copilot/agents/swe.agent.md" ]
+  ! grep -Fq "${source_agent}|${vscode_agent}|" "${state_root}/jsh/managed-links"
+}
+
+@test "full setup migrates the legacy prompts directory link" {
+  make_fixture full
+  mkdir -p "${source_root}/dotfiles/.vscode/user/prompts"
+  source_prompts=$(cd "${source_root}/dotfiles/.vscode/user/prompts" && pwd -P)
+  vscode_prompts="${home_root}/Library/Application Support/Code/User/prompts"
+  mkdir -p "$(dirname "${vscode_prompts}")" "${state_root}/jsh"
+  ln -s "${source_prompts}" "${vscode_prompts}"
+  printf '%s|%s|\n' \
+    "${source_prompts}" "${vscode_prompts}" \
+    >"${state_root}/jsh/managed-links"
+  printf '%s\n' install >"${state_root}/jsh/mode"
+
+  run run_installer full --yes
+
+  [ "${status}" -eq 0 ]
+  [ -d "${vscode_prompts}" ]
+  [ ! -L "${vscode_prompts}" ]
+  [ ! -e "${vscode_prompts}/swe.agent.md" ]
+  [ -f "${home_root}/.copilot/agents/swe.agent.md" ]
+  ! grep -Fq "${source_prompts}|${vscode_prompts}|" \
+    "${state_root}/jsh/managed-links"
+}
+
+@test "full setup recovers agent sources from a failed prompts migration" {
+  make_fixture full
+  mkdir -p "${source_root}/dotfiles/.vscode/user/prompts"
+  source_prompts=$(cd "${source_root}/dotfiles/.vscode/user/prompts" && pwd -P)
+  source_agent=${source_prompts}/swe.agent.md
+  vscode_prompts="${home_root}/Library/Application Support/Code/User/prompts"
+  vscode_agent=${vscode_prompts}/swe.agent.md
+  backup_agent="${state_root}/jsh/backups/failed/Library/Application Support/Code/User/prompts/swe.agent.md"
+  mkdir -p "$(dirname "${vscode_prompts}")" "$(dirname "${backup_agent}")"
+  printf '%s\n' agent >"${source_agent}"
+  git -C "${source_root}" add dotfiles/.vscode/user/prompts/swe.agent.md
+  git -C "${source_root}" commit -qm legacy
+  ln -s "${source_prompts}" "${vscode_prompts}"
+  mv "${source_agent}" "${backup_agent}"
+  ln -s "${source_agent}" "${source_agent}"
+  git -C "${source_root}" add dotfiles/.vscode/user/prompts/swe.agent.md
+  git -C "${source_root}" commit -qm damaged
+  printf '%s|%s|\n%s|%s|%s\n' \
+    "${source_prompts}" "${vscode_prompts}" \
+    "${source_agent}" "${vscode_agent}" "${backup_agent}" \
+    >"${state_root}/jsh/managed-links"
+  printf '%s\n' install >"${state_root}/jsh/mode"
+
+  run run_installer full --yes
+
+  [ "${status}" -eq 0 ]
+  [ -f "${source_agent}" ]
+  [ ! -L "${source_agent}" ]
+  [ "$(cat "${source_agent}")" = agent ]
+  [ ! -e "${vscode_agent}" ]
+  [ -f "${home_root}/.copilot/agents/swe.agent.md" ]
+  [ ! -e "${backup_agent}" ]
+  ! grep -Fq "${source_agent}|${vscode_agent}|" "${state_root}/jsh/managed-links"
+}
+
+@test "full setup removes managed Copilot agent links" {
+  make_fixture full
+  mkdir -p "${source_root}/dotfiles/.vscode/user/prompts"
+  source_prompts=$(cd "${source_root}/dotfiles/.vscode/user/prompts" && pwd -P)
+  source_agent=${source_prompts}/swe.agent.md
+  printf '%s\n' legacy >"${source_agent}"
+  git -C "${source_root}" add dotfiles/.vscode/user/prompts/swe.agent.md
+  git -C "${source_root}" commit -qm legacy
+  copilot_agent=${home_root}/.copilot/agents/swe.agent.md
+  mkdir -p "${copilot_agent%/*}" "${state_root}/jsh"
+  ln -s "${source_agent}" "${copilot_agent}"
+  printf '%s|%s|\n' "${source_agent}" "${copilot_agent}" \
+    >"${state_root}/jsh/managed-links"
+  printf '%s\n' install >"${state_root}/jsh/mode"
+
+  run run_installer full --yes
+
+  [ "${status}" -eq 0 ]
+  [ -f "${copilot_agent}" ]
+  [ ! -L "${copilot_agent}" ]
+  ! grep -Fq "${source_agent}|${copilot_agent}|" "${state_root}/jsh/managed-links"
+}
+
 @test "a declined launcher prevents its dependent configuration action" {
   make_fixture full
   run expect -c "
     set timeout 10
     spawn env HOME=${home_root} XDG_STATE_HOME=${state_root} JSH_BIN_DIR=${bin_root} JSH_MODE=full JSH_PLAIN_OUTPUT=1 JSH_COLOR=never JSH_NETWORK_CHECK=never ${source_root}/j.sh
+    expect \"Apply Submodules and vendored assets?\"
+    send \"y\"
     expect \"Apply Launcher?\"
     send \"n\"
-    expect \"Managed configuration skipped\"
+    expect {
+      \"Managed configuration skipped\" {}
+      \"Apply Managed configuration?\" { puts \"configuration was prompted independently\"; exit 2 }
+      timeout { puts \"timed out waiting for configuration skip\"; exit 3 }
+    }
     expect eof
     exit 1
   "
