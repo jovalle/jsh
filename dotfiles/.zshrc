@@ -129,12 +129,13 @@ is_linux() { [[ "${JSH_OS}" == "linux" ]]; }
 _jsh_has_color() {
   # Respect common no-color and plain output toggles.
   [[ "${JSH_PLAIN_OUTPUT:-0}" == "1" ]] && return 1
-  [[ "${JSH_COLOR:-auto}" != never ]] || return 1
-  [[ "${JSH_COLOR:-auto}" == always ]] && return 0
-  [[ -n "${NO_COLOR:-}" ]] && return 1
-  # Check if terminal supports colors (don't require -t 1, as stdout may not
-  # be a TTY during shell init, but we still want colors defined for later use)
-  [[ -n "${TERM:-}" ]] && [[ "${TERM}" != "dumb" ]]
+  [[ "${TERM:-dumb}" != dumb ]] || return 1
+  [[ -z ${NO_COLOR+x} ]] || return 1
+  case "${JSH_COLOR:-auto}" in
+    always) return 0 ;;
+    auto) [[ -t 1 ]] ;;
+    *) return 1 ;;
+  esac
 }
 
 _jsh_color_count() {
@@ -2285,7 +2286,7 @@ cd() {
     # Cleanup before creating new auto-dir (in case nested typos)
     _jsh_cleanup_autocreated
 
-    echo "Creating directory: $1"
+    _j_ui_message info "Creating directory: $1"
     if mkdir -p "$1" && builtin cd "$1"; then
       # Track this as auto-created for potential cleanup
       _JSH_AUTOCREATED_DIR="${PWD}"
@@ -2311,7 +2312,7 @@ up() {
 
 # Make a directory (with parents) and cd into it
 take() {
-  [[ -z "${1:-}" ]] && { echo "Usage: take <dir>" >&2; return 1; }
+  [[ -z "${1:-}" ]] && { _j_ui_message error "Usage: take <dir>"; return 1; }
   mkdir -p "$1" && builtin cd "$1" || return 1
 }
 
@@ -2329,7 +2330,7 @@ bd() {
     _dir="$(dirname "${_dir}")"
   done
 
-  echo "No parent directory matching '${target}'" >&2
+  _j_ui_message error "No parent directory matching '${target}'"
   return 1
 }
 
@@ -2340,13 +2341,13 @@ bd() {
 # Create backup with timestamp
 bak() {
   local file="$1"
-  [[ -z "${file}" ]] && { echo "Usage: bak <file>" >&2; return 1; }
-  [[ -e "${file}" ]] || { echo "File not found: ${file}" >&2; return 1; }
+  [[ -z "${file}" ]] && { _j_ui_message error "Usage: bak <file>"; return 1; }
+  [[ -e "${file}" ]] || { _j_ui_message error "File not found: ${file}"; return 1; }
 
   local timestamp
   timestamp="$(date +%Y%m%d_%H%M%S)"
   cp -a "${file}" "${file}.${timestamp}.bak"
-  echo "Backed up: ${file}.${timestamp}.bak"
+  _j_ui_message success "Backed up: ${file}.${timestamp}.bak"
 }
 
 # Batch backup multiple files
@@ -2357,9 +2358,9 @@ backup() {
   for file in "$@"; do
     if [[ -e "${file}" ]]; then
       cp -a "${file}" "${file}.${timestamp}.bak"
-      echo "Backed up: ${file}.${timestamp}.bak"
+      _j_ui_message success "Backed up: ${file}.${timestamp}.bak"
     else
-      echo "Skipped (not found): ${file}" >&2
+      _j_ui_message warn "Skipped (not found): ${file}"
     fi
   done
 }
@@ -2367,8 +2368,8 @@ backup() {
 # Extract any archive format
 extract() {
   local file="$1"
-  [[ -z "${file}" ]] && { echo "Usage: extract <file>" >&2; return 1; }
-  [[ -f "${file}" ]] || { echo "File not found: ${file}" >&2; return 1; }
+  [[ -z "${file}" ]] && { _j_ui_message error "Usage: extract <file>"; return 1; }
+  [[ -f "${file}" ]] || { _j_ui_message error "File not found: ${file}"; return 1; }
 
   case "${file:l}" in
     *.tar.bz2|*.tbz2)   tar xjf "${file}" ;;
@@ -2387,7 +2388,7 @@ extract() {
     *.deb)              ar x "${file}" ;;
     *.rpm)              rpm2cpio "${file}" | cpio -idmv ;;
     *)
-      echo "Unknown archive format: ${file}" >&2
+      _j_ui_message error "Unknown archive format: ${file}"
       return 1
       ;;
   esac
@@ -2397,8 +2398,8 @@ extract() {
 compress() {
   local archive="$1"
   shift
-  [[ -z "${archive}" ]] && { echo "Usage: compress <archive> <files...>" >&2; return 1; }
-  [[ $# -eq 0 ]] && { echo "No files specified" >&2; return 1; }
+  [[ -z "${archive}" ]] && { _j_ui_message error "Usage: compress <archive> <files...>"; return 1; }
+  [[ $# -eq 0 ]] && { _j_ui_message error "No files specified"; return 1; }
 
   case "${archive:l}" in
     *.tar.bz2|*.tbz2)   tar cjf "${archive}" "$@" ;;
@@ -2409,7 +2410,7 @@ compress() {
     *.zip)              zip -r "${archive}" "$@" ;;
     *.7z)               7z a "${archive}" "$@" ;;
     *)
-      echo "Unknown archive format: ${archive}" >&2
+      _j_ui_message error "Unknown archive format: ${archive}"
       return 1
       ;;
   esac
@@ -3293,10 +3294,10 @@ _j_ui_message() {
     return
   fi
   case "${_j_level}" in
-    success|ok) printf '  ✓ %s\n' "$*" ;;
-    warn|warning) printf '  ! %s\n' "$*" >&2 ;;
-    error|fail) printf '  ✕ %s\n' "$*" >&2 ;;
-    *) printf '  %s\n' "$*" ;;
+    success|ok) printf '%b✓ %s%b\n' "${C_OK:-}" "$*" "${RST:-}" ;;
+    warn|warning) printf '%b! %s%b\n' "${C_WARN:-}" "$*" "${RST:-}" >&2 ;;
+    error|fail) printf '%b✕ %s%b\n' "${C_ERR:-}" "$*" "${RST:-}" >&2 ;;
+    *) printf '%b%s%b\n' "${C_INFO:-}" "$*" "${RST:-}" ;;
   esac
 }
 
