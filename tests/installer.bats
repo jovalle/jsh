@@ -94,15 +94,18 @@ assert_banner_spacing() {
 }
 
 assert_embedded_banner_header() {
-  local header=$1 gap_width=26 left_width right_width banner_end
+  local header=$1 gap_width=26 left_width right_width banner_end banner_count
   left_width=$(((gap_width - ${#header}) / 2))
   right_width=$((gap_width - ${#header} - left_width))
   printf -v banner_end ' =   :-=-:%*s%s%*s-:\n\n' \
     "${left_width}" '' "${header}" "${right_width}" ''
+  banner_count=$(printf '%s\n' "${output}" \
+    | grep -Fc '   :%@@@@@@@@@#*#@%-              +-:##')
 
   [[ "${output}" == $'\n   :%@@@@@@@@@#*#@%-              +-:##'* ]]
   [[ "${output}" == *"${banner_end}"* ]]
   [[ "${output}" != *$'\n'"${header}"$'\n'* ]]
+  [[ "${banner_count}" -eq 1 ]]
 }
 
 @test "status embeds its header in the banner" {
@@ -167,11 +170,26 @@ BREW
     "${source_root}/bin/jsh" status
 
   [ "${status}" -eq 1 ]
-  [[ "${output}" == *$'[error] Shell                unconfigured, '* ]]
-  [[ "${output}" == *$'[warn]  Repository           '* ]]
+  [[ "${output}" == *'[error] Shell'*'unconfigured, '* ]]
+  [[ "${output}" == *'[warn]  Repository'* ]]
   [[ "${output}" == *'3 changes - 1 staged, 1 unstaged, 1 untracked'* ]]
-  [[ "${output}" == *$'[error] Submodules           '* ]]
-  [[ "${output}" == *$'[error] Packages             5 defined'* ]]
+  [[ "${output}" == *'[error] Submodules'* ]]
+  [[ "${output}" == *'[ok]    Packages'*'4 defined'* ]]
+}
+
+@test "status indents wrapped summary values by two spaces" {
+  make_fixture lite
+  run env \
+    COLUMNS=40 \
+    HOME="${home_root}" \
+    XDG_STATE_HOME="${state_root}" \
+    JSH_DIR="${source_root}" \
+    JSH_STATUS_CHECK_UPDATES=never \
+    JSH_PLAIN_OUTPUT=1 \
+    JSH_COLOR=never \
+    "${source_root}/bin/jsh" status
+
+  [[ "${output}" == *$'[ok]    Repository\n  main @ '* ]]
 }
 
 @test "status accepts installed Homebrew formula aliases" {
@@ -198,7 +216,7 @@ BREW
     JSH_COLOR=never \
     "${source_root}/bin/jsh" status --verbose
 
-  [[ "${output}" == *$'[ok]    Packages             1 defined, 1 installed, 0 updates'* ]]
+  [[ "${output}" == *'[ok]    Packages'*'1 defined, 1 installed, 0 updates'* ]]
 }
 
 @test "verbose status highlights package versions and update command" {
@@ -228,15 +246,61 @@ BREW
     "${source_root}/bin/jsh" status --verbose
 
   [ "${status}" -eq 1 ]
-  [[ "${output}" == *'5 defined, 5 installed, 1 update'* ]]
+  [[ "${output}" == *'4 defined, 4 installed, 1 update'* ]]
   [[ "${output}" == *$'\033[38;2;255;233;0m1.7\033[0m'* ]]
   [[ "${output}" == *$'\033[38;2;0;208;132m1.8\033[0m'* ]]
   [[ "${output}" == *$'Run \033[1m\033[38;2;0;183;255mjsh update\033[0m'* ]]
 }
 
 @test "doctor uses comprehensive verbose status output" {
-  make_fixture lite
+  make_fixture full
+  for submodule_path in vendor/fzf vendor/fzf-tab vendor/zsh-completions; do
+    git -C "${source_root}/${submodule_path}" init -q
+    git -C "${source_root}/${submodule_path}" config user.email test@example.invalid
+    git -C "${source_root}/${submodule_path}" config user.name test
+    git -C "${source_root}/${submodule_path}" config commit.gpgsign false
+    git -C "${source_root}/${submodule_path}" add .
+    GIT_AUTHOR_DATE=2024-01-02T00:00:00Z GIT_COMMITTER_DATE=2024-01-02T00:00:00Z \
+      git -C "${source_root}/${submodule_path}" commit -qm initial
+  done
+  git -C "${source_root}/vendor/fzf" tag v1.0.0
+  git -C "${source_root}" rm -qr --cached vendor/fzf vendor/fzf-tab vendor/zsh-completions
+  git -C "${source_root}" add vendor/fzf vendor/fzf-tab vendor/zsh-completions 2>/dev/null
+  git -C "${source_root}" commit -qm submodules
+  git -C "${source_root}" submodule absorbgitdirs >/dev/null
+  git -C "${source_root}" submodule init >/dev/null
+  fzf_head=$(git -C "${source_root}/vendor/fzf" rev-parse --short=7 HEAD)
+  homebrew_root=${test_root}/homebrew
+  mkdir -p "${homebrew_root}/bin" "${home_root}/.local/bin" \
+    "${home_root}/Library/Application Support/Code/User" "${state_root}/jsh"
+  cat >"${homebrew_root}/bin/zsh" <<'ZSH'
+#!/bin/sh
+printf '%s\n' 'zsh 5.9.2 (test)'
+ZSH
+  cat >"${bin_root}/brew" <<BREW
+#!/bin/sh
+case "\$1:\${2:-}" in
+  --prefix:) printf '%s\n' '${homebrew_root}' ;;
+  list:--formula) printf '%s\n' fzf go-task jq just zsh ;;
+  list:--cask) ;;
+  *) exit 2 ;;
+esac
+BREW
+  chmod +x "${homebrew_root}/bin/zsh" "${bin_root}/brew"
+  ln -s "${source_root}/bin/jsh" "${home_root}/.local/bin/jsh"
+  ln -s "${source_root}/dotfiles/.vscode/user/settings.json" \
+    "${home_root}/Library/Application Support/Code/User/settings.json"
+  printf '%s|%s|\n%s|%s|\n' \
+    "${source_root}/bin/jsh" "${home_root}/.local/bin/jsh" \
+    "${source_root}/dotfiles/.vscode/user/settings.json" \
+    "${home_root}/Library/Application Support/Code/User/settings.json" \
+    >"${state_root}/jsh/managed-links"
+  printf '%s\n' install >"${state_root}/jsh/mode"
+
+  cd "${home_root}"
   run env \
+    COLUMNS=200 \
+    PATH="${homebrew_root}/bin:${bin_root}:${PATH}" \
     HOME="${home_root}" \
     XDG_STATE_HOME="${state_root}" \
     JSH_DIR="${source_root}" \
@@ -245,11 +309,16 @@ BREW
     JSH_COLOR=never \
     "${source_root}/bin/jsh" doctor
 
-  [[ "${output}" == *'Shell'* ]]
-  [[ "${output}" == *'Working tree'* ]]
-  [[ "${output}" == *'Repository'* ]]
-  [[ "${output}" == *'Packages'* ]]
-  [[ "${output}" == *'Commands'* ]]
+  [[ "${output}" == *$'[ok]    Shell                             full, zsh, standard profile\n  [ok]    bash'* ]]
+  [[ "${output}" == *$'  [ok]    zsh                             Homebrew zsh 5.9.2\n'* ]]
+  summary_column=$(awk 'match($0, /[0-9]+\/[0-9]+ available$/) && /Commands/ { print RSTART; exit }' <<<"${output}")
+  detail_column=$(awk '/clone and update network operation$/ { print index($0, "clone and update network operation"); exit }' <<<"${output}")
+  [ "${summary_column}" = "${detail_column}" ]
+  [[ "${output}" != *'fuzzy history and completion'* ]]
+  [[ "${output}" == *"${fzf_head} (v1.0.0), 2024-01-02"* ]]
+  [[ "${output}" == *$'  [ok]    "~/Library/Application Support/Code/User/settings.json"\n    → '* ]]
+  [[ "${output}" == *$'[ok]    Project shell config              none discovered'* ]]
+  [[ "${output}" == *$'  [ok]    Working tree'* ]]
   [[ "${output}" != *$'\nInstaller\n'* ]]
 }
 
