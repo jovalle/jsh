@@ -3482,7 +3482,9 @@ _j_matches() {
 # Get all matching directories with scores, sorted by score
 # Output: score|path (one per line)
 _j_query() {
-  local results="" line score _j_candidate_path
+  local exact_results="" results="" line score _j_candidate_path exact_query=""
+
+  [[ $# -ne 1 ]] || exact_query="$(_j_lowercase "$1")"
 
   # Add entries from j database
   while IFS='|' read -r score _j_candidate_path; do
@@ -3492,11 +3494,17 @@ _j_query() {
 
     # Check if matches query
     if [[ $# -eq 0 ]] || _j_matches "${_j_candidate_path}" "$@"; then
-      results="${results}${score}|${_j_candidate_path}"$'\n'
+      if [[ -n "${exact_query}" ]] &&
+        [[ "$(_j_lowercase "${_j_candidate_path##*/}")" == "${exact_query}" ]]; then
+        exact_results="${exact_results}${score}|${_j_candidate_path}"$'\n'
+      else
+        results="${results}${score}|${_j_candidate_path}"$'\n'
+      fi
     fi
   done < <(_j_calculate_scores)
 
-  # Sort by score descending
+  # Prefer exact directory names, preserving frecency order within each group.
+  printf '%s' "${exact_results}" | command -p sort -t'|' -k1 -rn
   printf '%s' "${results}" | command -p sort -t'|' -k1 -rn
 }
 
