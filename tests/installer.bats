@@ -843,6 +843,38 @@ UNAME
   [ ! -e "${state_root}" ]
 }
 
+@test "install accepts the verbose option" {
+  make_fixture lite
+  run run_installer lite --dry-run -v
+
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *"Setup plan (lite)"* ]]
+}
+
+@test "verbose install exposes vendored asset failures" {
+  make_fixture full
+  cat >"${source_root}/vendor/fzf/install" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' 'fzf fixture failure' >&2
+exit 23
+EOF
+  chmod +x "${source_root}/vendor/fzf/install"
+  for submodule_path in vendor/fzf vendor/fzf-tab vendor/zsh-completions; do
+    git -C "${source_root}/${submodule_path}" init -q
+    git -C "${source_root}/${submodule_path}" config user.email test@example.invalid
+    git -C "${source_root}/${submodule_path}" config user.name test
+    git -C "${source_root}/${submodule_path}" config commit.gpgsign false
+    git -C "${source_root}/${submodule_path}" add .
+    git -C "${source_root}/${submodule_path}" commit -qm initial
+  done
+
+  run run_installer full --yes --verbose
+
+  [ "${status}" -eq 1 ]
+  [[ "${output}" == *"fzf fixture failure"* ]]
+  [[ "${output}" == *"Failed to initialize submodules and vendored assets"* ]]
+}
+
 @test "curl bootstrap acquires a checkout before delegating install" {
   make_fixture lite
   runner=${test_root}/runner.sh

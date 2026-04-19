@@ -2408,6 +2408,7 @@ choose_mode() {
 jsh_parse_options() {
   JSH_ASSUME_YES=0
   JSH_DRY_RUN=0
+  JSH_VERBOSE=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --mode)
@@ -2428,9 +2429,10 @@ jsh_parse_options() {
         ;;
       --yes | -y) JSH_ASSUME_YES=1 ;;
       --dry-run | -n) JSH_DRY_RUN=1 ;;
+      --verbose | -v) JSH_VERBOSE=1 ;;
       *)
         jsh_ui_row error "Unknown installer option '$1'" stderr
-        printf 'Usage: jsh install [--mode lite|full] [-n|--dry-run] [-y|--yes]\n' >&2
+        printf 'Usage: jsh install [--mode lite|full] [-n|--dry-run] [-y|--yes] [-v|--verbose]\n' >&2
         jsh_ui_row note 'Run jsh install --dry-run to preview installation' stderr
         exit 2
         ;;
@@ -3576,9 +3578,19 @@ jsh_component_apply_core() {
 
 jsh_component_apply_vendor() {
   jsh_spinner_start 'Initializing submodules and vendored assets'
-  if git -C "${install_dir}" submodule sync --recursive >/dev/null 2>&1 \
-    && git -C "${install_dir}" submodule update --quiet --init --recursive >/dev/null 2>&1 \
-    && "${install_dir}/vendor/fzf/install" --bin >/dev/null 2>&1; then
+  if [ "${JSH_VERBOSE}" = 1 ]; then
+    jsh_spinner_hide
+    git -C "${install_dir}" submodule sync --recursive \
+      && git -C "${install_dir}" submodule update --init --recursive \
+      && "${install_dir}/vendor/fzf/install" --bin
+    vendor_status=$?
+  else
+    git -C "${install_dir}" submodule sync --recursive >/dev/null 2>&1 \
+      && git -C "${install_dir}" submodule update --quiet --init --recursive >/dev/null 2>&1 \
+      && "${install_dir}/vendor/fzf/install" --bin >/dev/null 2>&1
+    vendor_status=$?
+  fi
+  if [ "${vendor_status}" -eq 0 ]; then
     jsh_spinner_stop success 'Initialized submodules and vendored assets'
     return 0
   fi
@@ -3773,7 +3785,7 @@ usage() {
   cat <<'USAGE'
   shell [-l]                          Open the isolated jsh shell runtime
   -c COMMAND [args...]                Run a command inside the jsh runtime
-  install [--mode lite|full] [-n] [-y]
+  install [--mode lite|full] [-n] [-y] [-v]
                                       Reconcile the checkout and configured components
   status [-v|--verbose] [--porcelain] Summarize jsh and workstation health
   update                              Update submodules and managed packages
