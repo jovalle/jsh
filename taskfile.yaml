@@ -69,6 +69,7 @@ tasks:
       - task: configure:settings
       - task: configure:dock
       - task: configure:gecko
+      - task: configure:spicetify
 
   configure:permissions:
     desc: Check and guide terminal privacy permissions before configuration
@@ -102,6 +103,19 @@ tasks:
         msg: jq is required to read the Gecko add-on manifest
     cmds:
       - bash ./scripts/gecko.sh
+
+  configure:spicetify:
+    desc: Patch Spotify and install Spicetify Marketplace
+    platforms: [darwin, linux]
+    preconditions:
+      - sh: command -v spicetify
+        msg: Spicetify is required; run `task packages`
+      - sh: command -v curl
+        msg: curl is required to install Spicetify Marketplace
+      - sh: command -v unzip
+        msg: unzip is required to install Spicetify Marketplace
+    cmds:
+      - bash ./scripts/spicetify.sh
 
   configure:settings:
     desc: Configure macOS preferences
