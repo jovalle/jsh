@@ -2228,6 +2228,27 @@ fi
 # shellcheck disable=SC2034,SC2001,SC2004,SC2016
 # SC2001: sed preferred for complex patterns; SC2004/SC2016: Style preferences
 
+typeset -gA JSH_FUNCTION_DESCRIPTIONS=()
+typeset -gA JSH_COMMAND_DESCRIPTIONS=()
+
+jsh_describe() {
+  local name="${1:-}"
+  local description="${2:-}"
+
+  [[ -n "${name}" && -n "${description}" ]] || return 2
+  (( ${+functions[${name}]} )) || return 1
+  JSH_FUNCTION_DESCRIPTIONS[${name}]="${description}"
+}
+
+jsh_describe_command() {
+  local name="${1:-}"
+  local description="${2:-}"
+
+  case "${name}" in ''|*:*|*[[:space:]]*) return 2 ;; esac
+  [[ -n "${description}" ]] || return 2
+  JSH_COMMAND_DESCRIPTIONS[${name}]="${description}"
+}
+
 # =============================================================================
 # Directory Navigation
 # =============================================================================
@@ -2307,6 +2328,7 @@ take() {
   [[ -z "${1:-}" ]] && { _j_ui_message error "Usage: take <dir>"; return 1; }
   mkdir -p "$1" && builtin cd "$1" || return 1
 }
+jsh_describe take 'create a directory and enter it'
 
 # Quick cd to parent with matching name
 # Usage: bd foo -> cd to nearest parent containing "foo"
@@ -4862,6 +4884,13 @@ _jsh_completion_dirs=()
 if [[ -d "${JSH_DIR}/dotfiles/.config/shell/completions" ]]; then
   _jsh_completion_dirs+=("${JSH_DIR}/dotfiles/.config/shell/completions")
   fpath=("${JSH_DIR}/dotfiles/.config/shell/completions" "${fpath[@]}")
+  for _jsh_completion_file in "${JSH_DIR}/dotfiles/.config/shell/completions"/_*(N); do
+    [[ -f "${_jsh_completion_file}" ]] || continue
+    _jsh_completion_function="${_jsh_completion_file:t}"
+    unfunction "${_jsh_completion_function}" 2>/dev/null || true
+    autoload -Uz "${_jsh_completion_function}"
+  done
+  unset _jsh_completion_file _jsh_completion_function
 fi
 
 # Add zsh-completions (submodule preferred, core fallback for offline)
@@ -5025,6 +5054,15 @@ zstyle ':completion:*' verbose yes
 zstyle ':completion:*' group-name ''
 zstyle ':completion:*' use-cache yes
 zstyle ':completion:*' cache-path "${XDG_CACHE_HOME:-$HOME/.cache}/zsh/zcompcache"
+zstyle -e ':completion:*:*:-command-:*:functions' fake '
+  reply=()
+  for _jsh_completion_name in "${(@k)JSH_FUNCTION_DESCRIPTIONS}"; do
+    (( ${+functions[${_jsh_completion_name}]} )) || continue
+    _jsh_completion_description="${JSH_FUNCTION_DESCRIPTIONS[${_jsh_completion_name}]//:/\\:}"
+    reply+=("${_jsh_completion_name}:${_jsh_completion_description}")
+  done
+  unset _jsh_completion_name _jsh_completion_description
+'
 
 # Group formatting
 zstyle ':completion:*:descriptions' format "%F{${JSH_STYLE_MUTED}}%d%f"
@@ -6775,6 +6813,9 @@ jsh() {
       ;;
   esac
 }
+
+jsh_describe_command env 'manage the current project environment'
+jsh_describe_command reload 'reload the interactive shell configuration'
 
 # =============================================================================
 # Startup orchestration
