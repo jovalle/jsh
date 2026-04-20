@@ -3294,6 +3294,7 @@ _j_array_contains() {
   shift
   for item in "$@"; do
     [[ "$item" == "$wanted" ]] && return 0
+    [[ -e "$item" ]] && [[ -e "$wanted" ]] && [[ "$item" -ef "$wanted" ]] && return 0
   done
   return 1
 }
@@ -3590,10 +3591,17 @@ _j_list() {
 _j_interactive() {
   local entries=() paths=() count=0
   local include_current="${_J_INTERACTIVE_INCLUDE_CURRENT:-}"
+  local preferred_project="${_J_INTERACTIVE_PROJECT_PATH:-}"
+  local exact_query=""
+  [[ "${_J_INTERACTIVE_EXACT_ONLY:-}" == true ]] && [[ $# -eq 1 ]] && exact_query="$(_j_lowercase "$1")"
 
   # Collect frecency entries (already sorted by score, highest first)
   while IFS= read -r line; do
     [[ -z "${line}" ]] && continue
+    if [[ -n "${exact_query}" ]] &&
+      [[ "$(_j_lowercase "${${line#*|}##*/}")" != "${exact_query}" ]]; then
+      continue
+    fi
     entries+=("${line}")
     paths+=("${line#*|}")
     (( count += 1 ))
@@ -3603,14 +3611,22 @@ _j_interactive() {
   # associative arrays.
   local p
   local extra_paths=()
+  if [[ -d "${preferred_project}" ]] && [[ "${preferred_project}" != "${PWD}" ]] &&
+    ! _j_array_contains "${preferred_project}" "${paths[@]}"; then
+    extra_paths+=("${preferred_project}")
+  fi
   while IFS= read -r gpath; do
     [[ -z "${gpath}" ]] && continue
     # Expand ~ to absolute path for internal use
     local abs_path="${gpath/#\~/$HOME}"
     [[ ! -d "${abs_path}" ]] && continue
     [[ "${abs_path}" == "${PWD}" ]] && continue
+    if [[ -n "${exact_query}" ]] &&
+      [[ "$(_j_lowercase "${abs_path##*/}")" != "${exact_query}" ]]; then
+      continue
+    fi
     # Skip if already in frecency list
-    _j_array_contains "${abs_path}" "${paths[@]}" && continue
+    _j_array_contains "${abs_path}" "${paths[@]}" "${extra_paths[@]}" && continue
     # Filter by query if provided
     if [[ $# -eq 0 ]] || _j_matches "${abs_path}" "$@"; then
       extra_paths+=("${abs_path}")
@@ -3947,13 +3963,37 @@ j() {
   # Query mode - find best match
   [[ "${verbose}" == true ]] && _j_ui_message info "Searching frecency database: ${J_DATA}"
 
-  local best="" count=0 line
+  local best="" count=0 line exact_matches=()
 
   while IFS= read -r line; do
     [[ -z "${line}" ]] && continue
     [[ -z "${best}" ]] && best="${line}"
+    if [[ $# -eq 1 ]] &&
+      [[ "$(_j_lowercase "${${line#*|}##*/}")" == "$(_j_lowercase "$1")" ]]; then
+      exact_matches+=("${line#*|}")
+    fi
     (( count += 1 ))
   done < <(_j_query "$@")
+
+  if [[ $# -eq 1 ]] && command -v gitx &>/dev/null; then
+    local project_path=""
+    project_path=$(gitx path "$1" 2>/dev/null || true)
+    if [[ -n "${project_path}" ]] && [[ -d "${project_path}" ]]; then
+      local exact_match has_exact_conflict=false
+      for exact_match in "${exact_matches[@]}"; do
+        _j_array_contains "${project_path}" "${exact_match}" || has_exact_conflict=true
+      done
+      if [[ "${has_exact_conflict}" == true ]]; then
+        local selected
+        selected="$(_J_INTERACTIVE_EXACT_ONLY=true _J_INTERACTIVE_PROJECT_PATH="${project_path}" _j_interactive "$@")"
+        [[ -n "${selected}" ]] || return 1
+        best="0|${selected}"
+      else
+        best="0|${project_path}"
+      fi
+      count=1
+    fi
+  fi
 
   if [[ ${count} -gt 0 ]]; then
     local _j_best_path="${best#*|}"
