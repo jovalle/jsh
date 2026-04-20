@@ -25,6 +25,49 @@ setup() {
   [ "${lines[1]#*|}" = "${nested_dir}" ]
 }
 
+@test "query prefers an exact project over a fuzzy tracked directory" {
+  project_dir=${test_root}/projects/nientiendo
+  tracked_dir=${test_root}/NIENTIENDO-backup
+  mkdir -p "${project_dir}" "${tracked_dir}"
+  project_dir=$(cd "${project_dir}" && pwd -P)
+  printf '%s|100|%s\n' "${tracked_dir}" "${now}" >"${database}"
+
+  run env \
+    HOME="${test_root}/home" \
+    J_DATA="${database}" \
+    J_NO_HOOK=1 \
+    JSH_PROJECTS="${test_root}/projects/*" \
+    PATH="${project_root}/bin:${PATH}" \
+    PROJECT_ROOT="${project_root}" \
+    zsh -dfc 'source "${PROJECT_ROOT}/dotfiles/.zshrc" >/dev/null 2>&1; j nientiendo; pwd -P'
+
+  [ "${status}" -eq 0 ]
+  [ "${output}" = "${project_dir}" ]
+}
+
+@test "query prompts when a project and tracked directory have exact names" {
+  project_dir=${test_root}/projects/nientiendo
+  tracked_dir=${test_root}/volumes/NIENTIENDO
+  mkdir -p "${project_dir}" "${tracked_dir}"
+  project_dir=$(cd "${project_dir}" && pwd -P)
+  tracked_dir=$(cd "${tracked_dir}" && pwd -P)
+  git init -q "${project_dir}"
+  printf '%s|100|%s\n%s|1|%s\n' \
+    "${project_dir}" "${now}" "${tracked_dir}" "${now}" >"${database}"
+
+  run env \
+    HOME="${test_root}/home" \
+    J_DATA="${database}" \
+    J_NO_HOOK=1 \
+    JSH_PROJECTS="${test_root}/projects/*" \
+    PATH="${project_root}/bin:${PATH}" \
+    PROJECT_ROOT="${project_root}" \
+    zsh -dfc 'source "${PROJECT_ROOT}/dotfiles/.zshrc" >/dev/null 2>&1; fzf() { grep "volumes/NIENTIENDO$"; }; j nientiendo; pwd -P'
+
+  [ "${status}" -eq 0 ]
+  [ "${output}" = "${tracked_dir}" ]
+}
+
 @test "missing directory message is colored and starts in column one" {
   run env \
     HOME="${test_root}/home" \
