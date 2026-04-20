@@ -8,9 +8,19 @@ set -o nounset
 jsh_root="${JSH_DIR:-${HOME}/.jsh}"
 jsh_local="${JSH_LOCAL_DIR:-${jsh_root}/local}"
 
+jsh_error() {
+  if [[ "${JSH_PLAIN_OUTPUT:-0}" != 1 && "${TERM:-dumb}" != dumb &&
+    -z ${NO_COLOR+x} && "${JSH_COLOR:-auto}" != never ]] \
+    && { [[ -t 2 ]] || [[ "${JSH_COLOR:-auto}" == always ]]; }; then
+    printf '\033[31m✖\033[0m %s\n' "$*" >&2
+  else
+    printf '[error] %s\n' "$*" >&2
+  fi
+}
+
 if [[ "${1:-}" == --bootstrap ]]; then
   [[ "${JSH_OFFLINE:-0}" != 1 ]] || {
-    printf 'nvim: cannot bootstrap plugins while JSH_OFFLINE=1\n' >&2
+    jsh_error 'nvim: cannot bootstrap plugins while JSH_OFFLINE=1'
     exit 1
   }
   export JSH_ALLOW_NETWORK_BOOTSTRAP=1
@@ -52,7 +62,7 @@ if [[ ! -x "${editor_bin}" ]]; then
 fi
 
 if [[ -z "${editor_bin}" ]]; then
-  printf 'nvim: nvim, vim, and vi are not available in PATH\n' >&2
+  jsh_error 'nvim: nvim, vim, and vi are not available in PATH'
   exit 127
 fi
 

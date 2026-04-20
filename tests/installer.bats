@@ -442,6 +442,24 @@ UNAME
   assert_banner_spacing 'Setup plan (lite)'
 }
 
+@test "curl bootstrap colors standalone plan output" {
+  runner=${test_root}/runner.sh
+  checkout_root=${home_root}/.jsh
+  cp "${project_root}/j.sh" "${runner}"
+
+  run env -u NO_COLOR \
+    HOME="${home_root}" \
+    JSH_INSTALL_DIR="${checkout_root}" \
+    JSH_INSTALL_REPO=https://example.invalid/jsh.git \
+    JSH_MODE=lite \
+    JSH_COLOR=always \
+    TERM=xterm-256color \
+    "${runner}" --dry-run
+
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *$'\033['*'➜'$'\033[0m'' Git checkout'* ]]
+}
+
 @test "lite dry-run resolves only checkout and launcher" {
   make_fixture lite
   run run_installer lite --dry-run

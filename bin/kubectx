@@ -25,9 +25,10 @@ SELF_CMD="$0"
 KUBECTX="${XDG_CACHE_HOME:-$HOME/.kube}/kubectx"
 
 _jsh_color_enabled() {
+  local output_fd="${1:-1}"
   [[ "${JSH_PLAIN_OUTPUT:-0}" != 1 && "${TERM:-dumb}" != dumb &&
     -z ${NO_COLOR+x} && "${JSH_COLOR:-auto}" != never ]] || return 1
-  [[ -n "${_KUBECTX_FORCE_COLOR:-}" || -t 1 || "${JSH_COLOR:-auto}" == always ]]
+  [[ -n "${_KUBECTX_FORCE_COLOR:-}" || -t "${output_fd}" || "${JSH_COLOR:-auto}" == always ]]
 }
 
 usage() {
@@ -55,7 +56,7 @@ EOF
 }
 
 exit_err() {
-  echo >&2 "${1}"
+  error "${1}"
   exit 1
 }
 
@@ -124,7 +125,7 @@ choose_context_interactive() {
     FZF_DEFAULT_COMMAND="${SELF_CMD}" \
     fzf --ansi --no-preview || true)"
   if [[ -z "${choice}" ]]; then
-    echo 2>&1 "error: you did not choose any of the options"
+    error "error: you did not choose any of the options"
     exit 1
   else
     set_context "${choice}"
@@ -146,7 +147,7 @@ swap_context() {
   local ctx
   ctx="$(read_context)"
   if [[ -z "${ctx}" ]]; then
-    echo "error: No previous context found." >&2
+    error "error: No previous context found."
     exit 1
   fi
   set_context "${ctx}"
@@ -165,12 +166,12 @@ rename_context() {
   fi
 
   if ! context_exists "${old_name}"; then
-    echo "error: Context \"${old_name}\" not found, can't rename it." >&2
+    error "error: Context \"${old_name}\" not found, can't rename it."
     exit 1
   fi
 
   if context_exists "${new_name}"; then
-    echo "Context \"${new_name}\" exists, deleting..." >&2
+    warn "Context \"${new_name}\" exists, deleting..."
     $KUBECTL config delete-context "${new_name}" 1>/dev/null 2>&1
   fi
 
@@ -183,7 +184,7 @@ choose_contexts_to_delete_interactive() {
     FZF_DEFAULT_COMMAND="${SELF_CMD}" \
     fzf --ansi --no-preview --multi --prompt="Select contexts (⇧Tab=multi) to delete: " || true)"
   if [[ -z "${choices}" ]]; then
-    echo 2>&1 "error: you did not choose any contexts to delete"
+    error "error: you did not choose any contexts to delete"
     exit 1
   else
     # Convert newline-separated choices to array
@@ -206,7 +207,7 @@ choose_contexts_to_delete_interactive() {
         done
         ;;
       *)
-        echo "Deletion cancelled."
+        info "Deletion cancelled."
         exit 0
         ;;
     esac
@@ -214,7 +215,7 @@ choose_contexts_to_delete_interactive() {
 }
 
 unset_context() {
-  echo "Unsetting current context." >&2
+  info "Unsetting current context."
   $KUBECTL config unset current-context
 }
 
@@ -277,7 +278,7 @@ use_external_ca() {
 log() {
   local color="$1"
   shift
-  if _jsh_color_enabled; then
+  if _jsh_color_enabled 2; then
     printf '\033[0;%sm%s\033[0m\n' "$color" "$*" >&2
   else
     printf '%s\n' "$*" >&2
@@ -438,7 +439,7 @@ main() {
     elif hash kubectl.exe 2>/dev/null; then
       KUBECTL=kubectl.exe
     else
-      echo >&2 "kubectl is not installed"
+      error "kubectl is not installed"
       exit 1
     fi
   fi
@@ -454,7 +455,7 @@ main() {
     fi
   elif [[ "${1}" == "-a" || "${1}" == "--add" ]]; then
     if [[ "$#" -lt 2 ]]; then
-      echo "error: missing kubeconfig file path" >&2
+      error "error: missing kubeconfig file path"
       echo "Usage: kubectx --add <kubeconfig>" >&2
       exit 1
     fi
@@ -468,7 +469,7 @@ main() {
       )" -eq 0 ]]; then
         choose_contexts_to_delete_interactive
       else
-        echo "error: missing context NAME and fzf is not available for interactive selection" >&2
+        error "error: missing context NAME and fzf is not available for interactive selection"
         usage
         exit 1
       fi
@@ -482,7 +483,7 @@ main() {
       use_external_ca ""
     fi
   elif [[ "$#" -gt 1 ]]; then
-    echo "error: too many arguments" >&2
+    error "error: too many arguments"
     usage
     exit 1
   elif [[ "$#" -eq 1 ]]; then
@@ -498,7 +499,7 @@ main() {
     elif [[ "${1}" == '-h' || "${1}" == '--help' ]]; then
       usage
     elif [[ "${1}" =~ ^-(.*) ]]; then
-      echo "error: unrecognized flag \"${1}\"" >&2
+      error "error: unrecognized flag \"${1}\""
       usage
       exit 1
     elif [[ "${1}" =~ (.+)=(.+) ]]; then

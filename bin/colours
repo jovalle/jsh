@@ -13,7 +13,12 @@ set -eu # Fail on errors or undeclared variables
 }
 
 [[ $# -eq 0 ]] || {
-  printf 'colours: unknown option: %s\n' "$1" >&2
+  if [[ "${JSH_PLAIN_OUTPUT:-0}" != 1 && "${TERM:-dumb}" != dumb && -z ${NO_COLOR+x} &&
+    "${JSH_COLOR:-auto}" != never ]] && { [[ -t 2 ]] || [[ "${JSH_COLOR:-auto}" == always ]]; }; then
+    printf '\033[31m✖\033[0m colours: unknown option: %s\n' "$1" >&2
+  else
+    printf '[error] colours: unknown option: %s\n' "$1" >&2
+  fi
   exit 2
 }
 

@@ -6,14 +6,59 @@ set -eu
 # point that acquires a checkout before handing all setup work to `jsh install`.
 
 jsh_bootstrap_error() {
-  printf '[error] jsh: %s\n' "$*" >&2
+  jsh_ui_init 2
+  jsh_ui_style error
+  printf '%s%s%s jsh: %s\n' "${JSH_UI_COLOR}" "${JSH_UI_MARK}" "${JSH_UI_RESET}" "$*" >&2
   exit 1
 }
 
 jsh_ui_init() {
+  jsh_ui_output_fd=${1:-1}
   JSH_UI_BOLD=''
   JSH_UI_CYAN=''
+  JSH_UI_RED=''
+  JSH_UI_GREEN=''
+  JSH_UI_YELLOW=''
   JSH_UI_RESET=''
+  if [ "${JSH_PLAIN_OUTPUT:-0}" != 1 ] && [ "${TERM:-dumb}" != dumb ] \
+    && [ -z "${NO_COLOR+x}" ]; then
+    case "${JSH_COLOR:-auto}" in
+      always) jsh_ui_color=1 ;;
+      auto) if [ -t "${jsh_ui_output_fd}" ]; then jsh_ui_color=1; else jsh_ui_color=0; fi ;;
+      *) jsh_ui_color=0 ;;
+    esac
+    if [ "${jsh_ui_color}" = 1 ]; then
+      JSH_UI_BOLD=$(printf '\033[1m')
+      JSH_UI_CYAN=$(printf '\033[36m')
+      JSH_UI_RED=$(printf '\033[31m')
+      JSH_UI_GREEN=$(printf '\033[32m')
+      JSH_UI_YELLOW=$(printf '\033[33m')
+      JSH_UI_RESET=$(printf '\033[0m')
+    fi
+  fi
+}
+
+jsh_ui_style() {
+  case "$1" in
+    plan)
+      JSH_UI_COLOR=${JSH_UI_CYAN}
+      if [ -n "${JSH_UI_RESET}" ]; then JSH_UI_MARK='➜'; else JSH_UI_MARK='[plan]'; fi
+      ;;
+    note)
+      JSH_UI_COLOR=${JSH_UI_CYAN}
+      if [ -n "${JSH_UI_RESET}" ]; then JSH_UI_MARK='›'; else JSH_UI_MARK='[note]'; fi
+      ;;
+    error)
+      JSH_UI_COLOR=${JSH_UI_RED}
+      if [ -n "${JSH_UI_RESET}" ]; then JSH_UI_MARK='✖'; else JSH_UI_MARK='[error]'; fi
+      ;;
+  esac
+}
+
+jsh_ui_message() {
+  jsh_ui_style "$1"
+  shift
+  printf '%s%s%s %s\n' "${JSH_UI_COLOR}" "${JSH_UI_MARK}" "${JSH_UI_RESET}" "$*"
 }
 
 jsh_banner() {
@@ -160,9 +205,10 @@ if [ "${jsh_bootstrap_dry_run}" = 1 ]; then
   fi
 
   jsh_banner
-  printf 'Setup plan (%s)\n' "${jsh_bootstrap_plan_mode}"
-  printf '[plan] Git checkout                  clone %s at %s\n' "${jsh_bootstrap_install_dir}" "${jsh_bootstrap_ref}"
-  printf '[note] Dry run: no checkout, packages, submodules, or links were changed\n'
+  printf '%s%sSetup plan (%s)%s\n' "${JSH_UI_BOLD}" "${JSH_UI_CYAN}" \
+    "${jsh_bootstrap_plan_mode}" "${JSH_UI_RESET}"
+  jsh_ui_message plan "Git checkout                  clone ${jsh_bootstrap_install_dir} at ${jsh_bootstrap_ref}"
+  jsh_ui_message note 'Dry run: no checkout, packages, submodules, or links were changed'
   exit 0
 fi
 

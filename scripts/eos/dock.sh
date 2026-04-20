@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir=$(cd -- "${BASH_SOURCE[0]%/*}" && pwd -P)
+# shellcheck source=../ui.sh
+. "${script_dir}/../ui.sh"
+
 find_desktop_file() {
   local candidate directory
   for candidate in "$@"; do
@@ -61,13 +65,13 @@ write_pins() {
 }
 
 if ! xfconf-query -c xfce4-panel -lv >/dev/null 2>&1; then
-  printf 'XFCE panel is unavailable; skipping dock configuration.\n'
+  jsh_info 'XFCE panel is unavailable; skipping dock configuration.'
   exit 0
 fi
 
 pins=$(dock_pins)
 if [[ -z $pins ]]; then
-  printf 'No configured dock applications are installed; skipping dock configuration.\n'
+  jsh_info 'No configured dock applications are installed; skipping dock configuration.'
   exit 0
 fi
 
@@ -99,7 +103,7 @@ fi
 mkdir -p -- "$panel_dir"
 write_pins "$target" "$pins"
 grep -Fqx "pinned=$pins" "$target" || {
-  printf 'Failed to verify EndeavourOS dock pins.\n' >&2
+  jsh_error 'Failed to verify EndeavourOS dock pins.'
   exit 2
 }
 xfce4-panel -r >/dev/null 2>&1 || true

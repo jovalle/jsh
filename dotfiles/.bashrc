@@ -89,7 +89,7 @@ alias gp='git push'
 
 source "${JSH_DIR}/dotfiles/.config/shell/grep.sh"
 
-if [[ -n ${NO_COLOR:-} || ${JSH_PLAIN_OUTPUT:-0} == 1 || ${TERM:-dumb} == dumb ]]; then
+if [[ -n ${NO_COLOR+x} || ${JSH_PLAIN_OUTPUT:-0} == 1 || ${TERM:-dumb} == dumb ]]; then
   PS1='\u@\h:\w\$ '
 else
   PS1='\[\033[36m\]\u@\h\[\033[0m\]:\[\033[34m\]\w\[\033[0m\]\$ '
@@ -107,9 +107,17 @@ fi
 
 if [[ -z ${JSH_BASH_FALLBACK_NOTICE_SHOWN:-} ]]; then
   export JSH_BASH_FALLBACK_NOTICE_SHOWN=1
+  _jsh_bash_notice_color=''
+  _jsh_bash_notice_reset=''
+  if [[ ${JSH_PLAIN_OUTPUT:-0} != 1 && ${TERM:-dumb} != dumb && -z ${NO_COLOR+x} &&
+    ${JSH_COLOR:-auto} != never ]] && { [[ -t 2 ]] || [[ ${JSH_COLOR:-auto} == always ]]; }; then
+    _jsh_bash_notice_color=$'\033[33m'
+    _jsh_bash_notice_reset=$'\033[0m'
+  fi
   case $(uname -s 2>/dev/null) in
   Darwin)
-    printf '%s\n' 'jsh: Bash is the fallback. Zsh ships with macOS; switch with: chsh -s /bin/zsh' >&2
+    printf '%s▲%s %s\n' "${_jsh_bash_notice_color}" "${_jsh_bash_notice_reset}" \
+      'jsh: Bash is the fallback. Zsh ships with macOS; switch with: chsh -s /bin/zsh' >&2
     ;;
   Linux)
     if command -v apt-get >/dev/null 2>&1; then
@@ -123,13 +131,16 @@ if [[ -z ${JSH_BASH_FALLBACK_NOTICE_SHOWN:-} ]]; then
     else
       _jsh_zsh_install='install zsh with your package manager'
     fi
-    printf 'jsh: Bash is the fallback. Install Zsh: %s; then: chsh -s "$(command -v zsh)"\n' "${_jsh_zsh_install}" >&2
+    printf '%s▲%s jsh: Bash is the fallback. Install Zsh: %s; then: chsh -s "$(command -v zsh)"\n' \
+      "${_jsh_bash_notice_color}" "${_jsh_bash_notice_reset}" "${_jsh_zsh_install}" >&2
     unset _jsh_zsh_install
     ;;
   *)
-    printf '%s\n' 'jsh: Bash is the fallback. Install Zsh, then run: chsh -s "$(command -v zsh)"' >&2
+    printf '%s▲%s %s\n' "${_jsh_bash_notice_color}" "${_jsh_bash_notice_reset}" \
+      'jsh: Bash is the fallback. Install Zsh, then run: chsh -s "$(command -v zsh)"' >&2
     ;;
   esac
+  unset _jsh_bash_notice_color _jsh_bash_notice_reset
 fi
 
 [[ ! -r ${HOME}/.bashrc.local ]] || source "${HOME}/.bashrc.local"

@@ -74,9 +74,19 @@ _jsh_status_style() {
   esac
 }
 _jsh_message() {
-  _jsh_status_style "$1"
+  local state="$1" output_fd=1 color mark reset
+  [[ "${state}" != warn && "${state}" != warning && "${state}" != error ]] || output_fd=2
+  _jsh_status_style "${state}"
+  color=${REPLY_COLOR} mark=${REPLY_MARK} reset=${C_RESET}
+  if [[ ${output_fd} -eq 2 && -z "${reset}" && "${JSH_PLAIN_OUTPUT:-0}" != 1 &&
+    "${TERM:-dumb}" != dumb && -z ${NO_COLOR+x} && "${JSH_COLOR:-auto}" != never ]] \
+    && { [[ -t 2 ]] || [[ "${JSH_COLOR:-auto}" == always ]]; }; then
+    reset=$'\033[0m'
+    [[ "${state}" == error ]] && color=$'\033[31m' && mark='✖' \
+      || { color=$'\033[33m'; mark='▲'; }
+  fi
   shift
-  printf '%s%s%s %b\n' "${REPLY_COLOR}" "${REPLY_MARK}" "${C_RESET}" "$*"
+  printf '%s%s%s %b\n' "${color}" "${mark}" "${reset}" "$*" >&"${output_fd}"
 }
 die() {
   _jsh_message error "$@" >&2

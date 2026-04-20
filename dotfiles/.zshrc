@@ -127,13 +127,14 @@ is_linux() { [[ "${JSH_OS}" == "linux" ]]; }
 # =============================================================================
 
 _jsh_has_color() {
+  local output_fd="${1:-1}"
   # Respect common no-color and plain output toggles.
   [[ "${JSH_PLAIN_OUTPUT:-0}" == "1" ]] && return 1
   [[ "${TERM:-dumb}" != dumb ]] || return 1
   [[ -z ${NO_COLOR+x} ]] || return 1
   case "${JSH_COLOR:-auto}" in
     always) return 0 ;;
-    auto) [[ -t 1 ]] ;;
+    auto) [[ -t "${output_fd}" ]] ;;
     *) return 1 ;;
   esac
 }
@@ -982,7 +983,7 @@ _jsh_operation_title_frame() {
   _jsh_operation_title_enabled || return 0
   label="${label//$'\n'/ }"
   label="${label//$'\r'/ }"
-  printf '\033]2;%s jsh · %s\007' "${frame}" "${label}" >&2
+  printf '\033]2;%s jsh - %s\007' "${frame}" "${label}" >&2
 }
 
 _jsh_operation_title_loop() {
@@ -1432,7 +1433,7 @@ _brew_warn_once() {
   local message="$1"
   [[ "${_BREW_DELEGATE_WARNED}" == "1" ]] && return 0
   _BREW_DELEGATE_WARNED=1
-  echo "jsh: ${message}" >&2
+  _j_ui_message warn "jsh: ${message}"
 }
 
 _brew_repair_delegate_permissions() {
@@ -2491,7 +2492,7 @@ listening() {
 # Kill process on specific port
 killport() {
   local port="$1"
-  [[ -z "${port}" ]] && { echo "Usage: killport <port>" >&2; return 1; }
+  [[ -z "${port}" ]] && { _j_ui_message error "Usage: killport <port>"; return 1; }
 
   local pid
   if [[ "${JSH_OS}" == "macos" ]]; then
@@ -2501,10 +2502,10 @@ killport() {
   fi
 
   if [[ -n "${pid}" ]]; then
-    echo "Killing PID ${pid} on port ${port}"
+    _j_ui_message info "Killing PID ${pid} on port ${port}"
     kill -9 "${pid}"
   else
-    echo "No process found on port ${port}"
+    _j_ui_message warn "No process found on port ${port}"
   fi
 }
 
@@ -2526,7 +2527,7 @@ serve() {
   local port="${1:-8000}"
   local dir="${2:-.}"
 
-  echo "Serving ${dir} on http://localhost:${port}"
+  _j_ui_message info "Serving ${dir} on http://localhost:${port}"
 
   if has python3; then
     python3 -m http.server "${port}" --directory "${dir}"
@@ -2537,7 +2538,7 @@ serve() {
   elif has php; then
     php -S "localhost:${port}" -t "${dir}"
   else
-    echo "No suitable HTTP server found (python, ruby, php)" >&2
+    _j_ui_message error "No suitable HTTP server found (python, ruby, php)"
     return 1
   fi
 }
@@ -2551,7 +2552,7 @@ jsonpp() {
   elif has python; then
     python -m json.tool "$@"
   else
-    echo "No JSON parser available (jq, python)" >&2
+    _j_ui_message error "No JSON parser available (jq, python)"
     return 1
   fi
 }
@@ -2606,7 +2607,7 @@ _git_confirm() {
       return 0
       ;;
     *)
-      echo "Cancelled"
+      _j_ui_message info "Cancelled"
       return 1
       ;;
   esac
@@ -2616,7 +2617,7 @@ _git_confirm() {
 function git+ {
   local branch
   branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null) || {
-    echo "Detached HEAD: checkout a branch first" >&2
+    _j_ui_message error "Detached HEAD: checkout a branch first"
     return 1
   }
 
@@ -2627,7 +2628,7 @@ function git+ {
 function git+++ {
   local branch
   branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null) || {
-    echo "Detached HEAD: checkout a branch first" >&2
+    _j_ui_message error "Detached HEAD: checkout a branch first"
     return 1
   }
 
@@ -2648,13 +2649,13 @@ function git- {
 # Usage: git-+ [git rebase args...]
 function git-+ {
   if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    echo "Not a git repository" >&2
+    _j_ui_message error "Not a git repository"
     return 1
   fi
 
   local current_branch remote upstream_ref default_ref default_branch candidate
   current_branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null) || {
-    echo "Detached HEAD: checkout a branch first" >&2
+    _j_ui_message error "Detached HEAD: checkout a branch first"
     return 1
   }
 
@@ -2674,7 +2675,7 @@ function git-+ {
   fi
 
   if [[ -z "${remote}" ]]; then
-    echo "No git remote configured" >&2
+    _j_ui_message error "No git remote configured"
     return 1
   fi
 
@@ -2695,7 +2696,7 @@ function git-+ {
   fi
 
   if [[ -z "${default_branch}" ]]; then
-    echo "Could not determine default branch for remote '${remote}'" >&2
+    _j_ui_message error "Could not determine default branch for remote '${remote}'"
     return 1
   fi
 
@@ -2703,7 +2704,7 @@ function git-+ {
 
   git fetch "${remote}" --prune || return 1
 
-  echo "Rebasing ${current_branch} onto ${remote}/${default_branch}"
+  _j_ui_message info "Rebasing ${current_branch} onto ${remote}/${default_branch}"
   git rebase --autostash "$@" "${remote}/${default_branch}"
 }
 
@@ -2720,7 +2721,7 @@ git_() {
 # Clone and cd into repo
 gclone() {
   local repo="$1"
-  [[ -z "${repo}" ]] && { echo "Usage: gclone <repo-url>" >&2; return 1; }
+  [[ -z "${repo}" ]] && { _j_ui_message error "Usage: gclone <repo-url>"; return 1; }
 
   local dir
   dir="$(basename "${repo}" .git)"
@@ -2749,7 +2750,7 @@ weather() {
 # Cheat sheet lookup
 cheat() {
   local topic="$1"
-  [[ -z "${topic}" ]] && { echo "Usage: cheat <topic>" >&2; return 1; }
+  [[ -z "${topic}" ]] && { _j_ui_message error "Usage: cheat <topic>"; return 1; }
   curl -s "cheat.sh/${topic}"
 }
 
@@ -2780,7 +2781,7 @@ calc() {
   local expr="$*"
   # Validate input: only allow numbers, operators, parentheses, decimal points, spaces
   if [[ ! "$expr" =~ ^[0-9+\-*/\(\)\.\ %^]+$ ]]; then
-    echo "calc: invalid characters in expression" >&2
+    _j_ui_message error "calc: invalid characters in expression"
     return 1
   fi
   if has bc; then
@@ -2880,7 +2881,7 @@ else
       [[ $i -gt 50 ]] && { echo "... (limited to 50)"; break; }
     done < <(find "${dir}" -maxdepth 3 -type d 2>/dev/null | head -50)
 
-    [[ ${#dirs[@]} -eq 0 ]] && { echo "No directories found"; return 1; }
+    [[ ${#dirs[@]} -eq 0 ]] && { _j_ui_message warn "No directories found"; return 1; }
 
     printf "\nEnter number (or 'q' to cancel): "
     read -r choice
@@ -2889,7 +2890,7 @@ else
     if [[ "${choice}" =~ ^[0-9]+$ ]] && [[ "${choice}" -ge 1 ]] && [[ "${choice}" -le ${#dirs[@]} ]]; then
       _jsh_pick_array_item "$choice" "${dirs[@]}" && cd "$REPLY" || return 1
     else
-      echo "Invalid selection" >&2
+      _j_ui_message error "Invalid selection"
       return 1
     fi
   }
@@ -2907,7 +2908,7 @@ else
       [[ $i -gt 50 ]] && { echo "... (limited to 50)"; break; }
     done < <(find . -maxdepth 2 -type f 2>/dev/null | head -50)
 
-    [[ ${#files[@]} -eq 0 ]] && { echo "No files found"; return 1; }
+    [[ ${#files[@]} -eq 0 ]] && { _j_ui_message warn "No files found"; return 1; }
 
     printf "\nEnter number (or 'q' to cancel): "
     read -r choice
@@ -2916,7 +2917,7 @@ else
     if [[ "${choice}" =~ ^[0-9]+$ ]] && [[ "${choice}" -ge 1 ]] && [[ "${choice}" -le ${#files[@]} ]]; then
       _jsh_pick_array_item "$choice" "${files[@]}" && "${EDITOR:-vim}" "$REPLY"
     else
-      echo "Invalid selection" >&2
+      _j_ui_message error "Invalid selection"
       return 1
     fi
   }
@@ -2940,7 +2941,7 @@ else
       [[ $i -gt 30 ]] && break
     done < <(history | tail -100)
 
-    [[ ${#cmds[@]} -eq 0 ]] && { echo "No matching commands"; return 1; }
+    [[ ${#cmds[@]} -eq 0 ]] && { _j_ui_message warn "No matching commands"; return 1; }
 
     printf "\nEnter number to execute (or 'q' to cancel): "
     read -r choice
@@ -2951,7 +2952,7 @@ else
       echo "Executing: ${REPLY}"
       eval "${REPLY}"
     else
-      echo "Invalid selection" >&2
+      _j_ui_message error "Invalid selection"
       return 1
     fi
   }
@@ -2979,7 +2980,7 @@ else
       [[ ${#pids[@]} -ge 30 ]] && break
     done < <(ps aux)
 
-    [[ ${#pids[@]} -eq 0 ]] && { echo "No matching processes"; return 1; }
+    [[ ${#pids[@]} -eq 0 ]] && { _j_ui_message warn "No matching processes"; return 1; }
 
     printf "\nEnter number to kill (or 'q' to cancel): "
     read -r choice
@@ -2991,7 +2992,7 @@ else
       echo "Killing PID ${target_pid}..."
       kill -9 "${target_pid}"
     else
-      echo "Invalid selection" >&2
+      _j_ui_message error "Invalid selection"
       return 1
     fi
   }
@@ -3012,7 +3013,7 @@ else
       [[ $i -gt 30 ]] && { echo "... (limited to 30)"; break; }
     done < <(git branch -a 2>/dev/null)
 
-    [[ ${#branches[@]} -eq 0 ]] && { echo "No branches found (not a git repo?)"; return 1; }
+    [[ ${#branches[@]} -eq 0 ]] && { _j_ui_message warn "No branches found (not a git repo?)"; return 1; }
 
     printf "\nEnter number to checkout (or 'q' to cancel): "
     read -r choice
@@ -3021,7 +3022,7 @@ else
     if [[ "${choice}" =~ ^[0-9]+$ ]] && [[ "${choice}" -ge 1 ]] && [[ "${choice}" -le ${#branches[@]} ]]; then
       _jsh_pick_array_item "$choice" "${branches[@]}" && git checkout "$REPLY"
     else
-      echo "Invalid selection" >&2
+      _j_ui_message error "Invalid selection"
       return 1
     fi
   }
@@ -3042,7 +3043,7 @@ else
       [[ $i -gt 30 ]] && break
     done < <(git log --oneline -30 2>/dev/null)
 
-    [[ ${#commits[@]} -eq 0 ]] && { echo "No commits found (not a git repo?)"; return 1; }
+    [[ ${#commits[@]} -eq 0 ]] && { _j_ui_message warn "No commits found (not a git repo?)"; return 1; }
 
     printf "\nEnter number to show (or 'q' to cancel): "
     read -r choice
@@ -3051,7 +3052,7 @@ else
     if [[ "${choice}" =~ ^[0-9]+$ ]] && [[ "${choice}" -ge 1 ]] && [[ "${choice}" -le ${#commits[@]} ]]; then
       _jsh_pick_array_item "$choice" "${commits[@]}" && git show "$REPLY"
     else
-      echo "Invalid selection" >&2
+      _j_ui_message error "Invalid selection"
       return 1
     fi
   }
@@ -3298,7 +3299,7 @@ _j_array_contains() {
 }
 
 _j_ui_message() {
-  local _j_level="$1"
+  local _j_level="$1" _j_color="" _j_reset="" _j_output_fd=1 _j_mark=""
   shift
   if declare -f jsh_ui_message >/dev/null 2>&1; then
     case "${_j_level}" in
@@ -3308,13 +3309,23 @@ _j_ui_message() {
     return
   fi
   case "${_j_level}" in
-    success|ok) printf '%b✓ %s%b\n' "${C_OK:-}" "$*" "${RST:-}" ;;
-    warn|warning) printf '%b! %s%b\n' "${C_WARN:-}" "$*" "${RST:-}" >&2 ;;
-    error|fail) printf '%b✕ %s%b\n' "${C_ERR:-}" "$*" "${RST:-}" >&2 ;;
-    *) printf '%b%s%b\n' "${C_INFO:-}" "$*" "${RST:-}" ;;
+    success|ok) _j_mark='✓'; _j_color="${C_OK:-}" ;;
+    warn|warning) _j_mark='!'; _j_color="${C_WARN:-}"; _j_output_fd=2 ;;
+    error|fail) _j_mark='✕'; _j_color="${C_ERR:-}"; _j_output_fd=2 ;;
+    *) _j_color="${C_INFO:-}" ;;
   esac
-}
+  if _jsh_has_color "${_j_output_fd}"; then
+    [[ -n "${_j_color}" ]] || case "${_j_level}" in
+      success|ok) _j_color=$'\033[32m' ;;
+      warn|warning) _j_color=$'\033[33m' ;;
+      error|fail) _j_color=$'\033[31m' ;;
+      *) _j_color=$'\033[36m' ;;
+    esac
+    _j_reset="${RST:-$'\033[0m'}"
+  fi
+  printf '%b%s%s%s%b\n' "${_j_color}" "${_j_mark}" "${_j_mark:+ }" "$*" "${_j_reset}" >&"${_j_output_fd}"
 
+}
 _j_lock_acquire() {
   local lock_dir="${J_DATA}.lock" tries=0
   while ! command mkdir "${lock_dir}" 2>/dev/null; do
@@ -3441,9 +3452,9 @@ _j_clean() {
   _j_lock_release
 
   if [[ ${removed} -gt 0 ]]; then
-    _j_ui_message success "Removed ${removed} non-existent directories · kept $((total - removed))"
+    _j_ui_message success "Removed ${removed} non-existent directories, kept $((total - removed))"
   else
-    _j_ui_message success "Database is clean · ${total} directories"
+    _j_ui_message success "Database is clean: ${total} directories"
   fi
 }
 
@@ -3800,14 +3811,14 @@ j() {
         ;;
       -a|--add)
         _j_add "${PWD}"
-        _j_ui_message success "Added · $(_j_display_path "${PWD}")"
+        _j_ui_message success "Added: $(_j_display_path "${PWD}")"
         return 0
         ;;
       --remove)
         if _j_remove "${PWD}"; then
-          _j_ui_message success "Removed · $(_j_display_path "${PWD}")"
+          _j_ui_message success "Removed: $(_j_display_path "${PWD}")"
         else
-          _j_ui_message warn "Not in database · $(_j_display_path "${PWD}")"
+          _j_ui_message warn "Not in database: $(_j_display_path "${PWD}")"
           return 1
         fi
         return 0
@@ -3934,7 +3945,7 @@ j() {
   fi
 
   # Query mode - find best match
-  [[ "${verbose}" == true ]] && _j_ui_message info "Searching frecency database · ${J_DATA}"
+  [[ "${verbose}" == true ]] && _j_ui_message info "Searching frecency database: ${J_DATA}"
 
   local best="" count=0 line
 
@@ -3946,7 +3957,7 @@ j() {
 
   if [[ ${count} -gt 0 ]]; then
     local _j_best_path="${best#*|}"
-    [[ "${verbose}" == true ]] && _j_ui_message success "${count} database match(es) · best $(_j_display_path "${_j_best_path}")"
+    [[ "${verbose}" == true ]] && _j_ui_message success "${count} database match(es), best $(_j_display_path "${_j_best_path}")"
     if [[ "${open_code}" == true ]]; then
       _j_open_code_path "${_j_best_path}"
     else
@@ -3957,13 +3968,13 @@ j() {
 
   # Fallbacks only apply for single-keyword queries
   if [[ $# -eq 1 ]]; then
-    [[ "${verbose}" == true ]] && _j_ui_message info "No database match · trying path resolution"
+    [[ "${verbose}" == true ]] && _j_ui_message info "No database match, trying path resolution"
 
     # Fallback 1: Try resolving query as a directory path
     local resolved
     resolved="$(_j_resolve_path "$1")"
     if [[ -n "${resolved}" ]] && [[ -d "${resolved}" ]]; then
-      [[ "${verbose}" == true ]] && _j_ui_message success "Resolved path · $(_j_display_path "${resolved}")"
+      [[ "${verbose}" == true ]] && _j_ui_message success "Resolved path: $(_j_display_path "${resolved}")"
       if [[ "${open_code}" == true ]]; then
         _j_open_code_path "${resolved}"
       else
@@ -3974,11 +3985,10 @@ j() {
 
     # Fallback 2: Try as gitx project name (fast - single lookup)
     if command -v gitx &>/dev/null; then
-      [[ "${verbose}" == true ]] && _j_ui_message info "Trying gitx project lookup · $1"
-      local project_path
+      [[ "${verbose}" == true ]] && _j_ui_message info "Trying gitx project lookup: $1"
       project_path=$(gitx path "$1" 2>/dev/null)
       if [[ -n "${project_path}" ]] && [[ -d "${project_path}" ]]; then
-        [[ "${verbose}" == true ]] && _j_ui_message success "Found project · $(_j_display_path "${project_path}")"
+        [[ "${verbose}" == true ]] && _j_ui_message success "Found project: $(_j_display_path "${project_path}")"
         if [[ "${open_code}" == true ]]; then
           _j_open_code_path "${project_path}"
         else
@@ -3989,8 +3999,8 @@ j() {
     fi
   fi
 
-  [[ "${verbose}" == true ]] && _j_ui_message warn "No matching directory · $*"
-  _j_ui_message error "No matching directory · $*"
+  [[ "${verbose}" == true ]] && _j_ui_message warn "No matching directory: $*"
+  _j_ui_message error "No matching directory: $*"
   return 1
 }
 
@@ -4059,7 +4069,7 @@ _j_migrate_marks() {
   done < "${marks_file}"
 
   if [[ ${count} -gt 0 ]]; then
-    _j_ui_message success "Migrated ${count} bookmarks · original preserved at ~/.marks"
+    _j_ui_message success "Migrated ${count} bookmarks, original preserved at ~/.marks"
   fi
 }
 
@@ -4125,7 +4135,7 @@ _gitx_get_remote() {
   fi
 
   if ! command -v jq &>/dev/null; then
-    printf 'jq is required for remote projects\n' >&2
+    _j_ui_message error "jq is required for remote projects"
     return 1
   fi
 
@@ -5199,7 +5209,7 @@ bindkey '^S' history-incremental-search-forward
 # One-time warning in SSH sessions when fzf not available
 if ! has fzf && [[ "${JSH_ENV:-}" == "ssh" ]] && [[ -z "${_JSH_FZF_WARNED:-}" ]]; then
   export _JSH_FZF_WARNED=1
-  printf '%s\n' "${C_MUTED:-\033[2m}[jsh] fzf not found - using standard history search (Ctrl+R)${RST:-\033[0m}" >&2
+  _j_ui_message warn "jsh: fzf not found - using standard history search (Ctrl+R)"
 fi
 
 # =============================================================================
@@ -6731,7 +6741,7 @@ jsh_project_env_trust() {
 
   if [[ -z "$file" ]]; then
     if ! _jsh_project_find; then
-      printf 'jsh: no project environment found\n' >&2
+      _j_ui_message error "jsh: no project environment found"
       return 1
     fi
     file="$REPLY"
@@ -6741,12 +6751,12 @@ jsh_project_env_trust() {
   file="${file:A}"
 
   if [[ "${file:t}" != .jshrc || ! -r "$file" ]]; then
-    printf 'jsh: trust requires a readable .jshrc file\n' >&2
+    _j_ui_message error "jsh: trust requires a readable .jshrc file"
     return 1
   fi
-  case "$file" in *'|'*|*$'\n'*) printf 'jsh: unsupported project path\n' >&2; return 1 ;; esac
+  case "$file" in *'|'*|*$'\n'*) _j_ui_message error "jsh: unsupported project path"; return 1 ;; esac
   _jsh_project_hash "$file" || {
-    printf 'jsh: unable to hash %s\n' "$file" >&2
+    _j_ui_message error "jsh: unable to hash $file"
     return 1
   }
   hash="$REPLY"
@@ -6770,20 +6780,20 @@ jsh_project_env_trust() {
     return 1
   }
 
-  printf 'trusted: %s\n' "$file"
+  _j_ui_message success "trusted: $file"
   if _jsh_project_find && [[ "$REPLY" == "$file" ]]; then
     jsh_project_env_reload
   fi
 }
 
 _jsh_env_usage() {
-  printf 'Usage: jsh env status|trust [file]|reload\n' >&2
+  _j_ui_message error "Usage: jsh env status|trust [file]|reload"
 }
 
 jsh() {
   case "${1:-}" in
     reload | -r)
-      [[ $# -eq 1 ]] || { printf 'Usage: jsh reload\n' >&2; return 2; }
+      [[ $# -eq 1 ]] || { _j_ui_message error "Usage: jsh reload"; return 2; }
       unset _JSH_DOTFILES_ZSH_LOADED
       source "${JSH_DIR}/dotfiles/.zshrc"
       ;;

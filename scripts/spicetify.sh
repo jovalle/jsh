@@ -3,6 +3,8 @@ set -euo pipefail
 
 script_dir=$(cd -- "${BASH_SOURCE[0]%/*}" && pwd -P)
 root_dir=$(cd -- "${script_dir}/.." && pwd -P)
+# shellcheck source=ui.sh
+. "${script_dir}/ui.sh"
 tmp_dir="${root_dir}/tmp"
 config_dir="${SPICETIFY_CONFIG:-${XDG_CONFIG_HOME:-${HOME}/.config}/spicetify}"
 marketplace_dir="${config_dir}/CustomApps/marketplace"
@@ -27,15 +29,15 @@ else
 fi
 
 if ! spicetify "${patch_command[@]}"; then
-  printf 'Spicetify could not patch Spotify. %s\n' "${failure_hint}" >&2
+  jsh_error "Spicetify could not patch Spotify. ${failure_hint}"
   exit 1
 fi
 
 if [[ -d ${marketplace_dir} ]]; then
-  printf 'Spicetify configuration current; Marketplace is installed.\n'
+  jsh_success 'Spicetify configuration current; Marketplace is installed.'
   exit 0
 fi
 
 curl -fsSL --retry 2 --output "${installer}" "${marketplace_installer_url}"
 SPICETIFY_CONFIG="${config_dir}" sh "${installer}"
-printf 'Spicetify configured; Marketplace installed.\n'
+jsh_success 'Spicetify configured; Marketplace installed.'

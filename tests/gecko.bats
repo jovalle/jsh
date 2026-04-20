@@ -10,6 +10,7 @@ setup() {
   mkdir -p "${fixture_root}/scripts" "${fixture_root}/config/gecko" \
     "${fixture_home}" "${fixture_bin}"
   cp "${project_root}/scripts/gecko.sh" "${fixture_root}/scripts/gecko.sh"
+  cp "${project_root}/scripts/ui.sh" "${fixture_root}/scripts/ui.sh"
   cp "${project_root}/config/gecko/user.js" "${fixture_root}/config/gecko/user.js"
   cp "${project_root}/config/gecko/overrides.js" "${fixture_root}/config/gecko/overrides.js"
   printf '%s\n' '{"addons":[]}' >"${fixture_root}/config/gecko/addons.json"

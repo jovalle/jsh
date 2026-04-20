@@ -22,8 +22,14 @@ if ((BASH_VERSINFO[0] < 4)); then
       exec "$_bash" "$0" "$@"
     fi
   done
-  echo "gitx: requires bash 4+ (found $BASH_VERSION)" >&2
-  echo "  install with: brew install bash" >&2
+  if [[ "${JSH_PLAIN_OUTPUT:-0}" != 1 && "${TERM:-dumb}" != dumb && -z ${NO_COLOR+x} &&
+    "${JSH_COLOR:-auto}" != never ]] && { [[ -t 2 ]] || [[ "${JSH_COLOR:-auto}" == always ]]; }; then
+    printf '\033[31m✖\033[0m gitx requires Bash 4+ (found %s); install with: brew install bash\n' \
+      "${BASH_VERSION}" >&2
+  else
+    printf '[error] gitx requires Bash 4+ (found %s); install with: brew install bash\n' \
+      "${BASH_VERSION}" >&2
+  fi
   exit 1
 fi
 
@@ -75,11 +81,7 @@ else
   C_BLUE='' C_BOLD='' C_DIM='' C_RESET=''
 fi
 
-if [[ -n "${C_RESET}" ]]; then
-  JSH_SEPARATOR=' · '
-else
-  JSH_SEPARATOR=' | '
-fi
+JSH_SEPARATOR=', '
 
 _jsh_status_style() {
   case "$1" in
@@ -106,9 +108,19 @@ _jsh_status_style() {
   esac
 }
 _jsh_message() {
-  _jsh_status_style "$1"
+  local state="$1" output_fd=1 color mark reset
+  [[ "${state}" != warn && "${state}" != warning && "${state}" != error && "${state}" != failed ]] || output_fd=2
+  _jsh_status_style "${state}"
+  color=${REPLY_COLOR} mark=${REPLY_MARK} reset=${C_RESET}
+  if [[ ${output_fd} -eq 2 && -z "${reset}" && "${JSH_OUTPUT:-terminal}" == terminal &&
+    "${JSH_PLAIN_OUTPUT:-0}" != 1 && "${TERM:-dumb}" != dumb && -z ${NO_COLOR+x} &&
+    "${JSH_COLOR:-auto}" != never ]] && { [[ -t 2 ]] || [[ "${JSH_COLOR:-auto}" == always ]]; }; then
+    reset=$'\033[0m'
+    [[ "${state}" == error || "${state}" == failed ]] && color=$'\033[31m' && mark='✖' \
+      || { color=$'\033[33m'; mark='▲'; }
+  fi
   shift
-  printf '%s%s%s %s\n' "${REPLY_COLOR}" "${REPLY_MARK}" "${C_RESET}" "$*"
+  printf '%s%s%s %s\n' "${color}" "${mark}" "${reset}" "$*" >&"${output_fd}"
 }
 error() { _jsh_message error "$@" >&2; }
 warn() { _jsh_message warn "$@" >&2; }
@@ -994,7 +1006,7 @@ _git_status_summary() {
 # Get last commit info
 _git_last_commit() {
   local dir="${1:-.}"
-  local format="${2:-%cr · %s}"
+  local format="${2:-%cr: %s}"
   git -C "$dir" log -1 --format="$format" 2>/dev/null
 }
 

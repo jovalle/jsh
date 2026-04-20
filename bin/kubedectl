@@ -30,9 +30,19 @@ Examples:
 EOF
 }
 
+jsh_error() {
+  if [[ "${JSH_PLAIN_OUTPUT:-0}" != 1 && "${TERM:-dumb}" != dumb &&
+    -z ${NO_COLOR+x} && "${JSH_COLOR:-auto}" != never ]] \
+    && { [[ -t 2 ]] || [[ "${JSH_COLOR:-auto}" == always ]]; }; then
+    printf '\033[31m✖\033[0m %s\n' "$*" >&2
+  else
+    printf '[error] %s\n' "$*" >&2
+  fi
+}
+
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
-    echo "error: required command not found: $1" >&2
+    jsh_error "required command not found: $1"
     exit 127
   fi
 }
@@ -44,7 +54,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -o | --output)
       [[ $# -ge 2 ]] || {
-        echo "error: --output requires a value" >&2
+        jsh_error "--output requires a value"
         exit 1
       }
       output="$2"
@@ -52,7 +62,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     -d | --delete)
       [[ $# -ge 2 ]] || {
-        echo "error: --delete requires a yq path" >&2
+        jsh_error "--delete requires a yq path"
         exit 1
       }
       extra_paths+=("$2")
@@ -63,7 +73,7 @@ while [[ $# -gt 0 ]]; do
       exit 0
       ;;
     *)
-      echo "error: unknown argument: $1" >&2
+      jsh_error "unknown argument: $1"
       usage
       exit 1
       ;;
@@ -73,7 +83,7 @@ done
 case "$output" in
   yaml | json) ;;
   *)
-    echo "error: invalid output format '$output' (expected yaml|json)" >&2
+    jsh_error "invalid output format '$output' (expected yaml|json)"
     exit 1
     ;;
 esac
@@ -81,7 +91,7 @@ esac
 if [[ ${#extra_paths[@]} -gt 0 ]]; then
   for path in "${extra_paths[@]}"; do
     if [[ ! "$path" =~ ^\. ]]; then
-      echo "error: delete path must start with '.': $path" >&2
+      jsh_error "delete path must start with '.': $path"
       exit 1
     fi
   done
@@ -89,12 +99,12 @@ fi
 
 require_cmd yq
 if ! yq --version 2>/dev/null | grep -Eq 'version v?4([.]|$)'; then
-  echo "error: kubedectl requires Mike Farah yq v4" >&2
+  jsh_error "kubedectl requires Mike Farah yq v4"
   exit 1
 fi
 
 if [[ -t 0 ]]; then
-  echo "error: expected YAML/JSON input on stdin" >&2
+  jsh_error "expected YAML/JSON input on stdin"
   usage
   exit 1
 fi
