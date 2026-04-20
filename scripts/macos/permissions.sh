@@ -317,6 +317,15 @@ heading "${app_name} permissions"
 printf '%b%s%b\n' "${dim}" "${app_path}" "${reset}"
 refresh_permissions
 if ((databases_present > 0 && databases_read == 0)); then
+  refresh_permissions
+fi
+if ((databases_present > 0 && databases_read == 0)); then
+  if [[ ${mode} != check ]]; then
+    printf '\n' >&2
+    jsh_warn 'Cannot inspect macOS privacy records; continuing configuration.'
+    printf 'Rerun this permissions task after allowing protected-data access to inspect app permissions.\n' >&2
+    exit 0
+  fi
   printf '\n' >&2
   jsh_error 'The terminal running this check cannot read macOS privacy records.'
   printf 'If macOS asks whether the terminal may access data from other apps, choose Allow. ' >&2
