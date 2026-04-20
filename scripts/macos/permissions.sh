@@ -2,6 +2,10 @@
 
 set -euo pipefail
 
+script_dir=$(cd -- "${BASH_SOURCE[0]%/*}" && pwd -P)
+# shellcheck source=../ui.sh
+. "${script_dir}/../ui.sh"
+
 usage() {
   printf 'Usage: %s APP[.app] [--check]\n' "${0##*/}"
 }
@@ -30,7 +34,7 @@ for argument in "$@"; do
 done
 
 [[ $(uname -s) == Darwin ]] || {
-  printf 'App permissions can only be checked on macOS.\n' >&2
+  jsh_error 'App permissions can only be checked on macOS.'
   exit 1
 }
 [[ -n ${app_argument} ]] || {
@@ -38,7 +42,7 @@ done
   exit 2
 }
 
-if [[ -t 1 && -z ${NO_COLOR+x} ]]; then
+if jsh_ui_color_enabled 1; then
   reset=$'\033[0m' bold=$'\033[1m' red=$'\033[31m' green=$'\033[32m'
   yellow=$'\033[33m' cyan=$'\033[36m' dim=$'\033[2m'
 else
@@ -93,13 +97,13 @@ resolve_app() {
 }
 
 app_path=$(resolve_app "${app_argument}") || {
-  printf 'Could not find app: %s\n' "${app_argument}" >&2
+  jsh_error "Could not find app: ${app_argument}"
   exit 1
 }
 info_plist=${app_path}/Contents/Info.plist
 bundle_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "${info_plist}" 2>/dev/null || true)
 [[ ${bundle_id} =~ ^[A-Za-z0-9.-]+$ ]] || {
-  printf 'The app has no valid CFBundleIdentifier: %s\n' "${app_path}" >&2
+  jsh_error "The app has no valid CFBundleIdentifier: ${app_path}"
   exit 1
 }
 app_name=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "${info_plist}" 2>/dev/null \
@@ -111,7 +115,7 @@ databases=(
 )
 
 command -v sqlite3 >/dev/null 2>&1 || {
-  printf 'sqlite3 is required to inspect macOS privacy permissions.\n' >&2
+  jsh_error 'sqlite3 is required to inspect macOS privacy permissions.'
   exit 1
 }
 
@@ -313,10 +317,11 @@ heading "${app_name} permissions"
 printf '%b%s%b\n' "${dim}" "${app_path}" "${reset}"
 refresh_permissions
 if ((databases_present > 0 && databases_read == 0)); then
-  printf '\n%bThe terminal running this check cannot read macOS privacy records.%b\n' "${red}" "${reset}"
-  printf 'If macOS asks whether the terminal may access data from other apps, choose Allow. '
-  printf "If you chose Don't Allow, rerun this command and allow it.\n"
-  printf 'If the check remains blocked, add the terminal to Privacy & Security > Full Disk Access, then rerun.\n'
+  printf '\n' >&2
+  jsh_error 'The terminal running this check cannot read macOS privacy records.'
+  printf 'If macOS asks whether the terminal may access data from other apps, choose Allow. ' >&2
+  printf "If you chose Don't Allow, rerun this command and allow it.\n" >&2
+  printf 'If the check remains blocked, add the terminal to Privacy & Security > Full Disk Access, then rerun.\n' >&2
   exit 1
 fi
 collect_permissions
@@ -343,7 +348,8 @@ if [[ ${mode} == check ]]; then
   exit
 fi
 [[ -r /dev/tty && -w /dev/tty ]] || {
-  printf '\nGuided setup requires an interactive terminal. Use --check for status only.\n' >&2
+  printf '\n' >&2
+  jsh_error 'Guided setup requires an interactive terminal. Use --check for status only.'
   exit 1
 }
 if ((needs_setup == 0)); then
@@ -401,7 +407,7 @@ guide_panel() {
             sleep 1
             printf '%s panel reopened.\n' "${label}"
           else
-            printf '%bCould not reopen %s panel.%b\n' "${red}" "${label}" "${reset}"
+            jsh_error "Could not reopen ${label} panel."
           fi
           ;;
         s | S) return 2 ;;
@@ -430,7 +436,7 @@ while :; do
   heading "${label}"
 
   if [[ $(permission_status "${service}") == unknown ]]; then
-    printf '%bCannot monitor TCC. Grant Full Disk Access to this terminal and retry.%b\n' "${red}" "${reset}"
+    jsh_error 'Cannot monitor TCC. Grant Full Disk Access to this terminal and retry.'
     continue
   fi
 

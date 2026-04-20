@@ -3,6 +3,8 @@ set -euo pipefail
 
 script_dir=$(cd -- "${BASH_SOURCE[0]%/*}" && pwd -P)
 root_dir=$(cd -- "${script_dir}/.." && pwd -P)
+# shellcheck source=ui.sh
+. "${script_dir}/ui.sh"
 config_dir="${root_dir}/config/gecko"
 state_dir="${XDG_STATE_HOME:-${HOME}/.local/state}/jsh/backups/gecko"
 tmp_dir="${root_dir}/tmp"
@@ -51,25 +53,25 @@ check_betterfox_update() {
 
   current=$(betterfox_version "${source}")
   if [[ ! ${current} =~ ^v?[0-9]+(\.[0-9]+)*$ ]]; then
-    printf 'Could not determine the installed Betterfox version.\n' >&2
+    jsh_warn 'Could not determine the installed Betterfox version.'
     return
   fi
   if ! release=$(curl -fsSL --retry 2 "${betterfox_api_url}"); then
-    printf 'Could not check for Betterfox updates.\n' >&2
+    jsh_warn 'Could not check for Betterfox updates.'
     return
   fi
   latest=$(printf '%s' "${release}" | jq -r '.tag_name // empty')
   if [[ ! ${latest} =~ ^v?[0-9]+(\.[0-9]+)*$ ]]; then
-    printf 'Could not determine the latest Betterfox version.\n' >&2
+    jsh_warn 'Could not determine the latest Betterfox version.'
     return
   fi
   if ! version_is_newer "${latest}" "${current}"; then
-    printf 'Betterfox %s is current.\n' "${current}"
+    jsh_success "Betterfox ${current} is current."
     return
   fi
 
   if [[ ! -t 0 || ! -r /dev/tty || ! -w /dev/tty ]]; then
-    printf 'Betterfox %s is available (current %s); rerun interactively to update.\n' "${latest}" "${current}"
+    jsh_info "Betterfox ${latest} is available (current ${current}); rerun interactively to update."
     return
   fi
 
@@ -78,7 +80,7 @@ check_betterfox_update() {
   case ${answer} in
     y | Y | yes | YES) ;;
     *)
-      printf 'Betterfox update skipped.\n'
+      jsh_info 'Betterfox update skipped.'
       return
       ;;
   esac
@@ -86,28 +88,28 @@ check_betterfox_update() {
   downloaded_betterfox=$(mktemp "${tmp_dir}/betterfox-user.XXXXXX")
   if ! curl -fsSL --retry 2 --output "${downloaded_betterfox}" \
     "${betterfox_raw_base}/${latest}/user.js"; then
-    printf 'Could not download Betterfox %s.\n' "${latest}" >&2
+    jsh_error "Could not download Betterfox ${latest}."
     return 1
   fi
   downloaded_version=$(betterfox_version "${downloaded_betterfox}")
   if ! grep -q 'user_pref' "${downloaded_betterfox}" \
     || [[ ! ${downloaded_version} =~ ^v?[0-9]+(\.[0-9]+)*$ ]] \
     || ! versions_match "${latest}" "${downloaded_version}"; then
-    printf 'Downloaded Betterfox %s failed validation.\n' "${latest}" >&2
+    jsh_error "Downloaded Betterfox ${latest} failed validation."
     return 1
   fi
 
   install -m 0644 -- "${downloaded_betterfox}" "${source}"
   rm -f -- "${downloaded_betterfox}"
   downloaded_betterfox=""
-  printf 'Downloaded Betterfox %s.\n' "${latest}"
+  jsh_success "Downloaded Betterfox ${latest}."
 }
 
 check_betterfox_update
 
 for source in "${config_dir}/user.js" "${config_dir}/overrides.js"; do
   [[ -r ${source} ]] || {
-    printf 'Missing Gecko configuration: %s\n' "${source}" >&2
+    jsh_error "Missing Gecko configuration: ${source}"
     exit 1
   }
   cat "${source}" >>"${composed_user_js}"
@@ -197,7 +199,7 @@ install_policy_file() {
   local source=$1 target=$2 target_dir=${2%/*}
   if [[ $(uname -s) == Darwin && ${target} == /Library/Preferences/*.plist ]]; then
     command -v sudo >/dev/null 2>&1 || {
-      printf 'sudo is required to install the Waterfox policy.\n' >&2
+      jsh_error 'sudo is required to install the Waterfox policy.'
       return 1
     }
     sudo /usr/bin/defaults import "${target%.plist}" "${source}" >/dev/null
@@ -209,7 +211,7 @@ install_policy_file() {
     return
   fi
   command -v sudo >/dev/null 2>&1 || {
-    printf 'sudo is required to install the Waterfox policy.\n' >&2
+    jsh_error 'sudo is required to install the Waterfox policy.'
     return 1
   }
   sudo install -d -- "${target_dir}"
@@ -221,14 +223,14 @@ configure_waterfox_policy() {
   policy_changed=0
   browser_binary waterfox >/dev/null || return 0
   target=$(waterfox_policy_file) || {
-    printf 'Could not resolve the Waterfox policy file; skipping policy installation.\n' >&2
+    jsh_warn 'Could not resolve the Waterfox policy file; skipping policy installation.'
     return
   }
 
   existing='{}'
   if [[ -e ${target} ]]; then
     [[ -r ${target} ]] || {
-      printf 'Waterfox policy is not readable: %s\n' "${target}" >&2
+      jsh_error "Waterfox policy is not readable: ${target}"
       return 1
     }
     if [[ $(uname -s) == Darwin ]]; then
@@ -258,7 +260,7 @@ configure_waterfox_policy() {
 
   current=$(jq -Sc . <<<"${existing}") || return 1
   if [[ ${current} == "$(jq -Sc . <<<"${merged}")" ]]; then
-    printf 'Waterfox JPMorgan Chase Citrix policy current.\n'
+    jsh_success 'Waterfox JPMorgan Chase Citrix policy current.'
     return
   fi
 
@@ -272,7 +274,7 @@ configure_waterfox_policy() {
   rm -f -- "${policy_tmp}"
   policy_tmp=""
   policy_changed=1
-  printf 'Waterfox JPMorgan Chase Citrix policy updated.\n'
+  jsh_success 'Waterfox JPMorgan Chase Citrix policy updated.'
 }
 
 bootstrap_profile() {
@@ -297,7 +299,7 @@ bootstrap_profile() {
   install -m 0600 -- "${bootstrap_ini_tmp}" "${ini}"
   rm -f -- "${bootstrap_ini_tmp}"
   bootstrap_ini_tmp=""
-  printf 'Bootstrapped %s profile for %s.\n' "jsh-default" "${browser}"
+  jsh_success "Bootstrapped jsh-default profile for ${browser}."
 }
 
 bootstrap_profiles() {
@@ -405,7 +407,7 @@ install_addons() {
     if [[ -n ${path} ]]; then
       source=${path/#\~/${HOME}}
       if [[ ! -r ${source} ]]; then
-        printf 'Skipping unavailable add-on %s: %s\n' "${name}" "${source}" >&2
+        jsh_warn "Skipping unavailable add-on ${name}: ${source}"
         ((addons_skipped += 1))
         continue
       fi
@@ -414,7 +416,7 @@ install_addons() {
       downloaded_xpi=$(mktemp "${tmp_dir}/gecko-addon.XXXXXX")
       if ! curl -fsSL --retry 2 --output "${downloaded_xpi}" \
         "https://addons.mozilla.org/firefox/downloads/latest/${slug}/latest.xpi"; then
-        printf 'Skipping unavailable add-on %s: %s\n' "${name}" "${slug}" >&2
+        jsh_warn "Skipping unavailable add-on ${name}: ${slug}"
         ((addons_skipped += 1))
         rm -f -- "${downloaded_xpi}"
         downloaded_xpi=""
@@ -448,17 +450,17 @@ while IFS=$'\t' read -r browser profile; do
   if [[ ${preferences_status} == updated ]] || ((addons_installed > 0)); then
     ((changed += 1))
   fi
-  printf '%s %s: preferences %s, add-on files %d/%d' "${browser_name}" "${profile##*/}" \
-    "${preferences_status}" "${addons_present}" "${addons_total}"
-  ((addons_installed == 0)) || printf ' (%d installed)' "${addons_installed}"
-  ((addons_skipped == 0)) || printf ' (%d unavailable)' "${addons_skipped}"
-  printf '\n'
+  printf -v profile_status '%s %s: preferences %s, add-on files %d/%d' \
+    "${browser_name}" "${profile##*/}" "${preferences_status}" "${addons_present}" "${addons_total}"
+  ((addons_installed == 0)) || profile_status+=" (${addons_installed} installed)"
+  ((addons_skipped == 0)) || profile_status+=" (${addons_skipped} unavailable)"
+  jsh_info "${profile_status}"
 done < <(profiles)
 
 if ((found == 0)); then
-  printf 'No Firefox or Waterfox profiles found.\n'
+  jsh_info 'No Firefox or Waterfox profiles found.'
 elif ((changed == 0)); then
-  printf 'Gecko configuration current: %d profiles checked.\n' "${found}"
+  jsh_success "Gecko configuration current: ${found} profiles checked."
 else
-  printf 'Gecko configuration updated: %d profiles checked.\n' "${found}"
+  jsh_success "Gecko configuration updated: ${found} profiles checked."
 fi

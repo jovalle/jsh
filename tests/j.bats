@@ -36,7 +36,7 @@ setup() {
 
   [ "${status}" -eq 1 ]
   [ "${#lines[@]}" -eq 1 ]
-  [[ "${output}" == $'\033['*'✕ No matching directory · nientienod'$'\033[0m' ]]
+  [[ "${output}" == $'\033['*'✕ No matching directory: nientienod'$'\033[0m' ]]
 }
 
 @test "NO_COLOR suppresses forced color in shell messages" {
@@ -50,7 +50,7 @@ setup() {
     zsh -dfc 'source "${PROJECT_ROOT}/dotfiles/.zshrc" >/dev/null 2>&1; j nientienod'
 
   [ "${status}" -eq 1 ]
-  [ "${output}" = '✕ No matching directory · nientienod' ]
+  [ "${output}" = '✕ No matching directory: nientienod' ]
 }
 
 @test "shell utility errors use the standalone message renderer" {
@@ -64,4 +64,27 @@ setup() {
   [ "${status}" -eq 1 ]
   [ "${#lines[@]}" -eq 1 ]
   [[ "${output}" == $'\033['*'✕ File not found: missing-file'$'\033[0m' ]]
+}
+
+@test "setup script messages use semantic forced color" {
+  run env -u NO_COLOR \
+    JSH_COLOR=always \
+    TERM=xterm-256color \
+    PROJECT_ROOT="${project_root}" \
+    sh -c '. "${PROJECT_ROOT}/scripts/ui.sh"; jsh_error "setup failed"'
+
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == $'\033['*'✖'$'\033[0m'' setup failed' ]]
+}
+
+@test "setup script messages honor NO_COLOR" {
+  run env \
+    JSH_COLOR=always \
+    NO_COLOR=1 \
+    TERM=xterm-256color \
+    PROJECT_ROOT="${project_root}" \
+    sh -c '. "${PROJECT_ROOT}/scripts/ui.sh"; jsh_error "setup failed"'
+
+  [ "${status}" -eq 0 ]
+  [ "${output}" = '[error] setup failed' ]
 }

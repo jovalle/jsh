@@ -2,8 +2,12 @@
 
 set -eu
 
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)
+# shellcheck source=ui.sh
+. "${script_dir}/ui.sh"
+
 if [ "$#" -eq 0 ]; then
-  printf 'Usage: %s HEADER...\n' "${0##*/}" >&2
+  jsh_error "Usage: ${0##*/} HEADER..."
   exit 2
 fi
 
