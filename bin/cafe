@@ -63,9 +63,19 @@ _jsh_status_style() {
   esac
 }
 _jsh_message() {
-  _jsh_status_style "$1"
+  local state="$1" output_fd=1 color mark reset
+  [[ "${state}" != warn && "${state}" != warning && "${state}" != error && "${state}" != failed ]] || output_fd=2
+  _jsh_status_style "${state}"
+  color=${REPLY_COLOR} mark=${REPLY_MARK} reset=${C_RESET}
+  if [[ ${output_fd} -eq 2 && -z "${reset}" && "${JSH_PLAIN_OUTPUT:-0}" != 1 &&
+    "${TERM:-dumb}" != dumb && -z ${NO_COLOR+x} && "${JSH_COLOR:-auto}" != never ]] \
+    && { [[ -t 2 ]] || [[ "${JSH_COLOR:-auto}" == always ]]; }; then
+    reset=$'\033[0m'
+    [[ "${state}" == error || "${state}" == failed ]] && color=$'\033[31m' && mark='✖' \
+      || { color=$'\033[33m'; mark='▲'; }
+  fi
   shift
-  printf '%s%s%s %b\n' "${REPLY_COLOR}" "${REPLY_MARK}" "${C_RESET}" "$*"
+  printf '%s%s%s %b\n' "${color}" "${mark}" "${reset}" "$*" >&"${output_fd}"
 }
 die() {
   _jsh_message error "$@" >&2
@@ -179,7 +189,7 @@ show_status() {
   if is_running; then
     local pid
     pid=$(cat "${CAFE_PID_FILE}")
-    jsh_status "Cafe" "running · PID ${pid}" ok
+    jsh_status "Cafe" "running, PID ${pid}" ok
 
     # Try to show remaining time on macOS
     if [[ "$(uname -s)" == "Darwin" ]]; then
@@ -630,7 +640,7 @@ main() {
     else
       info "Keeping awake indefinitely (Ctrl+C to stop)..."
     fi
-    jsh_status "Method" "${method} · automatic" plan
+    jsh_status "Method" "${method}, automatic" plan
     jsh_child "Display sleep" "${display}" info
     jsh_child "System sleep" "${system}" info last
   fi
@@ -667,6 +677,6 @@ main() {
 }
 
 # Handle interrupts gracefully
-trap 'printf "\n%sStopped%s\n" "${C_DIM}" "${C_RESET}"; exit 130' INT TERM
+trap 'printf "\n"; info "Stopped"; exit 130' INT TERM
 
 main "$@"

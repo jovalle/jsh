@@ -22,11 +22,11 @@ JSH_LINK_STATE="${JSH_LINK_STATE:-${JSH_STATE_DIR}/managed-links}"
 JSH_MODE_FILE="${JSH_MODE_FILE:-${JSH_STATE_DIR}/mode}"
 
 _jsh_ui_init() {
-  local enabled=0
+  local output_fd="${1:-1}" enabled=0
   if [[ "${JSH_PLAIN_OUTPUT:-0}" != 1 && "${TERM:-dumb}" != dumb && -z ${NO_COLOR+x} ]]; then
     case "${JSH_COLOR:-auto}" in
       always) enabled=1 ;;
-      auto) [[ -t 1 ]] && enabled=1 ;;
+      auto) [[ -t "${output_fd}" ]] && enabled=1 ;;
     esac
   fi
 
@@ -130,8 +130,9 @@ _jsh_ui_heading() {
 
 _jsh_ui_row() {
   local status="$1" key="$2" value="${3:-}" value_style="${4:-}"
-  local columns row_width value_reset=
-  _jsh_ui_init
+  local stream="${5:-stdout}" output_fd=1 columns row_width value_reset=
+  [[ "${stream}" != stderr ]] || output_fd=2
+  _jsh_ui_init "${output_fd}"
   _jsh_ui_status "${status}"
   _jsh_ui_text "${key}"
   key=${REPLY_TEXT}
@@ -146,7 +147,7 @@ _jsh_ui_row() {
   fi
 
   if [[ -z "${value}" ]]; then
-    printf '%s%s%s %s\n' "${REPLY_COLOR}" "${REPLY_MARK}" "${_JSH_UI_RESET}" "${key}"
+    printf '%s%s%s %s\n' "${REPLY_COLOR}" "${REPLY_MARK}" "${_JSH_UI_RESET}" "${key}" >&"${output_fd}"
     return
   fi
 
@@ -154,22 +155,25 @@ _jsh_ui_row() {
   [[ "${columns}" =~ ^[0-9]+$ ]] || columns=80
   row_width=$((${#REPLY_MARK} + ${#key} + ${#value} + 2))
   if ((columns >= 30 && row_width > columns)); then
-    printf '%s%s%s %s\n' "${REPLY_COLOR}" "${REPLY_MARK}" "${_JSH_UI_RESET}" "${key}"
-    printf '  %s%s%s\n' "${value_style}" "${value}" "${value_reset}"
+    printf '%s%s%s %s\n' "${REPLY_COLOR}" "${REPLY_MARK}" "${_JSH_UI_RESET}" "${key}" >&"${output_fd}"
+    printf '  %s%s%s\n' "${value_style}" "${value}" "${value_reset}" >&"${output_fd}"
   else
     printf '%s%s%s %s %s%s%s\n' \
       "${REPLY_COLOR}" "${REPLY_MARK}" "${_JSH_UI_RESET}" "${key}" \
-      "${value_style}" "${value}" "${value_reset}"
+      "${value_style}" "${value}" "${value_reset}" >&"${output_fd}"
   fi
 }
 
 _jsh_message() {
-  _jsh_ui_row "$1" "$2"
+  case "$1" in
+    warning | error | failed) _jsh_ui_row "$1" "$2" '' '' stderr ;;
+    *) _jsh_ui_row "$1" "$2" ;;
+  esac
 }
 
 _jsh_error() {
   local message="$1"
-  _jsh_ui_init
+  _jsh_ui_init 2
   _jsh_ui_status error
   _jsh_ui_text "${message}"
   message=${REPLY_TEXT}
@@ -2124,11 +2128,12 @@ _jsh_uninstall() {
 # The curl bootstrap acquires a checkout and then hands control to this flow.
 
 jsh_ui_init() {
+  jsh_ui_output_fd=${1:-1}
   JSH_UI_RICH=0
   if [ "${JSH_PLAIN_OUTPUT:-0}" != 1 ] && [ "${TERM:-dumb}" != dumb ] && [ -z "${NO_COLOR+x}" ]; then
     case "${JSH_COLOR:-auto}" in
       always) JSH_UI_RICH=1 ;;
-      auto) [ -t 1 ] && JSH_UI_RICH=1 ;;
+      auto) [ -t "${jsh_ui_output_fd}" ] && JSH_UI_RICH=1 ;;
     esac
   fi
   if [ "${JSH_UI_RICH}" = 1 ]; then
@@ -2191,7 +2196,11 @@ jsh_ui_row() {
   status=$1
   message=$2
   stream=${3:-stdout}
-  jsh_ui_init
+  if [ "${stream}" = stderr ]; then
+    jsh_ui_init 2
+  else
+    jsh_ui_init 1
+  fi
   jsh_ui_status "${status}"
   [ "${JSH_UI_RICH}" = 1 ] || JSH_UI_MARK="[${JSH_UI_MARK}]"
   if [ "${stream}" = stderr ]; then
