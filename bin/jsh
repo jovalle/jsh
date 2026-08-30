@@ -3794,6 +3794,7 @@ usage() {
   cat <<'USAGE'
   shell [-l]                          Open the isolated jsh shell runtime
   -c COMMAND [args...]                Run a command inside the jsh runtime
+  -v                                  Show the graffiti banner
   install [--mode lite|full] [-n] [-y] [-v]
                                       Reconcile the checkout and configured components
   status [-v|--verbose] [--porcelain] Summarize jsh and workstation health
@@ -3876,6 +3877,9 @@ case "${command_name}" in
     ;;
   -c)
     _jsh_run_command "$@"
+    ;;
+  -v)
+    _jsh_banner
     ;;
   install)
     jsh_install_reconcile "$@"

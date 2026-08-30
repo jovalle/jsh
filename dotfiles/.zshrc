@@ -3081,6 +3081,7 @@ fi
 #   j <query>      Jump to best matching directory/project
 #   j <q1> <q2>    Multiple keywords (all must match)
 #   j -            Jump to previous directory
+#   j fetch        Show system information with the graffiti J
 #   j -v [query]   Verbose mode (show search steps)
 #   j -c [query]   Open in VS Code without changing directory
 #
@@ -3814,6 +3815,11 @@ j() {
   local open_remote=false
   local verbose=false
 
+  if [[ $# -eq 1 && "$1" == fetch ]]; then
+    command "${JSH_DIR}/bin/jfetch"
+    return $?
+  fi
+
   # Parse flags first
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -3865,6 +3871,7 @@ j() {
         jsh_field "j <query>" "Jump to the best matching directory or project"
         jsh_field "j <q1> <q2>" "Match multiple keywords"
         jsh_field "j -" "Jump to the previous directory"
+        jsh_field "j fetch" "Show system information with the graffiti J"
         jsh_field "j -v [query]" "Show search steps"
         jsh_field "j -c [query]" "Open in VS Code without changing directory"
         jsh_field "j -r [query]" "Open a remote project in VS Code over SSH"

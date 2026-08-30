@@ -1,0 +1,291 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+readonly SCRIPT_NAME=${0##*/}
+readonly PLATFORM=$(uname -s)
+
+if (($#)); then
+  printf '%s: this command takes no arguments\n' "${SCRIPT_NAME}" >&2
+  exit 2
+fi
+
+case "${PLATFORM}" in
+  Darwin | Linux) ;;
+  *)
+    printf '%s: unsupported operating system: %s\n' "${SCRIPT_NAME}" "${PLATFORM}" >&2
+    exit 1
+    ;;
+esac
+
+if [[ "${JSH_PLAIN_OUTPUT:-0}" != 1 && "${TERM:-dumb}" != dumb &&
+  -z ${NO_COLOR+x} && "${JSH_COLOR:-auto}" != never ]] \
+  && { [[ -t 1 ]] || [[ "${JSH_COLOR:-auto}" == always ]]; }; then
+  CYAN=$'\033[36m'
+  BOLD_CYAN=$'\033[1;36m'
+  RESET=$'\033[0m'
+else
+  CYAN=''
+  BOLD_CYAN=''
+  RESET=''
+fi
+
+format_bytes() {
+  awk -v bytes="$1" 'BEGIN {
+    split("B KiB MiB GiB TiB", units)
+    unit = 1
+    while (bytes >= 1024 && unit < 5) {
+      bytes /= 1024
+      unit++
+    }
+    if (unit < 3) printf "%.0f %s", bytes, units[unit]
+    else printf "%.2f %s", bytes, units[unit]
+  }'
+}
+
+format_uptime() {
+  local seconds=$1 days hours minutes output=''
+  days=$((seconds / 86400))
+  hours=$(((seconds % 86400) / 3600))
+  minutes=$(((seconds % 3600) / 60))
+  ((days == 0)) || output="${days} day"
+  ((days != 1)) && [[ -z "${output}" ]] || [[ ${days} -eq 1 ]] || output+='s'
+  if ((hours > 0)); then
+    [[ -z "${output}" ]] || output+=', '
+    output+="${hours} hour"
+    ((hours == 1)) || output+='s'
+  fi
+  if ((minutes > 0 || ${#output} == 0)); then
+    [[ -z "${output}" ]] || output+=', '
+    output+="${minutes} min"
+    ((minutes == 1)) || output+='s'
+  fi
+  printf '%s' "${output}"
+}
+
+os_value() {
+  local name version build major
+  if [[ "${PLATFORM}" == Darwin ]]; then
+    name=$(sw_vers -productName 2>/dev/null || printf 'macOS')
+    version=$(sw_vers -productVersion 2>/dev/null || true)
+    build=$(sw_vers -buildVersion 2>/dev/null || true)
+    major=${version%%.*}
+    case "${major}" in
+      26) name='macOS Tahoe' ;;
+      15) name='macOS Sequoia' ;;
+      14) name='macOS Sonoma' ;;
+      13) name='macOS Ventura' ;;
+      12) name='macOS Monterey' ;;
+      11) name='macOS Big Sur' ;;
+    esac
+    printf '%s%s%s %s' "${name}" "${version:+ ${version}}" "${build:+ (${build})}" "$(uname -m)"
+    return
+  fi
+
+  name=$(awk -F= '$1 == "PRETTY_NAME" {
+    sub(/^[^=]*=/, ""); sub(/^"/, ""); sub(/"$/, ""); print; exit
+  }' /etc/os-release 2>/dev/null || true)
+  [[ -n "${name}" ]] || name=$(uname -s)
+  printf '%s %s' "${name}" "$(uname -m)"
+}
+
+host_value() {
+  local model vendor version
+  if [[ "${PLATFORM}" == Darwin ]]; then
+    sysctl -n hw.model 2>/dev/null || printf 'Apple Mac'
+    return
+  fi
+
+  model=''
+  vendor=''
+  version=''
+  [[ ! -r /sys/devices/virtual/dmi/id/product_name ]] || model=$(</sys/devices/virtual/dmi/id/product_name)
+  [[ ! -r /sys/devices/virtual/dmi/id/sys_vendor ]] || vendor=$(</sys/devices/virtual/dmi/id/sys_vendor)
+  [[ ! -r /sys/devices/virtual/dmi/id/product_version ]] || version=$(</sys/devices/virtual/dmi/id/product_version)
+  [[ "${version}" == 'None' || "${version}" == 'Not Specified' ]] && version=''
+  printf '%s%s%s' "${vendor}" "${vendor:+ }${model}" "${version:+ (${version})}"
+  [[ -n "${vendor}${model}${version}" ]] || printf 'unknown'
+}
+
+uptime_value() {
+  local boot_time seconds
+  if [[ "${PLATFORM}" == Darwin ]]; then
+    boot_time=$(sysctl -n kern.boottime 2>/dev/null | sed -n 's/.*{ sec = \([0-9]*\).*/\1/p')
+    seconds=$(($(date +%s) - ${boot_time:-0}))
+  else
+    seconds=$(awk '{print int($1)}' /proc/uptime 2>/dev/null || printf '0')
+  fi
+  format_uptime "${seconds}"
+}
+
+packages_value() {
+  local count output=''
+  if command -v brew >/dev/null 2>&1; then
+    count=$(brew list --formula -1 2>/dev/null | wc -l | tr -d ' ')
+    output="${count} (brew)"
+    count=$(brew list --cask -1 2>/dev/null | wc -l | tr -d ' ')
+    ((count == 0)) || output+=", ${count} (brew-cask)"
+  elif command -v dpkg-query >/dev/null 2>&1; then
+    count=$(dpkg-query -f '${binary:Package}\n' -W 2>/dev/null | wc -l | tr -d ' ')
+    output="${count} (dpkg)"
+  elif command -v rpm >/dev/null 2>&1; then
+    count=$(rpm -qa 2>/dev/null | wc -l | tr -d ' ')
+    output="${count} (rpm)"
+  elif command -v pacman >/dev/null 2>&1; then
+    count=$(pacman -Qq 2>/dev/null | wc -l | tr -d ' ')
+    output="${count} (pacman)"
+  fi
+  printf '%s' "${output:-unknown}"
+}
+
+shell_value() {
+  local shell_path=${SHELL:-} shell_name version=''
+  shell_name=${shell_path##*/}
+  [[ -n "${shell_name}" ]] || shell_name=unknown
+  if [[ -x "${shell_path}" ]]; then
+    version=$("${shell_path}" --version 2>/dev/null | head -n 1 || true)
+    case "${shell_name}" in
+      bash)
+        version=${version#GNU bash, version }
+        version=${version%%(*}
+        version=${version%% *}
+        ;;
+      zsh)
+        version=${version#zsh }
+        version=${version%% *}
+        ;;
+      fish)
+        version=${version#fish, version }
+        version=${version%% *}
+        ;;
+      *) version='' ;;
+    esac
+  fi
+  printf '%s%s' "${shell_name}" "${version:+ ${version% }}"
+}
+
+terminal_value() {
+  local name=${TERM_PROGRAM:-${LC_TERMINAL:-${TERM:-unknown}}}
+  local version=${TERM_PROGRAM_VERSION:-${LC_TERMINAL_VERSION:-}}
+  [[ -z "${WT_SESSION:-}" ]] || name='Windows Terminal'
+  printf '%s%s' "${name}" "${version:+ ${version}}"
+}
+
+cpu_value() {
+  local cpu
+  if [[ "${PLATFORM}" == Darwin ]]; then
+    cpu=$(sysctl -n machdep.cpu.brand_string 2>/dev/null || true)
+    [[ -n "${cpu}" ]] || cpu=$(sysctl -n hw.model 2>/dev/null || true)
+  else
+    cpu=$(awk -F: '/model name|Hardware|Processor/ {
+      sub(/^[ \t]+/, "", $2); print $2; exit
+    }' /proc/cpuinfo 2>/dev/null || true)
+  fi
+  printf '%s' "${cpu:-unknown}"
+}
+
+memory_value() {
+  local total available used stats
+  if [[ "${PLATFORM}" == Darwin ]]; then
+    total=$(sysctl -n hw.memsize 2>/dev/null || printf '0')
+    stats=$(vm_stat 2>/dev/null | awk -v total="${total}" '
+      /page size of/ { page = $8 }
+      /Pages free:|Pages inactive:|Pages speculative:/ {
+        gsub(/\./, "", $3); available += $3
+      }
+      END { printf "%.0f %.0f", total - available * page, total }
+    ')
+    used=${stats%% *}
+  else
+    total=$(awk '/MemTotal:/ {print $2 * 1024}' /proc/meminfo 2>/dev/null || printf '0')
+    available=$(awk '/MemAvailable:/ {print $2 * 1024}' /proc/meminfo 2>/dev/null || printf '0')
+    used=$(awk -v total="${total}" -v available="${available}" 'BEGIN {printf "%.0f", total - available}')
+  fi
+  printf '%s / %s' "$(format_bytes "${used:-0}")" "$(format_bytes "${total:-0}")"
+}
+
+disk_value() {
+  local target=/ stats total used
+  if [[ "${PLATFORM}" == Darwin && -d /System/Volumes/Data ]]; then
+    target=/System/Volumes/Data
+  fi
+  stats=$(df -Pk "${target}" 2>/dev/null | awk 'END {printf "%.0f %.0f", $2 * 1024, $3 * 1024}')
+  total=${stats%% *}
+  used=${stats##* }
+  printf '%s / %s' "$(format_bytes "${used:-0}")" "$(format_bytes "${total:-0}")"
+}
+
+ip_value() {
+  local interface address=''
+  if [[ "${PLATFORM}" == Darwin ]]; then
+    interface=$(route -n get default 2>/dev/null | awk '/interface:/ {print $2; exit}')
+    [[ -z "${interface}" ]] || address=$(ipconfig getifaddr "${interface}" 2>/dev/null || true)
+  elif command -v ip >/dev/null 2>&1; then
+    address=$(ip route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "src") {print $(i + 1); exit}}')
+  else
+    address=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+  fi
+  printf '%s' "${address:-unknown}"
+}
+
+battery_value() {
+  local output percentage state battery
+  if [[ "${PLATFORM}" == Darwin ]] && command -v pmset >/dev/null 2>&1; then
+    output=$(pmset -g batt 2>/dev/null | awk '/%/ {print; exit}')
+    percentage=$(printf '%s\n' "${output}" | sed -n 's/.*[[:space:]]\([0-9][0-9]*%\).*/\1/p')
+    state=$(printf '%s\n' "${output}" | awk -F';[[:space:]]*' '{print $2}')
+    [[ -z "${percentage}" ]] || printf '%s%s' "${percentage}" "${state:+ (${state})}"
+    return
+  fi
+
+  for battery in /sys/class/power_supply/BAT*; do
+    [[ -r "${battery}/capacity" ]] || continue
+    percentage=$(<"${battery}/capacity")
+    state=''
+    [[ ! -r "${battery}/status" ]] || state=$(<"${battery}/status")
+    printf '%s%%%s' "${percentage}" "${state:+ (${state})}"
+    return
+  done
+}
+
+logo=(
+  ''
+  '      :%@@@@@@@@@#*#@%-'
+  '     :#    -#%%+=#:@#'
+  '      %@@     +@++@@-'
+  '             *@%:%@@:'
+  '        -###%@@+:%@@:'
+  '          :#@@@+:%@@:'
+  '         *#:#@@+:%@@:'
+  '          -#@@@+:%@%:'
+  '            :@@+:%@*'
+  '             +@+:%*'
+  '      :==--::*#:#-'
+  '    :@@@@@@@@#@-'
+  '    =   :-=-:'
+  ''
+)
+
+header="$(id -un 2>/dev/null || printf unknown)@$(hostname -s 2>/dev/null || hostname)"
+separator=$(printf '%*s' "${#header}" '' | tr ' ' '-')
+info=("${BOLD_CYAN}${header}${RESET}" "${separator}")
+info+=("OS: $(os_value)")
+info+=("Host: $(host_value)")
+info+=("Kernel: $(uname -r)")
+info+=("Uptime: $(uptime_value)")
+info+=("Packages: $(packages_value)")
+info+=("Shell: $(shell_value)")
+info+=("Terminal: $(terminal_value)")
+info+=("CPU: $(cpu_value)")
+info+=("Memory: $(memory_value)")
+info+=("Disk (/): $(disk_value)")
+info+=("Local IP: $(ip_value)")
+battery=$(battery_value)
+[[ -z "${battery}" ]] || info+=("Battery: ${battery}")
+info+=("Locale: ${LC_ALL:-${LC_CTYPE:-${LANG:-unknown}}}")
+
+rows=${#logo[@]}
+((${#info[@]} <= rows)) || rows=${#info[@]}
+for ((index = 0; index < rows; index++)); do
+  printf '%s%-27s%s  %s\n' "${CYAN}" "${logo[index]:-}" "${RESET}" "${info[index]:-}"
+done

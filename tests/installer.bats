@@ -370,6 +370,22 @@ TASK
   assert_banner_spacing Usage
 }
 
+@test "short verbose flag prints only the graffiti banner" {
+  make_fixture lite
+  run env \
+    HOME="${home_root}" \
+    XDG_STATE_HOME="${state_root}" \
+    JSH_DIR="${source_root}" \
+    JSH_PLAIN_OUTPUT=1 \
+    JSH_COLOR=never \
+    "${source_root}/bin/jsh" -v
+
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *'   :%@@@@@@@@@#*#@%-              +-:##'* ]]
+  [[ "${output}" == *' =   :-=-:                          -:'* ]]
+  [[ "${output}" != *Usage* ]]
+}
+
 @test "audit reports unmanaged Linuxbrew leaves and casks in columns" {
   make_fixture lite
   cat >"${source_root}/config/homebrew/Brewfile" <<'BREWFILE'

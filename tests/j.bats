@@ -13,6 +13,21 @@ setup() {
     "${exact_dir}" "${now}" "${nested_dir}" "${now}" >"${database}"
 }
 
+@test "fetch delegates to jfetch instead of directory matching" {
+  run env \
+    HOME="${test_root}/home" \
+    J_DATA="${database}" \
+    J_NO_HOOK=1 \
+    JSH_PLAIN_OUTPUT=1 \
+    JSH_COLOR=never \
+    PROJECT_ROOT="${project_root}" \
+    zsh -dfc 'source "${PROJECT_ROOT}/dotfiles/.zshrc" >/dev/null 2>&1; j fetch'
+
+  [ "${status}" -eq 0 ]
+  [[ "${output}" == *':%@@@@@@@@@#*#@%-'* ]]
+  [[ "${output}" == *'OS: '* ]]
+}
+
 @test "query prefers an exact directory name over a higher-frecency substring" {
   run env \
     HOME="${test_root}/home" \
