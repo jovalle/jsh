@@ -1,0 +1,6 @@
+# Core tools required by the native jsh reconciliation engine.
+brew "bash"
+brew "jq"
+brew "unzip"
+brew "zip"
+brew "zsh"
