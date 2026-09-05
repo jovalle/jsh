@@ -1,0 +1,1250 @@
+#!/usr/bin/env bash
+# shellcheck shell=bash
+#
+# A portable, Bash-compatible implementation of GNU Stow
+
+set -uo pipefail
+
+readonly JSTOW_VERSION="1.0.0"
+
+ENV_STOW_DIR="${STOW_DIR-}"
+VERBOSE=0
+SIMULATE=0
+COMPAT=0
+ADOPT=0
+NO_FOLDING=0
+DOTFILES=0
+STOW_DIR=""
+TARGET_DIR=""
+ACTION="stow"
+PARSING_SOURCE="cli"
+CLI_VERBOSE_SEEN=0
+
+declare -a IGNORE_REGEXES=()
+declare -a DEFER_REGEXES=()
+declare -a OVERRIDE_REGEXES=()
+declare -a STOW_PACKAGES=()
+declare -a UNSTOW_PACKAGES=()
+
+declare -a TASK_ACTION=()
+declare -a TASK_TYPE=()
+declare -a TASK_PATH=()
+declare -a TASK_ARG=()
+declare -A LINK_TASK=()
+declare -A DIR_TASK=()
+
+declare -a CONFLICT_ACTION=()
+declare -a CONFLICT_PACKAGE=()
+declare -a CONFLICT_MESSAGE=()
+
+declare -a APPLIED_TASKS=()
+declare -A MOVE_BACKUP=()
+ROLLBACK_DIR=""
+APPLYING=0
+INTERRUPTED=0
+
+usage() {
+  local message="${1-}"
+  if [[ -n "${message}" ]]; then
+    printf 'jstow: %s\n\n' "${message}" >&2
+  fi
+  cat <<EOF
+jstow version ${JSTOW_VERSION} (GNU Stow 2.4.1 filesystem compatible)
+
+SYNOPSIS:
+
+    jstow [OPTION ...] [-D|-S|-R] PACKAGE ... [-D|-S|-R] PACKAGE ...
+
+OPTIONS:
+
+    -d DIR, --dir=DIR     Set stow dir to DIR (default is current dir)
+    -t DIR, --target=DIR  Set target to DIR (default is parent of stow dir)
+
+    -S, --stow            Stow the package names that follow this option
+    -D, --delete          Unstow the package names that follow this option
+    -R, --restow          Restow (like -D followed by -S)
+
+    --ignore=REGEX        Ignore files ending in this Bash ERE
+    --defer=REGEX         Keep matching files stowed to another package
+    --override=REGEX      Replace matching files stowed to another package
+    --adopt               Move existing target files into the stow package
+    --dotfiles            Map package entries named dot-NAME to .NAME
+    --no-folding          Stow directories as individual entries
+    -p, --compat          Use the legacy target-tree unstow algorithm
+
+    -n, --no, --simulate  Do not modify the filesystem
+    -v, --verbose[=N]     Increase verbosity or set it explicitly
+    -V, --version         Show version information
+    -h, --help            Show this help
+EOF
+  [[ -z "${message}" ]]
+}
+
+die() {
+  printf 'jstow: %s\n' "$*" >&2
+  exit 1
+}
+
+debug() {
+  local level="$1"
+  shift
+  if ((VERBOSE >= level)); then
+    printf '%s\n' "$*" >&2
+  fi
+}
+
+trim() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "${value}"
+}
+
+canonical_dir() {
+  (cd -- "$1" 2>/dev/null && pwd -P)
+}
+
+normalize_path() {
+  local input="$1"
+  local absolute=0 part
+  local -a input_parts=() output_parts=()
+  [[ "${input}" == /* ]] && absolute=1
+  IFS='/' read -r -a input_parts <<<"${input}"
+  for part in "${input_parts[@]}"; do
+    case "${part}" in
+      '' | .) ;;
+      ..)
+        if ((${#output_parts[@]} > 0)) && [[ "${output_parts[-1]}" != ".." ]]; then
+          unset 'output_parts[-1]'
+        elif ((absolute == 0)); then
+          output_parts+=("..")
+        fi
+        ;;
+      *) output_parts+=("${part}") ;;
+    esac
+  done
+  local result
+  if ((${#output_parts[@]} == 0)); then
+    ((absolute)) && result="/" || result="."
+  else
+    local IFS=/
+    result="${output_parts[*]}"
+    ((absolute)) && result="/${result}"
+  fi
+  printf '%s' "${result}"
+}
+
+relative_path() {
+  local destination
+  local origin
+  destination="$(normalize_path "$1")"
+  origin="$(normalize_path "$2")"
+  local -a destination_parts=() origin_parts=() result=()
+  local index=0
+  IFS='/' read -r -a destination_parts <<<"${destination#/}"
+  IFS='/' read -r -a origin_parts <<<"${origin#/}"
+  while ((index < ${#destination_parts[@]} && index < ${#origin_parts[@]})) &&
+    [[ "${destination_parts[${index}]}" == "${origin_parts[${index}]}" ]]; do
+    ((index += 1))
+  done
+  local cursor
+  for ((cursor = index; cursor < ${#origin_parts[@]}; cursor += 1)); do
+    result+=("..")
+  done
+  for ((cursor = index; cursor < ${#destination_parts[@]}; cursor += 1)); do
+    result+=("${destination_parts[${cursor}]}")
+  done
+  if ((${#result[@]} == 0)); then
+    printf '.'
+  else
+    local IFS=/
+    printf '%s' "${result[*]}"
+  fi
+}
+
+join_rel() {
+  if [[ -z "$1" || "$1" == "." ]]; then
+    printf '%s' "$2"
+  elif [[ -z "$2" || "$2" == "." ]]; then
+    printf '%s' "$1"
+  else
+    printf '%s/%s' "$1" "$2"
+  fi
+}
+
+parent_rel() {
+  if [[ "$1" == */* ]]; then
+    printf '%s' "${1%/*}"
+  else
+    printf '.'
+  fi
+}
+
+target_abs() {
+  if [[ "$1" == "." || -z "$1" ]]; then
+    printf '%s' "${TARGET_ABS}"
+  else
+    printf '%s/%s' "${TARGET_ABS}" "$1"
+  fi
+}
+
+shell_words() {
+  local input="$1" state="plain" word="" character next
+  local started=0 index
+  SHELL_WORDS=()
+  for ((index = 0; index < ${#input}; index += 1)); do
+    character="${input:index:1}"
+    case "${state}:${character}" in
+      plain:" " | plain:$'\t')
+        if ((started)); then
+          SHELL_WORDS+=("${word}")
+          word=""
+          started=0
+        fi
+        ;;
+      plain:"'") state="single"; started=1 ;;
+      plain:'"') state="double"; started=1 ;;
+      plain:'\')
+        ((index += 1))
+        ((index < ${#input})) || die "unfinished escape in .stowrc"
+        next="${input:index:1}"
+        if [[ "${next}" == '$' || "${next}" == '~' ]]; then
+          word+="\\${next}"
+        else
+          word+="${next}"
+        fi
+        started=1
+        ;;
+      single:"'") state="plain" ;;
+      double:'"') state="plain" ;;
+      double:'\')
+        ((index += 1))
+        ((index < ${#input})) || die "unfinished escape in .stowrc"
+        next="${input:index:1}"
+        if [[ "${next}" == '$' || "${next}" == '~' ]]; then
+          word+="\\${next}"
+        else
+          word+="${next}"
+        fi
+        started=1
+        ;;
+      *) word+="${character}"; started=1 ;;
+    esac
+  done
+  [[ "${state}" == "plain" ]] || die "unclosed quote in .stowrc"
+  ((started)) && SHELL_WORDS+=("${word}")
+}
+
+expand_rc_path() {
+  local input="$1" output="" character name next index=0 end
+  if [[ "${input}" == '~' ]]; then
+    input="${HOME:-}"
+  elif [[ "${input:0:2}" == "${HOME:0:0}~/" ]]; then
+    input="${HOME:-}/${input#\~/}"
+  fi
+  while ((index < ${#input})); do
+    character="${input:index:1}"
+    if [[ "${character}" == '\' && $((index + 1)) -lt ${#input} ]]; then
+      next="${input:index + 1:1}"
+      if [[ "${next}" == '$' || "${next}" == '~' ]]; then
+        output+="${next}"
+        ((index += 2))
+        continue
+      fi
+    fi
+    if [[ "${character}" != '$' ]]; then
+      output+="${character}"
+      ((index += 1))
+      continue
+    fi
+    if [[ "${input:index + 1:1}" == '{' ]]; then
+      end=$((index + 2))
+      while ((end < ${#input})) && [[ "${input:end:1}" != '}' ]]; do
+        ((end += 1))
+      done
+      ((end < ${#input})) || die ".stowrc contains an unclosed environment variable"
+      name="${input:index + 2:end - index - 2}"
+      index=$((end + 1))
+    else
+      end=$((index + 1))
+      while ((end < ${#input})) && [[ "${input:end:1}" =~ [[:alnum:]_] ]]; do
+        ((end += 1))
+      done
+      name="${input:index + 1:end - index - 1}"
+      [[ -n "${name}" ]] || {
+        output+='$'
+        ((index += 1))
+        continue
+      }
+      index="${end}"
+    fi
+    [[ "${name}" =~ ^[[:alpha:]_][[:alnum:]_]*$ ]] ||
+      die ".stowrc contains an invalid environment variable name: ${name}"
+    [[ -v "${name}" ]] || die ".stowrc references undefined environment variable \$${name}"
+    output+="${!name}"
+  done
+  printf '%s' "${output}"
+}
+
+add_package() {
+  local package="$1"
+  while [[ "${package}" == */ ]]; do
+    package="${package%/}"
+  done
+  [[ -n "${package}" ]] || die "empty package name"
+  [[ "${package}" != */* ]] || die "Slashes are not permitted in package names"
+  [[ "${PARSING_SOURCE}" == "cli" ]] || return 0
+  case "${ACTION}" in
+    stow) STOW_PACKAGES+=("${package}") ;;
+    unstow) UNSTOW_PACKAGES+=("${package}") ;;
+    restow)
+      UNSTOW_PACKAGES+=("${package}")
+      STOW_PACKAGES+=("${package}")
+      ;;
+  esac
+}
+
+set_verbose() {
+  local value="$1"
+  if [[ "${PARSING_SOURCE}" == "cli" && "${CLI_VERBOSE_SEEN}" == 0 ]]; then
+    VERBOSE=0
+    CLI_VERBOSE_SEEN=1
+  fi
+  if [[ "${value}" == "+" ]]; then
+    ((VERBOSE += 1))
+  elif [[ "${value}" =~ ^[0-9]+$ ]]; then
+    VERBOSE="${value}"
+  else
+    die "invalid verbosity level: ${value}"
+  fi
+}
+
+expand_long_option() {
+  local argument="$1" option="${1%%=*}" suffix="" name canonical
+  local -A matches=()
+  [[ "${argument}" == *=* ]] && suffix="=${argument#*=}"
+  option="${option#--}"
+  local -a names=(
+    verbose:verbose help:help simulate:simulate no:simulate version:version
+    compat:compat dir:dir target:target adopt:adopt no-folding:no-folding
+    dotfiles:dotfiles ignore:ignore override:override defer:defer
+    delete:delete stow:stow restow:restow
+  )
+  for name in "${names[@]}"; do
+    canonical="${name#*:}"
+    name="${name%%:*}"
+    if [[ "${name}" == "${option}" ]]; then
+      LONG_OPTION="--${canonical}${suffix}"
+      return 0
+    fi
+    [[ "${name}" == "${option}"* ]] && matches["${canonical}"]=1
+  done
+  ((${#matches[@]} == 1)) || return 1
+  for canonical in "${!matches[@]}"; do
+    LONG_OPTION="--${canonical}${suffix}"
+  done
+}
+
+parse_tokens() {
+  local -a arguments=("$@")
+  local index=0 argument value bundle character offset
+  local options=1
+  while ((index < ${#arguments[@]})); do
+    argument="${arguments[${index}]}"
+    ((index += 1))
+    if ((options == 0)) || [[ "${argument}" != -* || "${argument}" == "-" ]]; then
+      add_package "${argument}"
+      continue
+    fi
+    if [[ "${argument}" == --?* ]]; then
+      expand_long_option "${argument}" || {
+        usage "unknown or ambiguous option: ${argument}"
+        exit 1
+      }
+      argument="${LONG_OPTION}"
+    fi
+    case "${argument}" in
+      --) options=0 ;;
+      --help) usage; exit 0 ;;
+      --version) printf 'jstow version %s\n' "${JSTOW_VERSION}"; exit 0 ;;
+      --stow) ACTION="stow" ;;
+      --delete) ACTION="unstow" ;;
+      --restow) ACTION="restow" ;;
+      --simulate | --no) SIMULATE=1 ;;
+      --compat) COMPAT=1 ;;
+      --adopt) ADOPT=1 ;;
+      --no-folding) NO_FOLDING=1 ;;
+      --dotfiles) DOTFILES=1 ;;
+      --verbose)
+        if ((index < ${#arguments[@]})) && [[ "${arguments[${index}]}" =~ ^[0-9]+$ ]]; then
+          set_verbose "${arguments[${index}]}"
+          ((index += 1))
+        else
+          set_verbose +
+        fi
+        ;;
+      --verbose=*) set_verbose "${argument#*=}" ;;
+      --dir=* | --target=* | --ignore=* | --defer=* | --override=*)
+        value="${argument#*=}"
+        case "${argument%%=*}" in
+          --dir) [[ "${PARSING_SOURCE}" == "rc" ]] && value="$(expand_rc_path "${value}")"; STOW_DIR="${value}" ;;
+          --target) [[ "${PARSING_SOURCE}" == "rc" ]] && value="$(expand_rc_path "${value}")"; TARGET_DIR="${value}" ;;
+          --ignore) IGNORE_REGEXES+=("${value}") ;;
+          --defer) DEFER_REGEXES+=("${value}") ;;
+          --override) OVERRIDE_REGEXES+=("${value}") ;;
+        esac
+        ;;
+      --dir | --target | --ignore | --defer | --override)
+        ((index < ${#arguments[@]})) || die "${argument} requires an argument"
+        value="${arguments[${index}]}"
+        ((index += 1))
+        case "${argument}" in
+          --dir) [[ "${PARSING_SOURCE}" == "rc" ]] && value="$(expand_rc_path "${value}")"; STOW_DIR="${value}" ;;
+          --target) [[ "${PARSING_SOURCE}" == "rc" ]] && value="$(expand_rc_path "${value}")"; TARGET_DIR="${value}" ;;
+          --ignore) IGNORE_REGEXES+=("${value}") ;;
+          --defer) DEFER_REGEXES+=("${value}") ;;
+          --override) OVERRIDE_REGEXES+=("${value}") ;;
+        esac
+        ;;
+      --*) usage "unknown option: ${argument}"; exit 1 ;;
+      -*)
+        bundle="${argument#-}"
+        for ((offset = 0; offset < ${#bundle}; offset += 1)); do
+          character="${bundle:offset:1}"
+          case "${character}" in
+            h) usage; exit 0 ;;
+            V) printf 'jstow version %s\n' "${JSTOW_VERSION}"; exit 0 ;;
+            v)
+              if [[ "${bundle:offset + 1}" =~ ^[0-9]+$ ]]; then
+                set_verbose "${bundle:offset + 1}"
+                offset="${#bundle}"
+              else
+                set_verbose +
+              fi
+              ;;
+            n) SIMULATE=1 ;;
+            p) COMPAT=1 ;;
+            S) ACTION="stow" ;;
+            D) ACTION="unstow" ;;
+            R) ACTION="restow" ;;
+            d | t)
+              if ((offset + 1 < ${#bundle})); then
+                value="${bundle:offset + 1}"
+                offset="${#bundle}"
+              else
+                ((index < ${#arguments[@]})) || die "-${character} requires an argument"
+                value="${arguments[${index}]}"
+                ((index += 1))
+              fi
+              [[ "${PARSING_SOURCE}" == "rc" ]] && value="$(expand_rc_path "${value}")"
+              [[ "${character}" == "d" ]] && STOW_DIR="${value}" || TARGET_DIR="${value}"
+              ;;
+            *) usage "unknown option: -${character}"; exit 1 ;;
+          esac
+        done
+        ;;
+    esac
+  done
+}
+
+read_rc_files() {
+  local file line
+  local -a files=()
+  [[ -n "${HOME:-}" ]] && files+=("${HOME}/.stowrc")
+  files+=(".stowrc")
+  PARSING_SOURCE="rc"
+  for file in "${files[@]}"; do
+    [[ -r "${file}" ]] || continue
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+      shell_words "${line}"
+      ((${#SHELL_WORDS[@]})) && parse_tokens "${SHELL_WORDS[@]}"
+    done <"${file}"
+  done
+  PARSING_SOURCE="cli"
+  ACTION="stow"
+}
+
+task_index() {
+  local kind="$1" item="$2" stored=""
+  if [[ "${kind}" == "link" ]]; then
+    stored="${LINK_TASK[${item}]-}"
+  else
+    stored="${DIR_TASK[${item}]-}"
+  fi
+  [[ -n "${stored}" ]] || return 1
+  TASK_INDEX=$((stored - 1))
+}
+
+parent_link_removed() {
+  local item="$1" prefix="" part index
+  local -a parts=()
+  IFS='/' read -r -a parts <<<"${item}"
+  for part in "${parts[@]}"; do
+    [[ -n "${prefix}" ]] && prefix+="/"
+    prefix+="${part}"
+    if task_index link "${prefix}"; then
+      index="${TASK_INDEX}"
+      [[ "${TASK_ACTION[${index}]}" == "remove" ]] && return 0
+    fi
+  done
+  return 1
+}
+
+is_link() {
+  local item="$1" index
+  if task_index link "${item}"; then
+    index="${TASK_INDEX}"
+    [[ "${TASK_ACTION[${index}]}" == "create" ]]
+    return
+  fi
+  parent_link_removed "${item}" && return 1
+  [[ -L "$(target_abs "${item}")" ]]
+}
+
+is_dir() {
+  local item="$1" index
+  if task_index dir "${item}"; then
+    index="${TASK_INDEX}"
+    [[ "${TASK_ACTION[${index}]}" == "create" ]]
+    return
+  fi
+  parent_link_removed "${item}" && return 1
+  [[ -d "$(target_abs "${item}")" ]]
+}
+
+is_node() {
+  local item="$1" link_action="" dir_action="" index
+  if task_index link "${item}"; then
+    index="${TASK_INDEX}"
+    link_action="${TASK_ACTION[${index}]}"
+  fi
+  if task_index dir "${item}"; then
+    index="${TASK_INDEX}"
+    dir_action="${TASK_ACTION[${index}]}"
+  fi
+  [[ "${link_action}" == "create" || "${dir_action}" == "create" ]] && return 0
+  [[ "${link_action}" == "remove" || "${dir_action}" == "remove" ]] && return 1
+  parent_link_removed "${item}" && return 1
+  local absolute
+  absolute="$(target_abs "${item}")"
+  [[ -e "${absolute}" || -L "${absolute}" ]]
+}
+
+read_link() {
+  local item="$1" index
+  if task_index link "${item}"; then
+    index="${TASK_INDEX}"
+    [[ "${TASK_ACTION[${index}]}" == "create" ]] || die "internal error: reading removed link ${item}"
+    printf '%s' "${TASK_ARG[${index}]}"
+  else
+    readlink "$(target_abs "${item}")"
+  fi
+}
+
+add_task() {
+  local action="$1" type="$2" item="$3" argument="${4-}"
+  local index="${#TASK_ACTION[@]}"
+  TASK_ACTION+=("${action}")
+  TASK_TYPE+=("${type}")
+  TASK_PATH+=("${item}")
+  TASK_ARG+=("${argument}")
+  if [[ "${type}" == "link" ]]; then
+    LINK_TASK["${item}"]=$((index + 1))
+  elif [[ "${type}" == "dir" ]]; then
+    DIR_TASK["${item}"]=$((index + 1))
+  fi
+}
+
+do_link() {
+  local source="$1" item="$2" index
+  if task_index link "${item}"; then
+    index="${TASK_INDEX}"
+    if [[ "${TASK_ACTION[${index}]}" == "create" ]]; then
+      [[ "${TASK_ARG[${index}]}" == "${source}" ]] || die "internal error: conflicting planned links for ${item}"
+      return
+    fi
+    if [[ "${TASK_ACTION[${index}]}" == "remove" && "${TASK_ARG[${index}]}" == "${source}" ]]; then
+      TASK_ACTION[${index}]="skip"
+      unset 'LINK_TASK[$item]'
+      return
+    fi
+  fi
+  debug 1 "LINK: ${item} => ${source}"
+  add_task create link "${item}" "${source}"
+}
+
+do_unlink() {
+  local item="$1" index source
+  if task_index link "${item}"; then
+    index="${TASK_INDEX}"
+    [[ "${TASK_ACTION[${index}]}" == "remove" ]] && return
+    if [[ "${TASK_ACTION[${index}]}" == "create" ]]; then
+      TASK_ACTION[${index}]="skip"
+      unset 'LINK_TASK[$item]'
+      return
+    fi
+  fi
+  source="$(readlink "$(target_abs "${item}")")" || die "could not read link ${item}"
+  debug 1 "UNLINK: ${item}"
+  add_task remove link "${item}" "${source}"
+}
+
+do_mkdir() {
+  local item="$1" index
+  if task_index dir "${item}"; then
+    index="${TASK_INDEX}"
+    [[ "${TASK_ACTION[${index}]}" == "create" ]] && return
+    if [[ "${TASK_ACTION[${index}]}" == "remove" ]]; then
+      TASK_ACTION[${index}]="skip"
+      unset 'DIR_TASK[$item]'
+      return
+    fi
+  fi
+  debug 1 "MKDIR: ${item}"
+  add_task create dir "${item}"
+}
+
+do_rmdir() {
+  local item="$1" index
+  if task_index dir "${item}"; then
+    index="${TASK_INDEX}"
+    [[ "${TASK_ACTION[${index}]}" == "remove" ]] && return
+    if [[ "${TASK_ACTION[${index}]}" == "create" ]]; then
+      TASK_ACTION[${index}]="skip"
+      unset 'DIR_TASK[$item]'
+      return
+    fi
+  fi
+  debug 1 "RMDIR: ${item}"
+  add_task remove dir "${item}"
+}
+
+do_move() {
+  debug 1 "MV: $1 -> $2"
+  add_task move file "$1" "$2"
+}
+
+conflict() {
+  CONFLICT_ACTION+=("$1")
+  CONFLICT_PACKAGE+=("$2")
+  CONFLICT_MESSAGE+=("$3")
+}
+
+regex_matches() {
+  local value="$1" expression="$2"
+  local regex_status
+  [[ "${value}" =~ ${expression} ]]
+  regex_status=$?
+  if ((regex_status == 0)); then
+    return 0
+  fi
+  ((regex_status != 2)) || die "invalid regular expression: ${expression}"
+  return 1
+}
+
+ignore_line_matches() {
+  local pattern="$1" target="$2" expression
+  local basename="${target##*/}"
+  if [[ "${pattern}" == */* ]]; then
+    expression="(^|/)(${pattern})(/|$)"
+    regex_matches "/${target}" "${expression}"
+  else
+    expression="^(${pattern})$"
+    regex_matches "${basename}" "${expression}"
+  fi
+}
+
+ignored() {
+  local stow="$1" package="$2" target="$3" regex file line
+  for regex in "${IGNORE_REGEXES[@]}"; do
+    regex_matches "${target}" "(${regex})$" && return 0
+  done
+  file="${stow}/${package}/.stow-local-ignore"
+  [[ -e "${file}" ]] || file="${HOME:-}/.stow-global-ignore"
+  if [[ -e "${file}" ]]; then
+    while IFS= read -r line || [[ -n "${line}" ]]; do
+      line="$(trim "${line}")"
+      [[ -n "${line}" && "${line}" != \#* ]] || continue
+      if [[ "${line}" =~ ^(.*[^\\])[[:space:]]+\#.*$ ]]; then
+        line="$(trim "${BASH_REMATCH[1]}")"
+      fi
+      line="${line//\\#/#}"
+      ignore_line_matches "${line}" "${target}" && return 0
+    done <"${file}"
+    [[ "${target}" == ".stow-local-ignore" ]] && return 0
+    return 1
+  fi
+  local -a segments=(RCS '.+,v' CVS '\.\#.+' '\.cvsignore' '\.svn' _darcs '\.hg' '\.git' '\.gitignore' '\.gitmodules' '.+~' '#.*#')
+  for regex in "${segments[@]}"; do
+    regex_matches "${target##*/}" "^(${regex})$" && return 0
+  done
+  regex_matches "/${target}" '^/README.*(/|$)' && return 0
+  regex_matches "/${target}" '^/LICENSE.*(/|$)' && return 0
+  regex_matches "/${target}" '^/COPYING(/|$)' && return 0
+  return 1
+}
+
+matches_any_prefix() {
+  local value="$1"
+  shift
+  local regex
+  for regex in "$@"; do
+    regex_matches "${value}" "^(${regex})" && return 0
+  done
+  return 1
+}
+
+adjust_dotfile() {
+  if ((DOTFILES)) && [[ "$1" =~ ^dot-[^.].* ]]; then
+    printf '.%s' "${1#dot-}"
+  else
+    printf '%s' "$1"
+  fi
+}
+
+unadjust_dotfile() {
+  if ((DOTFILES)) && [[ "$1" == .* && "$1" != "." && "$1" != ".." ]]; then
+    printf 'dot-%s' "${1#.}"
+  else
+    printf '%s' "$1"
+  fi
+}
+
+marked_stow_dir() {
+  local absolute
+  absolute="$(target_abs "$1")"
+  [[ -e "${absolute}/.stow" ]]
+}
+
+should_skip_target() {
+  local item="$1" absolute
+  absolute="$(target_abs "${item}")"
+  if [[ "$(normalize_path "${absolute}")" == "${STOW_ABS}" ]]; then
+    printf 'WARNING: skipping target which was current stow directory %s\n' "${item}" >&2
+    return 0
+  fi
+  if marked_stow_dir "${item}"; then
+    printf 'WARNING: skipping marked Stow directory %s\n' "${item}" >&2
+    return 0
+  fi
+  if [[ -e "${absolute}/.nonstow" ]]; then
+    printf 'WARNING: skipping protected directory %s\n' "${item}" >&2
+    return 0
+  fi
+  return 1
+}
+
+find_owner() {
+  local item="$1" destination="$2" source rest prefix
+  OWNER_SOURCE=""
+  OWNER_STOW=""
+  OWNER_PACKAGE=""
+  OWNER_SUBPATH=""
+  [[ "${destination}" != /* ]] || return 1
+  source="$(normalize_path "$(target_abs "$(parent_rel "${item}")")/${destination}")"
+  if [[ "${source}" == "${STOW_ABS}/"* ]]; then
+    rest="${source#"${STOW_ABS}/"}"
+    OWNER_PACKAGE="${rest%%/*}"
+    [[ "${rest}" == */* ]] && OWNER_SUBPATH="${rest#*/}"
+    OWNER_SOURCE="${source}"
+    OWNER_STOW="${STOW_ABS}"
+    return 0
+  fi
+  prefix=""
+  IFS='/' read -r -a OWNER_PARTS <<<"${source#/}"
+  local index
+  for ((index = 0; index < ${#OWNER_PARTS[@]} - 1; index += 1)); do
+    prefix+="/${OWNER_PARTS[${index}]}"
+    if [[ -e "${prefix}/.stow" ]]; then
+      OWNER_SOURCE="${source}"
+      OWNER_STOW="${prefix}"
+      OWNER_PACKAGE="${OWNER_PARTS[$((index + 1))]}"
+      if ((index + 2 < ${#OWNER_PARTS[@]})); then
+        local -a remainder=("${OWNER_PARTS[@]:index + 2}")
+        local IFS=/
+        OWNER_SUBPATH="${remainder[*]}"
+      fi
+      return 0
+    fi
+  done
+  return 1
+}
+
+stow_contents() {
+  local stow="$1" package="$2" package_subdir="$3" target_subdir="$4"
+  should_skip_target "${target_subdir}" && return 0
+  local source_dir="${stow}/${package}"
+  [[ -n "${package_subdir}" ]] && source_dir+="/${package_subdir}"
+  [[ -d "${source_dir}" ]] || die "cannot read directory: ${source_dir}"
+  local -a entries=()
+  local entry node package_node target_node package_path target_path
+  shopt -s nullglob dotglob
+  entries=("${source_dir}"/*)
+  shopt -u nullglob dotglob
+  for entry in "${entries[@]}"; do
+    node="${entry##*/}"
+    package_node="$(join_rel "${package_subdir}" "${node}")"
+    ignored "${stow}" "${package}" "$(join_rel "${target_subdir}" "${node}")" && continue
+    target_node="$(adjust_dotfile "${node}")"
+    target_path="$(join_rel "${target_subdir}" "${target_node}")"
+    package_path="${package_node}"
+    stow_node "${stow}" "${package}" "${package_path}" "${target_path}"
+  done
+}
+
+stow_node() {
+  local stow="$1" package="$2" package_subpath="$3" target_subpath="$4"
+  local source="${stow}/${package}/${package_subpath}" destination existing
+  if [[ -L "${source}" ]]; then
+    destination="$(readlink "${source}")" || die "could not read link ${source}"
+    if [[ "${destination}" == /* ]]; then
+      conflict stow "${package}" "source is an absolute symlink ${source} => ${destination}"
+      return
+    fi
+  fi
+  destination="$(relative_path "${source}" "$(target_abs "$(parent_rel "${target_subpath}")")")"
+  if is_link "${target_subpath}"; then
+    existing="$(read_link "${target_subpath}")" || die "could not read link ${target_subpath}"
+    if ! find_owner "${target_subpath}" "${existing}"; then
+      conflict stow "${package}" "existing target is not owned by stow: ${target_subpath}"
+    elif [[ -e "${OWNER_SOURCE}" || -L "${OWNER_SOURCE}" ]]; then
+      if [[ "${existing}" == "${destination}" ]]; then
+        debug 2 "--- Skipping ${target_subpath} as it already points to ${destination}"
+      elif matches_any_prefix "${target_subpath}" "${DEFER_REGEXES[@]}"; then
+        debug 2 "--- Deferring installation of: ${target_subpath}"
+      elif matches_any_prefix "${target_subpath}" "${OVERRIDE_REGEXES[@]}"; then
+        do_unlink "${target_subpath}"
+        do_link "${destination}" "${target_subpath}"
+      elif [[ -d "${OWNER_SOURCE}" && -d "${source}" ]]; then
+        local existing_stow="${OWNER_STOW}" existing_package="${OWNER_PACKAGE}" existing_subpath="${OWNER_SUBPATH}"
+        do_unlink "${target_subpath}"
+        do_mkdir "${target_subpath}"
+        stow_contents "${existing_stow}" "${existing_package}" "${existing_subpath}" "${target_subpath}"
+        stow_contents "${stow}" "${package}" "${package_subpath}" "${target_subpath}"
+      else
+        conflict stow "${package}" "existing target is stowed to a different package: ${target_subpath} => ${existing}"
+      fi
+    else
+      do_unlink "${target_subpath}"
+      do_link "${destination}" "${target_subpath}"
+    fi
+  elif is_node "${target_subpath}"; then
+    if is_dir "${target_subpath}"; then
+      if [[ ! -d "${source}" ]]; then
+        conflict stow "${package}" "cannot stow non-directory ${source} over existing directory target ${target_subpath}"
+      else
+        stow_contents "${stow}" "${package}" "${package_subpath}" "${target_subpath}"
+      fi
+    elif ((ADOPT)); then
+      if [[ -d "${source}" ]]; then
+        conflict stow "${package}" "cannot stow directory ${source} over existing non-directory target ${target_subpath}"
+      else
+        do_move "${target_subpath}" "${source}"
+        do_link "${destination}" "${target_subpath}"
+      fi
+    else
+      conflict stow "${package}" "cannot stow ${source} over existing target ${target_subpath} since neither a link nor a directory and --adopt not specified"
+    fi
+  elif ((NO_FOLDING)) && [[ -d "${source}" && ! -L "${source}" ]]; then
+    do_mkdir "${target_subpath}"
+    stow_contents "${stow}" "${package}" "${package_subpath}" "${target_subpath}"
+  else
+    do_link "${destination}" "${target_subpath}"
+  fi
+}
+
+virtual_children() {
+  local directory="$1" absolute entry item parent
+  local -A seen=()
+  VIRTUAL_CHILDREN=()
+  absolute="$(target_abs "${directory}")"
+  local -a entries=()
+  shopt -s nullglob dotglob
+  entries=("${absolute}"/*)
+  shopt -u nullglob dotglob
+  for entry in "${entries[@]}"; do
+    seen["${entry##*/}"]=1
+  done
+  for item in "${!LINK_TASK[@]}" "${!DIR_TASK[@]}"; do
+    parent="$(parent_rel "${item}")"
+    [[ "${parent}" == "${directory}" ]] && seen["${item##*/}"]=1
+  done
+  if ((${#seen[@]})); then
+    while IFS= read -r entry; do
+      VIRTUAL_CHILDREN+=("${entry}")
+    done < <(printf '%s\n' "${!seen[@]}" | LC_ALL=C sort)
+  fi
+}
+
+foldable() {
+  local directory="$1" node item destination common_parent="" candidate
+  ((NO_FOLDING == 0)) || return 1
+  virtual_children "${directory}"
+  ((${#VIRTUAL_CHILDREN[@]})) || return 1
+  for node in "${VIRTUAL_CHILDREN[@]}"; do
+    item="$(join_rel "${directory}" "${node}")"
+    is_node "${item}" || continue
+    is_link "${item}" || return 1
+    destination="$(read_link "${item}")" || return 1
+    candidate="$(parent_rel "${destination}")"
+    if [[ -z "${common_parent}" ]]; then
+      common_parent="${candidate}"
+    elif [[ "${common_parent}" != "${candidate}" ]]; then
+      return 1
+    fi
+  done
+  [[ -n "${common_parent}" ]] || return 1
+  common_parent="${common_parent#../}"
+  if find_owner "${directory}" "${common_parent}"; then
+    FOLD_SOURCE="${common_parent}"
+    return 0
+  fi
+  return 1
+}
+
+fold_tree() {
+  local directory="$1" source="$2" node item
+  virtual_children "${directory}"
+  for node in "${VIRTUAL_CHILDREN[@]}"; do
+    item="$(join_rel "${directory}" "${node}")"
+    is_node "${item}" || continue
+    do_unlink "${item}"
+  done
+  do_rmdir "${directory}"
+  do_link "${source}" "${directory}"
+}
+
+cleanup_invalid_links() {
+  local directory="$1" absolute entry item destination source
+  absolute="$(target_abs "${directory}")"
+  local -a entries=()
+  shopt -s nullglob dotglob
+  entries=("${absolute}"/*)
+  shopt -u nullglob dotglob
+  for entry in "${entries[@]}"; do
+    [[ -L "${entry}" ]] || continue
+    item="$(join_rel "${directory}" "${entry##*/}")"
+    if task_index link "${item}" && [[ "${TASK_ACTION[${TASK_INDEX}]}" == "remove" ]]; then
+      continue
+    fi
+    destination="$(readlink "${entry}")" || continue
+    source="$(normalize_path "$(target_abs "${directory}")/${destination}")"
+    [[ -e "${source}" || -L "${source}" ]] && continue
+    if find_owner "${item}" "${destination}"; then
+      do_unlink "${item}"
+    fi
+  done
+}
+
+unstow_contents() {
+  local package="$1" package_subdir="$2" target_subdir="$3"
+  should_skip_target "${target_subdir}" && return 0
+  local source_dir="${STOW_ABS}/${package}"
+  [[ -n "${package_subdir}" ]] && source_dir+="/${package_subdir}"
+  local listing_dir="${source_dir}"
+  ((COMPAT)) && listing_dir="$(target_abs "${target_subdir}")"
+  [[ -d "${listing_dir}" ]] || die "cannot read directory: ${listing_dir}"
+  local -a entries=()
+  local entry node package_node target_node package_path target_path
+  shopt -s nullglob dotglob
+  entries=("${listing_dir}"/*)
+  shopt -u nullglob dotglob
+  for entry in "${entries[@]}"; do
+    node="${entry##*/}"
+    package_node="${node}"
+    target_node="${node}"
+    target_path="$(join_rel "${target_subdir}" "${target_node}")"
+    ignored "${STOW_ABS}" "${package}" "${target_path}" && continue
+    if ((DOTFILES)); then
+      if ((COMPAT)); then
+        package_node="$(unadjust_dotfile "${node}")"
+      else
+        target_node="$(adjust_dotfile "${node}")"
+      fi
+    fi
+    target_path="$(join_rel "${target_subdir}" "${target_node}")"
+    package_path="$(join_rel "${package_subdir}" "${package_node}")"
+    unstow_node "${package}" "${package_path}" "${target_path}"
+  done
+  if ((COMPAT == 0)) && is_dir "${target_subdir}"; then
+    cleanup_invalid_links "${target_subdir}"
+  fi
+}
+
+unstow_node() {
+  local package="$1" package_subpath="$2" target_subpath="$3"
+  local destination expected
+  if is_link "${target_subpath}"; then
+    destination="$(read_link "${target_subpath}")" || die "could not read link ${target_subpath}"
+    [[ "${destination}" != /* ]] || {
+      printf 'Ignoring an absolute symlink: %s => %s\n' "${target_subpath}" "${destination}" >&2
+      return
+    }
+    find_owner "${target_subpath}" "${destination}" || return 0
+    expected="${STOW_ABS}/${package}/${package_subpath}"
+    if [[ -e "${OWNER_SOURCE}" || -L "${OWNER_SOURCE}" ]]; then
+      [[ "${OWNER_SOURCE}" == "${expected}" ]] && do_unlink "${target_subpath}"
+    else
+      do_unlink "${target_subpath}"
+    fi
+  elif is_dir "${target_subpath}"; then
+    unstow_contents "${package}" "${package_subpath}" "${target_subpath}"
+    if foldable "${target_subpath}"; then
+      fold_tree "${target_subpath}" "${FOLD_SOURCE}"
+    fi
+  fi
+}
+
+validate_package() {
+  local package="$1" package_abs
+  [[ -d "${STOW_ABS}/${package}" ]] ||
+    die "The stow directory ${STOW_ABS} does not contain package ${package}"
+  package_abs="$(canonical_dir "${STOW_ABS}/${package}")" ||
+    die "cannot read package directory: ${STOW_ABS}/${package}"
+  [[ "${package_abs}" != "${STOW_ABS}" ]] ||
+    die "Package ${package} resolves to the stow directory itself"
+  if [[ "${STOW_ABS}" != "/" && "${package_abs}" != "${STOW_ABS}/"* ]]; then
+    die "Package ${package} resolves outside the stow directory"
+  fi
+}
+
+plan_unstow() {
+  local package
+  for package in "${UNSTOW_PACKAGES[@]}"; do
+    validate_package "${package}"
+    debug 2 "Planning unstow of package ${package}"
+    unstow_contents "${package}" "" "."
+  done
+}
+
+plan_stow() {
+  local package
+  for package in "${STOW_PACKAGES[@]}"; do
+    validate_package "${package}"
+    debug 2 "Planning stow of package ${package}"
+    stow_contents "${STOW_ABS}" "${package}" "" "."
+  done
+}
+
+report_conflicts() {
+  local index
+  for ((index = 0; index < ${#CONFLICT_ACTION[@]}; index += 1)); do
+    printf 'WARNING! %sing %s would cause conflicts:\n' "${CONFLICT_ACTION[${index}]}" "${CONFLICT_PACKAGE[${index}]}" >&2
+    printf '  * %s\n' "${CONFLICT_MESSAGE[${index}]}" >&2
+  done
+  printf 'All operations aborted.\n' >&2
+}
+
+rollback() {
+  local position index action type item argument absolute backup move_restored
+  local failed=0
+  ((APPLYING)) || return 0
+  APPLYING=0
+  for ((position = ${#APPLIED_TASKS[@]} - 1; position >= 0; position -= 1)); do
+    index="${APPLIED_TASKS[${position}]}"
+    action="${TASK_ACTION[${index}]}"
+    type="${TASK_TYPE[${index}]}"
+    item="${TASK_PATH[${index}]}"
+    argument="${TASK_ARG[${index}]}"
+    absolute="$(target_abs "${item}")"
+    if [[ "${action}:${type}" == "create:link" ]]; then
+      if [[ -L "${absolute}" && "$(readlink "${absolute}")" == "${argument}" ]]; then
+        rm -- "${absolute}" || failed=1
+      else
+        failed=1
+      fi
+    elif [[ "${action}:${type}" == "create:dir" ]]; then
+      rmdir -- "${absolute}" 2>/dev/null || failed=1
+    elif [[ "${action}:${type}" == "remove:link" ]]; then
+      if [[ ! -e "${absolute}" && ! -L "${absolute}" ]]; then
+        ln -s -- "${argument}" "${absolute}" || failed=1
+      else
+        failed=1
+      fi
+    elif [[ "${action}:${type}" == "remove:dir" ]]; then
+      if [[ ! -e "${absolute}" && ! -L "${absolute}" ]]; then
+        mkdir -- "${absolute}" || failed=1
+      else
+        failed=1
+      fi
+    elif [[ "${action}:${type}" == "move:file" ]]; then
+      move_restored=0
+      if [[ -e "${argument}" || -L "${argument}" ]] && [[ ! -e "${absolute}" && ! -L "${absolute}" ]]; then
+        if mv -- "${argument}" "${absolute}"; then
+          move_restored=1
+        else
+          failed=1
+        fi
+      else
+        failed=1
+      fi
+      backup="${MOVE_BACKUP[${index}]-}"
+      if ((move_restored)) && [[ -n "${backup}" && -e "${backup}" ]]; then
+        mv -- "${backup}" "${argument}" || failed=1
+      elif ((move_restored)); then
+        failed=1
+      fi
+    fi
+  done
+  if ((failed)); then
+    if [[ -n "${ROLLBACK_DIR}" && -d "${ROLLBACK_DIR}" ]]; then
+      printf 'jstow: rollback incomplete; recovery data remains in %s\n' "${ROLLBACK_DIR}" >&2
+    else
+      printf 'jstow: rollback incomplete; manual recovery required\n' >&2
+    fi
+    return 1
+  fi
+  [[ -z "${ROLLBACK_DIR}" ]] || rmdir -- "${ROLLBACK_DIR}" 2>/dev/null || return 1
+}
+
+apply_tasks() {
+  local index action type item argument absolute backup
+  APPLYING=1
+  INTERRUPTED=0
+  trap 'INTERRUPTED=1' INT TERM
+  for ((index = 0; index < ${#TASK_ACTION[@]}; index += 1)); do
+    if ((INTERRUPTED)); then
+      rollback
+      exit 130
+    fi
+    action="${TASK_ACTION[${index}]}"
+    [[ "${action}" != "skip" ]] || continue
+    type="${TASK_TYPE[${index}]}"
+    item="${TASK_PATH[${index}]}"
+    argument="${TASK_ARG[${index}]}"
+    absolute="$(target_abs "${item}")"
+    if [[ "${action}:${type}" == "create:link" ]]; then
+      ln -s -- "${argument}" "${absolute}" || {
+        rollback
+        die "Could not create symlink: ${item} => ${argument}"
+      }
+    elif [[ "${action}:${type}" == "create:dir" ]]; then
+      mkdir -- "${absolute}" || {
+        rollback
+        die "Could not create directory: ${item}"
+      }
+    elif [[ "${action}:${type}" == "remove:link" ]]; then
+      rm -- "${absolute}" || {
+        rollback
+        die "Could not remove link: ${item}"
+      }
+    elif [[ "${action}:${type}" == "remove:dir" ]]; then
+      rmdir -- "${absolute}" || {
+        rollback
+        die "Could not remove directory: ${item}"
+      }
+    elif [[ "${action}:${type}" == "move:file" ]]; then
+      if [[ -z "${ROLLBACK_DIR}" ]]; then
+        ROLLBACK_DIR="${STOW_ABS}/.jstow-rollback.$$"
+        mkdir -- "${ROLLBACK_DIR}" || {
+          rollback
+          die "Could not create rollback directory"
+        }
+      fi
+      backup="${ROLLBACK_DIR}/${index}"
+      mv -- "${argument}" "${backup}" || {
+        rollback
+        die "Could not preserve ${argument} before adoption"
+      }
+      MOVE_BACKUP[${index}]="${backup}"
+      mv -- "${absolute}" "${argument}" || {
+        if mv -- "${backup}" "${argument}"; then
+          unset 'MOVE_BACKUP[$index]'
+        else
+          APPLYING=0
+          printf 'jstow: recovery data remains in %s\n' "${ROLLBACK_DIR}" >&2
+          die "Could not move ${item} -> ${argument} or restore its package file"
+        fi
+        rollback
+        die "Could not move ${item} -> ${argument}"
+      }
+    else
+      rollback
+      die "internal error: invalid task ${action} ${type}"
+    fi
+    APPLIED_TASKS+=("${index}")
+    if ((INTERRUPTED)); then
+      rollback
+      exit 130
+    fi
+  done
+  APPLYING=0
+  trap - INT TERM
+  if [[ -n "${ROLLBACK_DIR}" ]]; then
+    for backup in "${MOVE_BACKUP[@]}"; do
+      rm -f -- "${backup}" || die "Could not remove rollback copy ${backup}"
+    done
+    rmdir -- "${ROLLBACK_DIR}" || die "Could not remove rollback directory"
+  fi
+}
+
+main() {
+  local target_default
+  if ((BASH_VERSINFO[0] < 5)); then
+    die "Bash 5 or newer is required"
+  fi
+  if [[ ${1:-} == __complete ]]; then
+    local provider=${2:-} directory=${PWD} argument package
+    shift 2 || true
+    while (($#)); do
+      argument=$1
+      shift
+      case ${argument} in
+        -d | --dir)
+          (($#)) || break
+          directory=$1
+          shift
+          ;;
+        --dir=*) directory=${argument#*=} ;;
+      esac
+    done
+    if [[ ${provider} == package && -d ${directory} ]]; then
+      for package in "${directory}"/*; do
+        [[ -d ${package} ]] || continue
+        printf '%s\n' "${package##*/}"
+      done
+    fi
+    return
+  fi
+  read_rc_files
+  parse_tokens "$@"
+  ((${#STOW_PACKAGES[@]} + ${#UNSTOW_PACKAGES[@]} > 0)) || {
+    usage "No packages to stow or unstow"
+    exit 1
+  }
+  [[ -n "${STOW_DIR}" ]] || STOW_DIR="${ENV_STOW_DIR:-${PWD}}"
+  STOW_ABS="$(canonical_dir "${STOW_DIR}")" || die "--dir value '${STOW_DIR}' is not a valid directory"
+  if [[ -n "${TARGET_DIR}" ]]; then
+    TARGET_ABS="$(canonical_dir "${TARGET_DIR}")" || die "--target value '${TARGET_DIR}' is not a valid directory"
+  else
+    target_default="${STOW_DIR}"
+    while [[ "${target_default}" == */ && "${target_default}" != "/" ]]; do
+      target_default="${target_default%/}"
+    done
+    if [[ "${target_default}" == "/" ]]; then
+      TARGET_ABS="/"
+      target_default=""
+    elif [[ "${target_default}" == */* ]]; then
+      target_default="${target_default%/*}"
+      [[ -n "${target_default}" ]] || target_default="."
+    else
+      target_default="."
+    fi
+    if [[ -n "${target_default}" ]]; then
+      TARGET_ABS="$(canonical_dir "${target_default}")" || die "default target '${target_default}' is not a valid directory"
+    fi
+  fi
+  plan_unstow
+  plan_stow
+  if ((${#CONFLICT_ACTION[@]})); then
+    report_conflicts
+    exit 1
+  fi
+  if ((SIMULATE)); then
+    printf 'WARNING: in simulation mode so not modifying filesystem.\n' >&2
+    exit 0
+  fi
+  apply_tasks
+}
+
+main "$@"

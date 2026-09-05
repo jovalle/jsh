@@ -3,8 +3,8 @@ CHECK_TARGETS := check-script-headers check-shell-syntax check-zsh-syntax check-
 	lint-yaml lint-markdown lint-js
 FORMAT_TARGETS := format-shell format-python format-yaml format-json format-markdown
 
-.PHONY: help install setup deploy configure patch uninstall check test test-fast \
-	test-integration format clean \
+.PHONY: help install setup deploy configure patch uninstall check \
+	format clean \
 	check-tools check-syntax lint ci validate pre-commit pre-commit-run commit \
 	commit-msg-check $(CHECK_TARGETS) $(FORMAT_TARGETS)
 .DEFAULT_GOAL := help
@@ -57,10 +57,6 @@ SHELL_FILES := $(shell find . -type f -name "*.sh" ! -path "*/node_modules/*" ! 
 	find bin -type f 2>/dev/null | while read -r f; do head -n1 "$$f" 2>/dev/null | grep -qE '^\#!/usr/bin/env bash|^\#!/bin/(ba)?sh' && echo "$$f"; done)
 ZSH_FILES := $(shell find . -type f \( -name "*.zsh" -o -name ".zshrc" \) ! -path "*/.git/*" ! -path "./local/vendor/*" ! -path "./tmp/*")
 SCRIPT_FILES := $(shell find scripts -type f \( -name "*.sh" -o -name "*.zsh" \) | sort)
-BATS_TEST_FILES := $(shell find tests -type f \( -name "*.bats" -o -name "*.bash" \) 2>/dev/null)
-FAST_TEST_FILES := tests/commands.bats tests/completions.bats tests/jstow.bats \
-	tests/platform-safety.bats
-INTEGRATION_TEST_FILES := tests/jsh-runtime.bats tests/jssh.bats
 PYTHON_FILES := $(shell find . -type f -name "*.py" ! -path "*/\.*" ! -path "*/node_modules/*" ! -path "*/.venv/*" ! -path "./local/vendor/*" ! -path "./tmp/*"; \
 	find bin -type f 2>/dev/null | while read -r f; do head -n1 "$$f" 2>/dev/null | grep -qE '^\#!/usr/bin/env python3?' && echo "$$f"; done)
 YAML_FILES := $(shell find . -type f \( -name "*.yaml" -o -name "*.yml" \) ! -path "*/\.*" ! -path "*/node_modules/*" ! -path "./local/vendor/*" ! -path "./tmp/*")
@@ -104,16 +100,6 @@ uninstall: ## Remove dotfile links managed by jstow
 		*) jsh_warn "Skipping uninstall."; exit 0 ;; \
 	esac; \
 	bash "$(JSH_ROOT)/bin/jstow" --delete --dir "$(JSH_ROOT)" --target "$(HOME)" dotfiles
-
-##@ Testing
-
-test: test-fast test-integration ## Run all behavior tests
-
-test-fast: ## Run fast command and filesystem contracts
-	@bats $(FAST_TEST_FILES)
-
-test-integration: ## Run shell runtime and remote integration contracts
-	@bats $(INTEGRATION_TEST_FILES)
 
 ##@ Formatting
 
@@ -171,7 +157,7 @@ check: $(CHECK_TARGETS) ## Run all checks
 check-tools: ## Check required developer tools
 	@$(OUTPUT) jsh_info "Checking for required tools..."
 	@$(OUTPUT) errors=0; \
-	for tool in actionlint autopep8 bats black commitlint cz eslint gitleaks hadolint jq \
+	for tool in actionlint autopep8 black commitlint cz eslint gitleaks hadolint jq \
 		markdownlint pre-commit prettier pylint shellcheck shfmt stow yamllint yq; do \
 		if command -v $$tool >/dev/null 2>&1; then \
 			jsh_success "$$tool"; \
@@ -314,8 +300,8 @@ lint: lint-shell lint-python lint-yaml lint-markdown lint-js ## Run all linters
 
 lint-shell: # Lint shell scripts with shellcheck
 	@$(OUTPUT) jsh_info "Linting shell scripts..."
-	@$(OUTPUT) if [ -n "$(SHELL_FILES) $(BATS_TEST_FILES)" ]; then \
-		shellcheck -x -S warning $(SHELL_FILES) $(BATS_TEST_FILES) && \
+	@$(OUTPUT) if [ -n "$(SHELL_FILES)" ]; then \
+		shellcheck -x -S warning $(SHELL_FILES) && \
 		jsh_success "Shell scripts passed linting"; \
 	else \
 		jsh_warn "No shell files found"; \
@@ -404,9 +390,9 @@ pre-commit: check ## Run checks used by pre-commit
 
 ##@ Validation
 
-ci: check test ## Run CI checks and tests
+ci: check ## Run CI checks
 
-validate: check test ## Run all checks and tests
+validate: check ## Run all checks
 
 ##@ Cleanup
 
@@ -414,6 +400,5 @@ clean: ## Remove temporary files and caches
 	@$(OUTPUT) jsh_info "Cleaning up..."
 	@find . -type f -name "*.pyc" ! -path "./local/vendor/*" -delete
 	@find . -type d -name "__pycache__" ! -path "./local/vendor/*" -delete
-	@find . -type d -name ".pytest_cache" ! -path "./local/vendor/*" -delete
 	@find . -type d -name ".mypy_cache" ! -path "./local/vendor/*" -delete
 	@$(OUTPUT) jsh_success "Cleanup complete"

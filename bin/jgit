@@ -1,0 +1,782 @@
+#!/usr/bin/env bash
+##% jgit
+##+ git
+## identity [list|set NAME] ## Show, list, or set the repository identity
+## identities ## List configured identities
+## profile [NAME|list] ## Show or apply a repository identity
+## profiles ## List configured identities
+## commit [-t TIME] [ARGS...] ## Commit with an optional timestamp
+## amend -t TIME [ARGS...] ## Amend the latest commit timestamp
+## update [--stash] [--all [DIR]] ## Fast-forward repositories from their upstreams
+## @git-command ## Git command
+##? identity list ## List configured identities
+##? identity set ## Set the repository identity
+##? identity set @profile ## Configured identity
+##? identity @profile ## Configured identity
+##? profile @profile ## Configured identity
+##? update --stash ## Stash and restore local changes
+##? update --all ## Update the base directory and immediate child repositories
+##? update --all @directory ## Repository base directory
+
+set -euo pipefail
+
+case $0 in
+  /*) jgit_launcher=$0 ;;
+  *) jgit_launcher=${PWD}/$0 ;;
+esac
+
+if [[ -z ${JSH_ROOT:-} ]]; then
+  JSH_ROOT=$(CDPATH='' cd -P "${jgit_launcher%/*}/.." 2> /dev/null && pwd -P) || {
+    printf 'jgit: cannot locate the repository root\n' >&2
+    exit 1
+  }
+fi
+
+for library_file in "${JSH_ROOT}"/lib/*; do
+  [[ -f ${library_file} && -x ${library_file} ]] || continue
+  # shellcheck source=/dev/null
+  . "${library_file}"
+done
+unset library_file
+
+JGIT_CONFIG=${JGIT_CONFIG:-${JSH_ROOT}/conf/jsh/git.yaml}
+JGIT_VERSION=1.0.0
+JGIT_COLOR=0
+jsh_color_enabled 1 && JGIT_COLOR=1
+
+_jgit_usage() {
+  cat << 'EOF'
+Usage: jgit [command] [args...]
+
+Run without arguments in a Git repository to show its status and identity.
+All unrecognized commands and options are passed directly to Git.
+
+Commands:
+  identity              Show the repository identity
+  identity list         List configured identities
+  identity set NAME     Set the repository identity
+  profile [NAME|list]   Alias for identity commands
+  profiles              Alias for identity list
+  commit [-t TIME]      Commit with a relative or absolute timestamp
+  amend -t TIME         Amend the latest commit timestamp
+  update [--stash]      Fast-forward the current branch from its upstream
+  update --all [DIR]    Update repositories in DIR and its immediate children
+
+Timestamp examples:
+  +30m                  30 minutes after the latest commit
+  -2h                   2 hours before the latest commit
+  now, now+1h           Current time, optionally with an offset
+  2026-09-05 14:30      Absolute local date and time
+
+Relative offsets randomize unspecified lower-order time fields.
+
+Environment:
+  JGIT_CONFIG           Profile file (default: conf/jsh/git.yaml)
+EOF
+}
+
+_jgit_die() {
+  jsh_error "$*"
+  exit 1
+}
+
+_jgit_section() {
+  [[ ${2:-} == first ]] || printf '\n'
+  if ((JGIT_COLOR)); then
+    printf '\033[1;36m%s\033[0m\n' "$1"
+  else
+    printf '%s\n' "$1"
+  fi
+}
+
+_jgit_row() {
+  printf '  %-14s %s\n' "$1" "$2"
+}
+
+_jgit_state() {
+  local state=$1 text=$2 color
+  case ${state} in
+    ok)
+      color=32
+      ;;
+    warn)
+      color=33
+      ;;
+    error)
+      color=31
+      ;;
+    *)
+      color=36
+      ;;
+  esac
+  if ((JGIT_COLOR)); then
+    printf '\033[%sm%s\033[0m' "${color}" "${text}"
+  else
+    printf '%s' "${text}"
+  fi
+}
+
+_jgit_expand_home() {
+  if [[ $1 == \~ ]]; then
+    printf '%s\n' "${HOME}"
+  elif [[ ${1:0:2} == \~/ ]]; then
+    printf '%s/%s\n' "${HOME}" "${1:2}"
+  else
+    printf '%s\n' "$1"
+  fi
+}
+
+_jgit_profile_names() {
+  [[ -r ${JGIT_CONFIG} ]] || return 0
+  awk '
+    /^  [[:alnum:]_.-]+:[[:space:]]*$/ && $0 !~ /^    / {
+      line = $0
+      sub(/^  /, "", line)
+      sub(/:[[:space:]]*$/, "", line)
+      print line
+    }
+  ' "${JGIT_CONFIG}"
+}
+
+_jgit_git_commands() {
+  LC_ALL=C GIT_PAGER=cat git help -a 2> /dev/null | awk '
+    /^   [[:alnum:]][[:alnum:]-]*[[:space:]][[:space:]]+/ {
+      command = $1
+      $1 = ""
+      sub(/^[[:space:]]+/, "")
+      print command "\t" $0
+    }
+  '
+  git config --get-regexp '^alias\.' 2> /dev/null | awk '
+    {
+      alias_name = $1
+      sub(/^alias\./, "", alias_name)
+      $1 = ""
+      sub(/^[[:space:]]+/, "")
+      print alias_name "\tAlias for " $0
+    }
+  ' || true
+}
+
+_jgit_profile_field() {
+  local profile=$1 field=$2
+  [[ -r ${JGIT_CONFIG} ]] || return 1
+  awk -v wanted_profile="${profile}" -v wanted_field="${field}" '
+    function trim(value) {
+      sub(/^[[:space:]]+/, "", value)
+      sub(/[[:space:]]+$/, "", value)
+      return value
+    }
+    /^  [[:alnum:]_.-]+:[[:space:]]*$/ && $0 !~ /^    / {
+      current = $0
+      sub(/^  /, "", current)
+      sub(/:[[:space:]]*$/, "", current)
+      next
+    }
+    current == wanted_profile && /^    [[:alnum:]_.-]+:/ {
+      line = substr($0, 5)
+      key = line
+      sub(/:.*/, "", key)
+      if (key != wanted_field) next
+      sub(/^[^:]+:/, "", line)
+      line = trim(line)
+      if ((substr(line, 1, 1) == "\"" && substr(line, length(line), 1) == "\"") ||
+          (substr(line, 1, 1) == "\047" && substr(line, length(line), 1) == "\047")) {
+        line = substr(line, 2, length(line) - 2)
+      }
+      print line
+      exit
+    }
+  ' "${JGIT_CONFIG}"
+}
+
+_jgit_profile_exists() {
+  local candidate
+  while IFS= read -r candidate; do
+    [[ ${candidate} == "$1" ]] && return 0
+  done < <(_jgit_profile_names)
+  return 1
+}
+
+_jgit_profile_validate() {
+  local profile=$1 field value
+  for field in name email user ssh_key; do
+    value=$(_jgit_profile_field "${profile}" "${field}")
+    [[ -n ${value} ]] || {
+      jsh_error "profile '${profile}' is missing ${field}"
+      return 1
+    }
+  done
+}
+
+_jgit_file_metadata() {
+  local metadata
+  metadata=$(stat -f '%u %Lp' "$1" 2> /dev/null || true)
+  if [[ ! ${metadata} =~ ^[0-9]+\ [0-7]{3,4}$ ]]; then
+    metadata=$(stat -c '%u %a' "$1" 2> /dev/null || true)
+  fi
+  [[ ${metadata} =~ ^[0-9]+\ [0-7]{3,4}$ ]] || return 1
+  printf '%s\n' "${metadata}"
+}
+
+_jgit_key_health() {
+  local configured=$1 key_file metadata owner mode
+  HEALTH_STATE=error
+  HEALTH_TEXT='not configured'
+  [[ -n ${configured} ]] || return 0
+
+  key_file=$(_jgit_expand_home "${configured}")
+  HEALTH_TEXT=${configured}
+  if [[ ! -e ${key_file} ]]; then
+    HEALTH_TEXT="${configured} (missing)"
+    return 0
+  fi
+  if [[ ! -f ${key_file} || ! -r ${key_file} ]]; then
+    HEALTH_TEXT="${configured} (not a readable file)"
+    return 0
+  fi
+  metadata=$(_jgit_file_metadata "${key_file}") || {
+    HEALTH_TEXT="${configured} (permissions unavailable)"
+    return 0
+  }
+  owner=${metadata%% *}
+  mode=${metadata#* }
+  if [[ ${owner} != "$(id -u)" ]]; then
+    HEALTH_TEXT="${configured} (owned by uid ${owner})"
+    return 0
+  fi
+  if (((8#${mode} & 0077) != 0)); then
+    HEALTH_STATE=warn
+    HEALTH_TEXT="${configured} (permissions too open)"
+    return 0
+  fi
+
+  HEALTH_STATE=ok
+  HEALTH_TEXT=${configured}
+}
+
+_jgit_helper_health() {
+  local helper helper_name exec_dir
+  helper=$(git config --get-all credential.helper 2> /dev/null | awk 'NF { value = $0 } END { print value }')
+  if [[ -z ${helper} ]]; then
+    HEALTH_STATE=warn
+    HEALTH_TEXT='not configured'
+    return
+  fi
+  case ${helper} in
+    '!'*)
+      HEALTH_STATE=info
+      HEALTH_TEXT="custom command (not executed)"
+      return
+      ;;
+    /*)
+      helper_name=${helper%% *}
+      if [[ -x ${helper_name} ]]; then HEALTH_STATE=ok; else HEALTH_STATE=warn; fi
+      ;;
+    *)
+      helper_name=${helper%% *}
+      exec_dir=$(git --exec-path)
+      if command -v "git-credential-${helper_name}" > /dev/null 2>&1 ||
+        [[ -x ${exec_dir}/git-credential-${helper_name} ]]; then
+        HEALTH_STATE=ok
+      else
+        HEALTH_STATE=warn
+      fi
+      ;;
+  esac
+  HEALTH_TEXT=${helper}
+  [[ ${HEALTH_STATE} == ok ]] || HEALTH_TEXT="${helper} (helper not found)"
+}
+
+_jgit_active_profile() {
+  git config --local --get jsh.profile 2> /dev/null || true
+}
+
+_jgit_profile_status() {
+  git rev-parse --git-dir > /dev/null 2>&1 || _jgit_die 'not in a Git repository'
+  local profile name email expected_name expected_email ssh_key
+  profile=$(_jgit_active_profile)
+  name=$(git config --get user.name 2> /dev/null || true)
+  email=$(git config --get user.email 2> /dev/null || true)
+
+  _jgit_section Identity
+  if [[ -z ${profile} ]]; then
+    _jgit_row Profile "$(_jgit_state warn 'not assigned')"
+  elif ! _jgit_profile_exists "${profile}"; then
+    _jgit_row Profile "$(_jgit_state error "${profile} (not found in ${JGIT_CONFIG})")"
+  else
+    expected_name=$(_jgit_profile_field "${profile}" name)
+    expected_email=$(_jgit_profile_field "${profile}" email)
+    if [[ ${name} == "${expected_name}" && ${email} == "${expected_email}" ]]; then
+      _jgit_row Profile "$(_jgit_state ok "${profile}")"
+    else
+      _jgit_row Profile "$(_jgit_state warn "${profile} (Git identity differs)")"
+    fi
+  fi
+  _jgit_row Name "${name:-not set}"
+  _jgit_row Email "${email:-not set}"
+
+  _jgit_section Credentials
+  ssh_key=
+  [[ -z ${profile} ]] || ssh_key=$(_jgit_profile_field "${profile}" ssh_key 2> /dev/null || true)
+  _jgit_key_health "${ssh_key}"
+  _jgit_row 'SSH key' "$(_jgit_state "${HEALTH_STATE}" "${HEALTH_TEXT}")"
+  _jgit_helper_health
+  _jgit_row 'HTTPS helper' "$(_jgit_state "${HEALTH_STATE}" "${HEALTH_TEXT}")"
+}
+
+_jgit_dashboard() {
+  git rev-parse --git-dir > /dev/null 2>&1 || exec git
+  local root branch remote upstream ahead behind staged unstaged untracked conflicts stashes summary
+  root=$(git rev-parse --show-toplevel)
+  branch=$(git symbolic-ref --quiet --short HEAD 2> /dev/null || git rev-parse --short HEAD)
+  remote=$(git remote get-url origin 2> /dev/null || true)
+  upstream=$(git rev-parse --abbrev-ref '@{upstream}' 2> /dev/null || true)
+
+  _jgit_section Repository first
+  _jgit_row Root "${root}"
+  _jgit_row Branch "${branch}"
+  [[ -z ${remote} ]] || _jgit_row Remote "${remote}"
+  if [[ -n ${upstream} ]]; then
+    ahead=$(git rev-list --count '@{upstream}..HEAD')
+    behind=$(git rev-list --count 'HEAD..@{upstream}')
+    _jgit_row Upstream "${upstream} (${ahead} ahead, ${behind} behind)"
+  fi
+
+  staged=$(git diff --cached --name-only | wc -l | tr -d ' ')
+  unstaged=$(git diff --name-only | wc -l | tr -d ' ')
+  untracked=$(git ls-files --others --exclude-standard | wc -l | tr -d ' ')
+  conflicts=$(git diff --name-only --diff-filter=U | wc -l | tr -d ' ')
+  stashes=$(git stash list | wc -l | tr -d ' ')
+  if ((staged + unstaged + untracked + conflicts == 0)); then
+    summary=$(_jgit_state ok clean)
+  else
+    summary="${staged} staged, ${unstaged} modified, ${untracked} untracked"
+    ((conflicts == 0)) || summary="${summary}, ${conflicts} conflicted"
+    summary=$(_jgit_state warn "${summary}")
+  fi
+  _jgit_row 'Working tree' "${summary}"
+  ((stashes == 0)) || _jgit_row Stashes "${stashes}"
+
+  _jgit_profile_status
+
+  _jgit_section 'Recent commits'
+  git log -3 --format='  %h  %s  (%cr)' 2> /dev/null || printf '  No commits\n'
+}
+
+_jgit_profile_list() {
+  local profile name email user ssh_key count=0
+  [[ -r ${JGIT_CONFIG} ]] || _jgit_die "profile config not found: ${JGIT_CONFIG}"
+  _jgit_section Profiles first
+  while IFS= read -r profile; do
+    count=$((count + 1))
+    name=$(_jgit_profile_field "${profile}" name)
+    email=$(_jgit_profile_field "${profile}" email)
+    user=$(_jgit_profile_field "${profile}" user)
+    ssh_key=$(_jgit_profile_field "${profile}" ssh_key)
+    printf '  %s\n' "${profile}"
+    printf '    %s <%s> (%s)\n' "${name:-not set}" "${email:-not set}" "${user:-not set}"
+    _jgit_key_health "${ssh_key}"
+    printf '    SSH key: %s\n' "$(_jgit_state "${HEALTH_STATE}" "${HEALTH_TEXT}")"
+  done < <(_jgit_profile_names)
+  ((count > 0)) || _jgit_die "no profiles found in ${JGIT_CONFIG}"
+}
+
+_jgit_profile_apply() {
+  local profile=$1 name email ssh_key expanded_key ssh_command
+  git rev-parse --git-dir > /dev/null 2>&1 || _jgit_die 'not in a Git repository'
+  [[ -r ${JGIT_CONFIG} ]] || _jgit_die "profile config not found: ${JGIT_CONFIG}"
+  _jgit_profile_exists "${profile}" || _jgit_die "unknown profile: ${profile}"
+  _jgit_profile_validate "${profile}" || exit 1
+
+  name=$(_jgit_profile_field "${profile}" name)
+  email=$(_jgit_profile_field "${profile}" email)
+  ssh_key=$(_jgit_profile_field "${profile}" ssh_key)
+  expanded_key=$(_jgit_expand_home "${ssh_key}")
+  [[ ${expanded_key} != *'"'* && ${expanded_key} != *$'\n'* ]] || _jgit_die 'SSH key path contains unsupported characters'
+  ssh_command="ssh -i \"${expanded_key}\" -o IdentitiesOnly=yes -o IdentityAgent=none"
+
+  git config --local jsh.profile "${profile}"
+  git config --local user.name "${name}"
+  git config --local user.email "${email}"
+  git config --local core.sshCommand "${ssh_command}"
+  jsh_success "Applied Git profile '${profile}'"
+  _jgit_profile_status
+}
+
+_jgit_profile_command() {
+  case ${1:-} in
+    '') _jgit_profile_status ;;
+    list | ls) _jgit_profile_list ;;
+    set)
+      [[ -n ${2:-} ]] || _jgit_die 'profile set requires a profile name'
+      _jgit_profile_apply "$2"
+      ;;
+    -h | --help | help) printf 'Usage: jgit profile [NAME|list]\n' ;;
+    *) _jgit_profile_apply "$1" ;;
+  esac
+}
+
+_jgit_identity_command() {
+  case ${1:-} in
+    '') _jgit_profile_status ;;
+    list | ls) _jgit_profile_list ;;
+    set)
+      [[ -n ${2:-} ]] || _jgit_die 'identity set requires a profile name'
+      _jgit_profile_apply "$2"
+      ;;
+    -h | --help | help)
+      printf '%s\n' \
+        'Usage: jgit identity' \
+        '       jgit identity list' \
+        '       jgit identity set NAME'
+      ;;
+    *) _jgit_profile_apply "$1" ;;
+  esac
+}
+
+_jgit_is_gnu_date() {
+  date --version > /dev/null 2>&1
+}
+
+_jgit_now() {
+  date +%s
+}
+
+_jgit_parse_offset() {
+  local input=$1 sign=1 total=0 precision=86400 remaining number unit unit_precision
+  case ${input} in
+    -*)
+      sign=-1
+      remaining=${input#-}
+      ;;
+    +*) remaining=${input#+} ;;
+    *) return 1 ;;
+  esac
+  while [[ -n ${remaining} ]]; do
+    [[ ${remaining} =~ ^([0-9]+)([smhdwMy])(.*)$ ]] || return 1
+    number=${BASH_REMATCH[1]}
+    unit=${BASH_REMATCH[2]}
+    remaining=${BASH_REMATCH[3]}
+    case ${unit} in
+      s) total=$((total + number)) ;;
+      m) total=$((total + number * 60)) ;;
+      h) total=$((total + number * 3600)) ;;
+      d) total=$((total + number * 86400)) ;;
+      w) total=$((total + number * 604800)) ;;
+      M) total=$((total + number * 2592000)) ;;
+      y) total=$((total + number * 31536000)) ;;
+    esac
+    case ${unit} in
+      s) unit_precision=1 ;;
+      m) unit_precision=60 ;;
+      h) unit_precision=3600 ;;
+      *) unit_precision=86400 ;;
+    esac
+    if ((unit_precision < precision)); then
+      precision=${unit_precision}
+    fi
+  done
+  printf '%s %s\n' "$((sign * total))" "${precision}"
+}
+
+_jgit_parse_absolute() {
+  local input=$1 format
+  if _jgit_is_gnu_date; then
+    date -d "${input}" +%s 2> /dev/null
+    return
+  fi
+  for format in '%Y-%m-%d %H:%M:%S' '%Y-%m-%d %H:%M' '%Y-%m-%d' '%H:%M:%S' '%H:%M'; do
+    date -j -f "${format}" "${input}" +%s 2> /dev/null && return 0
+  done
+  return 1
+}
+
+_jgit_random_below() {
+  local limit=$1 value
+  if [[ ${JGIT_RANDOM_VALUE:-} =~ ^[0-9]+$ ]]; then
+    value=${JGIT_RANDOM_VALUE}
+  else
+    value=$((RANDOM * 32768 + RANDOM))
+  fi
+  JGIT_RANDOM_RESULT=$((value % limit))
+}
+
+_jgit_randomize_timestamp() {
+  local epoch=$1 precision=$2 local_date random timestamp resolved attempts=0
+  if ((precision == 1)); then
+    printf '%s\n' "${epoch}"
+    return
+  fi
+
+  local_date=$(_jgit_git_date "${epoch}") || return 1
+  while ((attempts < 10)); do
+    attempts=$((attempts + 1))
+    _jgit_random_below "${precision}"
+    random=${JGIT_RANDOM_RESULT}
+    case ${precision} in
+      60) printf -v timestamp '%s%02d' "${local_date:0:17}" "${random}" ;;
+      3600)
+        printf -v timestamp '%s%02d:%02d' "${local_date:0:14}" \
+          "$((random / 60))" "$((random % 60))"
+        ;;
+      86400)
+        printf -v timestamp '%s%02d:%02d:%02d' "${local_date:0:11}" \
+          "$((random / 3600))" "$(((random % 3600) / 60))" "$((random % 60))"
+        ;;
+    esac
+    if resolved=$(_jgit_parse_absolute "${timestamp}"); then
+      printf '%s\n' "${resolved}"
+      return
+    fi
+  done
+  return 1
+}
+
+_jgit_resolve_timestamp() {
+  local input=$1 base parsed offset precision
+  case ${input} in
+    now) _jgit_now ;;
+    now+* | now-*)
+      base=$(_jgit_now)
+      parsed=$(_jgit_parse_offset "${input#now}") || return 1
+      offset=${parsed%% *}
+      precision=${parsed#* }
+      _jgit_randomize_timestamp "$((base + offset))" "${precision}"
+      ;;
+    +* | -*)
+      base=$(git log -1 --format='%at' 2> /dev/null || _jgit_now)
+      parsed=$(_jgit_parse_offset "${input}") || return 1
+      offset=${parsed%% *}
+      precision=${parsed#* }
+      _jgit_randomize_timestamp "$((base + offset))" "${precision}"
+      ;;
+    *) _jgit_parse_absolute "${input}" ;;
+  esac
+}
+
+_jgit_git_date() {
+  if _jgit_is_gnu_date; then
+    date -d "@$1" '+%Y-%m-%d %H:%M:%S %z'
+  else
+    date -r "$1" '+%Y-%m-%d %H:%M:%S %z'
+  fi
+}
+
+_jgit_parse_timestamp_args() {
+  TIMESTAMP=
+  GIT_ARGS=()
+  while (($#)); do
+    case $1 in
+      -t | --timestamp)
+        (($# >= 2)) || _jgit_die "option $1 requires a timestamp"
+        TIMESTAMP=$2
+        shift 2
+        ;;
+      -t=* | --timestamp=*)
+        TIMESTAMP=${1#*=}
+        shift
+        ;;
+      *)
+        GIT_ARGS+=("$1")
+        shift
+        ;;
+    esac
+  done
+}
+
+_jgit_commit() {
+  local epoch git_date
+  _jgit_parse_timestamp_args "$@"
+  if [[ -z ${TIMESTAMP} ]]; then
+    exec git commit "${GIT_ARGS[@]}"
+  fi
+  epoch=$(_jgit_resolve_timestamp "${TIMESTAMP}") || _jgit_die "invalid timestamp: ${TIMESTAMP}"
+  git_date=$(_jgit_git_date "${epoch}")
+  GIT_AUTHOR_DATE=${git_date} GIT_COMMITTER_DATE=${git_date} \
+    git commit --date="${git_date}" "${GIT_ARGS[@]}"
+}
+
+_jgit_amend() {
+  local epoch git_date
+  _jgit_parse_timestamp_args "$@"
+  [[ -n ${TIMESTAMP} ]] || _jgit_die 'amend requires -t or --timestamp'
+  epoch=$(_jgit_resolve_timestamp "${TIMESTAMP}") || _jgit_die "invalid timestamp: ${TIMESTAMP}"
+  git_date=$(_jgit_git_date "${epoch}")
+  GIT_AUTHOR_DATE=${git_date} GIT_COMMITTER_DATE=${git_date} \
+    git commit --amend --no-edit --date="${git_date}" "${GIT_ARGS[@]}"
+}
+
+_jgit_update_restore_stash() {
+  local repo=$1 stash_oid=$2 stash_ref
+  stash_ref=$(git -C "${repo}" stash list --format='%gd %H' |
+    awk -v wanted="${stash_oid}" '$2 == wanted { print $1; exit }') || {
+    jsh_error "Could not inspect stashes in ${repo}"
+    return 1
+  }
+  if [[ -z ${stash_ref} ]]; then
+    jsh_error "Created stash not found for ${repo}: ${stash_oid}"
+    return 1
+  fi
+  if ! git -C "${repo}" stash pop --index --quiet "${stash_ref}"; then
+    jsh_error "Could not restore local changes in ${repo}; stash retained as ${stash_ref}"
+    return 1
+  fi
+}
+
+_jgit_update_repository() {
+  local repo=$1 use_stash=$2 status previous_stash='' stash_oid='' pull_status=0
+  if ! git -C "${repo}" symbolic-ref --quiet HEAD > /dev/null; then
+    jsh_error "Detached HEAD, skipped ${repo}"
+    return 1
+  fi
+  if ! git -C "${repo}" rev-parse --verify '@{upstream}' > /dev/null 2>&1; then
+    jsh_error "No upstream configured, skipped ${repo}"
+    return 1
+  fi
+  if [[ -n $(git -C "${repo}" diff --name-only --diff-filter=U) ]]; then
+    jsh_error "Unresolved conflicts, skipped ${repo}"
+    return 1
+  fi
+
+  status=$(git -C "${repo}" status --porcelain) || {
+    jsh_error "Could not inspect working tree in ${repo}"
+    return 1
+  }
+  if [[ -n ${status} && ${use_stash} == 0 ]]; then
+    jsh_warn "Dirty worktree, skipped ${repo}; use --stash to update"
+    return 1
+  fi
+  if [[ -n ${status} ]]; then
+    previous_stash=$(git -C "${repo}" rev-parse --verify refs/stash 2> /dev/null || true)
+    if ! git -C "${repo}" stash push --include-untracked --quiet \
+      --message "jgit update $(date +%Y-%m-%dT%H:%M:%S)"; then
+      jsh_error "Could not stash local changes in ${repo}"
+      return 1
+    fi
+    stash_oid=$(git -C "${repo}" rev-parse --verify refs/stash 2> /dev/null || true)
+    if [[ -z ${stash_oid} || ${stash_oid} == "${previous_stash}" ]]; then
+      jsh_error "Could not stash all local changes in ${repo}"
+      return 1
+    fi
+    status=$(git -C "${repo}" status --porcelain) || {
+      _jgit_update_restore_stash "${repo}" "${stash_oid}" || true
+      jsh_error "Could not inspect working tree in ${repo}"
+      return 1
+    }
+    if [[ -n ${status} ]]; then
+      _jgit_update_restore_stash "${repo}" "${stash_oid}" || return 1
+      jsh_error "Could not stash all local changes in ${repo}"
+      return 1
+    fi
+  fi
+
+  git -C "${repo}" pull --ff-only --quiet || pull_status=$?
+  if [[ -n ${stash_oid} ]] && ! _jgit_update_restore_stash "${repo}" "${stash_oid}"; then
+    return 1
+  fi
+  if ((pull_status != 0)); then
+    jsh_error "Update failed for ${repo}; local changes restored"
+    return 1
+  fi
+  jsh_success "Updated ${repo}"
+}
+
+_jgit_find_update_repositories() {
+  local base=$1 candidate candidate_root
+  UPDATE_REPOSITORIES=()
+  for candidate in "${base}" "${base}"/*; do
+    [[ -d ${candidate} ]] || continue
+    candidate_root=$(git -C "${candidate}" rev-parse --show-toplevel 2> /dev/null) || continue
+    [[ ${candidate_root} == "${candidate}" ]] || continue
+    UPDATE_REPOSITORIES+=("${candidate_root}")
+  done
+}
+
+_jgit_update() {
+  local update_all=0 use_stash=0 base='' repo updated=0 failed=0 noun=repositories
+  while (($#)); do
+    case $1 in
+      --all) update_all=1 ;;
+      --stash) use_stash=1 ;;
+      -h | --help)
+        printf '%s\n' \
+          'Usage: jgit update [--stash]' \
+          '       jgit update --all [DIR] [--stash]'
+        return
+        ;;
+      -*) _jgit_die "unknown update option: $1" ;;
+      *)
+        [[ -z ${base} ]] || _jgit_die 'update accepts at most one directory'
+        base=$1
+        ;;
+    esac
+    shift
+  done
+
+  if ((update_all)); then
+    base=${base:-${PWD}}
+    [[ -d ${base} ]] || _jgit_die "directory not found: ${base}"
+    base=$(CDPATH='' cd -P "${base}" && pwd -P)
+    _jgit_find_update_repositories "${base}"
+    ((${#UPDATE_REPOSITORIES[@]} > 0)) || _jgit_die "no repositories found in ${base}"
+  else
+    [[ -z ${base} ]] || _jgit_die 'a directory requires --all'
+    UPDATE_REPOSITORIES=("$(git rev-parse --show-toplevel 2> /dev/null)") ||
+      _jgit_die 'not in a Git repository'
+  fi
+
+  for repo in "${UPDATE_REPOSITORIES[@]}"; do
+    if _jgit_update_repository "${repo}" "${use_stash}"; then
+      updated=$((updated + 1))
+    else
+      failed=$((failed + 1))
+    fi
+  done
+  if ((update_all)); then
+    [[ ${updated} == 1 ]] && noun=repository
+    printf 'Updated %d %s; %d failed\n' "${updated}" "${noun}" "${failed}"
+  fi
+  ((failed == 0))
+}
+
+case ${1:-} in
+  '') _jgit_dashboard ;;
+  -h | --help) _jgit_usage ;;
+  --version) printf 'jgit %s\n' "${JGIT_VERSION}" ;;
+  __complete)
+    case ${2:-} in
+      profile) _jgit_profile_names | awk '{ print $0 "\tGit identity" }' ;;
+      git-command) _jgit_git_commands ;;
+    esac
+    ;;
+  identity)
+    shift
+    _jgit_identity_command "$@"
+    ;;
+  identities)
+    shift
+    _jgit_profile_list "$@"
+    ;;
+  profile)
+    shift
+    _jgit_profile_command "$@"
+    ;;
+  profiles)
+    shift
+    _jgit_profile_list "$@"
+    ;;
+  commit)
+    shift
+    _jgit_commit "$@"
+    ;;
+  amend)
+    shift
+    _jgit_amend "$@"
+    ;;
+  update)
+    shift
+    _jgit_update "$@"
+    ;;
+  *) exec git "$@" ;;
+esac
