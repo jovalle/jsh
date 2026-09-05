@@ -65,7 +65,7 @@ Network\ Trash\ Folder
 Temporary\ Items
 __pycache__
 bh_unicode_properties.cache
-node_modules
+git.yaml
 node_modules/
 oscrypto-ca-bundle.crt
 package-lock.json

@@ -1,0 +1,12 @@
+# Copy this file to git.yaml and replace each value with your Git identity.
+profiles:
+  personal:
+    name: Your Name
+    email: you@example.net
+    user: yourusername
+    ssh_key: ~/.ssh/id_ed25519_personal
+  work:
+    name: Your Name
+    email: you@example.org
+    user: workusername
+    ssh_key: ~/.ssh/id_ed25519_work
