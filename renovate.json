@@ -8,9 +8,8 @@
     {
       "matchManagers": ["git-submodules"],
       "automerge": true,
-      "automergeType": "branch",
-      "ignoreTests": true,
-      "schedule": ["before 6am on monday"]
+      "automergeType": "pr",
+      "platformAutomerge": false
     }
   ]
 }
