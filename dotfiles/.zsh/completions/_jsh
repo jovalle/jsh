@@ -1,0 +1,143 @@
+# shellcheck disable=SC2154,SC2206,SC2296
+
+# Completion annotations:
+#   ##% command [USAGE]
+#   ##+ command
+#   ## command [ARGS...] ## Description
+#   ##? CONTEXT... CANDIDATE ## Description
+# Use @file, @directory, @command, or @NAME as a candidate. Named providers
+# invoke the annotated command as: COMMAND __complete NAME [PRIOR_ARGS...].
+
+_jsh() {
+  emulate -L zsh
+  setopt extendedglob
+
+  local mode=${1:-annotated}
+  local source line payload spec description candidate command_name provider value rendered_value delegate delegate_function
+  local index matches context_count word_index
+  local -a completions fields
+  local -A seen
+
+  if [[ ${mode} == make ]]; then
+    for source in Makefile makefile GNUmakefile; do
+      [[ -f ${source} ]] && break
+      source=
+    done
+    [[ -n ${source} ]] || return 1
+
+    while IFS= read -r line; do
+      completions+=("${line}")
+    done < <(
+      awk -F':' '
+        /^[a-zA-Z0-9_-]+:.*##/ {
+          target = $1
+          if (target ~ /%/) next
+          description = $0
+          sub(/^[^:]+:[^#]*##[[:space:]]*/, "", description)
+          gsub(/[[:space:]]+$/, "", description)
+          print target ":" description
+        }
+      ' "${source}" | sort -u
+    )
+
+    _describe 'make target' completions
+    return
+  fi
+
+  command_name=${words[1]:t}
+  source=${JSH_COMPLETION_SOURCES[${command_name}]-}
+  [[ -n ${source} ]] || source=${commands[${command_name}]-}
+  [[ -r ${source} ]] || return 1
+
+  while IFS= read -r line; do
+    if [[ ${line} == '##+ '* ]]; then
+      delegate=${line#'##+ '}
+      delegate=${delegate%% *}
+      continue
+    elif (( CURRENT == 2 )) && [[ ${line} == '## '* ]]; then
+      payload=${line#'## '}
+      [[ ${payload} == *' ## '* ]] || continue
+      spec=${payload%%' ## '*}
+      description=${payload#*' ## '}
+      candidate=${spec%% *}
+      [[ ${candidate} == [[:alnum:]_@-]* ]] || continue
+    elif [[ ${line} == '##? '* ]]; then
+      payload=${line#'##? '}
+      [[ ${payload} == *' ## '* ]] || continue
+      spec=${payload%%' ## '*}
+      description=${payload#*' ## '}
+      fields=(${=spec})
+      (( ${#fields} >= 1 )) || continue
+
+      matches=1
+      context_count=$((${#fields} - 1))
+      (( context_count <= CURRENT - 2 )) || continue
+      word_index=$((CURRENT - context_count))
+      for ((index = 1; index <= context_count; index++)); do
+        if [[ ${fields[index]} != "${words[word_index + index - 1]}" ]]; then
+          matches=0
+          break
+        fi
+      done
+      (( matches )) || continue
+      candidate=${fields[-1]}
+    else
+      continue
+    fi
+
+    if [[ ${candidate} == @* ]]; then
+      provider=${candidate#@}
+      case ${provider} in
+        file)
+          _files
+          return
+          ;;
+        directory)
+          _files -/
+          return
+          ;;
+        command)
+          _command_names
+          return
+          ;;
+        url)
+          _urls
+          return
+          ;;
+        [[:lower:]][[:lower:][:digit:]_-]#)
+          while IFS=$'\t' read -r value description; do
+            [[ -n ${value} && -z ${seen[${value}]-} ]] || continue
+            seen[${value}]=1
+            rendered_value=${value//\\/\\\\}
+            rendered_value=${rendered_value//:/\\:}
+            completions+=("${rendered_value}:${description:-${value}}")
+          done < <("${source}" __complete "${provider}" \
+            "${words[@]:1:$((CURRENT - 2))}" 2>/dev/null)
+          continue
+          ;;
+        *) continue ;;
+      esac
+    fi
+
+    [[ -n ${seen[${candidate}]-} ]] && continue
+    seen[${candidate}]=1
+    completions+=("${candidate}:${description}")
+  done < "${source}"
+
+  if (( ${#completions} )); then
+    _describe "${command_name} command" completions
+    return
+  fi
+
+  if [[ -n ${delegate} && ${delegate} == [[:lower:]][[:lower:][:digit:]_-]# ]]; then
+    delegate_function=_${delegate}
+    typeset -f "${delegate_function}" > /dev/null || autoload -Uz "${delegate_function}"
+    words[1]=${delegate}
+    "${delegate_function}"
+    return
+  fi
+
+  return 1
+}
+
+_jsh "$@"

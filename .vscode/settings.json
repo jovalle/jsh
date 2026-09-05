@@ -1,13 +1,22 @@
 {
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
   "editor.formatOnSave": true,
   "editorconfig.enable": true,
-  "material-icon-theme.folders.associations": {
-    "darwin": "macos",
-    "dotfiles": "config",
-    "endeavouros": "linux",
-    "eos": "linux",
-    "shell": "command",
-    "ssh": "desktop"
+  "eslint.options": {
+    "configFile": ".eslintrc.json"
   },
-  "prettier.requireConfig": true
+  "files.associations": {
+    ".inputrc": "plaintext"
+  },
+  "material-icon-theme.folders.associations": {
+    "brew": "packages",
+    "conf": "config",
+    "darwin": "macos",
+    "local": "private",
+    "unix": "src"
+  },
+  "prettier.requireConfig": true,
+  "pylint.args": ["--rcfile=.pylintrc"]
 }

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# kubectx(1) is a utility to manage and switch between kubectl contexts.
 #
+# kubectx(1) is a utility to manage and switch between kubectl contexts.
+
 # Copyright 2017 Google Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,88 +16,75 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-[[ -n $DEBUG ]] && set -x
+[[ -n ${DEBUG:-} ]] && set -x
 
 set -eou pipefail
 IFS=$'\n\t'
 
-SELF_CMD="$0"
+SELF_CMD=$0
 
-KUBECTX="${XDG_CACHE_HOME:-$HOME/.kube}/kubectx"
-
-_jsh_color_enabled() {
-  local output_fd="${1:-1}"
-  [[ "${JSH_PLAIN_OUTPUT:-0}" != 1 && "${TERM:-dumb}" != dumb &&
-    -z ${NO_COLOR+x} && "${JSH_COLOR:-auto}" != never ]] || return 1
-  [[ -n "${_KUBECTX_FORCE_COLOR:-}" || -t "${output_fd}" || "${JSH_COLOR:-auto}" == always ]]
-}
+KUBECTX="${XDG_CACHE_HOME:-${HOME}/.kube}/kubectx"
 
 usage() {
   local SELF
-  SELF="kubectx"
-  if [[ "$(basename "$0")" == kubectl-* ]]; then # invoked as plugin
-    SELF="kubectl ctx"
-  fi
+  SELF=kubectx
 
   cat <<EOF
 USAGE:
-  $SELF                        : list the contexts
-  $SELF <NAME>                 : switch to context <NAME>
-  $SELF -                      : switch to the previous context
-  $SELF -a, --add <kubeconfig> : merge kubeconfig file into main config
-  $SELF -c, --current          : show the current context name
-  $SELF -d, --delete <NAME>    : delete context with cleanup (removes unused cluster/user)
-  $SELF -e, --external [NAME]  : use system CA trust store for context (current if no NAME)
-  $SELF -u, --unset            : unset the current context
-  $SELF <NEW_NAME>=.           : rename current-context to <NEW_NAME>
-  $SELF <NEW_NAME>=<NAME>      : rename context <NAME> to <NEW_NAME>
+  ${SELF}                        : list the contexts
+  ${SELF} <NAME>                 : switch to context <NAME>
+  ${SELF} -                      : switch to the previous context
+  ${SELF} -a, --add <kubeconfig> : merge kubeconfig file into main config
+  ${SELF} -c, --current          : show the current context name
+  ${SELF} -d, --delete <NAME>    : delete context with cleanup (removes unused cluster/user)
+  ${SELF} -u, --unset            : unset the current context
+  ${SELF} <NEW_NAME>=.           : rename current-context to <NEW_NAME>
+  ${SELF} <NEW_NAME>=<NAME>      : rename context <NAME> to <NEW_NAME>
 
-  $SELF -h,--help              : show this message
+  ${SELF} -h,--help              : show this message
 EOF
 }
 
 exit_err() {
-  error "${1}"
-  exit 1
+   echo >&2 "${1}"
+   exit 1
 }
 
 current_context() {
-  $KUBECTL config view -o=jsonpath='{.current-context}'
+  ${KUBECTL} config view -o=jsonpath='{.current-context}'
 }
 
 get_contexts() {
-  $KUBECTL config get-contexts -o=name | sort -n
+  ${KUBECTL} config get-contexts -o=name | sort -n
 }
 
 list_contexts() {
   set -u pipefail
-  local cur ctx_list use_color=false
+  local cur ctx_list
   cur="$(current_context)" || exit_err "error getting current context"
   ctx_list=$(get_contexts) || exit_err "error getting context list"
 
-  local yellow='' darkbg='' normal=''
-  if _jsh_color_enabled; then
-    use_color=true
-    yellow=$(tput setaf 3 || true)
-    darkbg=$(tput setab 0 || true)
-    normal=$(tput sgr0 || true)
-  fi
+  local yellow darkbg normal
+  yellow=$(tput setaf 3 || true)
+  darkbg=$(tput setab 0 || true)
+  normal=$(tput sgr0 || true)
 
   local cur_ctx_fg cur_ctx_bg
-  cur_ctx_fg=${KUBECTX_CURRENT_FGCOLOR:-$yellow}
-  cur_ctx_bg=${KUBECTX_CURRENT_BGCOLOR:-$darkbg}
+  cur_ctx_fg=${KUBECTX_CURRENT_FGCOLOR:-${yellow}}
+  cur_ctx_bg=${KUBECTX_CURRENT_BGCOLOR:-${darkbg}}
 
-  for c in $ctx_list; do
-    if [[ "${use_color}" == true ]]; then
-      # colored output mode
-      if [[ "${c}" = "${cur}" ]]; then
-        echo "${cur_ctx_bg}${cur_ctx_fg}${c}${normal}"
-      else
-        echo "${c}"
-      fi
+  for c in ${ctx_list}; do
+  if [[ -n "${_KUBECTX_FORCE_COLOR:-}" || \
+       -t 1 && -z "${NO_COLOR:-}" ]]; then
+    # colored output mode
+    if [[ "${c}" = "${cur}" ]]; then
+      echo "${cur_ctx_bg}${cur_ctx_fg}${c}${normal}"
     else
       echo "${c}"
     fi
+  else
+    echo "${c}"
+  fi
   done
 }
 
@@ -111,12 +99,12 @@ save_context() {
   saved="$(read_context)"
 
   if [[ "${saved}" != "${1}" ]]; then
-    printf %s "${1}" >"${KUBECTX}"
+    printf %s "${1}" > "${KUBECTX}"
   fi
 }
 
 switch_context() {
-  $KUBECTL config use-context "${1}"
+  ${KUBECTL} config use-context "${1}"
 }
 
 choose_context_interactive() {
@@ -125,7 +113,7 @@ choose_context_interactive() {
     FZF_DEFAULT_COMMAND="${SELF_CMD}" \
     fzf --ansi --no-preview || true)"
   if [[ -z "${choice}" ]]; then
-    error "error: you did not choose any of the options"
+    echo 2>&1 "error: you did not choose any of the options"
     exit 1
   else
     set_context "${choice}"
@@ -147,14 +135,14 @@ swap_context() {
   local ctx
   ctx="$(read_context)"
   if [[ -z "${ctx}" ]]; then
-    error "error: No previous context found."
+    echo "error: No previous context found." >&2
     exit 1
   fi
   set_context "${ctx}"
 }
 
 context_exists() {
-  grep -q ^"${1}"\$ <($KUBECTL config get-contexts -o=name)
+  grep -q ^"${1}"\$ <(${KUBECTL} config get-contexts -o=name)
 }
 
 rename_context() {
@@ -166,16 +154,16 @@ rename_context() {
   fi
 
   if ! context_exists "${old_name}"; then
-    error "error: Context \"${old_name}\" not found, can't rename it."
+    echo "error: Context \"${old_name}\" not found, can't rename it." >&2
     exit 1
   fi
 
   if context_exists "${new_name}"; then
-    warn "Context \"${new_name}\" exists, deleting..."
-    $KUBECTL config delete-context "${new_name}" 1>/dev/null 2>&1
+    echo "Context \"${new_name}\" exists, deleting..." >&2
+    ${KUBECTL} config delete-context "${new_name}" 1>/dev/null 2>&1
   fi
 
-  $KUBECTL config rename-context "${old_name}" "${new_name}"
+  ${KUBECTL} config rename-context "${old_name}" "${new_name}"
 }
 
 choose_contexts_to_delete_interactive() {
@@ -184,30 +172,30 @@ choose_contexts_to_delete_interactive() {
     FZF_DEFAULT_COMMAND="${SELF_CMD}" \
     fzf --ansi --no-preview --multi --prompt="Select contexts (⇧Tab=multi) to delete: " || true)"
   if [[ -z "${choices}" ]]; then
-    error "error: you did not choose any contexts to delete"
+    echo 2>&1 "error: you did not choose any contexts to delete"
     exit 1
   else
     # Convert newline-separated choices to array
     local contexts_to_delete=()
     while IFS= read -r context; do
-      contexts_to_delete+=("$context")
-    done <<<"$choices"
+      contexts_to_delete+=("${context}")
+    done <<< "${choices}"
 
     # Confirm deletion
     echo "You selected the following contexts for deletion:"
     for ctx in "${contexts_to_delete[@]}"; do
-      echo "- $ctx"
+      echo "  - ${ctx}"
     done
     echo -n "Are you sure you want to delete these contexts? [y/N]: "
     read -r confirmation
-    case $confirmation in
-      [Yy] | [Yy][Ee][Ss])
+    case ${confirmation} in
+      [Yy]|[Yy][Ee][Ss])
         for ctx in "${contexts_to_delete[@]}"; do
-          delete_context_with_cleanup "$ctx"
+          delete_context_with_cleanup "${ctx}"
         done
         ;;
       *)
-        info "Deletion cancelled."
+        echo "Deletion cancelled."
         exit 0
         ;;
     esac
@@ -215,214 +203,139 @@ choose_contexts_to_delete_interactive() {
 }
 
 unset_context() {
-  info "Unsetting current context."
-  $KUBECTL config unset current-context
+  echo "Unsetting current context." >&2
+  ${KUBECTL} config unset current-context
 }
 
-# Get cluster name for a context
-get_cluster_for_context() {
-  local context="${1}"
-  $KUBECTL config view -o jsonpath="{.contexts[?(@.name==\"${context}\")].context.cluster}"
+# Helper functions for output messages
+info() {
+  echo -e "\033[0;34m[INFO]\033[0m $*" >&2
 }
 
-# Check if cluster has embedded certificate-authority-data
-has_embedded_ca() {
-  local cluster="${1}"
-  local ca_data
-  ca_data=$($KUBECTL config view --raw -o jsonpath="{.clusters[?(@.name==\"${cluster}\")].cluster.certificate-authority-data}")
-  [[ -n "${ca_data}" ]]
+success() {
+  echo -e "\033[0;32m[SUCCESS]\033[0m $*" >&2
 }
 
-# Backup CA data before removal (for potential restore)
-backup_ca_data() {
-  local cluster="${1}"
-  local backup_dir="${XDG_CACHE_HOME:-$HOME/.cache}/kubectx/ca-backup"
-  mkdir -p "${backup_dir}"
-
-  local ca_data
-  ca_data=$($KUBECTL config view --raw -o jsonpath="{.clusters[?(@.name==\"${cluster}\")].cluster.certificate-authority-data}")
-  [[ -n "${ca_data}" ]] && printf '%s' "${ca_data}" >"${backup_dir}/${cluster}.ca-data"
+error() {
+  echo -e "\033[0;31m[ERROR]\033[0m $*" >&2
 }
 
-# Remove embedded CA to use system trust store
-use_external_ca() {
-  local context="${1:-}"
-  [[ -z "${context}" ]] && context=$(current_context)
-  [[ -z "${context}" ]] && exit_err "error: no current context set"
-
-  context_exists "${context}" || {
-    error "Context '${context}' does not exist"
-    exit 1
-  }
-
-  local cluster
-  cluster=$(get_cluster_for_context "${context}")
-  [[ -z "${cluster}" ]] && {
-    error "No cluster found for context '${context}'"
-    exit 1
-  }
-
-  info "Context: ${context}, Cluster: ${cluster}"
-
-  if has_embedded_ca "${cluster}"; then
-    backup_ca_data "${cluster}"
-    $KUBECTL config unset "clusters.${cluster}.certificate-authority-data"
-    success "Removed embedded CA from cluster '${cluster}'"
-    info "kubectl will now use the system CA trust store"
-  else
-    warn "Cluster '${cluster}' has no embedded CA - already using system trust store"
-  fi
+warn() {
+  echo -e "\033[0;33m[WARN]\033[0m $*" >&2
 }
-
-# Local output helpers keep kubectx usable without the former shared library.
-log() {
-  local color="$1"
-  shift
-  if _jsh_color_enabled 2; then
-    printf '\033[0;%sm%s\033[0m\n' "$color" "$*" >&2
-  else
-    printf '%s\n' "$*" >&2
-  fi
-}
-info() { log 34 "$@"; }
-success() { log 32 "$@"; }
-error() { log 31 "$@"; }
-warn() { log 33 "$@"; }
 
 # Add context from kubeconfig file (kctx+ functionality)
 add_context() {
   local KUBECONFIG_SRC="$1"
-  local KUBECONFIG_DST="$HOME/.kube/config"
+  local KUBECONFIG_DST="${HOME}/.kube/config"
 
   # Validate source kubeconfig
-  KUBECONFIG="$KUBECONFIG_SRC" $KUBECTL config view --minify -o jsonpath='{.contexts[*].name}' &>/dev/null \
-    || {
-      error "Invalid kubeconfig ($KUBECONFIG_SRC)"
-      return 1
-    }
+  KUBECONFIG="${KUBECONFIG_SRC}" ${KUBECTL} config view --minify -o jsonpath='{.contexts[*].name}' &>/dev/null || \
+    { error "Invalid kubeconfig (${KUBECONFIG_SRC})"; return 1; }
 
   # Ensure destination directory exists
-  mkdir -p "$(dirname "$KUBECONFIG_DST")"
+  mkdir -p "$(dirname "${KUBECONFIG_DST}")"
 
   # Create destination if it doesn't exist
-  [[ ! -f "$KUBECONFIG_DST" ]] && touch "$KUBECONFIG_DST"
+  [[ ! -f "${KUBECONFIG_DST}" ]] && touch "${KUBECONFIG_DST}"
 
   # Get details from source
-  local context_name
-  context_name=$(KUBECONFIG="$KUBECONFIG_SRC" $KUBECTL config view --minify -o jsonpath='{.contexts[0].name}')
-  local cluster_name
-  cluster_name=$(KUBECONFIG="$KUBECONFIG_SRC" $KUBECTL config view --minify -o jsonpath='{.contexts[0].context.cluster}')
-  local user_name
-  user_name=$(KUBECONFIG="$KUBECONFIG_SRC" $KUBECTL config view --minify -o jsonpath='{.contexts[0].context.user}')
+  local context_name cluster_name user_name
+  context_name=$(KUBECONFIG="${KUBECONFIG_SRC}" ${KUBECTL} config view --minify -o jsonpath='{.contexts[0].name}')
+  cluster_name=$(KUBECONFIG="${KUBECONFIG_SRC}" ${KUBECTL} config view --minify -o jsonpath='{.contexts[0].context.cluster}')
+  user_name=$(KUBECONFIG="${KUBECONFIG_SRC}" ${KUBECTL} config view --minify -o jsonpath='{.contexts[0].context.user}')
 
-  [[ -z "$context_name" ]] && {
-    error "No context found in source kubeconfig"
-    return 1
-  }
+  [[ -z "${context_name}" ]] && { error "No context found in source kubeconfig"; return 1; }
 
-  info "Merging context: $context_name"
+  info "Merging context: ${context_name}"
 
   # Extract details from source
-  local server
-  server=$(KUBECONFIG="$KUBECONFIG_SRC" $KUBECTL config view --minify -o jsonpath='{.clusters[0].cluster.server}')
-  local server_host
-  server_host=$(echo "$server" | sed -E 's|https?://([^:/]+).*|\1|')
+  local server server_host
+  server=$(KUBECONFIG="${KUBECONFIG_SRC}" ${KUBECTL} config view --minify -o jsonpath='{.clusters[0].cluster.server}')
+  server_host=$(echo "${server}" | sed -E 's|https?://([^:/]+).*|\1|')
 
-  # Use the authinfo as-is if it already contains server/user format, otherwise create it
-  local authinfo="$user_name"
-  local unique_authinfo
-  if [[ "$authinfo" == *"/"* ]]; then
-    # Already in server/user format, use as-is
-    unique_authinfo="$authinfo"
-  else
-    # Create server/user format
-    unique_authinfo="${server_host}/${user_name}"
-  fi
+  # Use server/user as the unique authinfo identifier
+  local unique_authinfo="${server_host}/${user_name}"
 
-  info "Using authinfo: $unique_authinfo"
+  info "Using authinfo: ${unique_authinfo}"
 
   # Remove existing context/cluster/authinfo if they exist (update case)
-  $KUBECTL config delete-context "$context_name" &>/dev/null || true
-  $KUBECTL config delete-cluster "$cluster_name" &>/dev/null || true
-  $KUBECTL config delete-user "$unique_authinfo" &>/dev/null || true
+  ${KUBECTL} config delete-context "${context_name}" &>/dev/null || true
+  ${KUBECTL} config delete-cluster "${cluster_name}" &>/dev/null || true
+  ${KUBECTL} config delete-user "${unique_authinfo}" &>/dev/null || true
 
   # Create temp files for certificate data
-  local ca_tmp
+  local ca_tmp cert_tmp key_tmp
   ca_tmp=$(mktemp)
-  local cert_tmp
   cert_tmp=$(mktemp)
-  local key_tmp
   key_tmp=$(mktemp)
 
   # Extract and write CA certificate
-  KUBECONFIG="$KUBECONFIG_SRC" $KUBECTL config view --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' | base64 -d >"$ca_tmp"
+  KUBECONFIG="${KUBECONFIG_SRC}" ${KUBECTL} config view --raw -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' | base64 -d > "${ca_tmp}"
 
   # Add cluster with CA file
-  $KUBECTL config set-cluster "$cluster_name" --server="$server" --certificate-authority="$ca_tmp" --embed-certs=true >/dev/null
+  ${KUBECTL} config set-cluster "${cluster_name}" --server="${server}" --certificate-authority="${ca_tmp}" --embed-certs=true
 
   # Extract and write user credentials
-  local user_cert
-  user_cert=$(KUBECONFIG="$KUBECONFIG_SRC" $KUBECTL config view --raw -o jsonpath='{.users[0].user.client-certificate-data}')
-  local user_key
-  user_key=$(KUBECONFIG="$KUBECONFIG_SRC" $KUBECTL config view --raw -o jsonpath='{.users[0].user.client-key-data}')
+  local user_cert user_key
+  user_cert=$(KUBECONFIG="${KUBECONFIG_SRC}" ${KUBECTL} config view --raw -o jsonpath='{.users[0].user.client-certificate-data}')
+  user_key=$(KUBECONFIG="${KUBECONFIG_SRC}" ${KUBECTL} config view --raw -o jsonpath='{.users[0].user.client-key-data}')
 
-  if [[ -n "$user_cert" && -n "$user_key" ]]; then
-    echo "$user_cert" | base64 -d >"$cert_tmp"
-    echo "$user_key" | base64 -d >"$key_tmp"
-    $KUBECTL config set-credentials "$unique_authinfo" --client-certificate="$cert_tmp" --client-key="$key_tmp" --embed-certs=true >/dev/null
+  if [[ -n "${user_cert}" && -n "${user_key}" ]]; then
+    echo "${user_cert}" | base64 -d > "${cert_tmp}"
+    echo "${user_key}" | base64 -d > "${key_tmp}"
+    ${KUBECTL} config set-credentials "${unique_authinfo}" --client-certificate="${cert_tmp}" --client-key="${key_tmp}" --embed-certs=true
   else
     # Try token-based auth
     local token
-    token=$(KUBECONFIG="$KUBECONFIG_SRC" $KUBECTL config view --raw -o jsonpath='{.users[0].user.token}')
-    if [[ -n "$token" ]]; then
-      $KUBECTL config set-credentials "$unique_authinfo" --token="$token" >/dev/null
+    token=$(KUBECONFIG="${KUBECONFIG_SRC}" ${KUBECTL} config view --raw -o jsonpath='{.users[0].user.token}')
+    if [[ -n "${token}" ]]; then
+      ${KUBECTL} config set-credentials "${unique_authinfo}" --token="${token}"
     else
       error "No valid credentials found in source kubeconfig"
-      rm -f "$ca_tmp" "$cert_tmp" "$key_tmp"
+      rm -f "${ca_tmp}" "${cert_tmp}" "${key_tmp}"
       return 1
     fi
   fi
 
   # Clean up temp files
-  rm -f "$ca_tmp" "$cert_tmp" "$key_tmp"
+  rm -f "${ca_tmp}" "${cert_tmp}" "${key_tmp}"
 
   # Create context
-  $KUBECTL config set-context "$context_name" --cluster="$cluster_name" --user="$unique_authinfo" >/dev/null
+  ${KUBECTL} config set-context "${context_name}" --cluster="${cluster_name}" --user="${unique_authinfo}"
 
   # Switch to the new context
-  $KUBECTL config use-context "$context_name" &>/dev/null \
-    && success "Context '$context_name' merged and activated"
+  ${KUBECTL} config use-context "${context_name}" &>/dev/null && \
+    success "Context '${context_name}' merged and activated"
 }
 
 # Delete context with cleanup (kctx- functionality)
 delete_context_with_cleanup() {
   local context="$1"
-  local KUBECONFIG_DST="$HOME/.kube/config"
+  local KUBECONFIG_DST="${HOME}/.kube/config"
 
   # Get cluster and user associated with this context
-  local cluster
-  cluster=$($KUBECTL config view -o jsonpath="{.contexts[?(@.name==\"$context\")].context.cluster}")
-  local user
-  user=$($KUBECTL config view -o jsonpath="{.contexts[?(@.name==\"$context\")].context.user}")
+  local cluster user
+  cluster=$(${KUBECTL} config view -o jsonpath="{.contexts[?(@.name==\"${context}\")].context.cluster}")
+  user=$(${KUBECTL} config view -o jsonpath="{.contexts[?(@.name==\"${context}\")].context.user}")
 
   # Delete the context
-  $KUBECTL config delete-context "$context" &>/dev/null \
-    && info "Context '$context' removed"
+  ${KUBECTL} config delete-context "${context}" &>/dev/null && \
+    info "Context '${context}' removed"
 
   # Check if cluster/user are still referenced by other contexts
-  local cluster_refs
-  cluster_refs=$($KUBECTL config view -o jsonpath="{.contexts[*].context.cluster}" | grep -c "$cluster" || true)
-  local user_refs
-  user_refs=$($KUBECTL config view -o jsonpath="{.contexts[*].context.user}" | grep -c "$user" || true)
+  local cluster_refs user_refs
+  cluster_refs=$(${KUBECTL} config view -o jsonpath="{.contexts[*].context.cluster}" | grep -c "${cluster}" || true)
+  user_refs=$(${KUBECTL} config view -o jsonpath="{.contexts[*].context.user}" | grep -c "${user}" || true)
 
   # Clean up orphaned clusters and users
-  [[ $cluster_refs -eq 0 && -n "$cluster" ]] \
-    && $KUBECTL config delete-cluster "$cluster" &>/dev/null \
-    && info "Cluster '$cluster' removed (no longer referenced)"
+  [[ ${cluster_refs} -eq 0 && -n "${cluster}" ]] && \
+    ${KUBECTL} config delete-cluster "${cluster}" &>/dev/null && \
+    info "Cluster '${cluster}' removed (no longer referenced)"
 
-  [[ $user_refs -eq 0 && -n "$user" ]] \
-    && $KUBECTL config delete-user "$user" &>/dev/null \
-    && info "User '$user' removed (no longer referenced)"
+  [[ ${user_refs} -eq 0 && -n "${user}" ]] && \
+    ${KUBECTL} config delete-user "${user}" &>/dev/null && \
+    info "User '${user}' removed (no longer referenced)"
 
   success "Cleanup complete"
 }
@@ -430,32 +343,29 @@ delete_context_with_cleanup() {
 main() {
   if [[ "$#" -eq 1 && ("${1}" == '-h' || "${1}" == '--help') ]]; then
     usage
-    return 0
+    return
   fi
 
   if [[ -z "${KUBECTL:-}" ]]; then
     if hash kubectl 2>/dev/null; then
       KUBECTL=kubectl
-    elif hash kubectl.exe 2>/dev/null; then
+    elif hash kubectl.exe  2>/dev/null; then
       KUBECTL=kubectl.exe
     else
-      error "kubectl is not installed"
+      echo >&2 "kubectl is not installed"
       exit 1
     fi
   fi
 
   if [[ "$#" -eq 0 ]]; then
-    if [[ -t 1 && -z "${KUBECTX_IGNORE_FZF:-}" && "$(
-      type fzf &>/dev/null
-      echo $?
-    )" -eq 0 ]]; then
+    if [[ -t 1 &&  -z "${KUBECTX_IGNORE_FZF:-}" && "$(type fzf &>/dev/null; echo $?)" -eq 0 ]]; then
       choose_context_interactive
     else
       list_contexts
     fi
   elif [[ "${1}" == "-a" || "${1}" == "--add" ]]; then
     if [[ "$#" -lt 2 ]]; then
-      error "error: missing kubeconfig file path"
+      echo "error: missing kubeconfig file path" >&2
       echo "Usage: kubectx --add <kubeconfig>" >&2
       exit 1
     fi
@@ -463,27 +373,18 @@ main() {
   elif [[ "${1}" == "-d" || "${1}" == "--delete" ]]; then
     if [[ "$#" -lt 2 ]]; then
       # No specific contexts provided, use interactive selection
-      if [[ -t 1 && -z "${KUBECTX_IGNORE_FZF:-}" && "$(
-        type fzf &>/dev/null
-        echo $?
-      )" -eq 0 ]]; then
+      if [[ -t 1 && -z "${KUBECTX_IGNORE_FZF:-}" && "$(type fzf &>/dev/null; echo $?)" -eq 0 ]]; then
         choose_contexts_to_delete_interactive
       else
-        error "error: missing context NAME and fzf is not available for interactive selection"
+        echo "error: missing context NAME and fzf is not available for interactive selection" >&2
         usage
         exit 1
       fi
     else
       delete_context_with_cleanup "${2}"
     fi
-  elif [[ "${1}" == "-e" || "${1}" == "--external" ]]; then
-    if [[ "$#" -ge 2 && "${2}" != -* ]]; then
-      use_external_ca "${2}"
-    else
-      use_external_ca ""
-    fi
   elif [[ "$#" -gt 1 ]]; then
-    error "error: too many arguments"
+    echo "error: too many arguments" >&2
     usage
     exit 1
   elif [[ "$#" -eq 1 ]]; then
@@ -496,10 +397,8 @@ main() {
       kubectl config current-context
     elif [[ "${1}" == '-u' || "${1}" == '--unset' ]]; then
       unset_context
-    elif [[ "${1}" == '-h' || "${1}" == '--help' ]]; then
-      usage
     elif [[ "${1}" =~ ^-(.*) ]]; then
-      error "error: unrecognized flag \"${1}\""
+      echo "error: unrecognized flag \"${1}\"" >&2
       usage
       exit 1
     elif [[ "${1}" =~ (.+)=(.+) ]]; then

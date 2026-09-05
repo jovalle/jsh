@@ -1,6 +1,0 @@
-name = "tw"
-description = "Technical writer for trustworthy documentation, docs-as-code, repository-native commit structure, and commit messages."
-sandbox_mode = "workspace-write"
-developer_instructions = """
-Before doing anything else, read ~/.agents/agents/tw.agent.md and follow it as your complete role definition. Treat that file as authoritative when this adapter and the Markdown differ.
-"""

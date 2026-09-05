@@ -1,70 +1,65 @@
-#!/bin/sh
+#!/usr/bin/env bash
 
 set -eu
 
-# j.sh is intentionally small and portable: it is the curl-friendly entry
-# point that acquires a checkout before handing all setup work to `jsh install`.
+JSH_REPO=${JSH_REPO:-https://github.com/jovalle/jsh.git}
+JSH_DIR=${JSH_DIR:-"${HOME}/.jsh"}
+TTY=${JSH_TTY:-/dev/tty}
 
-jsh_bootstrap_error() {
-  jsh_ui_init 2
-  jsh_ui_style error
-  printf '%s%s%s jsh: %s\n' "${JSH_UI_COLOR}" "${JSH_UI_MARK}" "${JSH_UI_RESET}" "$*" >&2
-  exit 1
-}
+for library_file in "${JSH_DIR}"/lib/*; do
+  [[ -f ${library_file} && -x ${library_file} ]] || continue
+  # shellcheck source=/dev/null
+  . "${library_file}"
+done
+unset library_file
 
-jsh_ui_init() {
-  jsh_ui_output_fd=${1:-1}
-  JSH_UI_BOLD=''
-  JSH_UI_CYAN=''
-  JSH_UI_RED=''
-  JSH_UI_GREEN=''
-  JSH_UI_YELLOW=''
-  JSH_UI_RESET=''
-  if [ "${JSH_PLAIN_OUTPUT:-0}" != 1 ] && [ "${TERM:-dumb}" != dumb ] \
-    && [ -z "${NO_COLOR+x}" ]; then
-    case "${JSH_COLOR:-auto}" in
-      always) jsh_ui_color=1 ;;
-      auto) if [ -t "${jsh_ui_output_fd}" ]; then jsh_ui_color=1; else jsh_ui_color=0; fi ;;
-      *) jsh_ui_color=0 ;;
-    esac
-    if [ "${jsh_ui_color}" = 1 ]; then
-      JSH_UI_BOLD=$(printf '\033[1m')
-      JSH_UI_CYAN=$(printf '\033[36m')
-      JSH_UI_RED=$(printf '\033[31m')
-      JSH_UI_GREEN=$(printf '\033[32m')
-      JSH_UI_YELLOW=$(printf '\033[33m')
-      JSH_UI_RESET=$(printf '\033[0m')
+if ! declare -F jsh_error > /dev/null; then
+  # First installs run before the repository and its shared output library exist.
+  jsh_color_enabled() {
+    [[ "${JSH_PLAIN_OUTPUT:-0}" != 1 && "${TERM:-}" != dumb && -z "${NO_COLOR+x}" ]] || return 1
+    [[ "${JSH_COLOR:-auto}" == always ]] ||
+      { [[ "${JSH_COLOR:-auto}" != never ]] && [[ -t "$1" ]]; }
+  }
+
+  jsh_stdout() {
+    local color=$1 prefix=$2
+    shift 2
+    if jsh_color_enabled 1; then
+      printf '\033[%sm%s%s\033[0m\n' "${color}" "${prefix}" "$*"
+    else
+      printf '%s%s\n' "${prefix}" "$*"
     fi
-  fi
-}
+  }
 
-jsh_ui_style() {
-  case "$1" in
-    plan)
-      JSH_UI_COLOR=${JSH_UI_CYAN}
-      if [ -n "${JSH_UI_RESET}" ]; then JSH_UI_MARK='➜'; else JSH_UI_MARK='[plan]'; fi
-      ;;
-    note)
-      JSH_UI_COLOR=${JSH_UI_CYAN}
-      if [ -n "${JSH_UI_RESET}" ]; then JSH_UI_MARK='›'; else JSH_UI_MARK='[note]'; fi
-      ;;
-    error)
-      JSH_UI_COLOR=${JSH_UI_RED}
-      if [ -n "${JSH_UI_RESET}" ]; then JSH_UI_MARK='✖'; else JSH_UI_MARK='[error]'; fi
-      ;;
-  esac
-}
+  jsh_stderr() {
+    local color=$1 prefix=$2
+    shift 2
+    if jsh_color_enabled 2; then
+      printf '\033[%sm%s%s\033[0m\n' "${color}" "${prefix}" "$*" >&2
+    else
+      printf '%s%s\n' "${prefix}" "$*" >&2
+    fi
+  }
 
-jsh_ui_message() {
-  jsh_ui_style "$1"
-  shift
-  printf '%s%s%s %s\n' "${JSH_UI_COLOR}" "${JSH_UI_MARK}" "${JSH_UI_RESET}" "$*"
-}
+  jsh_info() { jsh_stdout 36 '' "$*"; }
+  jsh_success() { jsh_stdout 32 '✓ ' "$*"; }
+  jsh_warn() { jsh_stderr 33 '' "$*"; }
+  jsh_error() { jsh_stderr 31 '✗ ' "$*"; }
+  jsh_prompt() {
+    if jsh_color_enabled 1; then
+      printf '\033[36m%s\033[0m' "$*"
+    else
+      printf '%s' "$*"
+    fi
+  }
+  jsh_detail() { printf '%s\n' "$*"; }
+  jsh_blank() { printf '\n'; }
+fi
 
 jsh_banner() {
-  jsh_ui_init
-  printf '\n%s%s' "${JSH_UI_BOLD}" "${JSH_UI_CYAN}"
-  cat <<'BANNER'
+  local banner
+  banner=$(
+    cat << 'BANNER'
    :%@@@@@@@@@#*#@%-              +-:##
   :#    -#%%+=#:@#                :@@%:
    %@@     +@++@@-            *-   @@%:
@@ -79,145 +74,233 @@ jsh_banner() {
  :@@@@@@@@#@-                         +@#:
  =   :-=-:                          -:
 BANNER
-  printf '%s\n' "${JSH_UI_RESET}"
+  )
+  jsh_blank
+  jsh_stdout '1;36' '' "${banner}"
+  jsh_blank
 }
 
-jsh_bootstrap_script_dir() {
-  jsh_bootstrap_script_path=$1
-  while [ -L "${jsh_bootstrap_script_path}" ]; do
-    jsh_bootstrap_parent=$(CDPATH='' cd -- "$(dirname -- "${jsh_bootstrap_script_path}")" 2>/dev/null && pwd -P) \
-      || return 1
-    jsh_bootstrap_link_target=$(readlink "${jsh_bootstrap_script_path}") || return 1
-    case "${jsh_bootstrap_link_target}" in
-      /*) jsh_bootstrap_script_path=${jsh_bootstrap_link_target} ;;
-      *) jsh_bootstrap_script_path=${jsh_bootstrap_parent}/${jsh_bootstrap_link_target} ;;
+usage() {
+  cat <<'EOF'
+Usage: j.sh [install]
+
+With no arguments, install or update Jsh and open an isolated shell environment.
+Run with install to install packages, deploy dotfiles, and configure the system.
+EOF
+}
+
+case ${1:-} in
+  '') mode=shell ;;
+  install)
+    mode=install
+    shift
+    ;;
+  -h | --help)
+    usage
+    exit 0
+    ;;
+  *)
+    jsh_error "Unknown command: $1"
+    usage >&2
+    exit 2
+    ;;
+esac
+if (($#)); then
+  jsh_error "Too many arguments."
+  usage >&2
+  exit 2
+fi
+
+if [[ ! -r "${TTY}" ]] || [[ ! -w "${TTY}" ]]; then
+  jsh_error "jsh needs an interactive terminal."
+  exit 1
+fi
+
+heading() {
+  jsh_blank
+  jsh_info "[$1] $2"
+  jsh_detail "$3"
+}
+
+confirm() {
+  local default=${2:-yes} prompt='Y/n'
+  [[ ${default} == no ]] && prompt='y/N'
+  while :; do
+    jsh_prompt "$1 [${prompt}] " > "${TTY}"
+    IFS= read -r answer < "${TTY}"
+    case "${answer}" in
+      '') [[ ${default} == yes ]]; return ;;
+      y | Y | yes | YES) return 0 ;;
+      n | N | no | NO) return 1 ;;
+      *) jsh_warn "Please answer yes or no." 2> "${TTY}" ;;
     esac
   done
-  CDPATH='' cd -- "$(dirname -- "${jsh_bootstrap_script_path}")" 2>/dev/null && pwd -P
 }
 
-jsh_bootstrap_dry_run=0
-jsh_bootstrap_yes=0
-jsh_bootstrap_mode=${JSH_MODE:-}
-jsh_bootstrap_mode_value=0
-for jsh_bootstrap_argument; do
-  case "${jsh_bootstrap_argument}" in
-    --dry-run | -n) jsh_bootstrap_dry_run=1 ;;
-    --yes | -y) jsh_bootstrap_yes=1 ;;
-    --mode)
-      jsh_bootstrap_mode_value=1
-      ;;
-    --mode=*)
-      case "${jsh_bootstrap_argument#*=}" in
-        lite | runtime) jsh_bootstrap_mode=lite ;;
-        full | install) jsh_bootstrap_mode=full ;;
-        *) jsh_bootstrap_error 'Mode must be lite or full' ;;
-      esac
-      ;;
-    *)
-      if [ "${jsh_bootstrap_mode_value}" = 1 ]; then
-        case "${jsh_bootstrap_argument}" in
-          lite | runtime) jsh_bootstrap_mode=lite ;;
-          full | install) jsh_bootstrap_mode=full ;;
-          *) jsh_bootstrap_error 'Mode must be lite or full' ;;
-        esac
-        jsh_bootstrap_mode_value=0
-      fi
-      ;;
-  esac
-done
-[ "${jsh_bootstrap_mode_value}" = 0 ] || jsh_bootstrap_error 'Missing value for --mode'
-
-jsh_bootstrap_local=0
-jsh_bootstrap_local_dir=
-case "$0" in
-  */j.sh | j.sh)
-    jsh_bootstrap_local_dir=$(jsh_bootstrap_script_dir "$0" 2>/dev/null || true)
-    if [ -n "${jsh_bootstrap_local_dir}" ] && [ -f "${jsh_bootstrap_local_dir}/bin/jsh" ]; then
-      jsh_bootstrap_local=1
-    fi
-    ;;
-esac
-
-if [ "${jsh_bootstrap_local}" = 1 ]; then
-  command -v bash >/dev/null 2>&1 || jsh_bootstrap_error 'Bash is required to run jsh'
-  JSH_DIR="${jsh_bootstrap_local_dir}" exec bash "${jsh_bootstrap_local_dir}/bin/jsh" install "$@"
-fi
-
-jsh_bootstrap_home=${HOME:-}
-[ -n "${jsh_bootstrap_home}" ] || jsh_bootstrap_error 'HOME is not set'
-jsh_bootstrap_install_dir=${JSH_INSTALL_DIR:-${jsh_bootstrap_home}/.jsh}
-case "${jsh_bootstrap_install_dir}" in
-  '' | / | "${jsh_bootstrap_home}")
-    jsh_bootstrap_error "unsafe install directory: ${jsh_bootstrap_install_dir}"
-    ;;
-  "${jsh_bootstrap_home}"/*) ;;
-  *) jsh_bootstrap_error 'JSH_INSTALL_DIR must be under HOME' ;;
-esac
-
-if [ -f "${jsh_bootstrap_install_dir}/bin/jsh" ]; then
-  command -v bash >/dev/null 2>&1 || jsh_bootstrap_error 'Bash is required to run jsh'
-  JSH_DIR="${jsh_bootstrap_install_dir}" exec bash "${jsh_bootstrap_install_dir}/bin/jsh" install "$@"
-fi
-
-if [ -e "${jsh_bootstrap_install_dir}" ] || [ -L "${jsh_bootstrap_install_dir}" ]; then
-  jsh_bootstrap_error "existing install path does not contain bin/jsh: ${jsh_bootstrap_install_dir}"
-fi
-
-jsh_bootstrap_repo=${JSH_INSTALL_REPO:-https://github.com/jovalle/jsh.git}
-jsh_bootstrap_ref=${JSH_INSTALL_REF:-main}
-command -v git >/dev/null 2>&1 || jsh_bootstrap_error 'Git is required to acquire jsh'
-
-jsh_bootstrap_interactive=0
-if [ -t 1 ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
-  jsh_bootstrap_interactive=1
-fi
-if [ "${jsh_bootstrap_interactive}" = 0 ] && [ -z "${jsh_bootstrap_mode}" ]; then
-  jsh_bootstrap_error 'Noninteractive installation requires JSH_MODE=lite or JSH_MODE=full'
-fi
-if [ "${jsh_bootstrap_interactive}" = 0 ] && [ "${jsh_bootstrap_dry_run}" = 0 ] \
-  && [ "${jsh_bootstrap_yes}" = 0 ]; then
-  jsh_bootstrap_error 'Noninteractive installation requires --yes when a checkout must be acquired'
-fi
-
-if [ "${jsh_bootstrap_dry_run}" = 1 ]; then
-  case "${jsh_bootstrap_mode:-lite}" in
-    lite) jsh_bootstrap_plan_mode=lite ;;
-    full) jsh_bootstrap_plan_mode=full ;;
-    *) jsh_bootstrap_error 'JSH_MODE must be lite or full' ;;
-  esac
-
-  jsh_bootstrap_source_bin=
-  case "${jsh_bootstrap_repo}" in
-    /* | ./* | ../*)
-      jsh_bootstrap_repo_dir=$(CDPATH='' cd -- "${jsh_bootstrap_repo}" 2>/dev/null && pwd -P || true)
-      [ -z "${jsh_bootstrap_repo_dir}" ] || jsh_bootstrap_source_bin=${jsh_bootstrap_repo_dir}/bin/jsh
-      ;;
-    file://*)
-      jsh_bootstrap_repo_dir=$(CDPATH='' cd -- "${jsh_bootstrap_repo#file://}" 2>/dev/null && pwd -P || true)
-      [ -z "${jsh_bootstrap_repo_dir}" ] || jsh_bootstrap_source_bin=${jsh_bootstrap_repo_dir}/bin/jsh
-      ;;
-  esac
-  if [ -n "${jsh_bootstrap_source_bin}" ] && [ -f "${jsh_bootstrap_source_bin}" ]; then
-    JSH_DIR="${jsh_bootstrap_repo_dir}" \
-      JSH_INSTALL_DIR="${jsh_bootstrap_install_dir}" \
-      exec bash "${jsh_bootstrap_source_bin}" install "$@"
+load_brew() {
+  if command -v brew > /dev/null 2>&1; then
+    return
   fi
 
-  jsh_banner
-  printf '%s%sSetup plan (%s)%s\n' "${JSH_UI_BOLD}" "${JSH_UI_CYAN}" \
-    "${jsh_bootstrap_plan_mode}" "${JSH_UI_RESET}"
-  jsh_ui_message plan "Git checkout                  clone ${jsh_bootstrap_install_dir} at ${jsh_bootstrap_ref}"
-  jsh_ui_message note 'Dry run: no checkout, packages, submodules, or links were changed'
-  exit 0
+  for brew_path in /opt/homebrew/bin/brew /usr/local/bin/brew /home/linuxbrew/.linuxbrew/bin/brew; do
+    if [[ -x "${brew_path}" ]]; then
+      eval "$("${brew_path}" shellenv)"
+      return
+    fi
+  done
+}
+
+is_arch_family() {
+  local os_release=${JSH_OS_RELEASE:-/etc/os-release}
+  [[ "$(uname -s)" == Linux && -r "${os_release}" ]] || return 1
+
+  local ID='' ID_LIKE=''
+  # shellcheck source=/dev/null
+  . "${os_release}"
+  [[ " ${ID:-} ${ID_LIKE:-} " == *" endeavouros "* ||
+    " ${ID:-} ${ID_LIKE:-} " == *" arch "* ||
+    " ${ID:-} ${ID_LIKE:-} " == *" archlinux "* ]]
+}
+
+install_arch_prerequisites() {
+  if [[ "$(id -u)" -eq 0 ]]; then
+    pacman -S --needed --noconfirm "$@"
+  elif command -v sudo > /dev/null 2>&1; then
+    sudo pacman -S --needed --noconfirm "$@"
+  else
+    jsh_error "sudo is required to install missing setup tools."
+    return 1
+  fi
+}
+
+install_prerequisites() {
+  local install_mode=$1 prompt_for_install=$2 package
+  local -a packages=()
+  command -v git > /dev/null 2>&1 || packages+=(git)
+  command -v zsh > /dev/null 2>&1 || packages+=(zsh)
+  if [[ ${install_mode} == install ]]; then
+    command -v make > /dev/null 2>&1 || packages+=(make)
+    if ! command -v bash > /dev/null 2>&1 || ! bash -c '((BASH_VERSINFO[0] >= 5))' 2> /dev/null; then
+      packages+=(bash)
+    fi
+  fi
+
+  if ((${#packages[@]} > 0)); then
+    jsh_warn "Missing required tools: ${packages[*]}"
+    if [[ ${prompt_for_install} == 1 ]] && ! confirm "Install them now?"; then
+      jsh_error "Git and Zsh are required to try Jsh."
+      return 1
+    fi
+    if is_arch_family; then
+      install_arch_prerequisites "${packages[@]}"
+    else
+      load_brew
+      if ! command -v brew > /dev/null 2>&1; then
+        jsh_info "Homebrew is required to install missing setup tools."
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" < "${TTY}"
+        load_brew
+      fi
+      for package in "${packages[@]}"; do
+        brew list "${package}" > /dev/null 2>&1 || brew install "${package}"
+      done
+    fi
+  else
+    jsh_success "Required tools are already installed."
+  fi
+
+  if ! is_arch_family && command -v brew > /dev/null 2>&1; then
+    brew_prefix=$(brew --prefix)
+    PATH="${brew_prefix}/bin:${brew_prefix}/opt/make/libexec/gnubin:${PATH}"
+    export PATH
+  fi
+}
+
+sync_repository() {
+  if ! command -v git > /dev/null 2>&1; then
+    jsh_error "Git is required. Run the prerequisite phase first."
+    exit 1
+  fi
+
+  if [[ -d "${JSH_DIR}/.git" ]]; then
+    if ! confirm "Update Jsh from upstream?" no; then
+      return
+    fi
+    if [[ -n "$(git -C "${JSH_DIR}" status --porcelain)" ]]; then
+      jsh_warn "Local changes found in ${JSH_DIR}; leaving the checkout unchanged."
+      return
+    fi
+    git -C "${JSH_DIR}" pull --ff-only
+    git -C "${JSH_DIR}" submodule update --init --recursive
+    return
+  fi
+
+  if [[ -e "${JSH_DIR}" ]]; then
+    jsh_error "Install path exists but is not a Git checkout: ${JSH_DIR}"
+    exit 1
+  fi
+
+  mkdir -p "$(dirname "${JSH_DIR}")"
+  git clone --recurse-submodules "${JSH_REPO}" "${JSH_DIR}"
+}
+
+setup_system() {
+  if [[ ! -f "${JSH_DIR}/Makefile" ]]; then
+    jsh_error "Repository is unavailable at ${JSH_DIR}. Run the repository phase first."
+    exit 1
+  fi
+
+  if command -v make > /dev/null 2>&1; then
+    make --no-print-directory -C "${JSH_DIR}" setup < "${TTY}"
+  elif command -v gmake > /dev/null 2>&1; then
+    gmake --no-print-directory -C "${JSH_DIR}" setup < "${TTY}"
+  else
+    jsh_error "Make is required. Run the prerequisite phase first."
+    exit 1
+  fi
+}
+
+jsh_banner
+if [[ ${mode} == shell ]]; then
+  jsh_info "jsh"
+  jsh_detail "Install directory: ${JSH_DIR}"
+  jsh_detail "This opens an isolated shell without changing your dotfiles or system configuration."
+  install_prerequisites shell 1
+  sync_repository
+  jsh_blank
+  jsh_success "Jsh is ready."
+  jsh_detail "When you want the full Jsh experience, run: jsh install"
+  jsh_blank
+  exec "${JSH_DIR}/bin/jsh" < "${TTY}"
 fi
 
-mkdir -p "$(dirname -- "${jsh_bootstrap_install_dir}")" \
-  || jsh_bootstrap_error "cannot create install parent: $(dirname -- "${jsh_bootstrap_install_dir}")"
-if ! git clone --quiet --branch "${jsh_bootstrap_ref}" \
-  "${jsh_bootstrap_repo}" "${jsh_bootstrap_install_dir}"; then
-  jsh_bootstrap_error 'failed to acquire the jsh checkout'
+jsh_info "jsh install"
+jsh_detail "Install directory: ${JSH_DIR}"
+jsh_detail "Each phase explains its changes before it runs."
+
+heading "1/3" "Prerequisites" "Install Homebrew when needed, then ensure Git, Make, Zsh, and Bash 5 are available."
+if confirm "Run this phase?"; then
+  install_prerequisites install 0
+else
+  jsh_warn "Skipped prerequisites."
 fi
 
-command -v bash >/dev/null 2>&1 || jsh_bootstrap_error 'Bash is required to run jsh'
-JSH_DIR="${jsh_bootstrap_install_dir}" exec bash "${jsh_bootstrap_install_dir}/bin/jsh" install "$@"
+heading "2/3" "Repository" "Clone ${JSH_REPO}, or fast-forward an existing clean checkout."
+if confirm "Run this phase?"; then
+  sync_repository
+else
+  jsh_warn "Skipped repository sync."
+fi
+
+heading "3/3" "System setup" "Deploy dotfiles, install packages, then run the conversational configuration scripts for this platform."
+if confirm "Run this phase?"; then
+  jsh_blank
+  setup_system
+else
+  jsh_warn "Skipped system setup."
+fi
+
+jsh_blank
+jsh_success "Installation finished."
+[[ ${JSH_INSTALL_RETURN:-0} == 1 ]] && exit 0
+jsh_blank
+exec "${JSH_DIR}/bin/jsh" < "${TTY}"

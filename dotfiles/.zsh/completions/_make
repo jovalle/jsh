@@ -1,0 +1,4 @@
+#compdef make gmake
+
+autoload -Uz _jsh
+_jsh make

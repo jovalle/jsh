@@ -1,0 +1,5 @@
+.cache
+.git/objects/pack/*
+.kube/cache
+.venv
+/local/vendor/

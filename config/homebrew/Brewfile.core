@@ -1,5 +1,0 @@
-# Core tools installed by the full jsh installer and required by workstation tasks.
-brew "go-task"
-brew "jq"
-brew "just"
-brew "zsh"

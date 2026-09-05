@@ -1,0 +1,10 @@
+# ShellCheck configuration
+
+# Enable all checks by default
+enable=all
+
+# External sources (optional, uncomment if needed)
+# source-path=SCRIPTDIR
+
+# Shell dialect
+shell=zsh

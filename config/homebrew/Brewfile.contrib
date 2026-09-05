@@ -1,7 +1,0 @@
-# Tools used by `just prepare`, checks, and repository hooks.
-brew "bats-core"
-brew "gitleaks"
-brew "pre-commit"
-brew "prettier"
-brew "shellcheck"
-brew "shfmt"

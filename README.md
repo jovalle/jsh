@@ -1,36 +1,82 @@
-# jsh
+<div align="center">
+  <img src=".github/assets/jsh.jpeg" width="200px" height="200px" />
 
-## Prerequisites
+  # jsh
 
-- bash
-- curl
-- git
-- zsh (for full experience)
+  <p>
+    A collection of files to improve life in the shell
+  </p>
+</div>
 
-## Install
+## 📖 Overview
+
+A feature-rich and consistent life in the shell. This is a mono repository for my local environments in both macOS and Linux (+WSL). I sync this project/directory across my devices using [Syncthing](https://syncthing.net/).
+
+## 📚 Core Elements
+
+My shell of choice is `zsh` with [oh-my-zsh](https://github.com/ohmyzsh/ohmyzsh) as the shell framework. Bootstrapping with [`task`](https://github.com/go-task/task) and [`stow`](https://www.gnu.org/software/stow/).
+
+### 🔌 Shell Plugins
+
+- `fzf`: Fuzzy finder enabled in shell reverse search and in `vim`
+- `powerlevel10k`: Stunning yet functional shell prompt
+- `zinit`: Shell framework that enables themes and plugins
+- `zsh-autosuggestions`: Pseudo auto-completion like in `fish` shell
+- `zsh-highlighting`: Emphasizes, as you write, if a command/file/directory is missing (usually due to a typo)
+
+### 🍟 Binaries
+
+Scripts at `./bin/` are imported into `PATH`:
+
+- `colours`: Unlocks full 8-bit colors in the shell
+- `httpstat`: Quick and easy HTTP requests with light benchmarking
+- `kubectx`: Must-have script for managing local Kubernetes configuration contexts
+- `kubens`: Similar to `kubectx` but for cluster namespaces
+- `nukem`: Quick and dirty script for eliminating pesky finalizers in Kubernetes
+- `sshrc`: Copies shell customizations to SSH targets for duration of sessions
+
+### 📝 Configurations
+
+Project includes custom configs for:
+
+- iTerm2
+- Firefox
+- Visual Studio Code
+
+### 🖍️ Customization
+
+## 🐣 Prerequisites
+
+Taskfile is a needed! Install via `./setup.sh`.
+
+### Font
+
+Using [JetBrainsMono](https://www.jetbrains.com/lp/mono/) with [FiraCode](https://github.com/tonsky/FiraCode) and [Meslo](https://github.com/andreberg/Meslo-Font) as backups.
+
+Installation should procure the fonts automatically but you may need to restart your app(s).
+
+## ⚠️ Important Note
+
+This repository may contain hardcoded references to my username (`jay`) and system paths in various configuration files. If you're forking or using this repository, you may need to:
+
+- Update usernames in `.taskfiles/` (especially the WindowW taskfile)
+- Adjust paths in configuration files (Firefox, VS Code, etc.)
+- Review and modify any platform-specific settings
+
+Please search for `jay` and `/home/jay/` or `C:\Users\jay\` and update accordingly for your environment.
+
+## 📲 Setup
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/jovalle/jsh/main/j.sh | sh
+task setup
 ```
 
-## Modes
-
-- **Lite** (default): checks the host and checkout, then installs only the
-  launcher; it does not initialize submodules, install Homebrew/core packages,
-  or change dotfiles.
-- **Full**: additionally links the managed dotfiles into `HOME`, the XDG config
-  directory, and the platform-specific VS Code user directory. Full setup also
-  initializes vendored submodules and, when needed, offers Homebrew (Linuxbrew
-  on Linux) and the core packages from `config/homebrew/Brewfile.core`:
-  `go-task` (`task`), `jq`, `just`, and `zsh`. It installs `fzf` from the pinned
-  `vendor/fzf` submodule without changing shell configuration files; jsh loads
-  the integration itself. Contributor tooling is installed separately with
-  `just prepare`.
-
-For a noninteractive install, choose the mode explicitly:
+### 🗑️ Uninstall
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/jovalle/jsh/main/j.sh | JSH_MODE=lite sh -s -- --yes
-# or, from an existing checkout:
-JSH_MODE=full jsh install --yes
+task uninstall
 ```
+
+> **⚠️ Warning:** The `uninstall` task only removes symlinks created by `stow`. It does **not** uninstall packages or applications installed during setup
+>
+> Removing symlinks will revert configuration changes to applications like Firefox and VS Code, as they will no longer point to the custom config files in this repository. Your original configuration files (if any existed) will need to be manually restored.
