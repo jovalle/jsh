@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# kubens(1) is a utility to switch between Kubernetes namespaces.
 #
+# kubens(1) is a utility to switch between Kubernetes namespaces.
+
 # Copyright 2017 Google Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,66 +16,40 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-[[ -n $DEBUG ]] && set -x
+[[ -n ${DEBUG:-} ]] && set -x
 
 set -eou pipefail
 IFS=$'\n\t'
 
-SELF_CMD="$0"
+SELF_CMD=$0
 
-KUBENS_DIR="${XDG_CACHE_HOME:-$HOME/.kube}/kubens"
-
-_jsh_color_enabled() {
-  local output_fd="${1:-1}"
-  [[ "${JSH_PLAIN_OUTPUT:-0}" != 1 && "${TERM:-dumb}" != dumb &&
-    -z ${NO_COLOR+x} && "${JSH_COLOR:-auto}" != never ]] || return 1
-  [[ -n "${_KUBECTX_FORCE_COLOR:-}" || -t "${output_fd}" || "${JSH_COLOR:-auto}" == always ]]
-}
-
-error() {
-  if _jsh_color_enabled 2; then
-    printf '\033[31m%s\033[0m\n' "$*" >&2
-  else
-    printf '%s\n' "$*" >&2
-  fi
-}
-
-info() {
-  if _jsh_color_enabled 2; then
-    printf '\033[34m%s\033[0m\n' "$*" >&2
-  else
-    printf '%s\n' "$*" >&2
-  fi
-}
+KUBENS_DIR="${XDG_CACHE_HOME:-${HOME}/.kube}/kubens"
 
 usage() {
   local SELF
-  SELF="kubens"
-  if [[ "$(basename "$0")" == kubectl-* ]]; then # invoked as plugin
-    SELF="kubectl ns"
-  fi
+  SELF=kubens
 
   cat <<EOF
 USAGE:
-  $SELF                    : list the namespaces in the current context
-  $SELF <NAME>             : change the active namespace of current context
-  $SELF -                  : switch to the previous namespace in this context
-  $SELF -c, --current      : show the current namespace
-  $SELF -h,--help          : show this message
+  ${SELF}                    : list the namespaces in the current context
+  ${SELF} <NAME>             : change the active namespace of current context
+  ${SELF} -                  : switch to the previous namespace in this context
+  ${SELF} -c, --current      : show the current namespace
+  ${SELF} -h,--help          : show this message
 EOF
 }
 
 exit_err() {
-  error "${1}"
-  exit 1
+   echo >&2 "${1}"
+   exit 1
 }
 
 current_namespace() {
   local cur_ctx
 
   cur_ctx="$(current_context)" || exit_err "error getting current context"
-  ns="$($KUBECTL config view -o=jsonpath="{.contexts[?(@.name==\"${cur_ctx}\")].context.namespace}")" \
-    || exit_err "error getting current namespace"
+  ns="$(${KUBECTL} config view -o=jsonpath="{.contexts[?(@.name==\"${cur_ctx}\")].context.namespace}")" \
+     || exit_err "error getting current namespace"
 
   if [[ -z "${ns}" ]]; then
     echo "default"
@@ -84,11 +59,11 @@ current_namespace() {
 }
 
 current_context() {
-  $KUBECTL config current-context
+  ${KUBECTL} config current-context
 }
 
 get_namespaces() {
-  $KUBECTL get namespaces -o=jsonpath='{range .items[*].metadata.name}{@}{"\n"}{end}'
+  ${KUBECTL} get namespaces -o=jsonpath='{range .items[*].metadata.name}{@}{"\n"}{end}'
 }
 
 escape_context_name() {
@@ -116,14 +91,14 @@ save_namespace() {
   saved="$(read_namespace "${1}")"
 
   if [[ "${saved}" != "${2}" ]]; then
-    printf %s "${2}" >"${f}"
+    printf %s "${2}" > "${f}"
   fi
 }
 
 switch_namespace() {
   local ctx="${1}"
-  $KUBECTL config set-context "${ctx}" --namespace="${2}"
-  info "Active namespace is \"${2}\"."
+  ${KUBECTL} config set-context "${ctx}" --namespace="${2}"
+  echo "Active namespace is \"${2}\".">&2
 }
 
 choose_namespace_interactive() {
@@ -140,7 +115,7 @@ choose_namespace_interactive() {
     FZF_DEFAULT_COMMAND="${SELF_CMD}" \
     fzf --ansi --no-preview || true)"
   if [[ -z "${choice}" ]]; then
-    error "error: you did not choose any of the options"
+    echo 2>&1 "error: you did not choose any of the options"
     exit 1
   else
     set_namespace "${choice}"
@@ -159,39 +134,37 @@ set_namespace() {
       save_namespace "${ctx}" "${prev}"
     fi
   else
-    error "error: no namespace exists with name \"${1}\"."
+    echo "error: no namespace exists with name \"${1}\".">&2
     exit 1
   fi
 }
 
 list_namespaces() {
-  local yellow='' darkbg='' normal='' use_color=false
-  if _jsh_color_enabled; then
-    use_color=true
-    yellow=$(tput setaf 3 || true)
-    darkbg=$(tput setab 0 || true)
-    normal=$(tput sgr0 || true)
-  fi
+  local yellow darkbg normal
+  yellow=$(tput setaf 3 || true)
+  darkbg=$(tput setab 0 || true)
+  normal=$(tput sgr0 || true)
 
   local cur_ctx_fg cur_ctx_bg
-  cur_ctx_fg=${KUBECTX_CURRENT_FGCOLOR:-$yellow}
-  cur_ctx_bg=${KUBECTX_CURRENT_BGCOLOR:-$darkbg}
+  cur_ctx_fg=${KUBECTX_CURRENT_FGCOLOR:-${yellow}}
+  cur_ctx_bg=${KUBECTX_CURRENT_BGCOLOR:-${darkbg}}
 
   local cur ns_list
   cur="$(current_namespace)" || exit_err "error getting current namespace"
   ns_list=$(get_namespaces) || exit_err "error getting namespace list"
 
-  for c in $ns_list; do
-    if [[ "${use_color}" == true ]]; then
-      # colored output mode
-      if [[ "${c}" = "${cur}" ]]; then
-        echo "${cur_ctx_bg}${cur_ctx_fg}${c}${normal}"
-      else
-        echo "${c}"
-      fi
+  for c in ${ns_list}; do
+  if [[ -n "${_KUBECTX_FORCE_COLOR:-}" || \
+       -t 1 && -z "${NO_COLOR:-}" ]]; then
+    # colored output mode
+    if [[ "${c}" = "${cur}" ]]; then
+      echo "${cur_ctx_bg}${cur_ctx_fg}${c}${normal}"
     else
       echo "${c}"
     fi
+  else
+    echo "${c}"
+  fi
   done
 }
 
@@ -200,42 +173,42 @@ swap_namespace() {
   ctx="$(current_context)" || exit_err "error getting current context"
   ns="$(read_namespace "${ctx}")"
   if [[ -z "${ns}" ]]; then
-    error "error: No previous namespace found for current context."
+    echo "error: No previous namespace found for current context." >&2
     exit 1
   fi
   set_namespace "${ns}"
 }
 
 main() {
+  if [[ "$#" -eq 1 && ("${1}" == '-h' || "${1}" == '--help') ]]; then
+    usage
+    return
+  fi
+
   if [[ -z "${KUBECTL:-}" ]]; then
     if hash kubectl 2>/dev/null; then
       KUBECTL=kubectl
-    elif hash kubectl.exe 2>/dev/null; then
+    elif hash kubectl.exe  2>/dev/null; then
       KUBECTL=kubectl.exe
     else
-      error "kubectl is not installed"
+      echo >&2 "kubectl is not installed"
       exit 1
     fi
   fi
 
   if [[ "$#" -eq 0 ]]; then
-    if [[ -t 1 && -z ${KUBECTX_IGNORE_FZF:-} && "$(
-      type fzf &>/dev/null
-      echo $?
-    )" -eq 0 ]]; then
+    if [[ -t 1 && -z ${KUBECTX_IGNORE_FZF:-} && "$(type fzf &>/dev/null; echo $?)" -eq 0 ]]; then
       choose_namespace_interactive
     else
       list_namespaces
     fi
   elif [[ "$#" -eq 1 ]]; then
-    if [[ "${1}" == '-h' || "${1}" == '--help' ]]; then
-      usage
-    elif [[ "${1}" == "-" ]]; then
+    if [[ "${1}" == "-" ]]; then
       swap_namespace
     elif [[ "${1}" == '-c' || "${1}" == '--current' ]]; then
       current_namespace
     elif [[ "${1}" =~ ^-(.*) ]]; then
-      error "error: unrecognized flag \"${1}\""
+      echo "error: unrecognized flag \"${1}\"" >&2
       usage
       exit 1
     elif [[ "${1}" =~ (.+)=(.+) ]]; then
@@ -244,7 +217,7 @@ main() {
       set_namespace "${1}"
     fi
   else
-    error "error: too many flags"
+    echo "error: too many flags" >&2
     usage
     exit 1
   fi

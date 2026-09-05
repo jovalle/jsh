@@ -1,32 +1,80 @@
-# Pre-commit Configuration for jsh
-default_install_hook_types: [pre-commit, pre-push, commit-msg]
+---
+# Pre-commit hooks for code quality
+# Install: brew install pre-commit
+# Setup: pre-commit install
+# Run: pre-commit run --all-files
 
 repos:
-  # ShellCheck - Shell script linting
-  - repo: https://github.com/shellcheck-py/shellcheck-py
-    rev: v0.10.0.1
-    hooks:
-      - id: shellcheck
-        args: ["--severity=warning"]
-        files: \.(sh|bash)$|^j\.sh$|^bin/[^.]+$
-
-  # Conventional commits
+  # Conventional commits (keep existing hook)
   - repo: https://github.com/compilerla/conventional-pre-commit
-    rev: v4.0.0
+    rev: v3.6.0
     hooks:
       - id: conventional-pre-commit
         stages: [commit-msg]
-        args: [feat, fix, refactor, docs, test, chore, perf, ci, build, style]
-
-  # Gitleaks - Secret scanning
-  - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.30.1
-    hooks:
-      - id: gitleaks
         args:
-          - --config
-          - .gitleaks.toml
-          - --ignore-gitleaks-allow
-          - --max-decode-depth=3
-          - --max-archive-depth=2
-        stages: [pre-commit]
+          - feat
+          - fix
+          - docs
+          - style
+          - refactor
+          - perf
+          - test
+          - build
+          - ci
+          - chore
+          - revert
+
+  # General file checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '\.md$'
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+      - id: check-json
+        exclude: '^\.vscode/extensions\.json$'
+      - id: check-added-large-files
+        args: [--maxkb=1000]
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: check-executables-have-shebangs
+      - id: check-shebang-scripts-are-executable
+        exclude: '^tests/.*\.bats$'
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  # Shell scripts
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.9.0.6
+    hooks:
+      - id: shellcheck
+        args: [--severity=warning]
+        types: [shell]
+        exclude: '(^|/)(\.zshrc|.*\.zsh)$|^(dotfiles/\.zsh/|lib/zsh/)'
+
+  # YAML linting
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.33.0
+    hooks:
+      - id: yamllint
+        args: [--config-file=.yamllint]
+        types: [yaml]
+
+  # Markdown linting
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.38.0
+    hooks:
+      - id: markdownlint
+        args: [--config=.markdownlint.json, --fix]
+        types: [markdown]
+
+  # Prettier for JS/JSON/Markdown formatting
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: v3.1.0
+    hooks:
+      - id: prettier
+        types_or: [javascript, json, markdown]
+        exclude: 'package-lock\.json'
+        # Prettier handles JSONC (JSON with Comments) in .vscode files

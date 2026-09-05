@@ -1,224 +1,73 @@
-# Global Gitignore - Jsh
-# Patterns to ignore across all repositories
-# Symlinked to ~ and referenced by git core.excludesfile
+# Git & Prettier Ignore File
+# This file is used by both Git (.gitignore) and Prettier (.prettierignore symlink)
+# https://git-scm.com/docs/gitignore
+# https://prettier.io/docs/en/ignore.html
 
-# =============================================================================
-# OS Generated
-# =============================================================================
-
-# macOS
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-.AppleDouble
-.LSOverride
-Icon
-
-# Windows
-Thumbs.db
-ehthumbs.db
-Desktop.ini
-$RECYCLE.BIN/
-
-# Linux
-.fuse_hidden*
-.directory
-.Trash-*
-.nfs*
-
-# =============================================================================
-# Editors & IDEs
-# =============================================================================
-
-# Vim
-*.swp
-*.swo
-*.swn
-*~
-.netrwhist
-tags
-TAGS
-
-# VS Code (allow project-specific configs)
-.vscode/extensions/
-
-# JetBrains
-.idea/
-*.iml
-*.ipr
-*.iws
-.idea_modules/
-
-# Sublime Text
+*.cache*
+*.db
+*.gpg
+*.last-run
+*.log
+*.min.js
+*.mk
+*.netrwhist
+*.pem
+*.stTheme.cache
 *.sublime-project
 *.sublime-workspace
-
-# Emacs
-\#*\#
-.#*
-*.elc
-auto-save-list
-tramp
-
-# AI Tools
-*[Cc][Ll][Aa][Uu][Dd][Ee]*
-*[Gg][Ee][Mm][Ii][Nn][Ii]*
-.github/prompts/
-
-# =============================================================================
-# Environment & Secrets
-# =============================================================================
-
-.env
-.env.local
-.env.*.local
-.envrc
-*.pem
-*.key
-*.crt
-*.p12
-credentials.json
-secrets.json
-.secrets
-.credentials
-
-# =============================================================================
-# Dependencies
-# =============================================================================
-
-# Node
-node_modules/
-bower_components/
-
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-.venv/
-venv/
-ENV/
-env/
-.eggs/
-*.egg-info/
-*.egg
-
-# Ruby
-.bundle/
-vendor/bundle
-
-# Go
-
-# =============================================================================
-# Build & Output
-# =============================================================================
-
-dist/
-build/
-out/
-target/
-*.o
-*.a
-*.dylib
-*.dll
-*.exe
-*.class
-*.jar
-
-# =============================================================================
-# Logs & Caches
-# =============================================================================
-
-*.log
-logs/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-.npm/
-.nvimlog
-.cache/
-.parcel-cache/
-.eslintcache
-.stylelintcache
-
-# =============================================================================
-# Temporary Files
-# =============================================================================
-
-tmp/
-temp/
-*.tmp
-*.temp
-*.bak
-*.backup
-*.orig
-*.cache
-
-# =============================================================================
-# DevOps & Cloud
-# =============================================================================
-
-# Terraform
-*.tfstate
-*.tfstate.*
-.terraform/
-.terraform.lock.hcl
-
-# Ansible
-*.retry
-
-# Docker
-.docker/
-
-# Kubernetes
-kubeconfig
-
-# =============================================================================
-# Syncthing
-# =============================================================================
-
-.stfolder/
-.stignore
 *.sync-conflict-*
-
-# =============================================================================
-# Shell History
-# =============================================================================
-
-.bash_history
+*.tmPreferences.cache
+*.tmlanguage.cache
+*.tmp
+*Package\ Control.ca-bundle
+*Package\ Control.ca-certs/
+*Package\ Control.ca-list
+*Package\ Control.cache/
+*Package\ Control.last-run
+*Package\ Control.merged-ca-bundle
+*Package\ Control.system-ca-bundle
+*Package\ Control.user-ca-bundle
+*[cC][lL][aA][uU][dD][eE]*
+*[gG][eE][mM][iI][nN][iI]*
+*[qQ][wW][eE][nN]*
+.AppleDB
+.AppleDesktop
+.AppleDouble
+.DS_Store
+.DocumentRevisions-V100
+.LSOverride
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+._*
+.apdisk
+.com.apple.timemachine.donotpresent
+.envrc
+.fseventsd
+.history
+.idea
+.kube
+.oh-my-zsh
+.sops
+.ssh
+.stfolder
+.talos
+.task/
+.vault
 .zsh_history
 .zsh_history.*
-
-# =============================================================================
-# Jsh-Specific (only applies to this repo)
-# =============================================================================
-
-# Local machine-specific config (not tracked)
-.planning
-.jshrc
-*.local
-local/*
-!local/*.example
-/.*.sh
-
-# Keep example files
-!*.example
-
-# Lib build artifacts
-lib/mason-packages/
-
-# Vim plugins (downloaded on setup)
-vendor/vim-config/plugged/
-
-# Neovim pre-built binaries (downloaded on setup)
-lib/nvim/
-
-# Archive
-archive/
-
-# Local copies
-* copy.*
+/local/
+/tmp/
+AppSupport
+GitHub.sublime-settings
+Network\ Trash\ Folder
+Temporary\ Items
+__pycache__
+bh_unicode_properties.cache
+node_modules
+node_modules/
+oscrypto-ca-bundle.crt
+package-lock.json
+package.json
+sftp-config.json

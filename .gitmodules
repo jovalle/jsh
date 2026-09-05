@@ -1,10 +1,15 @@
-[submodule "vendor/zsh-completions"]
-	path = vendor/zsh-completions
-	url = https://github.com/zsh-users/zsh-completions.git
-[submodule "vendor/fzf-tab"]
-	path = vendor/fzf-tab
-	url = https://github.com/Aloxaf/fzf-tab.git
-  ignore = dirty
-[submodule "vendor/fzf"]
-	path = vendor/fzf
+[submodule ".fzf"]
+	path = local/vendor/fzf
 	url = https://github.com/junegunn/fzf.git
+[submodule "local/vendor/fzf-tab"]
+	path = local/vendor/fzf-tab
+	url = https://github.com/Aloxaf/fzf-tab.git
+[submodule "local/vendor/zsh-completions"]
+	path = local/vendor/zsh-completions
+	url = https://github.com/zsh-users/zsh-completions.git
+[submodule "local/vendor/zsh-autosuggestions"]
+	path = local/vendor/zsh-autosuggestions
+	url = https://github.com/zsh-users/zsh-autosuggestions.git
+[submodule "local/vendor/zsh-syntax-highlighting"]
+	path = local/vendor/zsh-syntax-highlighting
+	url = https://github.com/zsh-users/zsh-syntax-highlighting.git

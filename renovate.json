@@ -1,15 +1,16 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
   "git-submodules": {
     "enabled": true
   },
   "packageRules": [
     {
-      "description": "Automerge submodule updates",
       "matchManagers": ["git-submodules"],
       "automerge": true,
-      "automergeType": "pr",
-      "platformAutomerge": false
+      "automergeType": "branch",
+      "ignoreTests": true,
+      "schedule": ["before 6am on monday"]
     }
   ]
 }

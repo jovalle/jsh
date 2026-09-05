@@ -1,360 +1,241 @@
-" =============================================================================
-" JSH Vim Configuration
-" =============================================================================
-" Symlinked to ~/.vimrc
-" Designed for SSH sessions - works with bundled plugins or standalone
-" Inspired by LazyVim keybindings and sensible defaults
+" Enable syntax
+syntax on
 
-set nocompatible
-set encoding=utf-8
-scriptencoding utf-8
+" Enable 256 colors palette
+set t_Co=256
 
-" =============================================================================
-" Plugin Manager (vim-plug)
-" =============================================================================
-
-" Detect config directory (supports JSH_EPHEMERAL for SSH sessions)
-let s:config_dir = exists('$JSH_EPHEMERAL')
-  \ ? $JSH_EPHEMERAL . '/vendor/vim-config'
-    \ : exists('$JSH_DIR')
-  \ ? $JSH_DIR . '/vendor/vim-config'
-  \ : expand('~/.jsh/vendor/vim-config')
-
-let s:plug_file = s:config_dir . '/autoload/plug.vim'
-let s:plugged_dir = s:config_dir . '/plugged'
-
-" Load vim-plug if available
-if filereadable(s:plug_file)
-  execute 'source ' . s:plug_file
-
-  call plug#begin(s:plugged_dir)
-
-  " Standard plugin declarations
-  " vim-plug automatically uses existing plugins from plugged_dir if present
-  " (no network calls if already downloaded)
-  Plug 'junegunn/fzf', { 'do': { -> fzf#install() } }
-  Plug 'junegunn/fzf.vim'
-  Plug 'tpope/vim-fugitive'
-  Plug 'airblade/vim-gitgutter'
-  Plug 'itchyny/lightline.vim'
-  Plug 'preservim/nerdtree'
-  Plug 'tpope/vim-surround'
-  Plug 'tpope/vim-commentary'
-
-  call plug#end()
-
-  " Lightline config (must be after plug#end)
-  let g:lightline = {
-      \ 'colorscheme': 'one',
-      \ 'active': {
-      \   'left': [ [ 'mode', 'paste' ],
-      \             [ 'gitbranch', 'filename', 'modified' ] ],
-      \   'right': [ [ 'lineinfo' ],
-      \              [ 'percent' ],
-      \              [ 'filetype' ] ]
-      \ },
-      \ 'inactive': {
-      \   'left': [ [ 'filename' ] ],
-      \   'right': [ [ 'lineinfo' ] ]
-      \ },
-      \ 'component_function': {
-      \   'gitbranch': 'LightlineGitBranch',
-      \   'filename': 'LightlineFilename',
-      \ },
-      \ 'mode_map': {
-      \   'n': 'NORMAL', 'i': 'INSERT', 'R': 'REPLACE',
-      \   'v': 'VISUAL', 'V': 'V-LINE', "\<C-v>": 'V-BLOCK',
-      \   'c': 'COMMAND', 's': 'SELECT', 'S': 'S-LINE', "\<C-s>": 'S-BLOCK', 't': 'TERMINAL',
-      \ },
-      \ 'separator': { 'left': '', 'right': '' },
-      \ 'subseparator': { 'left': '', 'right': '' },
-      \ }
-
-  " Git branch with icon for lightline
-  function! LightlineGitBranch()
-    if exists('*FugitiveHead')
-      let l:branch = FugitiveHead()
-      return l:branch !=# '' ? ' ' . l:branch : ''
-    endif
-    return ''
-  endfunction
-
-  " Relative filepath for lightline
-  function! LightlineFilename()
-    let l:filename = expand('%:~:.')
-    return l:filename !=# '' ? l:filename : '[No Name]'
-  endfunction
+" 24-bit true color
+if (has("termguicolors"))
+ set termguicolors
 endif
 
-" =============================================================================
-" Core Settings
-" =============================================================================
-
-" Appearance
-set number                      " Line numbers
-set relativenumber              " Relative line numbers
-set cursorline                  " Highlight current line
-if exists('+cursorlineopt')
-  set cursorlineopt=number    " Only highlight line number, not whole line
-endif
-set scrolloff=8                 " Keep 8 lines above/below cursor
-set sidescrolloff=8             " Keep 8 columns left/right of cursor
-set signcolumn=auto             " Show sign column only when needed
-set numberwidth=4               " Consistent line number column width
-set showmatch                   " Highlight matching brackets
-set laststatus=2                " Always show statusline
-set showcmd                     " Show command in bottom bar
-set wildmenu                    " Visual command autocomplete
-set wildmode=list:longest,full  " Complete longest common, then all
-
-" Colors
-syntax enable
+" Set dark bg for tmux compatibility
 set background=dark
-if has('termguicolors')
-  set termguicolors
+
+" Set number of lines for VIM to remember
+set history=500
+
+" Increase memory limit
+set maxmempattern=5000000
+
+" Enable filetype plugins
+filetype plugin on
+filetype indent on
+
+" Auto read external file changes
+set autoread
+
+" Quicksave
+nmap <leader>w :w!<cr>
+
+" :W sudo saves the file
+command W w !sudo tee % > /dev/null
+
+" Always show current position
+set ruler
+
+" Height of the command bar
+set cmdheight=1
+
+" Configure backspace so it acts as it should act
+set backspace=eol,start,indent
+set whichwrap+=<,>,h,l
+
+" Ignore case when searching
+set ignorecase
+
+" When searching try to be smart about cases
+set smartcase
+
+" Highlight search results
+set hlsearch
+
+" Makes search act like search in modern browsers
+set incsearch
+
+" For regular expressions turn magic on
+set magic
+
+" Show matching brackets when text indicator is over them
+set showmatch
+
+" No annoying sound on errors
+set noerrorbells
+set novisualbell
+set t_vb=
+set tm=500
+
+" Set utf8 as standard encoding and en_US as the standard language
+set encoding=utf8
+
+" Use Unix as the standard file type
+set ffs=unix,dos,mac
+
+" Turn backup off, since most stuff is in SVN, git, etc. anyway...
+set nobackup
+set nowb
+set noswapfile
+
+" 1 tab == 2 spaces
+set tabstop=2
+set softtabstop=2
+set shiftwidth=2
+
+" Linebreak on 500 characters
+set lbr
+set tw=500
+
+" Preferred indentation and formatting
+set ai "Auto indent
+set si "Smart indent
+set wrap "Wrap lines
+
+" Always paste mode
+set paste
+
+" Always show status line
+set laststatus=2
+
+" Combat distro specific nuances
+set nocompatible
+
+" Combat syntax highlighting issues in large files
+set redrawtime=10000
+
+" Improve visibility of cursor
+set cursorline
+
+" Use spaces instead of tabs
+set expandtab
+
+" Be smart when using tabs ;)
+set smarttab
+
+" Attach to clipboard (<Leader> == \)
+noremap <Leader>y "*y
+noremap <Leader>p "*p
+noremap <Leader>Y "+y
+noremap <Leader>P "+p
+
+" Clear highlighting
+noremap <Leader><space> :noh<cr>
+
+" Visual mode pressing * or # searches for the current selection
+" Super useful! From an idea by Michael Naumann
+vnoremap <silent> * :<C-u>call VisualSelection('', '')<CR>/<C-R>=@/<CR><CR>
+vnoremap <silent> # :<C-u>call VisualSelection('', '')<CR>?<C-R>=@/<CR><CR>
+
+" Map <Space> to / (search) and Ctrl-<Space> to ? (backwards search)
+map <space> /
+map <c-space> ?
+
+" Enable mouse
+set ttymouse=xterm2
+set mouse=a
+
+" Return to last known position
+if has("autocmd")
+  au BufReadPost * if line("'\"") > 1 && line("'\"") <= line("$") | exe "normal! g'\"" | endif
 endif
 
-" VS Code Dark Modern editor surfaces; syntax continues to use VS Code Dark+ roles.
-highlight Normal       ctermfg=252 ctermbg=234 guifg=#CCCCCC guibg=#1F1F1F
-highlight CursorLine   cterm=NONE ctermbg=235 guibg=#2B2B2B
-highlight CursorLineNr cterm=NONE ctermfg=252 ctermbg=235 guifg=#CCCCCC guibg=#2B2B2B
-highlight LineNr       ctermfg=243 ctermbg=234 guifg=#6E7681 guibg=#1F1F1F
-highlight SignColumn   ctermbg=234 guibg=#1F1F1F
-highlight VertSplit    ctermfg=235 ctermbg=234 guifg=#2B2B2B guibg=#1F1F1F
+" Remove all trailing whitespace on save
+autocmd BufWritePre * %s/\s\+$//e
 
-" Behavior
-set hidden                      " Allow hidden buffers
-set autoread                    " Auto-reload changed files
-set backspace=indent,eol,start  " Backspace over everything
-set mouse=a                     " Enable mouse support
-if has('clipboard')
-  set clipboard=unnamedplus   " Use the desktop clipboard (+ register)
-else
-  set clipboard=unnamed       " Fall back to the X11 primary selection
-endif
-set splitright                  " Open vertical splits to the right
-set splitbelow                  " Open horizontal splits below
-
-" Indentation
-set tabstop=4                   " Tab width
-set shiftwidth=4                " Indent width
-set softtabstop=4               " Soft tab width
-set expandtab                   " Use spaces instead of tabs
-set smartindent                 " Smart auto-indentation
-set autoindent                  " Copy indent from previous line
-
-" Search
-set ignorecase                  " Case-insensitive search
-set smartcase                   " Case-sensitive if uppercase present
-set hlsearch                    " Highlight search results
-set incsearch                   " Show matches while typing
-
-" Performance
-set lazyredraw                  " Don't redraw during macros
-set timeoutlen=500              " Faster key sequence timeout
-set ttimeoutlen=10              " Faster escape key
-set updatetime=250              " Faster CursorHold events
-
-" Files
-set noswapfile                  " Disable swap files
-set nobackup                    " Disable backup files
-set nowritebackup               " Disable write backup
-set undofile                    " Persistent undo
-set undodir=~/.vim/undodir      " Undo directory
-
-" Ensure undo directory exists
-if !isdirectory(expand('~/.vim/undodir'))
-  silent! call mkdir(expand('~/.vim/undodir'), 'p')
-endif
-
-" =============================================================================
-" Key Mappings (LazyVim-inspired)
-" =============================================================================
-
-" Leader key
-let mapleader = ' '
-let maplocalleader = ','
-
-" Better escape
-inoremap jj <Esc>
-inoremap jk <Esc>
-
-" Clear search highlight
-nnoremap <leader>h :nohlsearch<CR>
-nnoremap <C-l> :nohlsearch<CR><C-l>
-
-" Save and quit
-nnoremap <leader>w :w<CR>
-nnoremap <leader>q :q<CR>
-nnoremap <leader>x :x<CR>
-nnoremap <leader>Q :qa!<CR>
-
-" Window navigation (Ctrl + hjkl)
-nnoremap <C-h> <C-w>h
-nnoremap <C-j> <C-w>j
-nnoremap <C-k> <C-w>k
-nnoremap <C-l> <C-w>l
-
-" Window splitting
-nnoremap <leader>- :split<CR>
-nnoremap <leader>\| :vsplit<CR>
-nnoremap <leader>sv :vsplit<CR>
-nnoremap <leader>sh :split<CR>
-
-" Buffer navigation
-nnoremap <S-h> :bprevious<CR>
-nnoremap <S-l> :bnext<CR>
-nnoremap <leader>bd :bdelete<CR>
-nnoremap <leader>bb :Buffers<CR>
-
-" Better movement
-nnoremap j gj
-nnoremap k gk
-nnoremap <C-d> <C-d>zz
-nnoremap <C-u> <C-u>zz
-nnoremap n nzzzv
-nnoremap N Nzzzv
-
-" Move lines up/down
-vnoremap J :m '>+1<CR>gv=gv
-vnoremap K :m '<-2<CR>gv=gv
-
-" Keep visual selection when indenting
-vnoremap < <gv
-vnoremap > >gv
-
-" Yank to end of line (consistent with D, C)
-nnoremap Y y$
-
-" Quick access to vimrc
-nnoremap <leader>ve :edit $MYVIMRC<CR>
-nnoremap <leader>vr :source $MYVIMRC<CR>
-
-" =============================================================================
-" Plugin Mappings
-" =============================================================================
-
-" FZF (fuzzy finder)
-if exists(':Files')
-  nnoremap <leader>ff :Files<CR>
-  nnoremap <leader>fg :GFiles<CR>
-  nnoremap <leader>fb :Buffers<CR>
-  nnoremap <leader>fh :History<CR>
-  nnoremap <leader>fr :History<CR>
-  nnoremap <leader>fc :History:<CR>
-  nnoremap <leader>fs :Rg<Space>
-  nnoremap <leader>fw :Rg <C-r><C-w><CR>
-  nnoremap <leader>/ :BLines<CR>
-  nnoremap <C-p> :Files<CR>
-endif
-
-" NERDTree (file explorer)
-if exists(':NERDTree')
-  nnoremap <leader>e :NERDTreeToggle<CR>
-  nnoremap <leader>E :NERDTreeFind<CR>
-  " Close NERDTree when opening a file
-  let NERDTreeQuitOnOpen = 1
-  let NERDTreeShowHidden = 1
-  let NERDTreeMinimalUI = 1
-  let NERDTreeIgnore = ['\.pyc$', '__pycache__', '\.git$', 'node_modules']
-endif
-
-" Git (fugitive)
-if exists(':Git')
-  nnoremap <leader>gs :Git<CR>
-  nnoremap <leader>gc :Git commit<CR>
-  nnoremap <leader>gp :Git push<CR>
-  nnoremap <leader>gl :Git pull<CR>
-  nnoremap <leader>gb :Git blame<CR>
-  nnoremap <leader>gd :Gdiffsplit<CR>
-  nnoremap <leader>gL :Git log --oneline<CR>
-endif
-
-" GitGutter
-if exists(':GitGutter')
-  nnoremap ]h :GitGutterNextHunk<CR>
-  nnoremap [h :GitGutterPrevHunk<CR>
-  nnoremap <leader>ghs :GitGutterStageHunk<CR>
-  nnoremap <leader>ghu :GitGutterUndoHunk<CR>
-  nnoremap <leader>ghp :GitGutterPreviewHunk<CR>
-  let g:gitgutter_sign_added = '+'
-  let g:gitgutter_sign_modified = '~'
-  let g:gitgutter_sign_removed = '-'
-endif
-
-" Commentary (commenting)
-" gcc - toggle comment on line
-" gc in visual mode - toggle comment on selection
-" gcap - comment a paragraph
-
-" Surround
-" cs"' - change surrounding " to '
-" ds" - delete surrounding "
-" ysiw" - surround word with "
-
-" =============================================================================
-" Plugin Configuration
-" =============================================================================
-
-" FZF layout
-if exists('g:loaded_fzf')
-  let g:fzf_layout = { 'down': '40%' }
-  let g:fzf_preview_window = ['right:50%', 'ctrl-/']
-endif
-
-" =============================================================================
-" Autocommands
-" =============================================================================
-
-augroup jsh_vimrc
-  autocmd!
-
-  " Return to last edit position when opening files
-  autocmd BufReadPost *
-      \ if line("'\"") > 1 && line("'\"") <= line("$") |
-      \   execute "normal! g'\"" |
-      \ endif
-
-  " Trim trailing whitespace on save
-  autocmd BufWritePre * :%s/\s\+$//e
-
-  " Auto-resize splits when window is resized
-  autocmd VimResized * wincmd =
-
-  " Highlight yanked text briefly
-  if exists('##TextYankPost')
-    autocmd TextYankPost * silent! lua vim.highlight.on_yank({timeout=200})
+" Avoid Vim plugins on remote hosts
+if !exists("$SSHHOME")
+  " Install Vim Plug if not installed
+  if empty(glob('~/.vim/autoload/plug.vim'))
+    silent !proxy curl -fLo ~/.vim/autoload/plug.vim --create-dirs https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim
+    autocmd VimEnter * PlugInstall
   endif
 
-  " Filetype-specific settings
-  autocmd FileType python setlocal tabstop=4 shiftwidth=4
-  autocmd FileType javascript,typescript,json,yaml setlocal tabstop=2 shiftwidth=2
-  autocmd FileType gitcommit setlocal spell textwidth=72
+  " Start plugin injection
+  call plug#begin('~/.vim/plugged')
 
-augroup END
+  " Show start/end of any surroundings
+  Plug 'tpope/vim-surround'
 
-" =============================================================================
-" Which-Key Style Help
-" =============================================================================
+  " For terraform syntax
+  Plug 'hashivim/vim-terraform'
 
-" Show available keymaps with <leader>?
-function! s:ShowHelp()
-  echo "JSH Vim Keybindings"
-  echo "─────────────────────────────"
-  echo "<Space>f  - Find files/buffers/grep"
-  echo "<Space>e  - File explorer (NERDTree)"
-  echo "<Space>g  - Git commands"
-  echo "<Space>w  - Save file"
-  echo "<Space>q  - Quit"
-  echo "<Space>-  - Split horizontal"
-  echo "<Space>|  - Split vertical"
-  echo "<Space>b  - Buffer commands"
-  echo "Ctrl+hjkl - Navigate windows"
-  echo "gcc       - Toggle comment"
-  echo "]h / [h   - Next/prev git hunk"
-endfunction
-nnoremap <leader>? :call <SID>ShowHelp()<CR>
+  " Live syntax review (requires vim >=8)
+  Plug 'w0rp/ale'
 
-" =============================================================================
-" End of Configuration
-" =============================================================================
+  " Dynamic commenting
+  Plug 'preservim/nerdcommenter'
+
+  " Snippeting
+  Plug 'neoclide/coc.nvim', {'branch': 'release'}
+
+  " Fancy status line
+  Plug 'itchyny/lightline.vim'
+
+  " For NerdTree file explorer
+  Plug 'preservim/nerdtree'
+
+  " Syntax highlighting for languages
+  Plug 'sheerun/vim-polyglot'
+
+  " Go support
+  Plug 'fatih/vim-go', { 'do': ':GoUpdateBinaries' }
+
+  " General-purpose command-line fuzzy finder
+  Plug 'junegunn/fzf', { 'do': { -> fzf#install() } }
+  Plug 'junegunn/fzf.vim'
+
+  " Initialize plugin system
+  call plug#end()
+endif
+
+" Comment and uncomment lines
+nnoremap <leader><leader>c :call NERDComment(0,"toggle")<CR>
+vnoremap <leader><leader>c :call NERDComment(0,"toggle")<CR>
+
+" For NerdTree
+autocmd StdinReadPre * let s:std_in=1
+autocmd VimEnter * if argc() == 0 && !exists("s:std_in") | NERDTree | endif
+autocmd VimEnter * if argc() == 1 && isdirectory(argv()[0]) && !exists("s:std_in") | exe 'NERDTree' argv()[0] | wincmd p | ene | exe 'cd '.argv()[0] | endif
+map <C-n> :NERDTreeToggle<CR>
+
+" For netrw
+let g:netrw_browse_split=4  " open in prior window
+let g:netrw_altv=1          " open splits to the right
+let g:netrw_liststyle=3     " tree view
+
+" Enable completion where available.
+let g:ale_completion_enabled = 1
+
+" Set this. Airline will handle the rest.
+let g:airline#extensions#ale#enabled = 1
+
+" python
+autocmd FileType python setlocal shiftwidth=4 softtabstop=4 expandtab
+autocmd FileType python map <buffer> <F9> :w<CR>:exec '!python3' shellescape(@%, 1)<CR>
+autocmd FileType python imap <buffer> <F9> <esc>:w<CR>:exec '!python3' shellescape(@%, 1)<CR>
+
+let python_highlight_all = 1
+au FileType python syn keyword pythonDecorator True None False self
+
+au BufNewFile,BufRead *.jinja set syntax=htmljinja
+au BufNewFile,BufRead *.html,*.htm,*.shtml,*.stm,*.j2 set ft=jinja
+au BufNewFile,BufRead *.mako set ft=mako
+
+au FileType python map <buffer> F :set foldmethod=indent<cr>
+
+au FileType python inoremap <buffer> $r return
+au FileType python inoremap <buffer> $i import
+au FileType python inoremap <buffer> $p print
+au FileType python inoremap <buffer> $f # --- <esc>a
+au FileType python map <buffer> <leader>1 /class
+au FileType python map <buffer> <leader>2 /def
+au FileType python map <buffer> <leader>C ?class
+au FileType python map <buffer> <leader>D ?def
+au FileType python set cindent
+au FileType python set cinkeys-=0#
+au FileType python set indentkeys-=0#
+
+" yaml
+au FileType yaml set ts=2 sts=2 sw=2 indentexpr= nosmartindent et
+au FileType yml set ts=2 sts=2 sw=2 indentexpr= nosmartindent et
+
+silent! helptags ALL

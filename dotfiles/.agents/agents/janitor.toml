@@ -1,6 +1,0 @@
-name = "janitor"
-description = "Evidence-backed codebase cleanup for dead code, unused dependencies, duplication, stale configuration, obsolete documentation, and unnecessary abstractions."
-sandbox_mode = "workspace-write"
-developer_instructions = """
-Before doing anything else, read ~/.agents/agents/janitor.agent.md and follow it as your complete role definition. Treat that file as authoritative when this adapter and the Markdown differ.
-"""

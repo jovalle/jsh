@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json.schemastore.org/prettierrc",
+  "printWidth": 100,
+  "tabWidth": 2,
+  "useTabs": false,
+  "semi": true,
+  "singleQuote": true,
+  "quoteProps": "as-needed",
+  "trailingComma": "all",
+  "bracketSpacing": true,
+  "bracketSameLine": false,
+  "arrowParens": "always",
+  "proseWrap": "preserve",
+  "endOfLine": "lf",
+  "embeddedLanguageFormatting": "auto",
+  "overrides": [
+    {
+      "files": ["*.yaml", "*.yml"],
+      "options": {
+        "printWidth": 120,
+        "singleQuote": false
+      }
+    },
+    {
+      "files": "*.md",
+      "options": {
+        "proseWrap": "preserve",
+        "printWidth": 120
+      }
+    },
+    {
+      "files": ["*.json", "*.jsonc", ".prettierrc"],
+      "options": {
+        "printWidth": 120,
+        "tabWidth": 2,
+        "trailingComma": "none"
+      }
+    },
+    {
+      "files": ["*.html", "*.htm"],
+      "options": {
+        "printWidth": 120,
+        "tabWidth": 2,
+        "bracketSameLine": false,
+        "htmlWhitespaceSensitivity": "css"
+      }
+    },
+    {
+      "files": ["*.css", "*.scss", "*.less"],
+      "options": {
+        "printWidth": 120,
+        "singleQuote": false
+      }
+    },
+    {
+      "files": ["*.ts", "*.tsx"],
+      "options": {
+        "printWidth": 100,
+        "arrowParens": "always"
+      }
+    },
+    {
+      "files": ["*.graphql", "*.gql"],
+      "options": {
+        "printWidth": 120
+      }
+    },
+    {
+      "files": ["*.toml"],
+      "options": {
+        "printWidth": 100
+      }
+    }
+  ]
+}
