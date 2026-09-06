@@ -70,6 +70,19 @@ if [ "${1:-}" = install ] || [ "${1:-}" = update ]; then
   exec "${JSH_ROOT}/j.sh" "${action}" "$@"
 fi
 
+usage() {
+  cat <<'EOF'
+Usage: jsh [zsh-options]
+       jsh install
+       jsh update
+
+Open an isolated J shell environment.
+Run jsh install to install packages, deploy dotfiles, and configure the system.
+Run jsh update to update the repository, dependencies, packages, and configuration.
+Inside an active J shell, run jsh -r after configuration changes.
+EOF
+}
+
 JSH_ZSH=${JSH_ZSH:-zsh}
 if ! command -v "${JSH_ZSH}" > /dev/null 2>&1; then
   printf 'jsh: zsh is required but was not found in PATH\n' >&2
@@ -85,16 +98,14 @@ case ${1:-} in
     exit 2
     ;;
   -h | --help)
-    printf '%s\n' \
-      'Usage: jsh [zsh-options]' \
-      '       jsh install' \
-      '       jsh update' \
-      '' \
-      'Open an isolated J shell environment.' \
-      'Run jsh install to install packages, deploy dotfiles, and configure the system.' \
-      'Run jsh update to update the repository, dependencies, packages, and configuration.' \
-      'Inside an active J shell, run jsh -r after configuration changes.'
+    usage
     exit 0
+    ;;
+  '' | -*) ;;
+  *)
+    printf 'jsh: unknown command: %s\n\n' "$1" >&2
+    usage >&2
+    exit 2
     ;;
 esac
 export JSH_ROOT JSH_RUNTIME_DIR JSH_ZSH ZDOTDIR

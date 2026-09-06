@@ -263,6 +263,20 @@ profile_is_locked() {
   return 1
 }
 
+close_waterfox() {
+  local profile=$1 attempt
+  if [[ $(uname -s) == Darwin ]]; then
+    osascript -e 'tell application id "net.waterfox.waterfox" to quit' > /dev/null || return
+  else
+    pkill -TERM -x waterfox 2> /dev/null || pkill -TERM -x waterfox-bin 2> /dev/null || return
+  fi
+  for ((attempt = 0; attempt < 50; attempt++)); do
+    profile_is_locked "${profile}" || return 0
+    sleep 0.2
+  done
+  return 1
+}
+
 compose_preferences() {
   local profile=$1 output=$2 version revision toolbar quoted_toolbar
   version=$(manifest_value version)
@@ -505,8 +519,19 @@ apply_configuration() {
     profile=$(selected_profile "${root}")
   fi
   if profile_is_locked "${profile}"; then
-    jsh_error "Close Waterfox before configuring profile ${profile##*/}."
-    return 1
+    jsh_warn "Waterfox is open on profile ${profile##*/}."
+    jsh_prompt "Close Waterfox and continue? [y/N]: "
+    read -r answer || answer=
+    if [[ ! ${answer} =~ ^[Yy]$ ]]; then
+      jsh_warn "Skipping Waterfox configuration."
+      jsh_detail "Run later: ${JSH_ROOT}/scripts/unix/configure/waterfox.sh apply"
+      return
+    fi
+    if ! close_waterfox "${profile}"; then
+      jsh_warn "Waterfox did not close; skipping configuration."
+      jsh_detail "Run later: ${JSH_ROOT}/scripts/unix/configure/waterfox.sh apply"
+      return
+    fi
   fi
 
   validate_configured_addons "${profile}"

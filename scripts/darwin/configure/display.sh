@@ -57,7 +57,6 @@ main() {
     jsh_detail "  Current: ${current_logical} logical, ${current_backing} backing, scaling:${current_scaling}, ${current_ppi} effective PPI"
     jsh_detail "  Proposed: ${proposed_logical} logical, ${proposed_backing} backing, scaling:${proposed_scaling}, ${proposed_ppi} effective PPI"
   done <<< "${profile}"
-  jsh_blank
 
   confirm || {
     jsh_warn "Skipping macOS display resolution."
