@@ -1797,7 +1797,7 @@ dedup_path
 
 jsh() {
   case ${1:-} in
-    install)
+    install|update)
       JSH_INSTALL_RETURN=1 command "${JSH}/bin/jsh" "$@" || return
       jsh reload
       ;;

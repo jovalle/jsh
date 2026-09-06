@@ -82,10 +82,11 @@ BANNER
 
 usage() {
   cat <<'EOF'
-Usage: j.sh [install]
+Usage: j.sh [install|update]
 
 With no arguments, install or update Jsh and open an isolated shell environment.
 Run with install to install packages, deploy dotfiles, and configure the system.
+Run with update to update Jsh and reapply the managed environment.
 EOF
 }
 
@@ -93,6 +94,10 @@ case ${1:-} in
   '') mode=shell ;;
   install)
     mode=install
+    shift
+    ;;
+  update)
+    mode=update
     shift
     ;;
   -h | --help)
@@ -192,16 +197,17 @@ install_prerequisites() {
       return 1
     fi
     if is_arch_family; then
-      install_arch_prerequisites "${packages[@]}"
+      install_arch_prerequisites "${packages[@]}" || return
     else
       load_brew
       if ! command -v brew > /dev/null 2>&1; then
         jsh_info "Homebrew is required to install missing setup tools."
-        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" < "${TTY}"
+        /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" \
+          < "${TTY}" || return
         load_brew
       fi
       for package in "${packages[@]}"; do
-        brew list "${package}" > /dev/null 2>&1 || brew install "${package}"
+        brew list "${package}" > /dev/null 2>&1 || brew install "${package}" || return
       done
     fi
   else
@@ -209,7 +215,7 @@ install_prerequisites() {
   fi
 
   if ! is_arch_family && command -v brew > /dev/null 2>&1; then
-    brew_prefix=$(brew --prefix)
+    brew_prefix=$(brew --prefix) || return
     PATH="${brew_prefix}/bin:${brew_prefix}/opt/make/libexec/gnubin:${PATH}"
     export PATH
   fi
@@ -243,6 +249,25 @@ sync_repository() {
   git clone --recurse-submodules "${JSH_REPO}" "${JSH_DIR}"
 }
 
+update_repository() {
+  if ! command -v git > /dev/null 2>&1; then
+    jsh_error "Git is required to update Jsh."
+    return 1
+  fi
+  if [[ ! -d "${JSH_DIR}/.git" ]]; then
+    jsh_error "Jsh is not a Git checkout: ${JSH_DIR}"
+    return 1
+  fi
+  if [[ -n "$(git -C "${JSH_DIR}" status --porcelain --untracked-files=all)" ]]; then
+    jsh_warn "Local changes found in ${JSH_DIR}; skipping repository and submodule updates."
+    return 10
+  fi
+
+  git -C "${JSH_DIR}" pull --ff-only || return
+  git -C "${JSH_DIR}" submodule sync --recursive || return
+  git -C "${JSH_DIR}" submodule update --init --recursive || return
+}
+
 setup_system() {
   if [[ ! -f "${JSH_DIR}/Makefile" ]]; then
     jsh_error "Repository is unavailable at ${JSH_DIR}. Run the repository phase first."
@@ -259,6 +284,52 @@ setup_system() {
   fi
 }
 
+run_make_target() {
+  local target=$1
+  if command -v make > /dev/null 2>&1; then
+    make --no-print-directory -C "${JSH_DIR}" "${target}" < "${TTY}"
+  elif command -v gmake > /dev/null 2>&1; then
+    gmake --no-print-directory -C "${JSH_DIR}" "${target}" < "${TTY}"
+  else
+    jsh_error "Make is required to update Jsh."
+    return 1
+  fi
+}
+
+run_update_step() {
+  local label=$1 result
+  shift
+  jsh_blank
+  jsh_info "${label}"
+  if "$@"; then
+    UPDATE_SUCCEEDED+=("${label}")
+    return
+  else
+    result=$?
+  fi
+  if ((result == 10)); then
+    UPDATE_WARNINGS+=("${label}")
+  else
+    UPDATE_ERRORS+=("${label}")
+  fi
+}
+
+print_update_summary() {
+  local label
+  jsh_blank
+  jsh_info "Update summary"
+  for label in "${UPDATE_SUCCEEDED[@]}"; do
+    jsh_success "${label}"
+  done
+  for label in "${UPDATE_WARNINGS[@]}"; do
+    jsh_warn "Skipped: ${label}"
+  done
+  for label in "${UPDATE_ERRORS[@]}"; do
+    jsh_error "Failed: ${label}"
+  done
+  jsh_detail "${#UPDATE_SUCCEEDED[@]} succeeded, ${#UPDATE_WARNINGS[@]} skipped, ${#UPDATE_ERRORS[@]} failed."
+}
+
 jsh_banner
 if [[ ${mode} == shell ]]; then
   jsh_info "jsh"
@@ -271,6 +342,23 @@ if [[ ${mode} == shell ]]; then
   jsh_detail "When you want the full Jsh experience, run: jsh install"
   jsh_blank
   exec "${JSH_DIR}/bin/jsh" < "${TTY}"
+fi
+
+if [[ ${mode} == update ]]; then
+  declare -a UPDATE_SUCCEEDED=() UPDATE_WARNINGS=() UPDATE_ERRORS=()
+  jsh_info "jsh update"
+  jsh_detail "Install directory: ${JSH_DIR}"
+  export JSH_CONTINUE_ON_ERROR=1 JSH_UPDATE=1
+  run_update_step "Repository and submodules" update_repository
+  run_update_step "Prerequisites" install_prerequisites install 0
+  run_update_step "Packages and dependencies" run_make_target install
+  run_update_step "Betterfox" "${JSH_DIR}/scripts/unix/configure/waterfox.sh" update
+  run_update_step "Dotfiles" run_make_target deploy
+  run_update_step "Configuration" run_make_target configure
+  run_update_step "Patches" run_make_target patch
+  print_update_summary
+  ((${#UPDATE_ERRORS[@]} == 0))
+  exit
 fi
 
 jsh_info "jsh install"

@@ -73,6 +73,15 @@ install_native_packages() {
   jsh_success "Native Arch packages are installed."
 }
 
+update_native_packages() {
+  if [[ "${DRY_RUN}" == 1 ]]; then
+    jsh_detail "Would update native Arch packages."
+    return
+  fi
+  run_root pacman -Syu --noconfirm
+  jsh_success "Native Arch packages are up to date."
+}
+
 find_aur_helper() {
   command -v yay 2> /dev/null || command -v paru 2> /dev/null
 }
@@ -128,6 +137,17 @@ install_aur_packages() {
   jsh_success "AUR packages are installed."
 }
 
+update_aur_packages() {
+  local helper
+  helper=$(find_aur_helper) || return
+  if [[ "${DRY_RUN}" == 1 ]]; then
+    jsh_detail "Would update AUR packages with ${helper}."
+    return
+  fi
+  "${helper}" -Sua --noconfirm
+  jsh_success "AUR packages are up to date."
+}
+
 install_flatpaks() {
   local application
   local -a applications=(com.spotify.Client com.todoist.Todoist)
@@ -144,6 +164,16 @@ install_flatpaks() {
   jsh_success "Flatpak applications are installed."
 }
 
+update_flatpaks() {
+  command -v flatpak > /dev/null 2>&1 || return
+  if [[ "${DRY_RUN}" == 1 ]]; then
+    jsh_detail "Would update user Flatpak applications."
+    return
+  fi
+  flatpak update --user --noninteractive
+  jsh_success "Flatpak applications are up to date."
+}
+
 main() {
   [[ "$(uname -s)" == Linux ]] || return
   is_arch_family || {
@@ -155,9 +185,14 @@ main() {
     jsh_error "pacman is required on Arch-family systems."
     return 1
   }
+  [[ ${JSH_UPDATE:-0} != 1 ]] || update_native_packages
   install_native_packages
   install_aur_packages
   install_flatpaks
+  if [[ ${JSH_UPDATE:-0} == 1 ]]; then
+    update_aur_packages
+    update_flatpaks
+  fi
 }
 
 main "$@"

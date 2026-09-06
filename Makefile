@@ -3,7 +3,7 @@ CHECK_TARGETS := check-script-headers check-shell-syntax check-zsh-syntax check-
 	lint-yaml lint-markdown lint-js
 FORMAT_TARGETS := format-shell format-python format-yaml format-json format-markdown
 
-.PHONY: help install setup deploy configure patch uninstall check \
+.PHONY: help install update setup deploy configure patch uninstall check \
 	format clean \
 	check-tools check-syntax lint ci validate pre-commit pre-commit-run commit \
 	commit-msg-check $(CHECK_TARGETS) $(FORMAT_TARGETS)
@@ -30,7 +30,7 @@ define run_scripts
 		jsh_error "Unsupported platform: $(PLATFORM)"; \
 		exit 1; \
 	fi
-	@$(OUTPUT) set -e; \
+	@$(OUTPUT) failed_scripts=0; script_status=0; \
 	first_script=1; \
 	for action in $(1); do \
 		for platform in $(PLATFORM_DIRS); do \
@@ -41,10 +41,21 @@ define run_scripts
 				[ "$$first_script" -eq 1 ] || jsh_blank; \
 				first_script=0; \
 				jsh_info "Running $$script"; \
-				"$$script"; \
+				if "$$script"; then \
+					:; \
+				else \
+					script_status=$$?; \
+					if [ "$${JSH_CONTINUE_ON_ERROR:-0}" = 1 ]; then \
+						jsh_error "Failed: $$script"; \
+						failed_scripts=$$((failed_scripts + 1)); \
+					else \
+						exit "$$script_status"; \
+					fi; \
+				fi; \
 			done; \
 		done; \
-	done
+	done; \
+	[ "$$failed_scripts" -eq 0 ]
 endef
 
 # Tool versions (can be overridden)
@@ -79,6 +90,9 @@ help: ## Show this help message
 
 install: ## Install packages and repository hooks
 	$(call run_scripts,install)
+
+update: ## Update packages, dependencies, and managed configuration
+	@"$(JSH_ROOT)/bin/jsh" update
 
 deploy: ## Deploy dotfiles and command links
 	$(call run_scripts,deploy)

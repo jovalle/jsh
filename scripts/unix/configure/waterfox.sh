@@ -414,6 +414,67 @@ check_update() {
   fi
 }
 
+confirm_betterfox_update() {
+  local answer
+  [[ ${JSH_UPDATE_ASSUME_YES:-0} != 1 ]] || return 0
+  jsh_prompt "Update the reviewed Betterfox pin? [Y/n]: "
+  read -r answer || answer=
+  [[ -z ${answer} || ${answer} =~ ^[Yy]$ ]]
+}
+
+update_betterfox() {
+  local current latest release revision downloaded checksum candidate
+  require_command curl
+  require_command jq
+  validate_manifest
+  current=$(manifest_value version)
+  release=$(curl -fsSL --retry 2 "${BETTERFOX_API_URL}") || {
+    jsh_error "Could not determine the latest Betterfox release."
+    return 1
+  }
+  latest=$(jq -er '.tag_name' <<< "${release}")
+  revision=$(jq -er '.target_commitish' <<< "${release}")
+  [[ ${latest} =~ ^[0-9]+([.][0-9]+)*$ && ${revision} =~ ^[0-9a-f]{40}$ ]] || {
+    jsh_error "The latest Betterfox release metadata is invalid."
+    return 1
+  }
+  if ! jq -en --arg current "${current}" --arg latest "${latest}" '
+    ($latest | split(".") | map(tonumber)) > ($current | split(".") | map(tonumber))
+  ' > /dev/null; then
+    if [[ ${latest} == "${current}" ]]; then
+      jsh_success "Betterfox ${current} is the latest release."
+    else
+      jsh_warn "Reviewed Betterfox pin ${current} is newer than latest release ${latest}; keeping it."
+    fi
+    return
+  fi
+
+  jsh_warn "Betterfox ${latest} is available; reviewed pin is ${current}."
+  if ! confirm_betterfox_update; then
+    jsh_warn "Keeping Betterfox ${current}."
+    return
+  fi
+
+  mkdir -p "${JSH_ROOT}/tmp"
+  TEMP_DIR=$(mktemp -d "${JSH_ROOT}/tmp/betterfox.XXXXXX")
+  downloaded="${TEMP_DIR}/user.js"
+  if ! curl -fsSL --retry 2 --output "${downloaded}" \
+    "${BETTERFOX_RAW_BASE}/${revision}/user.js"; then
+    jsh_error "Could not download Betterfox ${latest}."
+    return 1
+  fi
+  grep -q 'user_pref' "${downloaded}" || {
+    jsh_error "Downloaded Betterfox file contains no preferences."
+    return 1
+  }
+  checksum=$(sha256_file "${downloaded}")
+  candidate="${TEMP_DIR}/betterfox.json"
+  jq -n --arg version "${latest}" --arg revision "${revision}" --arg sha256 "${checksum}" \
+    '{version: $version, revision: $revision, sha256: $sha256}' > "${candidate}"
+  mv -f -- "${candidate}" "${BETTERFOX_MANIFEST}"
+  jsh_success "Updated Betterfox pin to ${latest}."
+}
+
 apply_configuration() {
   local binary root profile profile_status composed
   require_command curl
@@ -473,8 +534,9 @@ main() {
     apply) apply_configuration ;;
     backup) backup_waterfox_configuration ;;
     check-update) check_update ;;
+    update) update_betterfox ;;
     *)
-      jsh_error "Usage: ${0##*/} [apply|backup|check-update]"
+      jsh_error "Usage: ${0##*/} [apply|backup|check-update|update]"
       return 2
       ;;
   esac
