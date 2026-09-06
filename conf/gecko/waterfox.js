@@ -43,6 +43,7 @@ user_pref('userChrome.icon.global_menu', false);
 
 user_pref('browser.search.separatePrivateDefault', true);
 user_pref('browser.search.separatePrivateDefault.ui.enabled', true);
+user_pref('accessibility.typeaheadfind', false);
 
 user_pref('privacy.history.custom', true);
 user_pref('browser.privatebrowsing.autostart', false);
@@ -52,7 +53,7 @@ user_pref('privacy.sanitize.sanitizeOnShutdown', false);
 
 user_pref('privacy.globalprivacycontrol.enabled', false);
 user_pref('privacy.globalprivacycontrol.was_ever_enabled', false);
-user_pref('network.http.sendRefererHeader', 0);
+user_pref('network.http.sendRefererHeader', 2);
 
 user_pref('extensions.formautofill.addresses.enabled', false);
 user_pref('extensions.formautofill.creditCards.enabled', false);

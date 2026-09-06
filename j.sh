@@ -231,7 +231,7 @@ sync_repository() {
     if ! confirm "Update Jsh from upstream?" no; then
       return
     fi
-    if [[ -n "$(git -C "${JSH_DIR}" status --porcelain)" ]]; then
+    if [[ -n "$(git -C "${JSH_DIR}" status --porcelain --untracked-files=no)" ]]; then
       jsh_warn "Local changes found in ${JSH_DIR}; leaving the checkout unchanged."
       return
     fi
@@ -258,7 +258,7 @@ update_repository() {
     jsh_error "Jsh is not a Git checkout: ${JSH_DIR}"
     return 1
   fi
-  if [[ -n "$(git -C "${JSH_DIR}" status --porcelain --untracked-files=all)" ]]; then
+  if [[ -n "$(git -C "${JSH_DIR}" status --porcelain --untracked-files=no)" ]]; then
     jsh_warn "Local changes found in ${JSH_DIR}; skipping repository and submodule updates."
     return 10
   fi
