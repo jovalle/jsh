@@ -120,6 +120,11 @@ main() {
   load_brew
   command -v brew > /dev/null 2>&1 || install_brew
 
+  if [[ ${JSH_UPDATE:-0} == 1 ]]; then
+    jsh_info "Updating Homebrew packages..."
+    brew update
+  fi
+
   install_scope core
   install_scope common
   install_scope contrib
@@ -132,6 +137,11 @@ main() {
   machine=$(hostname -s 2> /dev/null || hostname)
   machine=$(printf '%s' "${machine}" | tr '[:upper:]' '[:lower:]')
   install_scope "${machine}"
+
+  if [[ ${JSH_UPDATE:-0} == 1 ]]; then
+    brew upgrade
+    jsh_success "Homebrew packages are up to date."
+  fi
 }
 
 main "$@"
