@@ -1,0 +1,180 @@
+addons:
+  - id: CanvasBlocker@kkapsner.de
+    name: CanvasBlocker
+    privateBrowsing: true
+
+  - id: addon@darkreader.org
+    name: Dark Reader
+    pinned: true
+
+  - id: addon@fastforward.team
+    name: FastForward
+    origins:
+      - "<all_urls>"
+    permissions:
+      - "<all_urls>"
+    privateBrowsing: true
+
+  - id: amptra@keepa.com
+    name: Keepa - Amazon Price Tracker
+    origins:
+      - "*://*.keepa.com/*"
+      - "*://*.amazon.com/*"
+      - "*://*.amzn.com/*"
+      - "*://*.amazon.co.uk/*"
+      - "*://*.amazon.de/*"
+      - "*://*.amazon.fr/*"
+      - "*://*.amazon.it/*"
+      - "*://*.amazon.ca/*"
+      - "*://*.amazon.com.mx/*"
+      - "*://*.amazon.es/*"
+      - "*://*.amazon.co.jp/*"
+      - "*://*.amazon.in/*"
+      - "*://*.amazon.com.br/*"
+      - "*://*.amazon.nl/*"
+      - "*://*.amazon.com.au/*"
+
+  - id: chrome-mask@overengineer.dev
+    name: Chrome Mask
+    privateBrowsing: true
+
+  - id: enhancerforyoutube@maximerf.addons.mozilla.org
+    name: Enhancer for YouTube
+
+  - id: idcac-pub@guus.ninja
+    name: I still don't care about cookies
+    privateBrowsing: true
+
+  - id: openmultipleurls@ustat.de
+    name: Open Multiple URLs
+
+  - id: savewebpas@jeffersonscher.com
+    name: Save webP as PNG or JPEG
+
+  - id: sponsorBlocker@ajay.app
+    name: SponsorBlock for YouTube
+
+  - id: uBlock0@raymondhill.net
+    name: uBlock Origin
+    pinned: true
+    privateBrowsing: true
+
+  - id: vpn@proton.ch
+    name: Proton VPN
+    origins:
+      - "https://*/*"
+      - "http://*/*"
+      - "ftp://*/*"
+      - "wss://*/*"
+      - "ws://*/*"
+      - "https://account.protonvpn.com/*"
+      - "https://account.proton.me/*"
+    permissions:
+      - proxy
+    pinned: true
+    privateBrowsing: true
+
+  - id: "{00000f2a-7cde-4f20-83ed-434fcb420d71}"
+    name: Imagus
+
+  - id: "{024dd701-1855-47ee-b031-7b68e57c82c2}"
+    name: Linkclump
+  ## name
+  - id: "{446900e4-71c2-419f-a6a7-df9c091e268b}"
+    name: Bitwarden Password Manager
+    permissions:
+      - privacy
+    pinned: true
+    privateBrowsing: true
+
+  - id: "{74145f27-f039-47ce-a470-a662b129930a}"
+    name: ClearURLs
+    privateBrowsing: true
+
+  - id: "{b86e4813-687a-43e6-ab65-0bde4ab75758}"
+    name: LocalCDN
+    privateBrowsing: true
+
+  - id: "{b9db16a4-6edc-47ec-a1f4-b86292ed211d}"
+    name: Video Download Helper
+    origins:
+      - "<all_urls>"
+      - "*://*.youtube.com/*"
+      - "*://*.vimeo.com/*"
+      - "*://*.facebook.com/*"
+      - "*://*.instagram.com/*"
+      - "*://*.ok.ru/*"
+      - "*://*.m.ok.ru/*"
+      - "*://*.vk.com/*"
+      - "*://*.vk.ru/*"
+      - "*://*.vkvideo.ru/*"
+      - "*://live.vkvideo.ru/*"
+      - "*://*.canva.com/*"
+      - "*://*.iq.com/*"
+      - "*://*.twitcasting.tv/*"
+      - "*://*.bilibili.tv/*"
+      - "*://*.bilibili.com/*"
+      - "*://*.taiav.com/*"
+      - "*://*.osmosis.org/*"
+      - "*://*.kick.com/*"
+      - "*://*.chaturbate.com/*"
+      - "*://*.chaturbate.eu/*"
+      - "*://*.chaturbate.global/*"
+      - "*://*.91porna.com/*"
+      - "*://*.9n6gyt.umydsfs.cc/*"
+      - "https://downloadhelper.net/*"
+      - "https://app.downloadhelper.net/*"
+      - "https://v10.downloadhelper.net/*"
+    permissions:
+      - "<all_urls>"
+
+  - id: "{ce9f4b1f-24b8-4e9a-9051-b9e472b1b2f2}"
+    name: Clear Browsing Data
+    pinned: true
+
+  - id: "{d533177a-94cc-4e48-8e75-3187f0a81236}"
+    name: Cache Longer
+
+  - id: "{d7742d87-e61d-4b78-b8a1-b469842139fa}"
+    fileAccess: true
+    name: Vimium
+    origins:
+      - "<all_urls>"
+      - "file:///*"
+    permissions:
+      - "<all_urls>"
+
+associations:
+  linux:
+    browserDesktopAlternative: net.waterfox.waterfox.desktop
+    citrixIcaDesktop: jsh-citrix-ica.desktop
+    citrixReceiverDesktop: jsh-citrix-receiver.desktop
+    htmlDesktop: waterfox.desktop
+    httpDesktop: waterfox.desktop
+    httpsDesktop: waterfox.desktop
+  macos:
+    citrixBundleId: com.citrix.receiver.nomas
+    htmlBundleId: net.waterfox.waterfox
+    htmlType: public.html
+    httpBundleId: net.waterfox.waterfox
+    httpsBundleId: net.waterfox.waterfox
+    icaType: com.citrix.ica.connectionfile
+
+citrix:
+  allowedOrigins:
+    - "https://jpmchase.com"
+  protocol: receiver
+
+search:
+  default: Google
+  privateDefault: DuckDuckGo
+
+toolbar:
+  remove:
+    - alltabs-button
+    - new-tab-button
+    - firefox-view-button
+    - history-panelmenu
+    - waterfox-blocker-toolbar-button
+
+version: 1
