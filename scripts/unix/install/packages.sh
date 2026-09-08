@@ -43,6 +43,51 @@ install_brew() {
   fi
 }
 
+confirm() {
+  local answer
+  [[ ${JSH_ASSUME_YES:-0} == 1 ]] && return 0
+  while :; do
+    jsh_prompt "$1 [Y/n]: "
+    read -r answer || answer=
+    case "${answer}" in
+      '' | y | Y | yes | YES) return 0 ;;
+      n | N | no | NO) return 1 ;;
+      *) jsh_warn "Please answer yes or no." ;;
+    esac
+  done
+}
+
+trust_declared_formulae() {
+  local scope brewfile formula existing trusted_json
+  local -a formulae=() untrusted=()
+
+  for scope in "$@"; do
+    brewfile="${JSH_ROOT}/conf/brew/${scope}/Brewfile"
+    [[ -f "${brewfile}" ]] || continue
+    while IFS= read -r formula; do
+      for existing in "${formulae[@]}"; do
+        [[ "${existing}" != "${formula}" ]] || continue 2
+      done
+      formulae+=("${formula}")
+    done < <(sed -nE 's/^[[:space:]]*brew "([^"/]+\/[^"/]+\/[^"/]+)".*/\1/p' "${brewfile}")
+  done
+
+  trusted_json=$(brew trust --json=v1)
+  for formula in "${formulae[@]}"; do
+    jq -e --arg formula "${formula}" '.formulae | index($formula) != null' \
+      <<< "${trusted_json}" > /dev/null || untrusted+=("${formula}")
+  done
+  ((${#untrusted[@]} > 0)) || return 0
+
+  jsh_warn "Homebrew requires trust for these third-party formulas:"
+  printf '  %s\n' "${untrusted[@]}"
+  if ! confirm "Trust these formulas?"; then
+    jsh_error "Cannot install untrusted third-party formulas."
+    return 1
+  fi
+  brew trust --formula "${untrusted[@]}"
+}
+
 migrate_legacy_npm_package() {
   local package=$1
   shift
@@ -101,8 +146,9 @@ is_arch_family() {
 }
 
 main() {
-  local platform
+  local platform machine
   local -i installed_scope=0
+  local -a package_scopes=(common contrib)
   platform=$(uname -s)
   case "${platform}" in
     Darwin | Linux) ;;
@@ -126,17 +172,18 @@ main() {
   fi
 
   install_scope core
-  install_scope common
-  install_scope contrib
-
   if [[ "${platform}" == Darwin ]]; then
-    install_scope macos
+    package_scopes+=(macos)
   fi
 
-  local machine
   machine=$(hostname -s 2> /dev/null || hostname)
   machine=$(printf '%s' "${machine}" | tr '[:upper:]' '[:lower:]')
-  install_scope "${machine}"
+  package_scopes+=("${machine}")
+
+  trust_declared_formulae "${package_scopes[@]}"
+  for scope in "${package_scopes[@]}"; do
+    install_scope "${scope}"
+  done
 
   if [[ ${JSH_UPDATE:-0} == 1 ]]; then
     brew upgrade

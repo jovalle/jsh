@@ -26,6 +26,15 @@ if [ "${JSH_BASH_RUNTIME:-0}" = 1 ]; then
         JSH_INSTALL_RETURN=1 JSH_BASH_RUNTIME=0 command "${JSH_ROOT}/bin/jsh" "$@" || return
         JSH_BASH_RUNTIME=1 exec "${JSH_BASH}" --noprofile --rcfile "${JSH_ROOT}/bin/jsh" -i
         ;;
+      --yes)
+        case ${2:-} in
+          install | update)
+            JSH_INSTALL_RETURN=1 JSH_BASH_RUNTIME=0 command "${JSH_ROOT}/bin/jsh" "$@" || return
+            JSH_BASH_RUNTIME=1 exec "${JSH_BASH}" --noprofile --rcfile "${JSH_ROOT}/bin/jsh" -i
+            ;;
+          *) JSH_BASH_RUNTIME=0 command "${JSH_ROOT}/bin/jsh" "$@" ;;
+        esac
+        ;;
       -r | reload)
         JSH_BASH_RUNTIME=1 exec "${JSH_BASH}" --noprofile --rcfile "${JSH_ROOT}/bin/jsh" -i
         ;;
@@ -62,23 +71,33 @@ if ! JSH_ROOT=$(CDPATH='' cd -P "${launcher%/*}/.." 2> /dev/null && pwd -P); the
   exit 1
 fi
 
+assume_yes=
+if [ "${1:-}" = --yes ]; then
+  assume_yes=$1
+  shift
+fi
+
 if [ "${1:-}" = install ] || [ "${1:-}" = update ]; then
   action=$1
   shift
   JSH_DIR=${JSH_ROOT}
   export JSH_DIR
+  if [ -n "${assume_yes}" ]; then
+    exec "${JSH_ROOT}/j.sh" "${assume_yes}" "${action}" "$@"
+  fi
   exec "${JSH_ROOT}/j.sh" "${action}" "$@"
 fi
 
 usage() {
   cat <<'EOF'
 Usage: jsh [zsh-options]
-       jsh install
-       jsh update
+  jsh [--yes] install
+  jsh [--yes] update
 
 Open an isolated J shell environment.
 Run jsh install to install packages, deploy dotfiles, and configure the system.
 Run jsh update to update the repository, dependencies, packages, and configuration.
+Use --yes to accept setup workflow prompts.
 Inside an active J shell, run jsh -r after configuration changes.
 EOF
 }
