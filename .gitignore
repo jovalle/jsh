@@ -57,7 +57,8 @@
 .vault
 .zsh_history
 .zsh_history.*
-/local/
+/local/*
+!/local/vendor/
 /tmp/
 AppSupport
 GitHub.sublime-settings
