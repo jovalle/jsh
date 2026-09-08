@@ -82,39 +82,43 @@ BANNER
 
 usage() {
   cat <<'EOF'
-Usage: j.sh [install|update]
+Usage: j.sh [--yes] [install|update]
 
 With no arguments, install or update Jsh and open an isolated shell environment.
 Run with install to install packages, deploy dotfiles, and configure the system.
 Run with update to update Jsh and reapply the managed environment.
+Use --yes to accept setup workflow prompts.
 EOF
 }
 
-case ${1:-} in
-  '') mode=shell ;;
-  install)
-    mode=install
-    shift
-    ;;
-  update)
-    mode=update
-    shift
-    ;;
-  -h | --help)
-    usage
-    exit 0
-    ;;
-  *)
-    jsh_error "Unknown command: $1"
-    usage >&2
-    exit 2
-    ;;
-esac
-if (($#)); then
-  jsh_error "Too many arguments."
-  usage >&2
-  exit 2
-fi
+mode=shell
+command_seen=0
+while (($#)); do
+  case $1 in
+    --yes)
+      export JSH_ASSUME_YES=1
+      ;;
+    install | update)
+      if ((command_seen)); then
+        jsh_error "Too many commands."
+        usage >&2
+        exit 2
+      fi
+      mode=$1
+      command_seen=1
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    *)
+      jsh_error "Unknown argument: $1"
+      usage >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
 
 if [[ ! -r "${TTY}" ]] || [[ ! -w "${TTY}" ]]; then
   jsh_error "jsh needs an interactive terminal."
@@ -129,6 +133,7 @@ heading() {
 
 confirm() {
   local default=${2:-yes} prompt='Y/n'
+  [[ ${JSH_ASSUME_YES:-0} == 1 ]] && return 0
   [[ ${default} == no ]] && prompt='y/N'
   while :; do
     jsh_prompt "$1 [${prompt}] " > "${TTY}"
@@ -221,6 +226,15 @@ install_prerequisites() {
   fi
 }
 
+sync_submodules() {
+  if ! confirm "Initialize and update Jsh submodules?"; then
+    jsh_warn "Skipped submodule initialization and update."
+    return
+  fi
+  git -C "${JSH_DIR}" submodule sync --recursive
+  git -C "${JSH_DIR}" submodule update --init --recursive
+}
+
 sync_repository() {
   if ! command -v git > /dev/null 2>&1; then
     jsh_error "Git is required. Run the prerequisite phase first."
@@ -228,15 +242,16 @@ sync_repository() {
   fi
 
   if [[ -d "${JSH_DIR}/.git" ]]; then
-    if ! confirm "Update Jsh from upstream?" no; then
-      return
-    fi
     if [[ -n "$(git -C "${JSH_DIR}" status --porcelain --untracked-files=no)" ]]; then
-      jsh_warn "Local changes found in ${JSH_DIR}; leaving the checkout unchanged."
+      jsh_warn "Local changes found in ${JSH_DIR}; skipping repository and submodule updates."
       return
     fi
-    git -C "${JSH_DIR}" pull --ff-only
-    git -C "${JSH_DIR}" submodule update --init --recursive
+    if confirm "Pull Jsh from upstream?"; then
+      git -C "${JSH_DIR}" pull --ff-only
+    else
+      jsh_warn "Skipped repository pull."
+    fi
+    sync_submodules
     return
   fi
 
@@ -246,7 +261,8 @@ sync_repository() {
   fi
 
   mkdir -p "$(dirname "${JSH_DIR}")"
-  git clone --recurse-submodules "${JSH_REPO}" "${JSH_DIR}"
+  git clone "${JSH_REPO}" "${JSH_DIR}"
+  sync_submodules
 }
 
 update_repository() {
@@ -263,9 +279,12 @@ update_repository() {
     return 10
   fi
 
-  git -C "${JSH_DIR}" pull --ff-only || return
-  git -C "${JSH_DIR}" submodule sync --recursive || return
-  git -C "${JSH_DIR}" submodule update --init --recursive || return
+  if confirm "Pull Jsh from upstream?"; then
+    git -C "${JSH_DIR}" pull --ff-only || return
+  else
+    jsh_warn "Skipped repository pull."
+  fi
+  sync_submodules
 }
 
 setup_system() {

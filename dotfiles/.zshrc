@@ -1801,6 +1801,15 @@ jsh() {
       JSH_INSTALL_RETURN=1 command "${JSH}/bin/jsh" "$@" || return
       jsh reload
       ;;
+    --yes)
+      case ${2:-} in
+        install|update)
+          JSH_INSTALL_RETURN=1 command "${JSH}/bin/jsh" "$@" || return
+          jsh reload
+          ;;
+        *) command "${JSH}/bin/jsh" "$@" ;;
+      esac
+      ;;
     -r|reload)
       shift
       if (( $# )); then

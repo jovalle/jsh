@@ -14,6 +14,7 @@ for library_file in "${repo_root}"/lib/*; do
 done
 unset library_file
 recovery_dir=
+backup_root=
 typeset -a stashed_paths stashed_backups
 
 stash_path() {
@@ -24,6 +25,20 @@ stash_path() {
   fi
   relative=${target#"${HOME}/"}
   backup="${recovery_dir}/${relative}"
+  mkdir -p -- "${backup:h}"
+  mv -- "${target}" "${backup}"
+  stashed_paths+=("${target}")
+  stashed_backups+=("${backup}")
+}
+
+backup_path() {
+  local target=$1 relative backup
+  if [[ -z "${backup_root}" ]]; then
+    backup_root="${XDG_STATE_HOME:-${HOME}/.local/state}/jsh/backups/$(date +%Y%m%d-%H%M%S)-$$"
+    mkdir -p -- "${backup_root}"
+  fi
+  relative=${target#"${HOME}/"}
+  backup="${backup_root}/${relative}"
   mkdir -p -- "${backup:h}"
   mv -- "${target}" "${backup}"
   stashed_paths+=("${target}")
@@ -44,9 +59,10 @@ restore_stashed() {
     fi
   done
   if (( failed )); then
-    jsh_error "Deployment recovery is incomplete; backups remain in ${recovery_dir}"
-  elif [[ -n "${recovery_dir}" ]]; then
-    rm -rf -- "${recovery_dir}"
+    jsh_error "Deployment recovery is incomplete; moved files remain in Jsh backup storage"
+  else
+    [[ -z "${recovery_dir}" ]] || rm -rf -- "${recovery_dir}"
+    [[ -z "${backup_root}" ]] || rm -rf -- "${backup_root}"
   fi
 }
 trap restore_stashed EXIT
@@ -60,14 +76,16 @@ if [[ ! -d "${commands_dir}" ]]; then
   exit 1
 fi
 
-jsh_info "This will deploy managed dotfiles into ${HOME}."
-jsh_prompt "Continue? [y/N]: "
-if ! read -r confirm; then
-  confirm=
-fi
-if [[ "${confirm}" != [Yy] ]]; then
-  jsh_warn "Skipping dotfile deployment."
-  exit 0
+jsh_info "This will back up conflicting paths and deploy managed dotfiles into ${HOME}."
+if [[ ${JSH_ASSUME_YES:-0} != 1 ]]; then
+  jsh_prompt "Continue? [Y/n]: "
+  if ! read -r confirm; then
+    confirm=
+  fi
+  if [[ -n "${confirm}" && "${confirm}" != [Yy] ]]; then
+    jsh_warn "Skipping dotfile deployment."
+    exit 0
+  fi
 fi
 
 jsh_info "Checking for legacy Jsh symlinks..."
@@ -85,8 +103,8 @@ while IFS= read -r -d $'\0' link; do
   fi
 done < <(
   find "${HOME}" -maxdepth 3 \
-    \( -path "${repo_root}" -o -path "${HOME}/Library" \) -prune -o \
-    -type l -print0
+    \( -path "${repo_root}" -o -path "${HOME}/Library" -o -path "${HOME}/.Trash" \) -prune -o \
+    -type l -print0 2> /dev/null
 )
 
 typeset -a jstow_args
@@ -96,15 +114,14 @@ while IFS= read -r -d $'\0' source; do
   relative=${source#"${dotfiles_dir}/"}
   target="${HOME}/${relative}"
 
-  if [[ -e "${target}" && ! -L "${target}" ]]; then
-    if [[ -f "${source}" && -f "${target}" ]] && cmp -s "${source}" "${target}"; then
-      jsh_info "Removing identical copy: ${target}"
-      stash_path "${target}"
-    else
-      pattern=$(print -r -- "${relative}" | sed 's/[][\\.^$*+?(){}|]/\\&/g')
-      jsh_warn "Preserving unmanaged file: ${target}"
-      jstow_args+=("--ignore=^${pattern}$")
-    fi
+  if [[ -L "${target}" ]]; then
+    destination=$(readlink "${target}")
+    [[ "${destination}" == /* ]] || destination="${target:h}/${destination}"
+    [[ "${destination:a}" == "${source:a}" ]] && continue
+  fi
+  if [[ -e "${target}" || -L "${target}" ]]; then
+    jsh_warn "Backing up unmanaged path: ${target}"
+    backup_path "${target}"
   fi
 done < <(find "${dotfiles_dir}" \( -type f -o -type l \) -print0)
 
@@ -127,5 +144,8 @@ else
 fi
 if [[ -n "${recovery_dir}" ]]; then
   rm -rf -- "${recovery_dir}"
+fi
+if [[ -n "${backup_root}" ]]; then
+  jsh_detail "Backups: ${backup_root}"
 fi
 jsh_success "Dotfiles deployed successfully"
