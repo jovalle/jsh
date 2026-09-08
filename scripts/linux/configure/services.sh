@@ -43,7 +43,7 @@ install_user_text() {
 enable_user_unit() {
   local unit=$1
   if ! systemctl --user cat "${unit}" > /dev/null 2>&1; then
-    jsh_warn "Skipping unavailable user unit: ${unit}"
+    jsh_note "Skipping unavailable user unit: ${unit}"
     return
   fi
   if [[ "${DRY_RUN}" == 1 ]]; then
@@ -56,7 +56,7 @@ enable_user_unit() {
 main() {
   [[ "$(uname -s)" == Linux ]] || return
   is_endeavouros || {
-    jsh_info "Skipping user services: EndeavourOS not detected."
+    jsh_note "Skipping user services: EndeavourOS not detected."
     return
   }
   command -v systemctl > /dev/null 2>&1 || {
@@ -64,11 +64,11 @@ main() {
     return 1
   }
 
-  jsh_info "This will configure SSH, GPG, and Podman user services."
+  jsh_detail "This will configure SSH, GPG, and Podman user services."
   jsh_prompt "Configure EndeavourOS user services? [y/N]: "
   read -r answer || answer=
   [[ "${answer}" =~ ^[Yy]$ ]] || {
-    jsh_warn "Skipping EndeavourOS user services."
+    jsh_note "Skipping EndeavourOS user services."
     return
   }
 

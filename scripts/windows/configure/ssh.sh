@@ -13,7 +13,7 @@ for library_file in "${JSH_ROOT}"/lib/*; do
 done
 unset library_file
 if [[ ! -f "${JSH_ROOT}/dotfiles/.ssh/id_rsa" || ! -f "${JSH_ROOT}/dotfiles/.ssh/config-windows" ]]; then
-  jsh_warn "Skipping Windows SSH configuration: source files not found"
+  jsh_note "Skipping Windows SSH configuration: source files not found"
   exit 0
 fi
 
@@ -44,7 +44,7 @@ jsh_warn "Existing destination files will be replaced."
 jsh_prompt "Configure Windows SSH? [y/N]: "
 read -r CONFIRM || CONFIRM=
 if [[ ! "${CONFIRM}" =~ ^[Yy]$ ]]; then
-  jsh_warn "Skipping Windows SSH configuration."
+  jsh_note "Skipping Windows SSH configuration."
   exit 0
 fi
 

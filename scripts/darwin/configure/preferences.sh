@@ -14,7 +14,7 @@ done
 unset library_file
 
 confirm() {
-  jsh_info "This will apply the managed macOS privacy, input, Finder, and application preferences."
+  jsh_detail "This will apply the managed macOS privacy, input, Finder, and application preferences."
   jsh_prompt "Configure macOS preferences? [y/N]: "
   read -r answer || answer=
   [[ "${answer}" =~ ^[Yy]$ ]]
@@ -204,7 +204,7 @@ PREFERENCES
 
 main() {
   [[ "$(uname -s)" == Darwin ]] || {
-    jsh_info "Skipping macOS preferences: macOS not detected."
+    jsh_note "Skipping macOS preferences: macOS not detected."
     return
   }
   command -v defaults > /dev/null 2>&1 || {
@@ -212,7 +212,7 @@ main() {
     return 1
   }
   confirm || {
-    jsh_warn "Skipping macOS preferences."
+    jsh_note "Skipping macOS preferences."
     return
   }
 

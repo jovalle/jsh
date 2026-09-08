@@ -14,7 +14,7 @@ done
 unset library_file
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
-  jsh_warn "Skipping VS Code Copilot patch: macOS only"
+  jsh_note "Skipping VS Code Copilot patch: macOS only"
   exit 0
 fi
 
@@ -35,11 +35,11 @@ case "${1:-apply}" in
       exit 0
     fi
 
-    jsh_warn "This will modify the installed VS Code Copilot extension."
+    jsh_detail "This will modify the installed VS Code Copilot extension."
     jsh_prompt "Apply the Copilot patch? [y/N]: "
     read -r CONFIRM || CONFIRM=
     if [[ ! "${CONFIRM}" =~ ^[Yy]$ ]]; then
-      jsh_warn "Skipping VS Code Copilot patch."
+      jsh_note "Skipping VS Code Copilot patch."
       exit 0
     fi
 
@@ -78,11 +78,11 @@ case "${1:-apply}" in
       jsh_error "No backup found at ${BAK_PATH}"
       exit 1
     fi
-    jsh_warn "This will replace the installed extension with its backup."
+    jsh_detail "This will replace the installed extension with its backup."
     jsh_prompt "Restore the original Copilot extension? [y/N]: "
     read -r CONFIRM || CONFIRM=
     if [[ ! "${CONFIRM}" =~ ^[Yy]$ ]]; then
-      jsh_warn "Skipping VS Code Copilot restore."
+      jsh_note "Skipping VS Code Copilot restore."
       exit 0
     fi
     cp -p "${BAK_PATH}" "${EXT_PATH}"

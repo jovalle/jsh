@@ -14,7 +14,7 @@ done
 unset library_file
 SETTINGS_SRC="${JSH_ROOT}/dotfiles/.config/windows-terminal/settings.json"
 if [[ ! -f "${SETTINGS_SRC}" ]]; then
-  jsh_warn "Skipping Windows Terminal configuration: source file not found"
+  jsh_note "Skipping Windows Terminal configuration: source file not found"
   exit 0
 fi
 
@@ -24,7 +24,7 @@ TERMINAL_SETTINGS_DIR="${LOCAL_APP_DATA}\\Packages\\Microsoft.WindowsTerminal_8w
 # Check if Windows Terminal is installed
 TERMINAL_DIR_WSL=$(wslpath -u "${TERMINAL_SETTINGS_DIR}")
 if [[ ! -d "${TERMINAL_DIR_WSL}" ]]; then
-  jsh_warn "Skipping Windows Terminal configuration: application not found"
+  jsh_note "Skipping Windows Terminal configuration: application not found"
   exit 0
 fi
 
@@ -44,7 +44,7 @@ jsh_warn "The existing settings file may be replaced."
 jsh_prompt "Configure Windows Terminal? [y/N]: "
 read -r CONFIRM || CONFIRM=
 if [[ ! "${CONFIRM}" =~ ^[Yy]$ ]]; then
-  jsh_warn "Skipping Windows Terminal configuration."
+  jsh_note "Skipping Windows Terminal configuration."
   exit 0
 fi
 

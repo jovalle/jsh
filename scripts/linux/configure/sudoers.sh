@@ -27,11 +27,11 @@ if sudo -n grep -Fxq "${SUDOERS_LINE}" "${SUDOERS_FILE}" 2>/dev/null; then
   exit 0
 fi
 
-jsh_info "This will grant ${USERNAME} passwordless sudo access."
+jsh_detail "This will grant ${USERNAME} passwordless sudo access."
 jsh_prompt "Configure sudoers? [y/N]: "
 read -r CONFIRM || CONFIRM=
 if [[ ! "${CONFIRM}" =~ ^[Yy]$ ]]; then
-  jsh_warn "Skipping sudoers configuration."
+  jsh_note "Skipping sudoers configuration."
   exit 0
 fi
 

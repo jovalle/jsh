@@ -47,9 +47,9 @@ configure_appearance() {
   defaults write com.apple.dock wvous-br-corner -int 0
 
   if ! command -v osascript > /dev/null 2>&1; then
-    jsh_warn "Skipping wallpaper: osascript is unavailable."
+    jsh_note "Skipping wallpaper: osascript is unavailable."
   elif [[ -z "${wallpaper}" ]] && ! command -v magick > /dev/null 2>&1; then
-    jsh_warn "Skipping wallpaper: no local wallpaper was found and magick is unavailable."
+    jsh_note "Skipping wallpaper: no local wallpaper was found and magick is unavailable."
   else
     if [[ -z "${wallpaper}" ]]; then
       wallpaper="${appearance_dir}/jsh-solid-black.png"
@@ -80,11 +80,11 @@ configure_account_picture() {
   username=$(id -un)
 
   [[ -r "${source}" ]] || {
-    jsh_warn "Skipping account picture: ${source} is unavailable."
+    jsh_note "Skipping account picture: ${source} is unavailable."
     return
   }
   command -v dscl > /dev/null 2>&1 || {
-    jsh_warn "Skipping account picture: dscl is unavailable."
+    jsh_note "Skipping account picture: dscl is unavailable."
     return
   }
 
@@ -97,7 +97,7 @@ configure_account_picture() {
 
 main() {
   [[ "$(uname -s)" == Darwin ]] || {
-    jsh_info "Skipping macOS appearance: macOS not detected."
+    jsh_note "Skipping macOS appearance: macOS not detected."
     return
   }
   command -v defaults > /dev/null 2>&1 || {
@@ -109,14 +109,14 @@ main() {
   if confirm "Configure macOS appearance and Dock?"; then
     configure_appearance
   else
-    jsh_warn "Skipping macOS appearance and Dock."
+    jsh_note "Skipping macOS appearance and Dock."
   fi
 
   jsh_blank
   if confirm "Configure the local account picture?"; then
     configure_account_picture
   else
-    jsh_warn "Skipping macOS account picture."
+    jsh_note "Skipping macOS account picture."
   fi
 }
 

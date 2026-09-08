@@ -69,7 +69,7 @@ configure_panel() {
   local -a plugin_ids=() arguments=()
   panel_id=$(xfconf-query -c xfce4-panel -p /panels 2> /dev/null | sed -n '1p')
   [[ "${panel_id}" =~ ^[0-9]+$ ]] || {
-    jsh_warn "Skipping panel monitors: no XFCE panel is available."
+    jsh_note "Skipping panel monitors: no XFCE panel is available."
     return
   }
   cpu_id=$(managed_plugin cpugraph)
@@ -119,19 +119,19 @@ configure_identity() {
 main() {
   [[ "$(uname -s)" == Linux ]] || return
   is_endeavouros || {
-    jsh_info "Skipping XFCE configuration: EndeavourOS not detected."
+    jsh_note "Skipping XFCE configuration: EndeavourOS not detected."
     return
   }
   command -v xfconf-query > /dev/null 2>&1 || {
-    jsh_warn "Skipping XFCE configuration: xfconf-query is unavailable."
+    jsh_note "Skipping XFCE configuration: xfconf-query is unavailable."
     return
   }
 
-  jsh_warn "This will replace managed XFCE theme, wallpaper, terminal, and panel settings."
+  jsh_detail "This will replace managed XFCE theme, wallpaper, terminal, and panel settings."
   jsh_prompt "Configure the EndeavourOS desktop? [y/N]: "
   read -r answer || answer=
   [[ "${answer}" =~ ^[Yy]$ ]] || {
-    jsh_warn "Skipping EndeavourOS desktop configuration."
+    jsh_note "Skipping EndeavourOS desktop configuration."
     return
   }
 

@@ -42,6 +42,7 @@ if ! declare -F jsh_error > /dev/null; then
   }
 
   jsh_info() { jsh_stdout 36 '' "$*"; }
+  jsh_note() { jsh_stdout '2;37' '' "$*"; }
   jsh_success() { jsh_stdout 32 '✓ ' "$*"; }
   jsh_warn() { jsh_stderr 33 '' "$*"; }
   jsh_error() { jsh_stderr 31 '✗ ' "$*"; }
@@ -228,7 +229,7 @@ install_prerequisites() {
 
 sync_submodules() {
   if ! confirm "Initialize and update Jsh submodules?"; then
-    jsh_warn "Skipped submodule initialization and update."
+    jsh_note "Skipped submodule initialization and update."
     return
   fi
   git -C "${JSH_DIR}" submodule sync --recursive
@@ -243,13 +244,13 @@ sync_repository() {
 
   if [[ -d "${JSH_DIR}/.git" ]]; then
     if [[ -n "$(git -C "${JSH_DIR}" status --porcelain --untracked-files=no)" ]]; then
-      jsh_warn "Local changes found in ${JSH_DIR}; skipping repository and submodule updates."
+      jsh_note "Local changes found in ${JSH_DIR}; skipping repository and submodule updates."
       return
     fi
     if confirm "Pull Jsh from upstream?"; then
       git -C "${JSH_DIR}" pull --ff-only
     else
-      jsh_warn "Skipped repository pull."
+      jsh_note "Skipped repository pull."
     fi
     sync_submodules
     return
@@ -275,14 +276,14 @@ update_repository() {
     return 1
   fi
   if [[ -n "$(git -C "${JSH_DIR}" status --porcelain --untracked-files=no)" ]]; then
-    jsh_warn "Local changes found in ${JSH_DIR}; skipping repository and submodule updates."
+    jsh_note "Local changes found in ${JSH_DIR}; skipping repository and submodule updates."
     return 10
   fi
 
   if confirm "Pull Jsh from upstream?"; then
     git -C "${JSH_DIR}" pull --ff-only || return
   else
-    jsh_warn "Skipped repository pull."
+    jsh_note "Skipped repository pull."
   fi
   sync_submodules
 }
@@ -341,7 +342,7 @@ print_update_summary() {
     jsh_success "${label}"
   done
   for label in "${UPDATE_WARNINGS[@]}"; do
-    jsh_warn "Skipped: ${label}"
+    jsh_note "Skipped: ${label}"
   done
   for label in "${UPDATE_ERRORS[@]}"; do
     jsh_error "Failed: ${label}"
@@ -388,14 +389,14 @@ heading "1/3" "Prerequisites" "Install Homebrew when needed, then ensure Git, Ma
 if confirm "Run this phase?"; then
   install_prerequisites install 0
 else
-  jsh_warn "Skipped prerequisites."
+  jsh_note "Skipped prerequisites."
 fi
 
 heading "2/3" "Repository" "Clone ${JSH_REPO}, or fast-forward an existing clean checkout."
 if confirm "Run this phase?"; then
   sync_repository
 else
-  jsh_warn "Skipped repository sync."
+  jsh_note "Skipped repository sync."
 fi
 
 heading "3/3" "System setup" "Deploy dotfiles, install packages, then run the conversational configuration scripts for this platform."
@@ -403,7 +404,7 @@ if confirm "Run this phase?"; then
   jsh_blank
   setup_system
 else
-  jsh_warn "Skipped system setup."
+  jsh_note "Skipped system setup."
 fi
 
 jsh_blank
