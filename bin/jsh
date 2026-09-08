@@ -1,6 +1,7 @@
 #!/bin/sh
 ##% jsh
-## install ## Adopt Jsh as the main shell environment
+## runtime ## Run an ephemeral J shell without deploying dotfiles
+## install ## Install Jsh as the main shell environment
 ## update ## Update Jsh, dependencies, packages, and managed configuration
 ## reload ## Reload the active J shell
 ## -r ## Reload the active J shell
@@ -22,13 +23,13 @@ if [ "${JSH_BASH_RUNTIME:-0}" = 1 ]; then
 
   jsh() {
     case ${1:-} in
-      install | update)
+      runtime | install | update)
         JSH_INSTALL_RETURN=1 JSH_BASH_RUNTIME=0 command "${JSH_ROOT}/bin/jsh" "$@" || return
         JSH_BASH_RUNTIME=1 exec "${JSH_BASH}" --noprofile --rcfile "${JSH_ROOT}/bin/jsh" -i
         ;;
       --yes)
         case ${2:-} in
-          install | update)
+          runtime | install | update)
             JSH_INSTALL_RETURN=1 JSH_BASH_RUNTIME=0 command "${JSH_ROOT}/bin/jsh" "$@" || return
             JSH_BASH_RUNTIME=1 exec "${JSH_BASH}" --noprofile --rcfile "${JSH_ROOT}/bin/jsh" -i
             ;;
@@ -65,6 +66,14 @@ case $0 in
   /*) launcher=$0 ;;
   *) launcher=${PWD}/$0 ;;
 esac
+while [ -L "${launcher}" ]; do
+  launcher_dir=$(CDPATH='' cd -P "${launcher%/*}" 2> /dev/null && pwd -P) || break
+  launcher_target=$(readlink "${launcher}") || break
+  case ${launcher_target} in
+    /*) launcher=${launcher_target} ;;
+    *) launcher=${launcher_dir}/${launcher_target} ;;
+  esac
+done
 
 if ! JSH_ROOT=$(CDPATH='' cd -P "${launcher%/*}/.." 2> /dev/null && pwd -P); then
   printf 'jsh: cannot locate the repository root\n' >&2
@@ -77,7 +86,7 @@ if [ "${1:-}" = --yes ]; then
   shift
 fi
 
-if [ "${1:-}" = install ] || [ "${1:-}" = update ]; then
+if [ "${1:-}" = runtime ] || [ "${1:-}" = install ] || [ "${1:-}" = update ]; then
   action=$1
   shift
   JSH_DIR=${JSH_ROOT}
@@ -91,10 +100,12 @@ fi
 usage() {
   cat <<'EOF'
 Usage: jsh [zsh-options]
+  jsh [--yes] runtime
   jsh [--yes] install
   jsh [--yes] update
 
 Open an isolated J shell environment.
+Run jsh runtime to install a persistent command without deploying managed dotfiles.
 Run jsh install to install packages, deploy dotfiles, and configure the system.
 Run jsh update to update the repository, dependencies, packages, and configuration.
 Use --yes to accept setup workflow prompts.

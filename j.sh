@@ -83,9 +83,10 @@ BANNER
 
 usage() {
   cat <<'EOF'
-Usage: j.sh [--yes] [install|update]
+Usage: j.sh [--yes] [runtime|install|update]
 
 With no arguments, install or update Jsh and open an isolated shell environment.
+Run with runtime to install a persistent jsh command without deploying managed dotfiles.
 Run with install to install packages, deploy dotfiles, and configure the system.
 Run with update to update Jsh and reapply the managed environment.
 Use --yes to accept setup workflow prompts.
@@ -99,7 +100,7 @@ while (($#)); do
     --yes)
       export JSH_ASSUME_YES=1
       ;;
-    install | update)
+    runtime | install | update)
       if ((command_seen)); then
         jsh_error "Too many commands."
         usage >&2
@@ -311,6 +312,67 @@ run_make_target() {
   fi
 }
 
+install_runtime_launcher() {
+  local commands_dir=${HOME}/.local/bin
+  local launcher=${commands_dir}/jsh
+  local target=${JSH_DIR}/bin/jsh
+
+  mkdir -p -- "${commands_dir}"
+  if [[ -e ${launcher} || -L ${launcher} ]]; then
+    if [[ ${launcher} -ef ${target} ]]; then
+      jsh_success "Jsh command is already installed: ${launcher}"
+      return
+    fi
+    jsh_error "Cannot install Jsh command; path already exists: ${launcher}"
+    return 1
+  fi
+
+  ln -s -- "${target}" "${launcher}"
+  jsh_success "Installed Jsh command: ${launcher}"
+}
+
+configure_runtime_path_file() {
+  local rc_file=$1
+  local block_start='# jsh runtime path: begin'
+  local block_end='# jsh runtime path: end'
+
+  if grep -Fqx -- "${block_start}" "${rc_file}" 2> /dev/null ||
+    grep -Fqx -- "${block_end}" "${rc_file}" 2> /dev/null; then
+    if grep -Fqx -- "${block_start}" "${rc_file}" 2> /dev/null &&
+      grep -Fqx -- "${block_end}" "${rc_file}" 2> /dev/null; then
+      jsh_success "Jsh PATH is already configured: ${rc_file}"
+      return
+    fi
+    jsh_error "Incomplete Jsh PATH block in ${rc_file}; repair or remove it before retrying."
+    return 1
+  fi
+
+  (
+    umask 077
+    [[ ! -s ${rc_file} ]] || printf '\n'
+    printf '%s\n' \
+      "${block_start}" \
+      'case ":${PATH}:" in' \
+      '  *:"${HOME}/.local/bin":*) ;;' \
+      '  *) export PATH="${HOME}/.local/bin:${PATH}" ;;' \
+      'esac' \
+      "${block_end}"
+  ) >> "${rc_file}"
+  jsh_success "Configured Jsh PATH: ${rc_file}"
+}
+
+configure_runtime_path() {
+  local rc_file
+
+  if ! confirm "Add ${HOME}/.local/bin to PATH in Bash and Zsh?"; then
+    jsh_note "Skipped PATH configuration. Run Jsh with: ${HOME}/.local/bin/jsh"
+    return
+  fi
+  for rc_file in "${HOME}/.bashrc" "${HOME}/.zshrc"; do
+    configure_runtime_path_file "${rc_file}" || return
+  done
+}
+
 run_update_step() {
   local label=$1 result
   shift
@@ -355,6 +417,40 @@ if [[ ${mode} == shell ]]; then
   jsh_blank
   jsh_success "Jsh is ready."
   jsh_detail "When you want the full Jsh experience, run: jsh install"
+  jsh_blank
+  exec "${JSH_DIR}/bin/jsh" < "${TTY}"
+fi
+
+if [[ ${mode} == runtime ]]; then
+  jsh_info "jsh runtime"
+  jsh_detail "Install directory: ${JSH_DIR}"
+  jsh_detail "This installs an opt-in J shell without deploying managed dotfiles or configuring the system."
+
+  heading "1/3" "Prerequisites" "Ensure Git and Zsh are available."
+  if confirm "Run this phase?"; then
+    install_prerequisites shell 0
+  else
+    jsh_note "Skipped prerequisites."
+  fi
+
+  heading "2/3" "Repository" "Clone ${JSH_REPO}, or fast-forward an existing clean checkout."
+  if confirm "Run this phase?"; then
+    sync_repository
+  else
+    jsh_note "Skipped repository sync."
+  fi
+
+  heading "3/3" "Shell runtime" "Install the launcher and optionally configure Bash and Zsh PATH."
+  if confirm "Run this phase?"; then
+    install_runtime_launcher
+    configure_runtime_path
+  else
+    jsh_note "Skipped shell runtime installation."
+  fi
+
+  jsh_blank
+  jsh_success "Runtime installation finished."
+  [[ ${JSH_INSTALL_RETURN:-0} == 1 ]] && exit 0
   jsh_blank
   exec "${JSH_DIR}/bin/jsh" < "${TTY}"
 fi
