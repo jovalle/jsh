@@ -244,15 +244,13 @@ sync_repository() {
 
   if [[ -d "${JSH_DIR}/.git" ]]; then
     if [[ -n "$(git -C "${JSH_DIR}" status --porcelain --untracked-files=no)" ]]; then
-      jsh_note "Local changes found in ${JSH_DIR}; skipping repository and submodule updates."
-      return
-    fi
-    if confirm "Pull Jsh from upstream?"; then
-      git -C "${JSH_DIR}" pull --ff-only
+      jsh_note "Local changes found in ${JSH_DIR}; skipping repository pull."
+    elif confirm "Pull Jsh from upstream?"; then
+      git -C "${JSH_DIR}" pull --ff-only || return
     else
       jsh_note "Skipped repository pull."
     fi
-    sync_submodules
+    sync_submodules || return
     return
   fi
 
@@ -276,16 +274,13 @@ update_repository() {
     return 1
   fi
   if [[ -n "$(git -C "${JSH_DIR}" status --porcelain --untracked-files=no)" ]]; then
-    jsh_note "Local changes found in ${JSH_DIR}; skipping repository and submodule updates."
-    return 10
-  fi
-
-  if confirm "Pull Jsh from upstream?"; then
+    jsh_note "Local changes found in ${JSH_DIR}; skipping repository pull."
+  elif confirm "Pull Jsh from upstream?"; then
     git -C "${JSH_DIR}" pull --ff-only || return
   else
     jsh_note "Skipped repository pull."
   fi
-  sync_submodules
+  sync_submodules || return
 }
 
 setup_system() {
