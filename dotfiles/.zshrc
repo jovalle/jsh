@@ -1797,13 +1797,13 @@ dedup_path
 
 jsh() {
   case ${1:-} in
-    install|update)
+    runtime|install|update)
       JSH_INSTALL_RETURN=1 command "${JSH}/bin/jsh" "$@" || return
       jsh reload
       ;;
     --yes)
       case ${2:-} in
-        install|update)
+        runtime|install|update)
           JSH_INSTALL_RETURN=1 command "${JSH}/bin/jsh" "$@" || return
           jsh reload
           ;;
