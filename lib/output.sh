@@ -1,10 +1,10 @@
 #!/bin/sh
 
-# Human output uses cyan for activity, green checks for success, yellow for
-# warnings and skips, and red crosses for errors. Prompts use cyan without a
-# status mark. Emitters terminate one record; composing callers use jsh_blank
-# between blocks, never before the first or after the last. Keep structured
-# data, command output, and generated files raw.
+# Human output uses cyan for activity, dim gray for notes and skips, green
+# checks for success, yellow for warnings, and red crosses for errors. Prompts
+# use cyan without a status mark. Emitters terminate one record; composing
+# callers use jsh_blank between blocks, never before the first or after the
+# last. Keep structured data, command output, and generated files raw.
 
 jsh_color_enabled() {
   jsh_output_descriptor=$1
@@ -47,6 +47,10 @@ jsh_stderr() {
 
 jsh_info() {
   jsh_stdout 36 '' "$*"
+}
+
+jsh_note() {
+  jsh_stdout '2;37' '' "$*"
 }
 
 jsh_success() {

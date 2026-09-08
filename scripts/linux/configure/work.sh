@@ -206,14 +206,14 @@ EOF
 main() {
   [[ "$(uname -s)" == Linux ]] || return
   is_endeavouros || {
-    jsh_info "Skipping work setup: EndeavourOS not detected."
+    jsh_note "Skipping work setup: EndeavourOS not detected."
     return
   }
-  jsh_warn "This installs Citrix Workspace, Zoom, and a checksum-pinned Zoom VDI plugin."
+  jsh_detail "This installs Citrix Workspace, Zoom, and a checksum-pinned Zoom VDI plugin."
   jsh_prompt "Configure the EndeavourOS work environment? [y/N]: "
   read -r answer || answer=
   [[ "${answer}" =~ ^[Yy]$ ]] || {
-    jsh_warn "Skipping EndeavourOS work environment."
+    jsh_note "Skipping EndeavourOS work environment."
     return
   }
 

@@ -338,7 +338,7 @@ prepare_policy() {
   local existing managed merged current
   POLICY_CHANGED=0
   POLICY_TARGET=$(policy_target) || {
-    jsh_warn "Skipping Waterfox Citrix policy: browser executable not found."
+    jsh_note "Skipping Waterfox Citrix policy: browser executable not found."
     return
   }
   existing='{}'
@@ -500,7 +500,7 @@ apply_configuration() {
   binary=$(waterfox_binary 2> /dev/null || true)
   root=$(waterfox_root)
   if [[ -z ${binary} && ! -d ${root} ]]; then
-    jsh_info "Skipping Waterfox configuration: Waterfox is not installed."
+    jsh_note "Skipping Waterfox configuration: Waterfox is not installed."
     return
   fi
   mkdir -p "${JSH_ROOT}/tmp"
@@ -523,12 +523,12 @@ apply_configuration() {
     jsh_prompt "Close Waterfox and continue? [y/N]: "
     read -r answer || answer=
     if [[ ! ${answer} =~ ^[Yy]$ ]]; then
-      jsh_warn "Skipping Waterfox configuration."
+      jsh_note "Skipping Waterfox configuration."
       jsh_detail "Run later: ${JSH_ROOT}/scripts/unix/configure/waterfox.sh apply"
       return
     fi
     if ! close_waterfox "${profile}"; then
-      jsh_warn "Waterfox did not close; skipping configuration."
+      jsh_note "Waterfox did not close; skipping configuration."
       jsh_detail "Run later: ${JSH_ROOT}/scripts/unix/configure/waterfox.sh apply"
       return
     fi

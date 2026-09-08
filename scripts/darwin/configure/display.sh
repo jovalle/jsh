@@ -27,23 +27,23 @@ main() {
   local -a display_args=()
 
   [[ "$(uname -s)" == Darwin ]] || {
-    jsh_info "Skipping macOS display resolution: macOS not detected."
+    jsh_note "Skipping macOS display resolution: macOS not detected."
     return
   }
   command -v displayplacer > /dev/null 2>&1 || {
-    jsh_warn "Skipping display resolution: displayplacer is unavailable."
+    jsh_note "Skipping display resolution: displayplacer is unavailable."
     return
   }
   if ! command -v xcrun > /dev/null 2>&1 || ! xcrun --find swift > /dev/null 2>&1; then
-    jsh_warn "Skipping display resolution: the Swift toolchain is unavailable."
+    jsh_note "Skipping display resolution: the Swift toolchain is unavailable."
     return
   fi
   if ! profile=$(xcrun swift "${selector}"); then
-    jsh_warn "Skipping display resolution: unable to calculate display modes."
+    jsh_note "Skipping display resolution: unable to calculate display modes."
     return
   fi
   [[ -n "${profile}" ]] || {
-    jsh_warn "Skipping display resolution: no configurable displays found."
+    jsh_note "Skipping display resolution: no configurable displays found."
     return
   }
 
@@ -59,7 +59,7 @@ main() {
   done <<< "${profile}"
 
   confirm || {
-    jsh_warn "Skipping macOS display resolution."
+    jsh_note "Skipping macOS display resolution."
     return
   }
 

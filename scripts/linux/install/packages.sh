@@ -177,7 +177,7 @@ update_flatpaks() {
 main() {
   [[ "$(uname -s)" == Linux ]] || return
   is_arch_family || {
-    jsh_info "Skipping native packages: Arch Linux or EndeavourOS not detected."
+    jsh_note "Skipping native packages: Arch Linux or EndeavourOS not detected."
     return
   }
 

@@ -76,14 +76,14 @@ if [[ ! -d "${commands_dir}" ]]; then
   exit 1
 fi
 
-jsh_info "This will back up conflicting paths and deploy managed dotfiles into ${HOME}."
+jsh_detail "This will back up conflicting paths and deploy managed dotfiles into ${HOME}."
 if [[ ${JSH_ASSUME_YES:-0} != 1 ]]; then
   jsh_prompt "Continue? [Y/n]: "
   if ! read -r confirm; then
     confirm=
   fi
   if [[ -n "${confirm}" && "${confirm}" != [Yy] ]]; then
-    jsh_warn "Skipping dotfile deployment."
+    jsh_note "Skipping dotfile deployment."
     exit 0
   fi
 fi

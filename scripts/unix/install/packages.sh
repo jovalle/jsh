@@ -159,7 +159,7 @@ main() {
   esac
 
   if is_arch_family; then
-    jsh_info "Using native Arch package management; skipping Homebrew packages."
+    jsh_note "Using native Arch package management; skipping Homebrew packages."
     return
   fi
 

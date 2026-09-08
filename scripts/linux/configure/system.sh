@@ -76,15 +76,15 @@ install_root_text() {
 main() {
   [[ "$(uname -s)" == Linux ]] || return
   is_endeavouros || {
-    jsh_info "Skipping system configuration: EndeavourOS not detected."
+    jsh_note "Skipping system configuration: EndeavourOS not detected."
     return
   }
 
-  jsh_warn "This will change memory policy, disable coredump storage, and enable earlyoom and zram."
+  jsh_detail "This will change memory policy, disable coredump storage, and enable earlyoom and zram."
   jsh_prompt "Configure EndeavourOS system policy? [y/N]: "
   read -r answer || answer=
   [[ "${answer}" =~ ^[Yy]$ ]] || {
-    jsh_warn "Skipping EndeavourOS system policy."
+    jsh_note "Skipping EndeavourOS system policy."
     return
   }
 

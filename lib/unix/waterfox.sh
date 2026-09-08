@@ -225,7 +225,7 @@ configure_associations() {
   config=$(waterfox_config_json)
   if [[ $(uname -s) == Darwin ]]; then
     if ! command -v duti > /dev/null 2>&1; then
-      jsh_warn "Skipping macOS file associations: duti is unavailable."
+      jsh_note "Skipping macOS file associations: duti is unavailable."
       return
     fi
     citrix_bundle=$(jq -r '.associations.macos.citrixBundleId' <<< "${config}")
@@ -245,7 +245,7 @@ configure_associations() {
   fi
 
   if ! command -v xdg-mime > /dev/null 2>&1; then
-    jsh_warn "Skipping Linux file associations: xdg-mime is unavailable."
+    jsh_note "Skipping Linux file associations: xdg-mime is unavailable."
     return
   fi
   application_dir="${XDG_DATA_HOME:-${HOME}/.local/share}/applications"
@@ -572,7 +572,7 @@ backup_waterfox_configuration() {
   binary=$(waterfox_binary 2> /dev/null || true)
   root=$(waterfox_root)
   if [[ -z ${binary} && ! -d ${root} ]]; then
-    jsh_info "Skipping Waterfox backup: Waterfox is not installed."
+    jsh_note "Skipping Waterfox backup: Waterfox is not installed."
     return
   fi
 

@@ -110,11 +110,11 @@ configure_shortcut() {
   local xfce_binding='/commands/custom/<Primary><Alt><Super>m'
   local bindings="${HOME}/.xbindkeysrc" autostart="${HOME}/.config/autostart/jsh-keybindings.desktop"
   local existing='' cleaned content temporary
-  jsh_info "This will bind Ctrl+Alt+Super+M to toggle an ultrawide display split."
+  jsh_detail "This will bind Ctrl+Alt+Super+M to toggle an ultrawide display split."
   jsh_prompt "Configure the EndeavourOS display shortcut? [y/N]: "
   read -r answer || answer=
   [[ "${answer}" =~ ^[Yy]$ ]] || {
-    jsh_warn "Skipping EndeavourOS display shortcut."
+    jsh_note "Skipping EndeavourOS display shortcut."
     return
   }
 
@@ -154,7 +154,7 @@ case ${1:-configure} in
   configure)
     [[ "$(uname -s)" == Linux ]] || exit 0
     is_endeavouros || {
-      jsh_info "Skipping display shortcut: EndeavourOS not detected."
+      jsh_note "Skipping display shortcut: EndeavourOS not detected."
       exit 0
     }
     configure_shortcut

@@ -73,11 +73,11 @@ cycle_output() {
 configure_audio() {
   local policy="${HOME}/.config/wireplumber/wireplumber.conf.d/51-jsh-audio-policy.conf"
   local bindings="${HOME}/.xbindkeysrc" existing='' cleaned content temporary
-  jsh_warn "This will disable selected HDMI, onboard, and Elgato audio nodes."
+  jsh_detail "This will disable selected HDMI, onboard, and Elgato audio nodes."
   jsh_prompt "Configure EndeavourOS audio policy? [y/N]: "
   read -r answer || answer=
   [[ "${answer}" =~ ^[Yy]$ ]] || {
-    jsh_warn "Skipping EndeavourOS audio policy."
+    jsh_note "Skipping EndeavourOS audio policy."
     return
   }
 
@@ -133,7 +133,7 @@ case ${1:-configure} in
   configure)
     [[ "$(uname -s)" == Linux ]] || exit 0
     is_endeavouros || {
-      jsh_info "Skipping audio policy: EndeavourOS not detected."
+      jsh_note "Skipping audio policy: EndeavourOS not detected."
       exit 0
     }
     configure_audio

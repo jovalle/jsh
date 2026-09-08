@@ -462,11 +462,11 @@ main() {
 
   operating_system=$(uname -s)
   [[ "${operating_system}" == Darwin ]] || {
-    jsh_info "Skipping Vorssaint configuration: macOS not detected."
+    jsh_note "Skipping Vorssaint configuration: macOS not detected."
     return
   }
   [[ -d "${APP_PATH}" ]] || {
-    jsh_warn "Skipping Vorssaint configuration: ${APP_PATH} is not installed."
+    jsh_note "Skipping Vorssaint configuration: ${APP_PATH} is not installed."
     return
   }
   [[ -r "${BACKUP_PATH}" ]] || {

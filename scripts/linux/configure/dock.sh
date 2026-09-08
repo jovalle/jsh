@@ -93,24 +93,24 @@ main() {
   local -a plugin_ids=() array_args=()
   [[ "$(uname -s)" == Linux ]] || return
   is_endeavouros || {
-    jsh_info "Skipping application dock: EndeavourOS not detected."
+    jsh_note "Skipping application dock: EndeavourOS not detected."
     return
   }
   command -v xfconf-query > /dev/null 2>&1 || {
-    jsh_warn "Skipping application dock: xfconf-query is unavailable."
+    jsh_note "Skipping application dock: xfconf-query is unavailable."
     return
   }
 
   pins=$(dock_pins)
   [[ -n "${pins}" ]] || {
-    jsh_warn "Skipping application dock: no configured applications are installed."
+    jsh_note "Skipping application dock: no configured applications are installed."
     return
   }
-  jsh_info "This will add or update the jsh-managed XFCE Docklike plugin."
+  jsh_detail "This will add or update the jsh-managed XFCE Docklike plugin."
   jsh_prompt "Configure the EndeavourOS application dock? [y/N]: "
   read -r answer || answer=
   [[ "${answer}" =~ ^[Yy]$ ]] || {
-    jsh_warn "Skipping EndeavourOS application dock."
+    jsh_note "Skipping EndeavourOS application dock."
     return
   }
 
