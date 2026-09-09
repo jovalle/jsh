@@ -1,0 +1,651 @@
+#!/usr/bin/env bash
+# Colorize interactive kubectl output using portable shell tools.
+
+set -u
+
+SELF=kubecolor
+KUBECOLOR_MODE=generic
+KUBECOLOR_COMMAND=
+KUBECOLOR_OUTPUT=
+KUBECOLOR_BYPASS=0
+KUBECOLOR_WATCH=0
+KUBECOLOR_TMP=
+KUBECOLOR_STDOUT_PID=
+KUBECOLOR_STDERR_PID=
+
+kubecolor_error() {
+  printf '%s: %s\n' "${SELF}" "$*" >&2
+}
+
+kubecolor_cleanup() {
+  [[ -z ${KUBECOLOR_TMP} ]] || rm -rf -- "${KUBECOLOR_TMP}"
+}
+
+kubecolor_color_enabled() {
+  local descriptor=$1
+
+  [[ ${JSH_PLAIN_OUTPUT:-0} != 1 ]] || return 1
+  [[ ${TERM:-dumb} != dumb ]] || return 1
+  [[ -z ${NO_COLOR+x} ]] || return 1
+
+  case ${KUBECOLOR_FORCE_COLORS:-${JSH_COLOR:-auto}} in
+    1 | true | always) return 0 ;;
+    0 | false | never) return 1 ;;
+    auto | '') [[ -t ${descriptor} ]] ;;
+    *) return 1 ;;
+  esac
+}
+
+kubecolor_detect_mode() {
+  local argument expect_output=0
+
+  for argument in "$@"; do
+    if ((expect_output)); then
+      KUBECOLOR_OUTPUT=${argument}
+      expect_output=0
+      continue
+    fi
+
+    case ${argument} in
+      -o | --output)
+        expect_output=1
+        ;;
+      --output=*)
+        KUBECOLOR_OUTPUT=${argument#*=}
+        ;;
+      -o?*)
+        KUBECOLOR_OUTPUT=${argument#-o}
+        ;;
+      -w | --watch | --watch-only | --watch=true | --watch-only=true)
+        KUBECOLOR_WATCH=1
+        ;;
+    esac
+
+    [[ -n ${KUBECOLOR_COMMAND} ]] && continue
+    case ${argument} in
+      get | describe | logs | diff | explain | top | version | apply | create | delete | patch | replace | rollout | scale | wait | auth | cluster-info | api-resources | api-versions | exec | attach | cp | port-forward | proxy | completion)
+        KUBECOLOR_COMMAND=${argument}
+        ;;
+    esac
+  done
+
+  case ${KUBECOLOR_COMMAND} in
+    exec | attach | cp | port-forward | proxy | completion)
+      KUBECOLOR_BYPASS=1
+      return
+      ;;
+  esac
+
+  case ${KUBECOLOR_OUTPUT} in
+    yaml | yml) KUBECOLOR_MODE=yaml ;;
+    json) KUBECOLOR_MODE=json ;;
+    '')
+      case ${KUBECOLOR_COMMAND} in
+        get | top | api-resources) KUBECOLOR_MODE=table ;;
+        describe) KUBECOLOR_MODE=describe ;;
+        logs) KUBECOLOR_MODE=logs ;;
+        diff) KUBECOLOR_MODE='diff' ;;
+        explain) KUBECOLOR_MODE=explain ;;
+        *) KUBECOLOR_MODE=generic ;;
+      esac
+      ;;
+    *) KUBECOLOR_MODE=plain ;;
+  esac
+}
+
+kubecolor_format() {
+  local mode=$1
+
+  LC_ALL=C awk -v mode="${mode}" -v esc="$(printf '\033')" '
+    BEGIN {
+      reset = esc "[0m"
+      bold = esc "[1m"
+      dim = esc "[2m"
+      red = esc "[31m"
+      green = esc "[32m"
+      yellow = esc "[33m"
+      blue = esc "[34m"
+      magenta = esc "[35m"
+      cyan = esc "[36m"
+    }
+
+    function paint(color, text) {
+      return color text reset
+    }
+
+    function token_color(token, bare) {
+      bare = token
+      gsub(/^[([{]/, "", bare)
+      gsub(/[]),;:]$/, "", bare)
+
+      if (bare ~ /^(Running|Ready|Active|Bound|Complete|Completed|Succeeded|Available|Healthy|True|Synced)$/) {
+        return green
+      }
+      if (bare == "Unknown") {
+        return dim
+      }
+      if (bare ~ /^(Pending|Terminating|ContainerCreating|PodInitializing|Progressing|Warning|Warn)$/) {
+        return yellow
+      }
+      if (bare ~ /^(Error|Failed|Failure|CrashLoopBackOff|ImagePullBackOff|ErrImagePull|Evicted|OOMKilled|NotReady|Unhealthy|False)$/) {
+        return red
+      }
+      return ""
+    }
+
+    function semantic(line, output, rest, token, color, position) {
+      output = ""
+      rest = line
+      while (match(rest, /[^[:space:]]+/)) {
+        position = RSTART + RLENGTH
+        output = output substr(rest, 1, RSTART - 1)
+        token = substr(rest, RSTART, RLENGTH)
+        color = token_color(token)
+        output = output (color == "" ? token : paint(color, token))
+        rest = substr(rest, position)
+      }
+      return output rest
+    }
+
+    function cell_value(cell, value) {
+      value = cell
+      sub(/^[[:space:]]+/, "", value)
+      sub(/[[:space:]]+$/, "", value)
+      return value
+    }
+
+    function paint_cell(color, cell, value, leading, trailing) {
+      value = cell_value(cell)
+      if (value == "" || color == "") {
+        return cell
+      }
+      leading = cell
+      sub(/[^[:space:]].*$/, "", leading)
+      trailing = cell
+      sub(/^.*[^[:space:]]/, "", trailing)
+      return leading paint(color, value) trailing
+    }
+
+    function status_class(status, normalized) {
+      normalized = status
+      gsub(/^[([{]/, "", normalized)
+      gsub(/[]),;:]$/, "", normalized)
+
+      if (normalized ~ /^(Completed|Complete|Succeeded)$/) {
+        return "terminal"
+      }
+      if (normalized ~ /^(Running|Ready|Active|Bound|Available|Healthy|True|Synced)$/) {
+        return "healthy"
+      }
+      if (normalized ~ /^(Pending|Terminating|ContainerCreating|PodInitializing|Progressing)$/ || normalized ~ /^Init:[0-9]+\/[0-9]+$/) {
+        return "progress"
+      }
+      if (normalized ~ /^(Error|Failed|Failure|CrashLoopBackOff|ImagePullBackOff|ErrImagePull|Evicted|OOMKilled|NotReady|Unhealthy|False|CreateContainerError|RunContainerError|InvalidImageName)$/ || normalized ~ /^Init:.*(Error|CrashLoopBackOff)$/) {
+        return "bad"
+      }
+      return "unknown"
+    }
+
+    function readiness_color(readiness, status, class, parts, ready, desired) {
+      class = status_class(status)
+      if (class == "terminal") {
+        return dim
+      }
+      if (class == "bad") {
+        return red
+      }
+      if (class == "progress") {
+        return yellow
+      }
+      if (class == "unknown" && status != "") {
+        return dim
+      }
+      if (split(readiness, parts, "/") != 2 || parts[1] !~ /^[0-9]+$/ || parts[2] !~ /^[0-9]+$/) {
+        return dim
+      }
+      ready = parts[1] + 0
+      desired = parts[2] + 0
+      if (ready == desired) {
+        return green
+      }
+      if (class == "healthy") {
+        return red
+      }
+      return yellow
+    }
+
+    function restarts_color(restarts, status, readiness, class, count, ready_color) {
+      class = status_class(status)
+      if (restarts !~ /^[0-9]+([[:space:]]|$)/) {
+        return dim
+      }
+      if (class == "terminal" || class == "unknown") {
+        return dim
+      }
+      if (class == "bad") {
+        return red
+      }
+      if (class == "progress") {
+        return yellow
+      }
+      ready_color = readiness_color(readiness, status)
+      if (ready_color == red) {
+        return red
+      }
+      count = restarts + 0
+      return count == 0 ? green : yellow
+    }
+
+    function remember_table_header(line, rest, offset, field, index_value) {
+      delete column_name
+      delete column_start
+      column_count = 0
+      ready_column = 0
+      status_column = 0
+      restarts_column = 0
+      rest = line
+      offset = 0
+
+      while (match(rest, /[^[:space:]]+/)) {
+        field = substr(rest, RSTART, RLENGTH)
+        column_count++
+        column_name[column_count] = field
+        column_start[column_count] = offset + RSTART
+        if (field == "READY") ready_column = column_count
+        else if (field == "STATUS") status_column = column_count
+        else if (field == "RESTARTS") restarts_column = column_count
+        offset += RSTART + RLENGTH - 1
+        rest = substr(rest, RSTART + RLENGTH)
+      }
+
+      if (ready_column == 0 && restarts_column == 0) {
+        column_count = 0
+      }
+    }
+
+    function contextual_table(line, index_value, start, length_value, cell, status, readiness, color, output) {
+      status = ""
+      readiness = ""
+      if (status_column > 0) {
+        start = column_start[status_column]
+        length_value = status_column < column_count ? column_start[status_column + 1] - start : length(line) - start + 1
+        status = cell_value(substr(line, start, length_value))
+      }
+      if (ready_column > 0) {
+        start = column_start[ready_column]
+        length_value = ready_column < column_count ? column_start[ready_column + 1] - start : length(line) - start + 1
+        readiness = cell_value(substr(line, start, length_value))
+      }
+
+      output = substr(line, 1, column_start[1] - 1)
+      for (index_value = 1; index_value <= column_count; index_value++) {
+        start = column_start[index_value]
+        length_value = index_value < column_count ? column_start[index_value + 1] - start : length(line) - start + 1
+        cell = substr(line, start, length_value)
+        if (index_value == 1) {
+          output = output paint_cell(cyan, cell)
+        } else if (index_value == ready_column) {
+          output = output paint_cell(readiness_color(cell_value(cell), status), cell)
+        } else if (index_value == restarts_column) {
+          output = output paint_cell(restarts_color(cell_value(cell), status, readiness), cell)
+        } else {
+          output = output semantic(cell)
+        }
+      }
+      return output
+    }
+
+    function table(line, first_end, first, rest) {
+      if (line ~ /^(NAMESPACE[[:space:]]+)?NAME([[:space:]]|$)/ || line ~ /^LAST SEEN[[:space:]]+/) {
+        remember_table_header(line)
+        return paint(bold cyan, line)
+      }
+      if (column_count > 0) {
+        return contextual_table(line)
+      }
+      if (!match(line, /[^[:space:]]+/)) {
+        return line
+      }
+      first_end = RSTART + RLENGTH
+      first = substr(line, 1, first_end - 1)
+      rest = substr(line, first_end)
+      return paint(cyan, first) semantic(rest)
+    }
+
+    function describe(line, colon, key, value) {
+      if (line ~ /^[[:space:]]*Events:[[:space:]]*$/ || line ~ /^[[:space:]]*Conditions:[[:space:]]*$/) {
+        return paint(bold cyan, line)
+      }
+      colon = index(line, ":")
+      if (colon > 0 && substr(line, 1, colon - 1) ~ /^[[:space:]]*[[:alnum:]_.() /-]+$/) {
+        key = substr(line, 1, colon)
+        value = substr(line, colon + 1)
+        return paint(cyan, key) semantic(value)
+      }
+      if (line ~ /^[[:space:]]*(Type|Reason|Age|From|Message)([[:space:]]|$)/) {
+        return paint(bold cyan, line)
+      }
+      return semantic(line)
+    }
+
+    function yaml_colon(line, index_value, character, single_quote, double_quote, escaped) {
+      single_quote = 0
+      double_quote = 0
+      escaped = 0
+      for (index_value = 1; index_value <= length(line); index_value++) {
+        character = substr(line, index_value, 1)
+        if (double_quote) {
+          if (escaped) {
+            escaped = 0
+          } else if (character == "\\") {
+            escaped = 1
+          } else if (character == "\"") {
+            double_quote = 0
+          }
+          continue
+        }
+        if (single_quote) {
+          if (character == "\047" && substr(line, index_value + 1, 1) == "\047") {
+            index_value++
+          } else if (character == "\047") {
+            single_quote = 0
+          }
+          continue
+        }
+        if (character == "\"") {
+          double_quote = 1
+        } else if (character == "\047") {
+          single_quote = 1
+        } else if (character == ":" && (substr(line, index_value + 1, 1) ~ /[[:space:]]/ || index_value == length(line))) {
+          return index_value
+        }
+      }
+      return 0
+    }
+
+    function yaml_comment(line, index_value, character, single_quote, double_quote, escaped) {
+      single_quote = 0
+      double_quote = 0
+      escaped = 0
+      for (index_value = 1; index_value <= length(line); index_value++) {
+        character = substr(line, index_value, 1)
+        if (double_quote) {
+          if (escaped) {
+            escaped = 0
+          } else if (character == "\\") {
+            escaped = 1
+          } else if (character == "\"") {
+            double_quote = 0
+          }
+          continue
+        }
+        if (single_quote) {
+          if (character == "\047" && substr(line, index_value + 1, 1) == "\047") {
+            index_value++
+          } else if (character == "\047") {
+            single_quote = 0
+          }
+          continue
+        }
+        if (character == "\"") {
+          double_quote = 1
+        } else if (character == "\047") {
+          single_quote = 1
+        } else if (character == "#" && (index_value == 1 || substr(line, index_value - 1, 1) ~ /[[:space:]]/)) {
+          return index_value
+        }
+      }
+      return 0
+    }
+
+    function yaml_scalar(value, trimmed) {
+      trimmed = value
+      sub(/^[[:space:]]+/, "", trimmed)
+      sub(/[[:space:]]+$/, "", trimmed)
+      if (trimmed == "") {
+        return value
+      }
+      if (trimmed ~ /^(true|false|yes|no|on|off)$/) {
+        return paint(magenta, value)
+      }
+      if (trimmed ~ /^(null|Null|NULL|~)$/) {
+        return paint(dim, value)
+      }
+      if (trimmed ~ /^[-+]?[0-9]+([.][0-9]+)?([eE][-+]?[0-9]+)?$/) {
+        return paint(yellow, value)
+      }
+      return paint(green, value)
+    }
+
+    function yaml(line, colon, comment, body, suffix, key, value, marker, indent) {
+      if (line ~ /^[[:space:]]*#/) {
+        return paint(dim, line)
+      }
+      if (line ~ /^[[:space:]]*(---|[.][.][.])[[:space:]]*$/) {
+        return paint(bold cyan, line)
+      }
+
+      comment = yaml_comment(line)
+      if (comment > 0) {
+        body = substr(line, 1, comment - 1)
+        suffix = paint(dim, substr(line, comment))
+      } else {
+        body = line
+        suffix = ""
+      }
+
+      colon = yaml_colon(body)
+      if (colon > 0) {
+        key = substr(body, 1, colon)
+        value = substr(body, colon + 1)
+        marker = ""
+        if (match(key, /^[[:space:]]*-[[:space:]]+/)) {
+          indent = substr(key, 1, RLENGTH)
+          marker = paint(yellow, indent)
+          key = substr(key, RLENGTH + 1)
+        }
+        return marker paint(cyan, key) yaml_scalar(value) suffix
+      }
+
+      if (match(body, /^[[:space:]]*-[[:space:]]+/)) {
+        marker = substr(body, 1, RLENGTH)
+        value = substr(body, RLENGTH + 1)
+        return paint(yellow, marker) yaml_scalar(value) suffix
+      }
+      return yaml_scalar(body) suffix
+    }
+
+    function json(line, output, index_value, character, end_index, escaped, next_index, token, remainder) {
+      output = ""
+      index_value = 1
+      while (index_value <= length(line)) {
+        character = substr(line, index_value, 1)
+        if (character == "\"") {
+          end_index = index_value + 1
+          escaped = 0
+          while (end_index <= length(line)) {
+            character = substr(line, end_index, 1)
+            if (escaped) {
+              escaped = 0
+            } else if (character == "\\") {
+              escaped = 1
+            } else if (character == "\"") {
+              break
+            }
+            end_index++
+          }
+          token = substr(line, index_value, end_index - index_value + 1)
+          next_index = end_index + 1
+          while (substr(line, next_index, 1) ~ /[[:space:]]/) {
+            next_index++
+          }
+          output = output paint(substr(line, next_index, 1) == ":" ? cyan : green, token)
+          index_value = end_index + 1
+          continue
+        }
+
+        remainder = substr(line, index_value)
+        if (match(remainder, /^-?[0-9]+([.][0-9]+)?([eE][-+]?[0-9]+)?/)) {
+          token = substr(remainder, 1, RLENGTH)
+          output = output paint(yellow, token)
+          index_value += RLENGTH
+          continue
+        }
+        if (match(remainder, /^(true|false|null)/)) {
+          token = substr(remainder, 1, RLENGTH)
+          output = output paint(token == "null" ? dim : magenta, token)
+          index_value += RLENGTH
+          continue
+        }
+        if (character ~ /[{}[\],:]/) {
+          output = output paint(blue, character)
+        } else {
+          output = output character
+        }
+        index_value++
+      }
+      return output
+    }
+
+    function logs(line) {
+      if (line ~ /(^|[^[:alpha:]])(FATAL|ERROR|ERR|PANIC|Failed|failure)([^[:alpha:]]|$)/) {
+        return paint(red, line)
+      }
+      if (line ~ /(^|[^[:alpha:]])(WARN|WARNING|Warning)([^[:alpha:]]|$)/) {
+        return paint(yellow, line)
+      }
+      if (line ~ /(^|[^[:alpha:]])(DEBUG|TRACE)([^[:alpha:]]|$)/) {
+        return paint(dim, line)
+      }
+      return line
+    }
+
+    function stderr_line(line) {
+      if (line ~ /(^|[[:space:]])([Ee]rror|[Ff]atal|[Ff]ailed|[Ff]ailure)(:|[[:space:]]|$)/) {
+        return paint(red, line)
+      }
+      if (line ~ /(^|[[:space:]])([Ww]arning|[Ww]arn)(:|[[:space:]]|$)/) {
+        return paint(yellow, line)
+      }
+      return line
+    }
+
+    {
+      if (index($0, esc) > 0) {
+        print
+      } else if (mode == "table") {
+        print table($0)
+      } else if (mode == "describe") {
+        print describe($0)
+      } else if (mode == "yaml") {
+        print yaml($0)
+      } else if (mode == "json") {
+        print json($0)
+      } else if (mode == "logs") {
+        print logs($0)
+      } else if (mode == "diff") {
+        if ($0 ~ /^@@/) print paint(cyan, $0)
+        else if ($0 ~ /^\+\+\+/ || $0 ~ /^---/) print paint(bold, $0)
+        else if ($0 ~ /^\+/) print paint(green, $0)
+        else if ($0 ~ /^-/) print paint(red, $0)
+        else print $0
+      } else if (mode == "explain") {
+        if ($0 ~ /^(KIND|VERSION|DESCRIPTION|FIELDS):/) print paint(bold cyan, $0)
+        else if ($0 ~ /^[[:space:]]{2,}[^[:space:]]/) print describe($0)
+        else print semantic($0)
+      } else if (mode == "stderr") {
+        print stderr_line($0)
+      } else {
+        print semantic($0)
+      }
+    }
+  '
+}
+
+kubecolor_pager_enabled() {
+  local pager_program
+
+  [[ ${KUBECOLOR_PAGING:-never} == auto ]] || return 1
+  ((KUBECOLOR_WATCH == 0)) || return 1
+  [[ ${KUBECOLOR_COMMAND} != logs ]] || return 1
+
+  KUBECOLOR_PAGER_COMMAND=${KUBECOLOR_PAGER:-${PAGER:-less -RF}}
+  pager_program=${KUBECOLOR_PAGER_COMMAND%% *}
+  command -v -- "${pager_program}" > /dev/null 2>&1
+}
+
+kubecolor_run_pager() {
+  LESS=${LESS:-FRX} sh -c "${KUBECOLOR_PAGER_COMMAND}" < "${KUBECOLOR_TMP}/page"
+}
+
+kubecolor_detect_mode "$@"
+
+KUBECTL_BIN=${KUBECOLOR_KUBECTL:-}
+if [[ -z ${KUBECTL_BIN} ]]; then
+  KUBECTL_BIN=$(command -v kubectl 2> /dev/null || true)
+fi
+if [[ -z ${KUBECTL_BIN} || ! -x ${KUBECTL_BIN} ]]; then
+  kubecolor_error "kubectl executable not found"
+  exit 127
+fi
+
+if ((KUBECOLOR_BYPASS)); then
+  exec "${KUBECTL_BIN}" "$@"
+fi
+
+KUBECOLOR_STDOUT=0
+KUBECOLOR_STDERR=0
+if [[ ${KUBECOLOR_MODE} != plain ]] && kubecolor_color_enabled 1; then
+  KUBECOLOR_STDOUT=1
+fi
+if kubecolor_color_enabled 2; then
+  KUBECOLOR_STDERR=1
+fi
+if ((KUBECOLOR_STDOUT == 0 && KUBECOLOR_STDERR == 0)); then
+  exec "${KUBECTL_BIN}" "$@"
+fi
+
+KUBECOLOR_TMP=$(mktemp -d "${TMPDIR:-/tmp}/kubecolor.XXXXXX") || {
+  kubecolor_error "cannot create temporary directory"
+  exit 1
+}
+trap kubecolor_cleanup EXIT
+
+KUBECOLOR_PAGE=0
+if ((KUBECOLOR_STDOUT)) && kubecolor_pager_enabled; then
+  KUBECOLOR_PAGE=1
+fi
+
+if ((KUBECOLOR_STDOUT)); then
+  mkfifo "${KUBECOLOR_TMP}/stdout"
+  if ((KUBECOLOR_PAGE)); then
+    kubecolor_format "${KUBECOLOR_MODE}" < "${KUBECOLOR_TMP}/stdout" > "${KUBECOLOR_TMP}/page" &
+  else
+    kubecolor_format "${KUBECOLOR_MODE}" < "${KUBECOLOR_TMP}/stdout" &
+  fi
+  KUBECOLOR_STDOUT_PID=$!
+fi
+
+if ((KUBECOLOR_STDERR)); then
+  mkfifo "${KUBECOLOR_TMP}/stderr"
+  kubecolor_format stderr < "${KUBECOLOR_TMP}/stderr" >&2 &
+  KUBECOLOR_STDERR_PID=$!
+fi
+
+if ((KUBECOLOR_STDOUT && KUBECOLOR_STDERR)); then
+  "${KUBECTL_BIN}" "$@" > "${KUBECOLOR_TMP}/stdout" 2> "${KUBECOLOR_TMP}/stderr"
+elif ((KUBECOLOR_STDOUT)); then
+  "${KUBECTL_BIN}" "$@" > "${KUBECOLOR_TMP}/stdout"
+else
+  "${KUBECTL_BIN}" "$@" 2> "${KUBECOLOR_TMP}/stderr"
+fi
+KUBECTL_STATUS=$?
+
+[[ -z ${KUBECOLOR_STDOUT_PID} ]] || wait "${KUBECOLOR_STDOUT_PID}" || true
+[[ -z ${KUBECOLOR_STDERR_PID} ]] || wait "${KUBECOLOR_STDERR_PID}" || true
+
+if ((KUBECOLOR_PAGE)); then
+  kubecolor_run_pager || true
+fi
+
+exit "${KUBECTL_STATUS}"

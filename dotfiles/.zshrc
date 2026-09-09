@@ -542,6 +542,7 @@ fi
 # ---- Kubernetes ----
 
 if has kubectl; then
+  [[ -x "${JSH}/bin/kubecolor" ]] && alias kubectl='kubecolor'
   alias k='kubectl'
   alias kx='kubectx 2>/dev/null || kubectl config get-contexts'
   alias kn='kubens 2>/dev/null || kubectl config set-context --current --namespace'
