@@ -15,6 +15,42 @@ unset library_file
 
 DRY_RUN=${JSH_INSTALL_DRY_RUN:-${JSH_CONFIGURE_DRY_RUN:-0}}
 
+NATIVE_PACKAGES=(
+  actionlint age ansible arc-gtk-theme-eos atuin base-devel bash bat btop
+  bun bzip2 ca-certificates cifs-utils coreutils curl desktop-file-utils dconf
+  diffutils direnv dkms docker docker-buildx docker-compose earlyoom
+  eos-qogir-icons eslint eza fd flatpak fnm fzf gawk github-cli git git-lfs
+  gitleaks gnome-keyring gnupg go grep grc helm helmfile hugo jq k9s kubectl
+  libarchive libnotify make markdownlint-cli2 mpv ncdu net-tools nfs-utils
+  nmap ntfs-3g nvme-cli openssh parallel pipewire-pulse pnpm podman pre-commit
+  prettier procps-ng python python-autopep8 python-black python-poetry
+  python-pylint readline reflector ripgrep rsync s-tui shellcheck shfmt sops
+  speedtest-cli sqlite sshpass stow syncthing tar tmux
+  ttf-jetbrains-mono-nerd unzip uv wireplumber xbindkeys xclip xdg-utils
+  xfce4-clipman-plugin xfce4-cpugraph-plugin xfce4-docklike-plugin
+  xfce4-systemload-plugin xfce4-taskmanager xfce4-terminal xorg-xrandr xz
+  yamllint yq zoxide zram-generator zsh
+)
+AUR_PACKAGES=(
+  commitlint commitlint-config-conventional gemini-cli-git hadolint-bin
+  nodejs-commitizen nodejs-cz-conventional-changelog opencode-bin
+  visual-studio-code-bin waterfox-bin
+)
+
+confirm() {
+  local answer
+  [[ ${JSH_ASSUME_YES:-0} == 1 ]] && return 0
+  while :; do
+    jsh_prompt "$1 [Y/n]: "
+    read -r answer || answer=
+    case "${answer}" in
+      '' | y | Y | yes | YES) return 0 ;;
+      n | N | no | NO) return 1 ;;
+      *) jsh_warn "Please answer yes or no." ;;
+    esac
+  done
+}
+
 is_arch_family() {
   local os_release=${JSH_OS_RELEASE:-/etc/os-release}
   [[ -r "${os_release}" ]] || return 1
@@ -43,24 +79,8 @@ run_root() {
 install_native_packages() {
   local package
   local -a missing=()
-  local -a packages=(
-    actionlint age ansible arc-gtk-theme-eos atuin base-devel bash bat btop
-    bun bzip2 ca-certificates cifs-utils coreutils curl desktop-file-utils dconf
-    diffutils direnv dkms docker docker-buildx docker-compose earlyoom
-    eos-qogir-icons eslint eza fd flatpak fnm fzf gawk github-cli git git-lfs
-    gitleaks gnome-keyring gnupg go grep grc helm helmfile hugo jq k9s kubectl
-    libarchive libnotify make markdownlint-cli2 mpv ncdu net-tools nfs-utils
-    nmap ntfs-3g nvme-cli openssh parallel pipewire-pulse pnpm podman pre-commit
-    prettier procps-ng python python-autopep8 python-black python-poetry
-    python-pylint readline reflector ripgrep rsync s-tui shellcheck shfmt sops
-    speedtest-cli sqlite sshpass stow syncthing tar tmux
-    ttf-jetbrains-mono-nerd unzip uv wireplumber xbindkeys xclip xdg-utils
-    xfce4-clipman-plugin xfce4-cpugraph-plugin xfce4-docklike-plugin
-    xfce4-systemload-plugin xfce4-taskmanager xfce4-terminal xorg-xrandr xz
-    yamllint yq zoxide zram-generator zsh
-  )
 
-  for package in "${packages[@]}"; do
+  for package in "${NATIVE_PACKAGES[@]}"; do
     pacman -Q "${package}" > /dev/null 2>&1 || missing+=("${package}")
   done
   if ((${#missing[@]} > 0)); then
@@ -115,13 +135,8 @@ install_aur_helper() {
 install_aur_packages() {
   local helper package
   local -a missing=()
-  local -a packages=(
-    commitlint commitlint-config-conventional gemini-cli-git hadolint-bin
-    nodejs-commitizen nodejs-cz-conventional-changelog opencode-bin
-    visual-studio-code-bin waterfox-bin
-  )
 
-  for package in "${packages[@]}"; do
+  for package in "${AUR_PACKAGES[@]}"; do
     pacman -Q "${package}" > /dev/null 2>&1 || missing+=("${package}")
   done
   ((${#missing[@]} == 0)) && return
@@ -175,7 +190,20 @@ update_flatpaks() {
 }
 
 main() {
-  [[ "$(uname -s)" == Linux ]] || return
+  local package platform
+  platform=$(uname -s)
+
+  if [[ ${1:-} == --list-installed-packages ]]; then
+    [[ "${platform}" == Linux ]] || return 0
+    is_arch_family || return 0
+    command -v pacman > /dev/null 2>&1 || return 0
+    for package in "${NATIVE_PACKAGES[@]}" "${AUR_PACKAGES[@]}"; do
+      pacman -Q "${package}" > /dev/null 2>&1 && printf '%s\n' "${package}"
+    done
+    return 0
+  fi
+
+  [[ "${platform}" == Linux ]] || return
   is_arch_family || {
     jsh_note "Skipping native packages: Arch Linux or EndeavourOS not detected."
     return
@@ -184,6 +212,10 @@ main() {
   command -v pacman > /dev/null 2>&1 || {
     jsh_error "pacman is required on Arch-family systems."
     return 1
+  }
+  confirm "Install native Arch and Flatpak packages?" || {
+    jsh_note "Skipping native packages."
+    return 0
   }
   [[ ${JSH_UPDATE:-0} != 1 ]] || update_native_packages
   install_native_packages

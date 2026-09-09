@@ -1764,8 +1764,8 @@ source "${JSH}/lib/zsh/prompt.zsh"
 # 9. PATH PRIORITIZATION / DEDUPLICATION
 # ============================================================================
 
-# Paths - ORDER MATTERS (priority: local > jsh > system)
-export PATH=${HOME}/.local/bin:${JSH}/bin:${FZF_BASE}/bin:${HOME}/go/bin:${PATH}
+# Paths - ORDER MATTERS (priority: local > jsh > go > cargo)
+export PATH=${HOME}/.local/bin:${JSH}/bin:${FZF_BASE}/bin:${HOME}/go/bin:${PATH}:${HOME}/.cargo/bin
 
 # Function to remove duplicate PATH entries while preserving order
 dedup_path() {
