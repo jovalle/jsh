@@ -69,6 +69,4 @@ bh_unicode_properties.cache
 git.yaml
 node_modules/
 oscrypto-ca-bundle.crt
-package-lock.json
-package.json
 sftp-config.json

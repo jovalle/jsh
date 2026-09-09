@@ -33,7 +33,11 @@ define run_scripts
 	@$(OUTPUT) failed_scripts=0; script_status=0; \
 	first_script=1; \
 	for action in $(1); do \
-		for platform in $(PLATFORM_DIRS); do \
+		action_platforms="$(PLATFORM_DIRS)"; \
+		if [ "$$action" = install ]; then \
+			action_platforms="$(filter-out unix,$(PLATFORM_DIRS)) unix"; \
+		fi; \
+		for platform in $$action_platforms; do \
 			dir="$(JSH_ROOT)/scripts/$$platform/$$action"; \
 			[ -d "$$dir" ] || continue; \
 			for script in "$$dir"/*; do \
