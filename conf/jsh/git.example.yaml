@@ -1,12 +1,13 @@
 # Copy this file to git.yaml and replace each value with your Git identity.
+# Bare SSH key names resolve under ~/.ssh and infer their type from id_TYPE.
 profiles:
   personal:
     name: Your Name
     email: you@example.net
     user: yourusername
-    ssh_key: ~/.ssh/id_ed25519_personal
+    ssh_key: id_ed25519_personal
   work:
     name: Your Name
     email: you@example.org
     user: workusername
-    ssh_key: ~/.ssh/id_ed25519_work
+    ssh_key: id_ed25519_work
