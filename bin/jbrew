@@ -1,0 +1,719 @@
+#!/usr/bin/env bash
+##% jbrew
+## installed ## List installed formulae and casks
+## search ## Search Homebrew with macOS and Linux availability
+## whatprovides @command ## Find formulae that provide a command
+## adopt ## Add packages to the matching Jsh Brewfile
+
+set -euo pipefail
+
+readonly SCRIPT_NAME=${0##*/}
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+JSH_ROOT=${JSH_DIR:-$(cd -- "${SCRIPT_DIR}/.." && pwd -P)}
+BREW=${JBREW_BREW:-brew}
+readonly SCRIPT_DIR JSH_ROOT BREW
+
+RESULT_KINDS=()
+RESULT_NAMES=()
+RESULT_LABELS=()
+RESULT_STATES=()
+META_QUERIES=()
+META_NAMES=()
+META_MACOS=()
+META_LINUX=()
+META_STATES=()
+CASK_META_NAMES=()
+CASK_META_STATES=()
+INSTALLED_KINDS=()
+INSTALLED_NAMES=()
+INSTALLED_REASONS=()
+RENDER_PLAIN=()
+RENDER_STYLED=()
+FORMULA_INDEX=''
+
+if [[ "${JSH_PLAIN_OUTPUT:-0}" != 1 && "${TERM:-dumb}" != dumb &&
+  -z ${NO_COLOR+x} && -z ${HOMEBREW_NO_COLOR+x} && "${JSH_COLOR:-auto}" != never ]] \
+  && { [[ -t 1 ]] || [[ "${JSH_COLOR:-auto}" == always || "${HOMEBREW_COLOR:-0}" == 1 ]]; }; then
+  C_RESET=$'\033[0m'
+  C_BOLD=$'\033[1m'
+  C_DIM=$'\033[2m'
+  C_BLUE=$'\033[34m'
+  C_GREEN=$'\033[32m'
+  C_YELLOW=$'\033[33m'
+  C_RED=$'\033[31m'
+else
+  C_RESET=''
+  C_BOLD=''
+  C_DIM=''
+  C_BLUE=''
+  C_GREEN=''
+  C_YELLOW=''
+  C_RED=''
+fi
+
+heading() {
+  printf '%s==>%s %s%s%s\n' "${C_BLUE}" "${C_RESET}" "${C_BOLD}" "$*" "${C_RESET}"
+}
+
+error() {
+  printf '%sError:%s %s\n' "${C_RED}" "${C_RESET}" "$*" >&2
+}
+
+die() {
+  error "$*"
+  exit 1
+}
+
+require_command() {
+  command -v "$1" >/dev/null 2>&1 || die "$1 is required"
+}
+
+reset_results() {
+  RESULT_KINDS=()
+  RESULT_NAMES=()
+  RESULT_LABELS=()
+  RESULT_STATES=()
+  META_QUERIES=()
+  META_NAMES=()
+  META_MACOS=()
+  META_LINUX=()
+  META_STATES=()
+  CASK_META_NAMES=()
+  CASK_META_STATES=()
+}
+
+add_result() {
+  local kind=$1 name=$2 label=$3 state=${4:-available} index
+
+  [[ ${name} =~ ^[[:alnum:]][[:alnum:]@+._/-]*$ ]] || return 0
+  for ((index = 0; index < ${#RESULT_NAMES[@]}; index++)); do
+    [[ ${RESULT_KINDS[index]} != "${kind}" || ${RESULT_NAMES[index]} != "${name}" ]] || return 0
+  done
+  RESULT_KINDS+=("${kind}")
+  RESULT_NAMES+=("${name}")
+  RESULT_LABELS+=("${label}")
+  RESULT_STATES+=("${state}")
+}
+
+collect_search_output() {
+  local kind=$1 output=$2 line name label state
+
+  while IFS= read -r line; do
+    [[ -n ${line} && ${line} != '==> '* ]] || continue
+    state=available
+    [[ ${line} != *' (deprecated)' ]] || state=deprecated
+    [[ ${line} != *' (disabled)' ]] || state=disabled
+    label=${line% ✔}
+    label=${label% (deprecated)}
+    label=${label% (disabled)}
+    name=${label%%: *}
+    add_result "${kind}" "${name}" "${label}" "${state}"
+  done <<<"${output}"
+}
+
+formula_index_mtime() {
+  stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null || printf '0\n'
+}
+
+load_formula_index() {
+  local cache_dir cache_file temporary_file now modified
+  cache_dir=${JBREW_CACHE_DIR:-${JSH_LOCAL_DIR:-${JSH_ROOT}/local}/cache/jbrew}
+  cache_file=${cache_dir}/formula.json
+  now=$(date +%s)
+
+  if [[ -f ${cache_file} ]]; then
+    modified=$(formula_index_mtime "${cache_file}")
+    if ((now - modified < 86400)); then
+      FORMULA_INDEX=${cache_file}
+      return 0
+    fi
+  fi
+
+  mkdir -p "${cache_dir}" 2>/dev/null || true
+  temporary_file=${cache_file}.tmp.$$
+  if curl -fsSL --connect-timeout 5 --max-time 30 \
+    "${HOMEBREW_API_DOMAIN:-https://formulae.brew.sh/api}/formula.json" \
+    -o "${temporary_file}" 2>/dev/null \
+    && jq -e 'type == "array"' "${temporary_file}" >/dev/null 2>&1; then
+    mv "${temporary_file}" "${cache_file}"
+  else
+    rm -f "${temporary_file}"
+  fi
+
+  [[ -f ${cache_file} ]] || return 1
+  FORMULA_INDEX=${cache_file}
+}
+
+fallback_platforms() {
+  if [[ $(uname -s) == Darwin ]]; then
+    META_MAC=yes
+    META_LIN=unknown
+  else
+    META_MAC=unknown
+    META_LIN=yes
+  fi
+}
+
+hydrate_formula_metadata() {
+  local names_file metadata_file index query
+  local -a names=()
+
+  for ((index = 0; index < ${#RESULT_NAMES[@]}; index++)); do
+    [[ ${RESULT_KINDS[index]} != formula ]] || names+=("${RESULT_NAMES[index]}")
+  done
+  ((${#names[@]} > 0)) || return 0
+
+  if ! load_formula_index; then
+    for query in "${names[@]}"; do
+      fallback_platforms
+      META_QUERIES+=("${query}")
+      META_NAMES+=("${query}")
+      META_MACOS+=("${META_MAC}")
+      META_LINUX+=("${META_LIN}")
+      META_STATES+=(available)
+    done
+    return 0
+  fi
+
+  names_file=${FORMULA_INDEX}.names.$$
+  metadata_file=${FORMULA_INDEX}.metadata.$$
+  printf '%s\n' "${names[@]}" | jq -Rsc 'split("\n") | map(select(length > 0))' >"${names_file}"
+  jq -r --slurpfile wanted "${names_file}" '
+    $wanted[0][] as $query |
+    (first(.[] | select(.name == $query or ((.aliases // []) | index($query)))) // null) as $formula |
+    if $formula == null then
+      [$query, $query, "unknown", "unknown", "available"]
+    else
+      ($formula.requirements // [] | map(.name)) as $requirements |
+      [
+        $query,
+        $formula.name,
+        (if $requirements | index("linux") then "no" else "yes" end),
+        (if $requirements | index("macos") then "no" else "yes" end),
+        (if $formula.disabled then "disabled" elif $formula.deprecated then "deprecated" else "available" end)
+      ]
+    end | @tsv
+  ' "${FORMULA_INDEX}" >"${metadata_file}"
+
+  while IFS=$'\t' read -r query META_NAME META_MAC META_LIN META_STATE; do
+    META_QUERIES+=("${query}")
+    META_NAMES+=("${META_NAME}")
+    META_MACOS+=("${META_MAC}")
+    META_LINUX+=("${META_LIN}")
+    META_STATES+=("${META_STATE}")
+  done <"${metadata_file}"
+  rm -f "${names_file}" "${metadata_file}"
+}
+
+metadata_for() {
+  local query=$1 index
+  META_NAME=${query}
+  META_STATE=available
+  fallback_platforms
+
+  for ((index = 0; index < ${#META_QUERIES[@]}; index++)); do
+    if [[ ${META_QUERIES[index]} == "${query}" ]]; then
+      META_NAME=${META_NAMES[index]}
+      META_MAC=${META_MACOS[index]}
+      META_LIN=${META_LINUX[index]}
+      META_STATE=${META_STATES[index]}
+      return 0
+    fi
+  done
+}
+
+hydrate_cask_metadata() {
+  local index metadata name state
+  local -a names=()
+
+  for ((index = 0; index < ${#RESULT_NAMES[@]}; index++)); do
+    [[ ${RESULT_KINDS[index]} != cask ]] || names+=("${RESULT_NAMES[index]}")
+  done
+  ((${#names[@]} > 0)) || return 0
+
+  metadata=$(HOMEBREW_NO_AUTO_UPDATE=1 "${BREW}" info --json=v2 --cask "${names[@]}" 2>/dev/null || true)
+  while IFS=$'\t' read -r name state; do
+    CASK_META_NAMES+=("${name}")
+    CASK_META_STATES+=("${state}")
+  done < <(jq -r '.casks[]? | [
+    .token,
+    (if .disabled then "disabled" elif .deprecated then "deprecated" else "available" end)
+  ] | @tsv' <<<"${metadata}" 2>/dev/null || true)
+}
+
+cask_state_for() {
+  local name=$1 index
+  CASK_STATE=available
+  for ((index = 0; index < ${#CASK_META_NAMES[@]}; index++)); do
+    if [[ ${CASK_META_NAMES[index]} == "${name}" ]]; then
+      CASK_STATE=${CASK_META_STATES[index]}
+      return 0
+    fi
+  done
+}
+
+line_exists() {
+  local needle=$1 lines=$2
+  [[ -n ${lines} ]] && grep -Fqx -- "${needle}" <<<"${lines}"
+}
+
+build_platform_marks() {
+  local macos=$1 linux=$2 separator=''
+  PLATFORM_PLAIN=''
+  PLATFORM_STYLED=''
+
+  case ${macos} in
+    yes)
+      PLATFORM_PLAIN=''
+      PLATFORM_STYLED="${C_BLUE}${C_RESET}"
+      separator=' '
+      ;;
+    unknown)
+      PLATFORM_PLAIN='?'
+      PLATFORM_STYLED="${C_YELLOW}?${C_RESET}"
+      separator=' '
+      ;;
+  esac
+  case ${linux} in
+    yes)
+      PLATFORM_PLAIN+="${separator}"
+      PLATFORM_STYLED+="${separator}${C_BLUE}${C_RESET}"
+      ;;
+    unknown)
+      PLATFORM_PLAIN+="${separator}?"
+      PLATFORM_STYLED+="${separator}${C_YELLOW}?${C_RESET}"
+      ;;
+  esac
+}
+
+print_availability_key() {
+  printf '\n%sKey:%s %s%s macOS  %s%s Linux  %s✔%s installed  %s?%s availability unknown\n' \
+    "${C_BOLD}" "${C_RESET}" \
+    "${C_BLUE}" "${C_RESET}" "${C_BLUE}" "${C_RESET}" \
+    "${C_GREEN}" "${C_RESET}" "${C_YELLOW}" "${C_RESET}"
+}
+
+render_columns() {
+  local count=${#RENDER_PLAIN[@]} terminal_width column_width columns rows
+  local row column index next_index padding maximum=0
+
+  for index in "${!RENDER_PLAIN[@]}"; do
+    ((${#RENDER_PLAIN[index]} <= maximum)) || maximum=${#RENDER_PLAIN[index]}
+  done
+  terminal_width=${COLUMNS:-}
+  [[ ${terminal_width} =~ ^[0-9]+$ ]] || terminal_width=$(tput cols 2>/dev/null || printf '80\n')
+  column_width=$((maximum + 4))
+  columns=$((terminal_width / column_width))
+  ((columns > 0)) || columns=1
+  ((columns <= count)) || columns=${count}
+  rows=$(((count + columns - 1) / columns))
+
+  for ((row = 0; row < rows; row++)); do
+    for ((column = 0; column < columns; column++)); do
+      index=$((row + column * rows))
+      ((index < count)) || continue
+      printf '%s' "${RENDER_STYLED[index]}"
+      next_index=$((row + (column + 1) * rows))
+      if ((next_index < count)); then
+        padding=$((column_width - ${#RENDER_PLAIN[index]}))
+        printf '%*s' "${padding}" ''
+      fi
+    done
+    printf '\n'
+  done
+}
+
+render_installed_section() {
+  local kind=$1 title=$2 index glyph styled_glyph
+
+  heading "${title}"
+  RENDER_PLAIN=()
+  RENDER_STYLED=()
+  for ((index = 0; index < ${#INSTALLED_NAMES[@]}; index++)); do
+    [[ ${INSTALLED_KINDS[index]} == "${kind}" ]] || continue
+    if [[ ${INSTALLED_REASONS[index]} == requested ]]; then
+      glyph='◆'
+      styled_glyph="${C_GREEN}◆${C_RESET}"
+    else
+      glyph='◇'
+      styled_glyph="${C_DIM}◇${C_RESET}"
+    fi
+    RENDER_PLAIN+=("${INSTALLED_NAMES[index]} ${glyph}")
+    RENDER_STYLED+=("${INSTALLED_NAMES[index]} ${styled_glyph}")
+  done
+
+  if [[ -t 1 ]]; then
+    render_columns
+  else
+    printf '%s\n' "${RENDER_STYLED[@]}"
+  fi
+}
+
+has_installed_kind() {
+  local kind=$1 installed_kind
+  for installed_kind in "${INSTALLED_KINDS[@]}"; do
+    [[ ${installed_kind} != "${kind}" ]] || return 0
+  done
+  return 1
+}
+
+installed_command() {
+  local arg formula=0 cask=0 selected=0 metadata kind name reason
+
+  for arg in "$@"; do
+    case ${arg} in
+      -h | --help)
+        printf 'Usage: %s installed [--formula|--cask]\n' "${SCRIPT_NAME}"
+        return 0
+        ;;
+      --formula | --formulae)
+        formula=1
+        selected=1
+        ;;
+      --cask | --casks)
+        cask=1
+        selected=1
+        ;;
+      *) die "unknown option: ${arg}" ;;
+    esac
+  done
+  if ((selected == 0)); then
+    formula=1
+    cask=1
+  fi
+
+  metadata=$(HOMEBREW_NO_AUTO_UPDATE=1 "${BREW}" info --json=v2 --installed)
+  INSTALLED_KINDS=()
+  INSTALLED_NAMES=()
+  INSTALLED_REASONS=()
+  while IFS=$'\t' read -r kind name reason; do
+    [[ -n ${name} ]] || continue
+    INSTALLED_KINDS+=("${kind}")
+    INSTALLED_NAMES+=("${name}")
+    INSTALLED_REASONS+=("${reason}")
+  done < <(jq -r '
+    (.formulae[]? | [
+      "formula",
+      .name,
+      (if any(.installed[]?; .installed_on_request) then "requested" else "dependency" end)
+    ]),
+    (.casks[]? | ["cask", .token, "requested"]) | @tsv
+  ' <<<"${metadata}" | LC_ALL=C sort -t $'\t' -k1,1 -k2,2)
+
+  ((formula == 0)) || {
+    if has_installed_kind formula; then
+      render_installed_section formula Formulae
+    fi
+  }
+  if ((formula && cask)) && has_installed_kind formula && has_installed_kind cask; then
+    printf '\n'
+  fi
+  ((cask == 0)) || {
+    if has_installed_kind cask; then
+      render_installed_section cask Casks
+    fi
+  }
+  printf '\n%sKey:%s %s◆%s installed on request  %s◇%s installed as a dependency\n' \
+    "${C_BOLD}" "${C_RESET}" "${C_GREEN}" "${C_RESET}" "${C_DIM}" "${C_RESET}"
+}
+
+render_results() {
+  local section_kind=$1 title=$2 layout=${3:-lines}
+  local index label state installed canonical macos linux plain styled
+  local installed_formulae installed_casks
+  installed_formulae=$(HOMEBREW_NO_AUTO_UPDATE=1 "${BREW}" list --formula -1 2>/dev/null || true)
+  installed_casks=$(HOMEBREW_NO_AUTO_UPDATE=1 "${BREW}" list --cask -1 2>/dev/null || true)
+
+  heading "${title}"
+  RENDER_PLAIN=()
+  RENDER_STYLED=()
+  for ((index = 0; index < ${#RESULT_NAMES[@]}; index++)); do
+    [[ ${RESULT_KINDS[index]} == "${section_kind}" ]] || continue
+    label=${RESULT_LABELS[index]}
+    state=${RESULT_STATES[index]}
+    if [[ ${section_kind} == formula ]]; then
+      metadata_for "${RESULT_NAMES[index]}"
+      canonical=${META_NAME}
+      macos=${META_MAC}
+      linux=${META_LIN}
+      [[ ${META_STATE} == available ]] || state=${META_STATE}
+      line_exists "${canonical}" "${installed_formulae}" && installed=1 || installed=0
+    else
+      canonical=${RESULT_NAMES[index]}
+      macos=yes
+      linux=no
+      cask_state_for "${canonical}"
+      [[ ${CASK_STATE} == available ]] || state=${CASK_STATE}
+      line_exists "${canonical}" "${installed_casks}" && installed=1 || installed=0
+    fi
+
+    build_platform_marks "${macos}" "${linux}"
+    plain="${label} ${PLATFORM_PLAIN}"
+    styled="${label} ${PLATFORM_STYLED}"
+    if ((installed)); then
+      plain+=' ✔'
+      styled+=" ${C_GREEN}✔${C_RESET}"
+    fi
+    case ${state} in
+      deprecated)
+        plain+=' (deprecated)'
+        styled+=" ${C_YELLOW}(deprecated)${C_RESET}"
+        ;;
+      disabled)
+        plain+=' (disabled)'
+        styled+=" ${C_RED}(disabled)${C_RESET}"
+        ;;
+    esac
+    RENDER_PLAIN+=("${plain}")
+    RENDER_STYLED+=("${styled}")
+  done
+
+  if [[ ${layout} == columns && -t 1 ]]; then
+    render_columns
+  else
+    printf '%s\n' "${RENDER_STYLED[@]}"
+  fi
+}
+
+has_results_of_kind() {
+  local kind=$1 result_kind
+  for result_kind in "${RESULT_KINDS[@]}"; do
+    [[ ${result_kind} != "${kind}" ]] || return 0
+  done
+  return 1
+}
+
+search_command() {
+  local arg formula=0 cask=0 selected=0 output layout=columns
+  local -a search_args=()
+
+  (($#)) || exec "${BREW}" search
+  for arg in "$@"; do
+    case ${arg} in
+      -h | --help | --pull-request | --alpine | --repology | --macports | --fink | --opensuse | --fedora | --archlinux | --debian | --ubuntu)
+        exec "${BREW}" search "$@"
+        ;;
+      --formula | --formulae)
+        formula=1
+        selected=1
+        ;;
+      --cask | --casks)
+        cask=1
+        selected=1
+        ;;
+      --desc)
+        layout=lines
+        search_args+=("${arg}")
+        ;;
+      *) search_args+=("${arg}") ;;
+    esac
+  done
+  if ((selected == 0)); then
+    formula=1
+    cask=1
+  fi
+
+  reset_results
+  if ((formula)); then
+    output=$(HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_COLOR=1 \
+      "${BREW}" search --formula "${search_args[@]}" 2>/dev/null || true)
+    collect_search_output formula "${output}"
+  fi
+  if ((cask)); then
+    output=$(HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_COLOR=1 \
+      "${BREW}" search --cask "${search_args[@]}" 2>/dev/null || true)
+    collect_search_output cask "${output}"
+  fi
+  ((${#RESULT_NAMES[@]} > 0)) || exec "${BREW}" search "$@"
+
+  hydrate_formula_metadata
+  hydrate_cask_metadata
+  has_results_of_kind formula && render_results formula Formulae "${layout}"
+  if has_results_of_kind formula && has_results_of_kind cask; then
+    printf '\n'
+  fi
+  has_results_of_kind cask && render_results cask Casks "${layout}"
+  print_availability_key
+  return 0
+}
+
+whatprovides_command() {
+  local command_name lookup provider metadata kind name found=0 missing=0
+
+  (($#)) || die "Usage: ${SCRIPT_NAME} whatprovides COMMAND..."
+  [[ ${1:-} != -h && ${1:-} != --help ]] || {
+    printf 'Usage: %s whatprovides COMMAND...\n' "${SCRIPT_NAME}"
+    return 0
+  }
+
+  for command_name in "$@"; do
+    [[ ${command_name} != -* ]] || die "unknown option: ${command_name}"
+    reset_results
+    lookup=${command_name##*/}
+    while IFS= read -r provider; do
+      provider=${provider% ✔}
+      provider=${provider% ✘}
+      [[ -n ${provider} ]] && add_result formula "${provider}" "${provider}"
+    done < <(HOMEBREW_NO_AUTO_UPDATE=1 "${BREW}" which-formula "${command_name}" 2>/dev/null || true)
+
+    metadata=$(HOMEBREW_NO_AUTO_UPDATE=1 "${BREW}" info --json=v2 "${lookup}" 2>/dev/null || true)
+    while IFS=$'\t' read -r kind name; do
+      [[ -n ${name} ]] && add_result "${kind}" "${name}" "${name}"
+    done < <(jq -r '
+      (.formulae[]? | ["formula", .full_name]),
+      (.casks[]? | ["cask", .token]) | @tsv
+    ' <<<"${metadata}" 2>/dev/null || true)
+
+    if ((${#RESULT_NAMES[@]} == 0)); then
+      error "No formula or cask provides \"${command_name}\"."
+      missing=1
+      continue
+    fi
+    hydrate_formula_metadata
+    hydrate_cask_metadata
+    found=1
+    has_results_of_kind formula && render_results formula "Formulae providing \"${command_name}\""
+    if has_results_of_kind formula && has_results_of_kind cask; then
+      printf '\n'
+    fi
+    has_results_of_kind cask && render_results cask "Casks named \"${command_name}\""
+  done
+  ((found == 0)) || print_availability_key
+  return "${missing}"
+}
+
+configured_in() {
+  local kind=$1 name=$2 brewfile configured_kind configured_name
+
+  for brewfile in "${JSH_ROOT}"/conf/brew/*/Brewfile; do
+    [[ -f ${brewfile} ]] || continue
+    while IFS=$'\t' read -r configured_kind configured_name; do
+      if [[ ${configured_kind} == "${kind}" && ${configured_name} == "${name}" ]]; then
+        printf '%s\n' "${brewfile#"${JSH_ROOT}/"}"
+        return 0
+      fi
+    done < <(sed -nE 's/^[[:space:]]*(brew|cask) "([^"]+)".*/\1\t\2/p' "${brewfile}")
+  done
+}
+
+add_to_brewfile() {
+  local kind=$1 name=$2 scope=$3 brewfile line list_file output_file
+  brewfile=${JSH_ROOT}/conf/brew/${scope}/Brewfile
+  line="${kind} \"${name}\""
+  [[ -f ${brewfile} ]] || die "missing ${brewfile#"${JSH_ROOT}/"}"
+
+  list_file=${brewfile}.list.$$
+  output_file=${brewfile}.tmp.$$
+  {
+    sed -n "/^${kind} \"/p" "${brewfile}"
+    printf '%s\n' "${line}"
+  } | LC_ALL=C sort -u >"${list_file}"
+  awk -v kind="${kind}" -v list_file="${list_file}" '
+    function emit(line) {
+      while ((getline line < list_file) > 0) print line
+      close(list_file)
+    }
+    $0 ~ ("^" kind " \\\"") {
+      if (!emitted) { emit(); emitted = 1 }
+      next
+    }
+    { print }
+    END { if (!emitted) emit() }
+  ' "${brewfile}" >"${output_file}"
+  chmod 0644 "${output_file}"
+  mv "${output_file}" "${brewfile}"
+  rm -f "${list_file}"
+  printf '%s✔%s Added %s to %s\n' "${C_GREEN}" "${C_RESET}" "${line}" "${brewfile#"${JSH_ROOT}/"}"
+}
+
+adopt_command() {
+  local selector=auto package metadata formula cask kind name scope config
+  local -a packages=()
+
+  for package in "$@"; do
+    case ${package} in
+      -h | --help)
+        printf 'Usage: %s adopt [--formula|--cask] PACKAGE...\n' "${SCRIPT_NAME}"
+        return 0
+        ;;
+      --formula | --formulae) selector=formula ;;
+      --cask | --casks) selector=cask ;;
+      --*) die "unknown option: ${package}" ;;
+      *) packages+=("${package}") ;;
+    esac
+  done
+  ((${#packages[@]} > 0)) || die "Usage: ${SCRIPT_NAME} adopt [--formula|--cask] PACKAGE..."
+
+  load_formula_index || true
+  for package in "${packages[@]}"; do
+    metadata=$(HOMEBREW_NO_AUTO_UPDATE=1 "${BREW}" info --json=v2 "${package}" 2>/dev/null || true)
+    formula=$(jq -r '.formulae[0].full_name // empty' <<<"${metadata}" 2>/dev/null || true)
+    cask=$(jq -r '.casks[0].token // empty' <<<"${metadata}" 2>/dev/null || true)
+    case ${selector} in
+      formula) cask='' ;;
+      cask) formula='' ;;
+    esac
+    [[ -z ${formula} || -z ${cask} ]] || die "${package} is both a formula and a cask; use --formula or --cask"
+    if [[ -n ${formula} ]]; then
+      kind=brew
+      name=${formula}
+      reset_results
+      add_result formula "${name}" "${name}"
+      hydrate_formula_metadata
+      metadata_for "${name}"
+      [[ ${META_STATE} != disabled ]] || die "${name} is disabled"
+      if [[ ${META_MAC} == yes && ${META_LIN} == yes ]]; then
+        scope=common
+      elif [[ ${META_MAC} == yes && ${META_LIN} == no ]]; then
+        scope=macos
+      elif [[ ${META_MAC} == no && ${META_LIN} == yes ]]; then
+        scope=linux
+      else
+        die "cannot determine macOS/Linux availability for ${name}"
+      fi
+    elif [[ -n ${cask} ]]; then
+      kind=cask
+      name=${cask}
+      scope=macos
+      [[ $(jq -r '.casks[0].disabled // false' <<<"${metadata}") != true ]] || die "${name} is disabled"
+    else
+      die "No formula or cask found for \"${package}\"."
+    fi
+
+    config=$(configured_in "${kind}" "${name}" || true)
+    if [[ -n ${config} ]]; then
+      printf '%s✔%s %s is already in %s\n' "${C_GREEN}" "${C_RESET}" "${name}" "${config}"
+      continue
+    fi
+    heading "Adopting ${name}"
+    add_to_brewfile "${kind}" "${name}" "${scope}"
+  done
+}
+
+command -v "${BREW}" >/dev/null 2>&1 || die 'brew is required'
+case ${1:-} in
+  installed)
+    shift
+    require_command jq
+    installed_command "$@"
+    ;;
+  search)
+    shift
+    require_command jq
+    require_command curl
+    search_command "$@"
+    ;;
+  whatprovides)
+    shift
+    require_command jq
+    require_command curl
+    whatprovides_command "$@"
+    ;;
+  adopt)
+    shift
+    require_command jq
+    require_command curl
+    adopt_command "$@"
+    ;;
+  *) exec "${BREW}" "$@" ;;
+esac

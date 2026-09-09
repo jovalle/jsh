@@ -340,6 +340,8 @@ main() {
 
   if [[ "${platform}" == Darwin ]]; then
     package_scopes+=(macos)
+  else
+    package_scopes+=(linux)
   fi
   machine=$(hostname -s 2> /dev/null || hostname)
   machine=$(printf '%s' "${machine}" | tr '[:upper:]' '[:lower:]')
