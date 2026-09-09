@@ -730,10 +730,6 @@ has lazygit && alias lg='lazygit'
 has lazydocker && alias lzd='lazydocker'
 has k9s && alias k9='k9s'
 
-# ---- SSH and Proxy ----
-
-alias sshx='eval $(ssh-agent) && ssh-add 2>/dev/null'
-
 # ---- Platform Specific ----
 
 if [[ "${JSH_OS}" == macos ]]; then
@@ -1825,6 +1821,10 @@ jsh() {
 }
 
 # These plugins must load after widgets and local customizations are defined.
+typeset -gA ZSH_HIGHLIGHT_STYLES
+ZSH_HIGHLIGHT_STYLES[command]='fg=green'
+ZSH_HIGHLIGHT_STYLES[hashed-command]='fg=green'
+
 # shellcheck disable=SC1090  # Pinned repository submodules
 [[ -r "${JSH_VENDOR}/zsh-autosuggestions/zsh-autosuggestions.zsh" ]] && \
   source "${JSH_VENDOR}/zsh-autosuggestions/zsh-autosuggestions.zsh"
