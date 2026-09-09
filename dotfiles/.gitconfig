@@ -44,3 +44,9 @@
   defaultBranch = main
 [alias]
   undo = reset --soft HEAD~1
+[credential "https://github.com"]
+	helper =
+	helper = !/opt/homebrew/bin/gh auth git-credential
+[credential "https://gist.github.com"]
+	helper =
+	helper = !/opt/homebrew/bin/gh auth git-credential
