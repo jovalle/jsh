@@ -202,6 +202,7 @@ if [[ -z "${JSH_OS:-}" ]]; then
   case "${OSTYPE:-}" in
     darwin*) JSH_OS=macos ;;
     linux*) JSH_OS=linux ;;
+    cygwin* | msys* | win32*) JSH_OS=windows ;;
     *) JSH_OS=unknown ;;
   esac
 fi
@@ -869,19 +870,89 @@ top() {
   fi
 }
 
-if [[ "${JSH_OS}" == linux ]]; then
-  unalias open 2>/dev/null || true
-  open() {
-    if has xdg-open; then
-      command xdg-open "$@"
-    elif has sensible-browser; then
-      command sensible-browser "$@"
-    else
-      _j_ui_message error "xdg-open or sensible-browser is required"
-      return 1
-    fi
-  }
-fi
+unalias open 2>/dev/null || true
+open() {
+  local -a targets opener
+  local target desktop=${(L)${XDG_CURRENT_DESKTOP:-${DESKTOP_SESSION:-}}}
+  local -i result=0
+
+  (( $# )) && targets=("$@") || targets=(.)
+
+  case "${JSH_OS}" in
+    macos)
+      command open "${targets[@]}"
+      return
+      ;;
+    linux)
+      if [[ -n ${WSL_DISTRO_NAME:-}${WSL_INTEROP:-} ]]; then
+        if has wslview; then
+          opener=(wslview)
+        elif has explorer.exe; then
+          opener=(explorer.exe)
+        fi
+      fi
+
+      if (( ${#opener[@]} == 0 )); then
+        case "${desktop}" in
+          *kde* | *plasma*)
+            if has kioclient6; then
+              opener=(kioclient6 exec)
+            elif has kioclient5; then
+              opener=(kioclient5 exec)
+            elif has kioclient; then
+              opener=(kioclient exec)
+            fi
+            ;;
+          *gnome* | *unity* | *cinnamon* | *mate* | *budgie*)
+            has gio && opener=(gio open)
+            ;;
+          *xfce*)
+            has exo-open && opener=(exo-open)
+            ;;
+        esac
+      fi
+
+      if (( ${#opener[@]} == 0 )); then
+        if has xdg-open; then
+          opener=(xdg-open)
+        elif has gio; then
+          opener=(gio open)
+        elif has kioclient6; then
+          opener=(kioclient6 exec)
+        elif has kioclient5; then
+          opener=(kioclient5 exec)
+        elif has kioclient; then
+          opener=(kioclient exec)
+        elif has exo-open; then
+          opener=(exo-open)
+        elif has sensible-open; then
+          opener=(sensible-open)
+        elif has sensible-browser; then
+          opener=(sensible-browser)
+        fi
+      fi
+      ;;
+    windows)
+      if has cygstart; then
+        opener=(cygstart)
+      elif has start; then
+        opener=(start)
+      elif has explorer.exe; then
+        opener=(explorer.exe)
+      fi
+      ;;
+  esac
+
+  if (( ${#opener[@]} == 0 )); then
+    _j_ui_message error "No supported opener found for ${JSH_OS}"
+    return 1
+  fi
+
+  for target in "${targets[@]}"; do
+    command "${opener[@]}" "${target}" || result=$?
+  done
+  return ${result}
+}
 
 quiet() {
   if [[ $# -eq 0 ]]; then
