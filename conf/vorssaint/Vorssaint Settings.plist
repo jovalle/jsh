@@ -749,7 +749,7 @@
 		<key>screenshotShortcut</key>
 		<string>control+option+command:21</string>
 		<key>screenshotShortcutEnabled</key>
-		<false/>
+		<true/>
 		<key>screenshotShowLastRegion</key>
 		<true/>
 		<key>screenshotToolOrder</key>
@@ -928,7 +928,7 @@
 		<array/>
 	</dict>
 	<key>vorssaintBackupAppVersion</key>
-	<string>3.3.2</string>
+	<string>3.3.5</string>
 	<key>vorssaintBackupVersion</key>
 	<integer>1</integer>
 </dict>
