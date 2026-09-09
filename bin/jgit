@@ -7,6 +7,7 @@
 ## profiles ## List configured identities
 ## commit [-t TIME] [ARGS...] ## Commit with an optional timestamp
 ## amend -t TIME [ARGS...] ## Amend the latest commit timestamp
+## rewrite [--last N|REF...] ## Rewrite commit messages and timestamps
 ## update [--stash] [--all [DIR]] ## Fast-forward repositories from their upstreams
 ## @git-command ## Git command
 ##? identity list ## List configured identities
@@ -59,6 +60,8 @@ Commands:
   profiles              Alias for identity list
   commit [-t TIME]      Commit with a relative or absolute timestamp
   amend -t TIME         Amend the latest commit timestamp
+  rewrite REF...        Rewrite selected commits by hash, tag, or other ref
+  rewrite --last N      Rewrite the last N first-parent commits
   update [--stash]      Fast-forward the current branch from its upstream
   update --all [DIR]    Update repositories in DIR and its immediate children
 
@@ -124,6 +127,53 @@ _jgit_expand_home() {
   else
     printf '%s\n' "$1"
   fi
+}
+
+_jgit_ssh_key_path() {
+  case $1 in
+    */*) printf '%s\n' "$1" ;;
+    *) printf '%s/.ssh/%s\n' \~ "$1" ;;
+  esac
+}
+
+_jgit_ssh_key_type() {
+  local key_name=${1##*/}
+  case ${key_name} in
+    id_ed25519_sk* | id_ed25519-sk*) printf 'ed25519-sk\n' ;;
+    id_ecdsa_sk* | id_ecdsa-sk*) printf 'ecdsa-sk\n' ;;
+    id_ed25519*) printf 'ed25519\n' ;;
+    id_ecdsa*) printf 'ecdsa\n' ;;
+    id_rsa*) printf 'rsa\n' ;;
+    id_dsa*) printf 'dsa\n' ;;
+    *) ;;
+  esac
+}
+
+_jgit_generate_ssh_key() {
+  local configured=$1 key_path expanded_key key_type answer key_directory
+  key_path=$(_jgit_ssh_key_path "${configured}")
+  expanded_key=$(_jgit_expand_home "${key_path}")
+  [[ -e ${expanded_key} ]] && return 0
+
+  jsh_prompt "Generate missing SSH key ${key_path}? [Y/n]: "
+  read -r answer || answer=
+  case ${answer} in
+    [Nn]*) return 0 ;;
+    *) ;;
+  esac
+
+  key_type=$(_jgit_ssh_key_type "${key_path}")
+  if [[ -z ${key_type} ]]; then
+    jsh_prompt 'SSH key type: '
+    read -r key_type || _jgit_die 'SSH key type is required'
+    [[ -n ${key_type} ]] || _jgit_die 'SSH key type is required'
+  fi
+
+  command -v ssh-keygen > /dev/null 2>&1 || _jgit_die 'ssh-keygen is required'
+  key_directory=${expanded_key%/*}
+  [[ ${key_directory} == "${expanded_key}" ]] || mkdir -p "${key_directory}"
+  command ssh-keygen -t "${key_type}" -f "${expanded_key}" -C ''
+  jsh_success "Generated SSH key ${key_path}"
 }
 
 _jgit_profile_names() {
@@ -220,39 +270,40 @@ _jgit_file_metadata() {
 }
 
 _jgit_key_health() {
-  local configured=$1 key_file metadata owner mode
+  local configured=$1 key_path key_file metadata owner mode
   HEALTH_STATE=error
   HEALTH_TEXT='not configured'
   [[ -n ${configured} ]] || return 0
 
-  key_file=$(_jgit_expand_home "${configured}")
-  HEALTH_TEXT=${configured}
+  key_path=$(_jgit_ssh_key_path "${configured}")
+  key_file=$(_jgit_expand_home "${key_path}")
+  HEALTH_TEXT=${key_path}
   if [[ ! -e ${key_file} ]]; then
-    HEALTH_TEXT="${configured} (missing)"
+    HEALTH_TEXT="${key_path} (missing)"
     return 0
   fi
   if [[ ! -f ${key_file} || ! -r ${key_file} ]]; then
-    HEALTH_TEXT="${configured} (not a readable file)"
+    HEALTH_TEXT="${key_path} (not a readable file)"
     return 0
   fi
   metadata=$(_jgit_file_metadata "${key_file}") || {
-    HEALTH_TEXT="${configured} (permissions unavailable)"
+    HEALTH_TEXT="${key_path} (permissions unavailable)"
     return 0
   }
   owner=${metadata%% *}
   mode=${metadata#* }
   if [[ ${owner} != "$(id -u)" ]]; then
-    HEALTH_TEXT="${configured} (owned by uid ${owner})"
+    HEALTH_TEXT="${key_path} (owned by uid ${owner})"
     return 0
   fi
   if (((8#${mode} & 0077) != 0)); then
     HEALTH_STATE=warn
-    HEALTH_TEXT="${configured} (permissions too open)"
+    HEALTH_TEXT="${key_path} (permissions too open)"
     return 0
   fi
 
   HEALTH_STATE=ok
-  HEALTH_TEXT=${configured}
+  HEALTH_TEXT=${key_path}
 }
 
 _jgit_helper_health() {
@@ -383,7 +434,7 @@ _jgit_profile_list() {
 }
 
 _jgit_profile_apply() {
-  local profile=$1 name email ssh_key expanded_key ssh_command
+  local profile=$1 name email ssh_key key_path expanded_key ssh_command
   git rev-parse --git-dir > /dev/null 2>&1 || _jgit_die 'not in a Git repository'
   [[ -r ${JGIT_CONFIG} ]] || _jgit_die "profile config not found: ${JGIT_CONFIG}"
   _jgit_profile_exists "${profile}" || _jgit_die "unknown profile: ${profile}"
@@ -392,8 +443,10 @@ _jgit_profile_apply() {
   name=$(_jgit_profile_field "${profile}" name)
   email=$(_jgit_profile_field "${profile}" email)
   ssh_key=$(_jgit_profile_field "${profile}" ssh_key)
-  expanded_key=$(_jgit_expand_home "${ssh_key}")
+  key_path=$(_jgit_ssh_key_path "${ssh_key}")
+  expanded_key=$(_jgit_expand_home "${key_path}")
   [[ ${expanded_key} != *'"'* && ${expanded_key} != *$'\n'* ]] || _jgit_die 'SSH key path contains unsupported characters'
+  _jgit_generate_ssh_key "${key_path}"
   ssh_command="ssh -i \"${expanded_key}\" -o IdentitiesOnly=yes -o IdentityAgent=none"
 
   git config --local jsh.profile "${profile}"
@@ -534,7 +587,13 @@ _jgit_randomize_timestamp() {
 }
 
 _jgit_resolve_timestamp() {
-  local input=$1 base parsed offset precision
+  local base
+  base=$(git log -1 --format='%at' 2> /dev/null || _jgit_now)
+  _jgit_resolve_timestamp_from "$1" "${base}"
+}
+
+_jgit_resolve_timestamp_from() {
+  local input=$1 base=$2 parsed offset precision
   case ${input} in
     now) _jgit_now ;;
     now+* | now-*)
@@ -545,7 +604,6 @@ _jgit_resolve_timestamp() {
       _jgit_randomize_timestamp "$((base + offset))" "${precision}"
       ;;
     +* | -*)
-      base=$(git log -1 --format='%at' 2> /dev/null || _jgit_now)
       parsed=$(_jgit_parse_offset "${input}") || return 1
       offset=${parsed%% *}
       precision=${parsed#* }
@@ -607,6 +665,272 @@ _jgit_amend() {
     git commit --amend --no-edit --date="${git_date}" "${GIT_ARGS[@]}"
 }
 
+_jgit_rewrite_add_commit() {
+  local commit=$1 existing
+  for existing in "${REWRITE_COMMITS[@]}"; do
+    [[ ${existing} == "${commit}" ]] && return
+  done
+  REWRITE_COMMITS+=("${commit}")
+}
+
+_jgit_rewrite_sort_commits() {
+  local commit selected
+  REWRITE_SORTED=()
+  while IFS= read -r commit; do
+    for selected in "${REWRITE_COMMITS[@]}"; do
+      if [[ ${selected} == "${commit}" ]]; then
+        REWRITE_SORTED+=("${commit}")
+        break
+      fi
+    done
+  done < <(git rev-list --reverse --topo-order HEAD)
+  REWRITE_COMMITS=("${REWRITE_SORTED[@]}")
+}
+
+_jgit_rewrite_sequence() {
+  local todo=${1:-} temporary line action candidate remainder selected full found=0 expected
+  [[ ${JGIT_REWRITE_ACTIVE:-} == 1 ]] || _jgit_die 'rewrite callback called outside an active rewrite'
+  [[ -n ${todo} && -f ${todo} ]] || _jgit_die 'rewrite sequence file not found'
+  [[ -r ${JGIT_REWRITE_SELECTED:-} ]] || _jgit_die 'rewrite selection file not found'
+  temporary=$(mktemp "${todo}.jgit.XXXXXX") || _jgit_die 'could not create rewrite sequence'
+
+  while IFS= read -r line || [[ -n ${line} ]]; do
+    printf '%s\n' "${line}"
+    candidate=
+    read -r action candidate remainder <<< "${line}"
+    if [[ ${action} == merge && (${candidate} == -C || ${candidate} == -c) ]]; then
+      candidate=${remainder%% *}
+    fi
+    case ${action} in
+      pick | edit | reword | squash | fixup | drop | merge) ;;
+      *) continue ;;
+    esac
+
+    selected=
+    while IFS= read -r full; do
+      if [[ ${full} == "${candidate}"* ]]; then
+        selected=${full}
+        break
+      fi
+    done < "${JGIT_REWRITE_SELECTED}"
+    if [[ -n ${selected} ]]; then
+      found=$((found + 1))
+      printf 'exec echo %s > "$JGIT_REWRITE_MARKER"\n' "${selected}"
+      printf 'break\n'
+    else
+      printf 'exec "$JGIT_REWRITE_LAUNCHER" __rewrite-restore %s\n' "${candidate}"
+    fi
+  done < "${todo}" > "${temporary}"
+  expected=$(wc -l < "${JGIT_REWRITE_SELECTED}")
+  if ((found != expected)); then
+    rm -f "${temporary}"
+    _jgit_die "rewrite plan found ${found} of ${expected} selected commits"
+  fi
+  mv "${temporary}" "${todo}"
+}
+
+_jgit_rewrite_restore() {
+  local original=${1:-} author_date committer_date committer_name committer_email
+  [[ ${JGIT_REWRITE_ACTIVE:-} == 1 ]] || _jgit_die 'rewrite callback called outside an active rewrite'
+  [[ -d $(git rev-parse --git-path rebase-merge 2> /dev/null) ]] ||
+    _jgit_die 'rewrite callback called outside a rebase'
+  [[ -n ${original} ]] || _jgit_die 'rewrite restore requires a commit'
+  author_date=$(git show -s --format='%aI' "${original}")
+  committer_date=$(git show -s --format='%cI' "${original}")
+  committer_name=$(git show -s --format='%cn' "${original}")
+  committer_email=$(git show -s --format='%ce' "${original}")
+  GIT_AUTHOR_DATE=${author_date} GIT_COMMITTER_DATE=${committer_date} \
+    GIT_COMMITTER_NAME=${committer_name} GIT_COMMITTER_EMAIL=${committer_email} \
+    git commit --amend --allow-empty --no-edit --no-verify --date="${author_date}" > /dev/null
+}
+
+_jgit_rewrite_abort() {
+  local restore_status=0
+  trap - EXIT HUP INT TERM
+  git rebase --abort > /dev/null 2>&1 || true
+  _jgit_rewrite_restore_worktree || restore_status=$?
+  rm -f "${JGIT_REWRITE_SELECTED:-}" "${JGIT_REWRITE_MARKER:-}" \
+    "${JGIT_REWRITE_LAUNCHER:-}"
+  return "${restore_status}"
+}
+
+_jgit_rewrite() {
+  local last='' ref commit count common base parent sequence_editor answer original timestamp
+  local author_date committer_date committer_name committer_email epoch git_date edited=0
+  REWRITE_COMMITS=()
+  REWRITE_REFS=()
+
+  while (($#)); do
+    case $1 in
+      --last | -n)
+        (($# >= 2)) || _jgit_die "option $1 requires a count"
+        [[ -z ${last} ]] || _jgit_die 'rewrite accepts --last only once'
+        last=$2
+        shift 2
+        ;;
+      --last=* | -n=*)
+        [[ -z ${last} ]] || _jgit_die 'rewrite accepts --last only once'
+        last=${1#*=}
+        shift
+        ;;
+      -h | --help)
+        printf '%s\n' \
+          'Usage: jgit rewrite REF...' \
+          '       jgit rewrite --last N' \
+          '' \
+          'Refs may be commit hashes, tags, branches, or relative refs such as HEAD~2.' \
+          'Selected commits must be reachable from HEAD. Tags are not moved.' \
+          'Local staged, unstaged, and untracked changes are stashed and restored.'
+        return
+        ;;
+      --)
+        shift
+        while (($#)); do
+          REWRITE_REFS+=("$1")
+          shift
+        done
+        ;;
+      -*) _jgit_die "unknown rewrite option: $1" ;;
+      *)
+        REWRITE_REFS+=("$1")
+        shift
+        ;;
+    esac
+  done
+
+  git rev-parse --git-dir > /dev/null 2>&1 || _jgit_die 'not in a Git repository'
+  git symbolic-ref --quiet HEAD > /dev/null || _jgit_die 'rewrite requires a branch checkout'
+  [[ -z $(git diff --name-only --diff-filter=U) ]] || _jgit_die 'rewrite cannot stash unresolved conflicts'
+  [[ ! -d $(git rev-parse --git-path rebase-merge) && ! -d $(git rev-parse --git-path rebase-apply) ]] ||
+    _jgit_die 'another rebase is already in progress'
+  [[ -z ${last} || ${#REWRITE_REFS[@]} == 0 ]] || _jgit_die 'use either refs or --last, not both'
+
+  if [[ -n ${last} ]]; then
+    [[ ${last} =~ ^[1-9][0-9]*$ ]] || _jgit_die '--last requires a positive integer'
+    while IFS= read -r commit; do
+      _jgit_rewrite_add_commit "${commit}"
+    done < <(git rev-list --first-parent --max-count="${last}" HEAD)
+    count=${#REWRITE_COMMITS[@]}
+    ((count == last)) || _jgit_die "requested ${last} commits, but this branch has ${count}"
+  else
+    ((${#REWRITE_REFS[@]} > 0)) || _jgit_die 'rewrite requires one or more refs or --last N'
+    for ref in "${REWRITE_REFS[@]}"; do
+      commit=$(git rev-parse --verify "${ref}^{commit}" 2> /dev/null) || _jgit_die "invalid commit ref: ${ref}"
+      git merge-base --is-ancestor "${commit}" HEAD || _jgit_die "commit is not reachable from HEAD: ${ref}"
+      _jgit_rewrite_add_commit "${commit}"
+    done
+  fi
+
+  _jgit_rewrite_sort_commits
+
+  jsh_warn 'Rewriting published commits requires a force push.'
+  printf 'Selected commits (edited oldest first):\n'
+  for commit in "${REWRITE_COMMITS[@]}"; do
+    git show -s --format='  %h  %s  (%ad)' --date=short "${commit}"
+  done
+  jsh_prompt 'Continue? [y/N]: '
+  read -r answer || answer=
+  case ${answer} in
+    [Yy]*) ;;
+    *) jsh_warn 'Rewrite cancelled'; return ;;
+  esac
+
+  JGIT_REWRITE_SELECTED=$(git rev-parse --path-format=absolute --git-path "jgit-rewrite-selected.$$")
+  JGIT_REWRITE_MARKER=$(git rev-parse --path-format=absolute --git-path "jgit-rewrite-current.$$")
+  JGIT_REWRITE_LAUNCHER=$(git rev-parse --path-format=absolute --git-path "jgit-rewrite-launcher.$$")
+  export JSH_ROOT JGIT_REWRITE_SELECTED JGIT_REWRITE_MARKER JGIT_REWRITE_LAUNCHER
+  trap '_jgit_rewrite_abort' EXIT
+  trap '_jgit_rewrite_abort; exit 130' HUP INT TERM
+  command cp "${jgit_launcher}" "${JGIT_REWRITE_LAUNCHER}" ||
+    _jgit_die 'could not snapshot the rewrite launcher'
+  chmod 700 "${JGIT_REWRITE_LAUNCHER}"
+  _jgit_rewrite_stash_worktree
+
+  printf '%s\n' "${REWRITE_COMMITS[@]}" > "${JGIT_REWRITE_SELECTED}"
+  export JGIT_REWRITE_ACTIVE=1
+  printf -v sequence_editor '%q __rewrite-sequence' "${JGIT_REWRITE_LAUNCHER}"
+
+  if ((${#REWRITE_COMMITS[@]} == 1)); then
+    common=${REWRITE_COMMITS[0]}
+  else
+    common=$(git merge-base --octopus "${REWRITE_COMMITS[@]}") || {
+      _jgit_rewrite_abort
+      _jgit_die 'selected commits have no common ancestor'
+    }
+  fi
+  base=${common}
+  for commit in "${REWRITE_COMMITS[@]}"; do
+    if [[ ${commit} == "${common}" ]]; then
+      parent=$(git rev-parse --verify "${common}^" 2> /dev/null || true)
+      base=${parent}
+      break
+    fi
+  done
+
+  if [[ -n ${base} ]]; then
+    GIT_SEQUENCE_EDITOR=${sequence_editor} git rebase --rebase-merges -i "${base}" || {
+      _jgit_rewrite_abort
+      _jgit_die 'rewrite aborted'
+    }
+  else
+    GIT_SEQUENCE_EDITOR=${sequence_editor} git rebase --rebase-merges -i --root || {
+      _jgit_rewrite_abort
+      _jgit_die 'rewrite aborted'
+    }
+  fi
+
+  while [[ -d $(git rev-parse --git-path rebase-merge) || -d $(git rev-parse --git-path rebase-apply) ]]; do
+    [[ -s ${JGIT_REWRITE_MARKER} ]] || {
+      _jgit_rewrite_abort
+      _jgit_die 'rewrite stopped without a selected commit'
+    }
+    original=$(< "${JGIT_REWRITE_MARKER}")
+    printf '\n'
+    git show -s --format='%h  %s%nAuthor: %an <%ae>%nAuthor date: %aI%nCommit date: %cI' "${original}"
+    jsh_prompt 'Timestamp [keep]: '
+    read -r timestamp || {
+      _jgit_rewrite_abort
+      _jgit_die 'rewrite aborted'
+    }
+    if [[ -n ${timestamp} ]]; then
+      epoch=$(_jgit_resolve_timestamp_from "${timestamp}" "$(git show -s --format='%at' "${original}")") || {
+        _jgit_rewrite_abort
+        _jgit_die "invalid timestamp: ${timestamp}"
+      }
+      git_date=$(_jgit_git_date "${epoch}")
+      author_date=${git_date}
+      committer_date=${git_date}
+    else
+      author_date=$(git show -s --format='%aI' "${original}")
+      committer_date=$(git show -s --format='%cI' "${original}")
+    fi
+    committer_name=$(git show -s --format='%cn' "${original}")
+    committer_email=$(git show -s --format='%ce' "${original}")
+    printf 'Opening commit message in %s\n' "$(git var GIT_EDITOR)"
+    if ! GIT_AUTHOR_DATE=${author_date} GIT_COMMITTER_DATE=${committer_date} \
+      GIT_COMMITTER_NAME=${committer_name} GIT_COMMITTER_EMAIL=${committer_email} \
+      git commit --amend --allow-empty --date="${author_date}"; then
+      _jgit_rewrite_abort
+      _jgit_die 'rewrite aborted'
+    fi
+    edited=$((edited + 1))
+    rm -f "${JGIT_REWRITE_MARKER}"
+    git rebase --continue || {
+      _jgit_rewrite_abort
+      _jgit_die 'rewrite aborted'
+    }
+  done
+
+  count=${#REWRITE_COMMITS[@]}
+  rm -f "${JGIT_REWRITE_SELECTED}" "${JGIT_REWRITE_MARKER}" "${JGIT_REWRITE_LAUNCHER}"
+  ((edited == count)) || _jgit_die "rewrote ${edited} of ${count} selected commits"
+  trap - EXIT HUP INT TERM
+  _jgit_rewrite_restore_worktree ||
+    _jgit_die 'rewrite completed, but local changes could not be restored'
+  unset JGIT_REWRITE_SELECTED JGIT_REWRITE_MARKER JGIT_REWRITE_LAUNCHER JGIT_REWRITE_ACTIVE
+  jsh_success "Rewrote ${count} commit$([[ ${count} == 1 ]] || printf s)"
+}
+
 _jgit_update_restore_stash() {
   local repo=$1 stash_oid=$2 stash_ref
   stash_ref=$(git -C "${repo}" stash list --format='%gd %H' |
@@ -622,6 +946,40 @@ _jgit_update_restore_stash() {
     jsh_error "Could not restore local changes in ${repo}; stash retained as ${stash_ref}"
     return 1
   fi
+}
+
+_jgit_rewrite_stash_worktree() {
+  local status previous_stash
+  JGIT_REWRITE_REPO=$(git rev-parse --show-toplevel)
+  JGIT_REWRITE_STASH_OID=
+  status=$(git status --porcelain) || _jgit_die 'could not inspect the working tree'
+  [[ -n ${status} ]] || return
+
+  previous_stash=$(git rev-parse --verify refs/stash 2> /dev/null || true)
+  git stash push --include-untracked --quiet \
+    --message "jgit rewrite $(date +%Y-%m-%dT%H:%M:%S)" ||
+    _jgit_die 'could not stash local changes'
+  JGIT_REWRITE_STASH_OID=$(git rev-parse --verify refs/stash 2> /dev/null || true)
+  if [[ -z ${JGIT_REWRITE_STASH_OID} || ${JGIT_REWRITE_STASH_OID} == "${previous_stash}" ]]; then
+    _jgit_die 'could not stash local changes'
+  fi
+
+  status=$(git status --porcelain) || {
+    _jgit_update_restore_stash "${JGIT_REWRITE_REPO}" "${JGIT_REWRITE_STASH_OID}" || true
+    _jgit_die 'could not inspect the working tree after stashing'
+  }
+  if [[ -n ${status} ]]; then
+    _jgit_update_restore_stash "${JGIT_REWRITE_REPO}" "${JGIT_REWRITE_STASH_OID}" || true
+    _jgit_die 'could not stash all local changes'
+  fi
+  jsh_info 'Temporarily stashed local changes'
+}
+
+_jgit_rewrite_restore_worktree() {
+  [[ -n ${JGIT_REWRITE_STASH_OID:-} ]] || return
+  _jgit_update_restore_stash "${JGIT_REWRITE_REPO}" "${JGIT_REWRITE_STASH_OID}" || return 1
+  JGIT_REWRITE_STASH_OID=
+  jsh_success 'Restored local changes'
 }
 
 _jgit_update_repository() {
@@ -773,6 +1131,18 @@ case ${1:-} in
   amend)
     shift
     _jgit_amend "$@"
+    ;;
+  rewrite)
+    shift
+    _jgit_rewrite "$@"
+    ;;
+  __rewrite-sequence)
+    shift
+    _jgit_rewrite_sequence "$@"
+    ;;
+  __rewrite-restore)
+    shift
+    _jgit_rewrite_restore "$@"
     ;;
   update)
     shift

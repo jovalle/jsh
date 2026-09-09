@@ -3,6 +3,7 @@
 # https://git-scm.com/docs/gitignore
 # https://prettier.io/docs/en/ignore.html
 
+!/local/vendor/
 *.cache*
 *.db
 *.gpg
@@ -59,7 +60,6 @@
 .zsh_history
 .zsh_history.*
 /local/*
-!/local/vendor/
 /tmp/
 AppSupport
 GitHub.sublime-settings
@@ -67,6 +67,7 @@ Network\ Trash\ Folder
 Temporary\ Items
 __pycache__
 bh_unicode_properties.cache
+dotfiles/.config/gh/
 git.yaml
 node_modules/
 oscrypto-ca-bundle.crt
