@@ -19,20 +19,20 @@ NATIVE_PACKAGES=(
   actionlint age ansible arc-gtk-theme-eos atuin base-devel bash bat btop
   bun bzip2 ca-certificates cifs-utils coreutils curl desktop-file-utils dconf
   diffutils direnv dkms docker docker-buildx docker-compose earlyoom
-  eos-qogir-icons eslint eza fd flatpak fnm fzf gawk github-cli git git-lfs
-  gitleaks gnome-keyring gnupg go grep grc helm helmfile hugo jq k9s kubectl
-  libarchive libnotify make markdownlint-cli2 mpv ncdu net-tools nfs-utils
+  eos-qogir-icons eslint eza fd flatpak fnm fzf gawk gemini-cli github-cli git
+  git-lfs gitleaks gnome-keyring gnupg go grep grc helm helmfile hugo jq k9s kubectl
+  libarchive libnotify make markdownlint-cli mpv ncdu net-tools nfs-utils
   nmap ntfs-3g nvme-cli openssh parallel pipewire-pulse pnpm podman pre-commit
-  prettier procps-ng python python-autopep8 python-black python-poetry
-  python-pylint readline reflector ripgrep rsync s-tui shellcheck shfmt sops
+  prettier procps-ng python autopep8 python-black python-poetry
+  python-pylint readline reflector ripgrep rsync rust s-tui shellcheck shfmt sops
   speedtest-cli sqlite sshpass stow syncthing tar tmux
   ttf-jetbrains-mono-nerd unzip uv wireplumber xbindkeys xclip xdg-utils
   xfce4-clipman-plugin xfce4-cpugraph-plugin xfce4-docklike-plugin
   xfce4-systemload-plugin xfce4-taskmanager xfce4-terminal xorg-xrandr xz
-  yamllint yq zoxide zram-generator zsh
+  go-yq yamllint zoxide zram-generator zsh
 )
 AUR_PACKAGES=(
-  commitlint commitlint-config-conventional gemini-cli-git hadolint-bin
+  commitlint commitlint-config-conventional hadolint-bin
   nodejs-commitizen nodejs-cz-conventional-changelog opencode-bin
   visual-studio-code-bin waterfox-bin
 )
@@ -68,6 +68,10 @@ run_root() {
     jsh_detail "Would run as root: $*"
   elif [[ "$(id -u)" -eq 0 ]]; then
     "$@"
+  elif [[ -r /proc/self/status ]] && grep -Eq '^NoNewPrivs:[[:space:]]+1$' /proc/self/status; then
+    jsh_error "Cannot run sudo: this process has Linux no-new-privileges enabled."
+    jsh_detail "Rerun ./j.sh install from a regular terminal outside this restricted session."
+    return 1
   elif command -v sudo > /dev/null 2>&1; then
     sudo -- "$@"
   else
@@ -80,6 +84,9 @@ install_native_packages() {
   local package
   local -a missing=()
 
+  if pacman -Q yq > /dev/null 2>&1 && ! pacman -Q go-yq > /dev/null 2>&1; then
+    run_root pacman -R --noconfirm -- yq
+  fi
   for package in "${NATIVE_PACKAGES[@]}"; do
     pacman -Q "${package}" > /dev/null 2>&1 || missing+=("${package}")
   done
@@ -217,7 +224,7 @@ main() {
     jsh_note "Skipping native packages."
     return 0
   }
-  [[ ${JSH_UPDATE:-0} != 1 ]] || update_native_packages
+  update_native_packages
   install_native_packages
   install_aur_packages
   install_flatpaks

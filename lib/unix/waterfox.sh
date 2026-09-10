@@ -386,26 +386,40 @@ active_associations() {
 
 write_active_waterfox_config() {
   local profile=$1 output=$2 config extensions grants toolbar policy associations
-  config=$(waterfox_config_json)
+  config="${TEMP_DIR}/configured-waterfox.json"
+  extensions="${profile}/extensions.json"
+  grants="${profile}/extension-preferences.json"
+  toolbar="${TEMP_DIR}/toolbar.json"
+  policy="${TEMP_DIR}/policy.json"
+  associations="${TEMP_DIR}/associations.json"
+  waterfox_config_json > "${config}"
   if [[ -r ${profile}/extensions.json ]]; then
-    extensions=$(cat "${profile}/extensions.json")
+    :
   else
-    extensions='{"addons":[]}'
+    extensions="${TEMP_DIR}/extensions.json"
+    printf '{"addons":[]}\n' > "${extensions}"
   fi
   if [[ -r ${profile}/extension-preferences.json ]]; then
-    grants=$(cat "${profile}/extension-preferences.json")
+    :
   else
-    grants='{}'
+    grants="${TEMP_DIR}/extension-preferences.json"
+    printf '{}\n' > "${grants}"
   fi
-  toolbar=$(current_toolbar_state "${profile}" || printf '{"placements":{}}')
-  policy=$(active_managed_policy "${config}")
-  associations=$(active_associations "$(jq -c '.associations' <<< "${config}")")
-  jq -n --argjson config "${config}" --argjson extensions "${extensions}" \
-    --argjson grants "${grants}" --argjson toolbar "${toolbar}" \
-    --argjson policy "${policy}" --argjson associations "${associations}" '
+  current_toolbar_state "${profile}" > "${toolbar}" || printf '{"placements":{}}\n' > "${toolbar}"
+  active_managed_policy "$(cat "${config}")" > "${policy}"
+  active_associations "$(jq -c '.associations' "${config}")" > "${associations}"
+  jq -n --slurpfile config "${config}" --slurpfile extensions "${extensions}" \
+    --slurpfile grants "${grants}" --slurpfile toolbar "${toolbar}" \
+    --slurpfile policy "${policy}" --slurpfile associations "${associations}" '
     def widget($id):
       ($id | ascii_downcase | gsub("[^a-z0-9_-]"; "_")) + "-browser-action";
-    ($extensions.addons | map(select(.type == "extension")
+    ($config[0]) as $config
+    | ($extensions[0]) as $extensions
+    | ($grants[0]) as $grants
+    | ($toolbar[0]) as $toolbar
+    | ($policy[0]) as $policy
+    | ($associations[0]) as $associations
+    | ($extensions.addons | map(select(.type == "extension")
       | {key: .id, value: .}) | from_entries) as $active
     | ([($toolbar.placements // {})[][]]) as $placements
     | ($toolbar.placements["nav-bar"] // []) as $navbar
