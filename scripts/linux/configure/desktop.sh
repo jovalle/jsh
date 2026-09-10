@@ -104,13 +104,8 @@ configure_panel() {
 
 configure_identity() {
   local avatar="${JSH_USER_AVATAR:-${JSH_ROOT}/.github/assets/j.jpg}"
-  local menu_icon="${JSH_MENU_ICON:-${JSH_ROOT}/.github/assets/j.png}"
 
   [[ ! -r "${avatar}" ]] || install -m 0644 "${avatar}" "${HOME}/.face"
-  if [[ -r "${menu_icon}" ]]; then
-    mkdir -p "${HOME}/.local/share/icons"
-    install -m 0644 "${menu_icon}" "${HOME}/.local/share/icons/jsh-menu.png"
-  fi
   mkdir -p "${HOME}/.config"
   printf '%s\n' '## Configuration file for eos-welcome.' 'Greeter=disable' \
     'OnceDaily=no' 'LastCheck=0' > "${HOME}/.config/EOS-greeter.conf"

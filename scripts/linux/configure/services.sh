@@ -41,13 +41,20 @@ install_user_text() {
 }
 
 enable_user_unit() {
-  local unit=$1
+  local unit=$1 state
   if ! systemctl --user cat "${unit}" > /dev/null 2>&1; then
     jsh_note "Skipping unavailable user unit: ${unit}"
     return
   fi
+  state=$(systemctl --user is-enabled "${unit}" 2> /dev/null || true)
   if [[ "${DRY_RUN}" == 1 ]]; then
-    jsh_detail "Would enable and start ${unit}"
+    if [[ "${state}" == static ]]; then
+      jsh_detail "Would start static user unit ${unit}"
+    else
+      jsh_detail "Would enable and start ${unit}"
+    fi
+  elif [[ "${state}" == static ]]; then
+    systemctl --user start "${unit}"
   else
     systemctl --user enable --now "${unit}"
   fi

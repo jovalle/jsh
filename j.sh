@@ -127,6 +127,43 @@ if [[ ! -r "${TTY}" ]] || [[ ! -w "${TTY}" ]]; then
   exit 1
 fi
 
+relaunch_if_privileges_restricted() {
+  local script_path
+  local -a relaunch
+
+  [[ ${mode} == install || ${mode} == update ]] || return 0
+  [[ -r /proc/self/status ]] || return 0
+  grep -Eq '^NoNewPrivs:[[:space:]]+1$' /proc/self/status || return 0
+
+  if [[ ${JSH_SYSTEMD_REEXEC:-0} == 1 ]]; then
+    jsh_error "The user systemd manager also launched Jsh with no-new-privileges enabled."
+    return 1
+  fi
+  command -v systemd-run > /dev/null 2>&1 || {
+    jsh_error "Cannot elevate from this restricted session, and systemd-run is unavailable."
+    jsh_detail "Rerun ./j.sh ${mode} from a terminal outside this restricted session."
+    return 1
+  }
+
+  script_path=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/$(basename -- "${BASH_SOURCE[0]}")
+  relaunch=(
+    systemd-run --user --quiet --pty --wait --collect --same-dir
+    --setenv="JSH_SYSTEMD_REEXEC=1"
+    --setenv="JSH_DIR=${JSH_DIR}"
+    --setenv="JSH_REPO=${JSH_REPO}"
+    --setenv="JSH_INSTALL_RETURN=${JSH_INSTALL_RETURN:-0}"
+    --setenv="PATH=${PATH}"
+    "${script_path}"
+  )
+  [[ ${JSH_ASSUME_YES:-0} != 1 ]] || relaunch+=(--yes)
+  relaunch+=("${mode}")
+
+  jsh_note "Relaunching Jsh through the user systemd manager to enable sudo."
+  exec "${relaunch[@]}"
+}
+
+relaunch_if_privileges_restricted
+
 heading() {
   jsh_blank
   jsh_info "[$1] $2"

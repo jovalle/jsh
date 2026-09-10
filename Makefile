@@ -10,6 +10,8 @@ FORMAT_TARGETS := format-shell format-python format-yaml format-json format-mark
 .DEFAULT_GOAL := help
 
 JSH_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+HASH := \#
+OUTPUT_LIB := $(JSH_ROOT)/lib/output.sh
 OUTPUT := for library_file in "$(JSH_ROOT)"/lib/*; do \
 	[ -f "$$library_file" ] && [ -x "$$library_file" ] || continue; \
 	. "$$library_file"; \
@@ -69,11 +71,11 @@ YAMLLINT_CONFIG := dotfiles/.yamllint
 # Find files by type
 # Shell files: Find by .sh extension OR by shebang in bin/ directory
 SHELL_FILES := $(shell find . -type f -name "*.sh" ! -path "*/node_modules/*" ! -path "*/.git/*" ! -path "./local/vendor/*" ! -path "./tmp/*" ! -path "*/.config/*"; \
-	find bin -type f 2>/dev/null | while read -r f; do head -n1 "$$f" 2>/dev/null | grep -qE '^\#!/usr/bin/env bash|^\#!/bin/(ba)?sh' && echo "$$f"; done)
+	find bin -type f 2>/dev/null | while read -r f; do head -n1 "$$f" 2>/dev/null | grep -qE '^$(HASH)!/usr/bin/env bash|^$(HASH)!/bin/(ba)?sh' && echo "$$f"; done)
 ZSH_FILES := $(shell find . -type f \( -name "*.zsh" -o -name ".zshrc" \) ! -path "*/.git/*" ! -path "./local/vendor/*" ! -path "./tmp/*")
 SCRIPT_FILES := $(shell find scripts -type f \( -name "*.sh" -o -name "*.zsh" \) | sort)
 PYTHON_FILES := $(shell find . -type f -name "*.py" ! -path "*/\.*" ! -path "*/node_modules/*" ! -path "*/.venv/*" ! -path "./local/vendor/*" ! -path "./tmp/*"; \
-	find bin -type f 2>/dev/null | while read -r f; do head -n1 "$$f" 2>/dev/null | grep -qE '^\#!/usr/bin/env python3?' && echo "$$f"; done)
+	find bin -type f 2>/dev/null | while read -r f; do head -n1 "$$f" 2>/dev/null | grep -qE '^$(HASH)!/usr/bin/env python3?' && echo "$$f"; done)
 YAML_FILES := $(shell find . -type f \( -name "*.yaml" -o -name "*.yml" \) ! -path "*/\.*" ! -path "*/node_modules/*" ! -path "./local/vendor/*" ! -path "./tmp/*")
 JSON_FIND := find . -type f -name "*.json" ! -path "*/\.*" ! -path "*/node_modules/*" ! -path "*/package*.json" ! -path "./local/*" ! -path "./tmp/*"
 JSON_FILES := $(shell $(JSON_FIND))

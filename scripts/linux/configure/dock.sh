@@ -121,7 +121,8 @@ main() {
     plugin_id=$(xfconf-query -c xfce4-panel -lv 2> /dev/null |
       sed -n 's|^/plugins/plugin-\([0-9][0-9]*\).*|\1|p' | sort -n | tail -1)
     plugin_id=$((${plugin_id:-0} + 1))
-    panel_id=$(xfconf-query -c xfce4-panel -p /panels 2> /dev/null | sed -n '1p')
+    panel_id=$(xfconf-query -c xfce4-panel -p /panels 2> /dev/null |
+      sed -n '/^[0-9][0-9]*$/ { p; q; }')
     [[ "${panel_id}" =~ ^[0-9]+$ ]] || {
       jsh_error "No XFCE panel is available for the application dock."
       return 1

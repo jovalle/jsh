@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Configure opt-in macOS appearance, Dock, wallpaper, and account picture.
+# Configure opt-in macOS appearance, Dock, and wallpaper.
 
 set -euo pipefail
 
@@ -72,29 +72,6 @@ APPLESCRIPT
   jsh_success "macOS appearance and Dock configured."
 }
 
-configure_account_picture() {
-  local source="${JSH_USER_AVATAR:-${JSH_ROOT}/.github/assets/j.jpg}"
-  local appearance_dir="${HOME}/Library/Application Support/jsh"
-  local destination="${appearance_dir}/j-avatar.jpg"
-  local username
-  username=$(id -un)
-
-  [[ -r "${source}" ]] || {
-    jsh_note "Skipping account picture: ${source} is unavailable."
-    return
-  }
-  command -v dscl > /dev/null 2>&1 || {
-    jsh_note "Skipping account picture: dscl is unavailable."
-    return
-  }
-
-  mkdir -p "${appearance_dir}"
-  install -m 0644 "${source}" "${destination}"
-  sudo dscl . -delete "/Users/${username}" JPEGPhoto > /dev/null 2>&1 || true
-  sudo dscl . -create "/Users/${username}" Picture "${destination}"
-  jsh_success "macOS account picture configured."
-}
-
 main() {
   [[ "$(uname -s)" == Darwin ]] || {
     jsh_note "Skipping macOS appearance: macOS not detected."
@@ -110,13 +87,6 @@ main() {
     configure_appearance
   else
     jsh_note "Skipping macOS appearance and Dock."
-  fi
-
-  jsh_blank
-  if confirm "Configure the local account picture?"; then
-    configure_account_picture
-  else
-    jsh_note "Skipping macOS account picture."
   fi
 }
 
