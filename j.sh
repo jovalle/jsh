@@ -199,23 +199,48 @@ load_brew() {
   done
 }
 
-is_arch_family() {
+linux_package_manager() {
   local os_release=${JSH_OS_RELEASE:-/etc/os-release}
   [[ "$(uname -s)" == Linux && -r "${os_release}" ]] || return 1
 
   local ID='' ID_LIKE=''
   # shellcheck source=/dev/null
   . "${os_release}"
-  [[ " ${ID:-} ${ID_LIKE:-} " == *" endeavouros "* ||
-    " ${ID:-} ${ID_LIKE:-} " == *" arch "* ||
-    " ${ID:-} ${ID_LIKE:-} " == *" archlinux "* ]]
+  case " ${ID:-} ${ID_LIKE:-} " in
+    *' arch '* | *' archlinux '* | *' endeavouros '*) printf '%s\n' pacman ;;
+    *' fedora '* | *' rhel '* | *' centos '*)
+      if command -v dnf5 > /dev/null 2>&1; then
+        printf '%s\n' dnf5
+      else
+        printf '%s\n' dnf
+      fi
+      ;;
+    *' debian '* | *' ubuntu '*) printf '%s\n' apt-get ;;
+    *) return 1 ;;
+  esac
 }
 
-install_arch_prerequisites() {
+install_linux_prerequisites() {
+  local manager
+  manager=$(linux_package_manager) || return 1
   if [[ "$(id -u)" -eq 0 ]]; then
-    pacman -S --needed --noconfirm "$@"
+    case "${manager}" in
+      pacman) pacman -S --needed --noconfirm "$@" ;;
+      dnf | dnf5) "${manager}" install -y "$@" ;;
+      apt-get)
+        apt-get update
+        apt-get install -y "$@"
+        ;;
+    esac
   elif command -v sudo > /dev/null 2>&1; then
-    sudo pacman -S --needed --noconfirm "$@"
+    case "${manager}" in
+      pacman) sudo pacman -S --needed --noconfirm "$@" ;;
+      dnf | dnf5) sudo "${manager}" install -y "$@" ;;
+      apt-get)
+        sudo apt-get update
+        sudo apt-get install -y "$@"
+        ;;
+    esac
   else
     jsh_error "sudo is required to install missing setup tools."
     return 1
@@ -240,8 +265,8 @@ install_prerequisites() {
       jsh_error "Git and Zsh are required to try Jsh."
       return 1
     fi
-    if is_arch_family; then
-      install_arch_prerequisites "${packages[@]}" || return
+    if linux_package_manager > /dev/null; then
+      install_linux_prerequisites "${packages[@]}" || return
     else
       load_brew
       if ! command -v brew > /dev/null 2>&1; then
@@ -258,7 +283,7 @@ install_prerequisites() {
     jsh_success "Required tools are already installed."
   fi
 
-  if ! is_arch_family && command -v brew > /dev/null 2>&1; then
+  if ! linux_package_manager > /dev/null && command -v brew > /dev/null 2>&1; then
     brew_prefix=$(brew --prefix) || return
     PATH="${brew_prefix}/bin:${brew_prefix}/opt/make/libexec/gnubin:${PATH}"
     export PATH
@@ -266,6 +291,7 @@ install_prerequisites() {
 }
 
 install_python_runtime() {
+  local manager package
   if command -v python3 > /dev/null 2>&1; then
     jsh_success "Python 3 is already installed."
     return
@@ -277,8 +303,10 @@ install_python_runtime() {
     return
   fi
 
-  if is_arch_family; then
-    install_arch_prerequisites python || return
+  if manager=$(linux_package_manager); then
+    package=python3
+    [[ "${manager}" != pacman ]] || package=python
+    install_linux_prerequisites "${package}" || return
   else
     load_brew
     if ! command -v brew > /dev/null 2>&1; then

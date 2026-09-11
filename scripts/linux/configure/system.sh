@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Configure opt-in EndeavourOS memory, coredump, timezone, and system services.
+# Configure opt-in Linux memory, coredump, timezone, and system services.
 
 set -euo pipefail
 
@@ -16,28 +16,6 @@ unset library_file
 DRY_RUN=${JSH_CONFIGURE_DRY_RUN:-0}
 BACKUP_ROOT=
 
-is_endeavouros() {
-  local os_release=${JSH_OS_RELEASE:-/etc/os-release}
-  [[ -r "${os_release}" ]] || return 1
-  local ID=
-  # shellcheck source=/dev/null
-  . "${os_release}"
-  [[ "${ID:-}" == endeavouros ]]
-}
-
-run_root() {
-  if [[ "${DRY_RUN}" == 1 ]]; then
-    jsh_detail "Would run as root: $*"
-  elif [[ "$(id -u)" -eq 0 ]]; then
-    "$@"
-  elif command -v sudo > /dev/null 2>&1; then
-    sudo -- "$@"
-  else
-    jsh_error "sudo is required to configure the system."
-    return 1
-  fi
-}
-
 backup_root_file() {
   local source=$1 backup
   [[ -e "${source}" ]] || return 0
@@ -50,11 +28,7 @@ backup_root_file() {
     return
   fi
   mkdir -p "$(dirname -- "${backup}")"
-  if [[ "$(id -u)" -eq 0 ]]; then
-    cat -- "${source}" > "${backup}"
-  else
-    sudo cat -- "${source}" | command cat > "${backup}"
-  fi
+  jsh_run_root cat -- "${source}" > "${backup}"
   chmod 0600 "${backup}"
 }
 
@@ -64,33 +38,48 @@ install_root_text() {
   temporary=$(mktemp "${JSH_ROOT}/tmp/system-config.XXXXXX")
   printf '%s\n' "${content}" > "${temporary}"
   if [[ "${DRY_RUN}" != 1 && -e "${destination}" ]] &&
-    run_root cmp -s "${temporary}" "${destination}"; then
+    jsh_run_root cmp -s "${temporary}" "${destination}"; then
     rm -f "${temporary}"
     return
   fi
   backup_root_file "${destination}"
-  run_root install -D -o root -g root -m 0644 "${temporary}" "${destination}"
+  jsh_run_root install -D -o root -g root -m 0644 "${temporary}" "${destination}"
   rm -f "${temporary}"
 }
 
-main() {
-  [[ "$(uname -s)" == Linux ]] || return
-  is_endeavouros || {
-    jsh_note "Skipping system configuration: EndeavourOS not detected."
+enable_system_unit() {
+  local unit=$1 action=$2
+  if ! jsh_run_root systemctl cat "${unit}" > /dev/null 2>&1; then
+    jsh_note "Skipping unavailable system unit: ${unit}"
     return
-  }
+  fi
+  case "${action}" in
+    enable) jsh_run_root systemctl enable --now "${unit}" ;;
+    start) jsh_run_root systemctl start "${unit}" ;;
+  esac
+}
+
+main() {
+  local command
+  [[ "$(uname -s)" == Linux ]] || return
+  for command in systemctl sysctl timedatectl; do
+    command -v "${command}" > /dev/null 2>&1 || {
+      jsh_error "${command} is required to configure Linux system policy."
+      return 1
+    }
+  done
 
   jsh_detail "This will change memory policy, disable coredump storage, and enable earlyoom and zram."
-  jsh_prompt "Configure EndeavourOS system policy? [y/N]: "
+  jsh_prompt "Configure Linux system policy? [y/N]: "
   read -r answer || answer=
   [[ "${answer}" =~ ^[Yy]$ ]] || {
-    jsh_note "Skipping EndeavourOS system policy."
+    jsh_note "Skipping Linux system policy."
     return
   }
 
   install_root_text /etc/default/earlyoom \
     "# Managed by jsh
-EARLYOOM_ARGS=\"-m 4 -s 15 -r 60 --avoid '(^|/)(init|systemd|Xorg|Xwayland|xfce4-session|sshd)$' --prefer '(^|/)(code|waterfox|electron|zoom)$'\""
+EARLYOOM_ARGS=\"-m 4 -s 15 -r 60 --avoid '(^|/)(init|systemd|Xorg|Xwayland|xfce4-session|gnome-shell|sshd)$' --prefer '(^|/)(code|waterfox|electron|zoom)$'\""
   install_root_text /etc/sysctl.d/99-jsh-memory.conf \
     "# Managed by jsh
 vm.swappiness = 180
@@ -108,13 +97,13 @@ ProcessSizeMax=0"
 zram-size = ram
 compression-algorithm = zstd"
 
-  run_root timedatectl set-timezone America/New_York
-  run_root sysctl --system
-  run_root systemctl daemon-reload
-  run_root systemctl enable --now earlyoom.service
-  run_root systemctl start systemd-zram-setup@zram0.service
+  jsh_run_root timedatectl set-timezone "${JSH_TIMEZONE:-America/New_York}"
+  jsh_run_root sysctl --system
+  jsh_run_root systemctl daemon-reload
+  enable_system_unit earlyoom.service enable
+  enable_system_unit systemd-zram-setup@zram0.service start
   [[ -z "${BACKUP_ROOT}" ]] || jsh_detail "Backups: ${BACKUP_ROOT}"
-  jsh_success "EndeavourOS system policy configured."
+  jsh_success "Linux system policy configured."
 }
 
 main "$@"

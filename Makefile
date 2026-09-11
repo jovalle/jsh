@@ -1,6 +1,6 @@
 CHECK_TARGETS := check-script-headers check-readme check-shell-syntax check-zsh-syntax check-python-syntax \
 	check-yaml-syntax check-json-syntax lint-shell lint-python \
-	lint-yaml lint-markdown lint-js
+	lint-yaml lint-markdown lint-js test-linux-platform
 FORMAT_TARGETS := format-shell format-python format-yaml format-json format-markdown
 
 .PHONY: help install update setup deploy configure patch uninstall check \
@@ -66,6 +66,7 @@ endef
 
 # Tool versions (can be overridden)
 PYTHON := python3
+BATS ?= bats
 YAMLLINT_CONFIG := dotfiles/.yamllint
 
 # Find files by type
@@ -177,7 +178,7 @@ check: $(CHECK_TARGETS) ## Run all checks
 check-tools: ## Check required developer tools
 	@$(OUTPUT) jsh_info "Checking for required tools..."
 	@$(OUTPUT) errors=0; \
-	for tool in actionlint autopep8 black commitlint cz eslint gitleaks hadolint jq \
+	for tool in actionlint autopep8 bats black commitlint cz eslint gitleaks hadolint jq \
 		markdownlint pre-commit prettier pylint shellcheck shfmt stow yamllint yq; do \
 		if command -v $$tool >/dev/null 2>&1; then \
 			jsh_success "$$tool"; \
@@ -330,6 +331,11 @@ check-json-syntax: # Check JSON syntax
 	else \
 		jsh_warn "No JSON files found"; \
 	fi
+
+test-linux-platform: # Test Linux distro and desktop adapters
+	@$(OUTPUT) jsh_info "Testing Linux platform adapters..."
+	@$(OUTPUT) $(BATS) tests/linux-platform.bats && \
+		jsh_success "Linux platform adapters passed"
 
 ##@ Linting
 

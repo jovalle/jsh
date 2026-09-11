@@ -173,6 +173,7 @@ migrate_legacy_npm_packages() {
 install_scope() {
   local scope=$1
   local brewfile="${JSH_ROOT}/conf/brew/${scope}/Brewfile"
+  local line package temporary
 
   [[ -f "${brewfile}" ]] || return 0
   [[ "${scope}" != contrib ]] || migrate_legacy_npm_packages
@@ -182,7 +183,17 @@ install_scope() {
     installed_scope=1
   fi
   jsh_info "Installing ${scope} packages..."
-  brew bundle --file="${brewfile}"
+  mkdir -p "${JSH_ROOT}/tmp"
+  temporary=$(mktemp "${JSH_ROOT}/tmp/Brewfile.${scope}.XXXXXX")
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    package=$(sed -nE 's/^[[:space:]]*(brew|cask) "([^"]+)".*/\2/p' <<< "${line}")
+    if [[ -n "${package}" && "${PACKAGE_OWNERS[${package}]:-}" == os ]]; then
+      continue
+    fi
+    printf '%s\n' "${line}" >> "${temporary}"
+  done < "${brewfile}"
+  brew bundle --file="${temporary}"
+  rm -f "${temporary}"
 }
 
 install_brew_packages() {
@@ -197,10 +208,6 @@ install_brew_packages() {
   done
   ((has_brewfile)) || return 0
 
-  if is_arch_family; then
-    jsh_note "Using native Arch package management; skipping Homebrew packages."
-    return
-  fi
   confirm "Install Homebrew packages?" || {
     jsh_note "Skipping Homebrew packages."
     return 0
@@ -314,18 +321,6 @@ install_npm_packages() {
   done
 }
 
-is_arch_family() {
-  local os_release=${JSH_OS_RELEASE:-/etc/os-release}
-  [[ "$(uname -s)" == Linux && -r "${os_release}" ]] || return 1
-
-  local ID='' ID_LIKE=''
-  # shellcheck source=/dev/null
-  . "${os_release}"
-  [[ " ${ID:-} ${ID_LIKE:-} " == *" endeavouros "* ||
-    " ${ID:-} ${ID_LIKE:-} " == *" arch "* ||
-    " ${ID:-} ${ID_LIKE:-} " == *" archlinux "* ]]
-}
-
 main() {
   local platform machine
   local -a package_scopes=(core common contrib)
@@ -353,4 +348,6 @@ main() {
   install_npm_packages
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

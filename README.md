@@ -22,7 +22,7 @@ curl -fsSL https://raw.githubusercontent.com/jovalle/jsh/main/j.sh | bash
 
 This clones or updates Jsh in `~/.jsh`, initializes its submodules, and opens an isolated Zsh session. It does not link
 dotfiles into your home directory or run the system configuration scripts. If Git or Zsh is missing, the bootstrap asks
-before installing it with pacman on Arch-based Linux or Homebrew elsewhere.
+before installing it with pacman, DNF, or APT on supported Linux distributions, or Homebrew elsewhere.
 
 Leave the runtime with `exit`.
 
