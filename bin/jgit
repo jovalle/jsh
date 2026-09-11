@@ -40,7 +40,7 @@ for library_file in "${JSH_ROOT}"/lib/*; do
 done
 unset library_file
 
-JGIT_CONFIG=${JGIT_CONFIG:-${JSH_ROOT}/conf/jsh/git.yaml}
+JGIT_CONFIG=${JGIT_CONFIG:-${JSH_ROOT}/conf/git.yaml}
 JGIT_VERSION=1.0.0
 JGIT_COLOR=0
 jsh_color_enabled 1 && JGIT_COLOR=1
@@ -74,7 +74,7 @@ Timestamp examples:
 Relative offsets randomize unspecified lower-order time fields.
 
 Environment:
-  JGIT_CONFIG           Profile file (default: conf/jsh/git.yaml)
+  JGIT_CONFIG           Profile file (default: conf/git.yaml)
 EOF
 }
 
