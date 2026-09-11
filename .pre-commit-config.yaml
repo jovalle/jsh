@@ -5,6 +5,15 @@
 # Run: pre-commit run --all-files
 
 repos:
+  - repo: local
+    hooks:
+      - id: readme-coverage
+        name: check README coverage
+        entry: make check-readme
+        language: system
+        pass_filenames: false
+        always_run: true
+
   # Conventional commits (keep existing hook)
   - repo: https://github.com/compilerla/conventional-pre-commit
     rev: v3.6.0

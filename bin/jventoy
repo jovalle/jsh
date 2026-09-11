@@ -1,0 +1,1073 @@
+#!/usr/bin/env python3
+"""
+ventoy: Automated ISO reconciliation and updater for Ventoy drives.
+
+Dynamically fetches the latest upstream releases for:
+  - Windows 11 Pro / Multi-Edition (via msdl / Microsoft CDN)
+  - Ubuntu Desktop LTS (Noble / Resolute)
+  - Ubuntu Server LTS
+  - Fedora Workstation (latest stable)
+  - Fedora Server (latest stable)
+  - Fedora CoreOS (stable metal stream)
+  - Linux Mint Cinnamon
+  - Talos Linux Bare-Metal (Kubernetes OS)
+  - Kali Linux Live
+  - Rescue & Diagnostics Toolkit:
+      - SystemRescue (system-rescue.org)
+      - GParted Live
+      - Clonezilla Live
+      - Arch Linux Installation & Rescue Media
+      - Tails Amnesic Incognito Live System
+      - Proxmox VE Bare-Metal Installer
+"""
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+VERSION = "1.1.0"
+USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+
+
+# ANSI Terminal Colors
+class Colors:
+    HEADER = "\033[95m"
+    BLUE = "\033[94m"
+    CYAN = "\033[96m"
+    GREEN = "\033[92m"
+    YELLOW = "\033[93m"
+    RED = "\033[91m"
+    BOLD = "\033[1m"
+    DIM = "\033[2m"
+    NC = "\033[0m"
+
+    @classmethod
+    def strip_if_not_tty(cls):
+        if not sys.stdout.isatty():
+            cls.HEADER = ""
+            cls.BLUE = ""
+            cls.CYAN = ""
+            cls.GREEN = ""
+            cls.YELLOW = ""
+            cls.RED = ""
+            cls.BOLD = ""
+            cls.DIM = ""
+            cls.NC = ""
+
+
+Colors.strip_if_not_tty()
+
+
+def fetch_url(url, timeout=15):
+    """Fetch URL contents using curl with fallback to urllib."""
+    try:
+        p = subprocess.run(
+            ["curl", "-sL", "--compressed", "-m", str(timeout), "-A", USER_AGENT, url],
+            capture_output=True,
+            text=True,
+            timeout=timeout + 3,
+        )
+        if p.returncode == 0 and p.stdout:
+            return p.stdout
+    except Exception:
+        pass
+
+    # Fallback to urllib
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "*/*"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read().decode("utf-8", errors="ignore")
+
+
+def format_bytes(n):
+    """Format bytes into human-readable string."""
+    if n is None or n < 0:
+        return "Unknown"
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
+        if n < 1024.0 or unit == "TB":
+            return f"{n:.2f} {unit}" if unit in ["GB", "TB"] else f"{n:.1f} {unit}"
+        n /= 1024.0
+    return f"{n:.2f} TB"
+
+
+# ==============================================================================
+# Upstream Distro Resolvers
+# ==============================================================================
+
+
+def resolve_win11():
+    """Resolve latest Windows 11 Consumer / Pro x64 download from Microsoft."""
+    msdl_path = shutil.which("msdl") or "/usr/local/bin/msdl"
+    if os.path.exists(msdl_path):
+        try:
+            # Query msdl list to find newest Windows 11 product ID
+            proc = subprocess.run([msdl_path, "--list"], capture_output=True, text=True, timeout=8)
+            combined = (proc.stdout or "") + "\n" + (proc.stderr or "")
+            candidates = []
+            for line in combined.splitlines():
+                m = re.match(r"\s*(\d+)\s+(Windows 11\b.*)", line)
+                if m:
+                    pid, title = int(m.group(1)), m.group(2).strip()
+                    if "Arm64" not in title and "China" not in title:
+                        candidates.append((pid, title))
+
+            latest_pid = sorted(candidates, key=lambda x: x[0])[-1][0] if candidates else 3321
+            dl_proc = subprocess.run(
+                [msdl_path, "--id", str(latest_pid), "--lang", "English", "--no-contribute"],
+                input="\n",
+                capture_output=True,
+                text=True,
+                timeout=12,
+            )
+            out = (dl_proc.stdout or "") + "\n" + (dl_proc.stderr or "")
+            link_match = re.search(r"(https://software\.download\.prss\.microsoft\.com[^\s]+)", out)
+            if link_match:
+                url = link_match.group(1)
+                fn_match = re.search(r"/([^/?]+)\.iso", url)
+                filename = f"{fn_match.group(1)}.iso" if fn_match else "Win11_English_x64.iso"
+                return {"url": url, "filename": filename, "version": filename.replace(".iso", "")}
+        except Exception:
+            pass
+
+    # Microsoft official static direct evaluation / LTSC media
+    static_url = "https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26100.1742.240906-0331.ge_release_svc_refresh_CLIENT_LTSC_EVAL_x64FRE_en-us.iso"
+    return {
+        "url": static_url,
+        "filename": "Win11_24H2_Enterprise_LTSC_en-us.iso",
+        "version": "Win11-24H2-LTSC",
+        "note": "Official Microsoft CDN Media",
+    }
+
+
+def resolve_ubuntu(flavor="desktop"):
+    """Resolve latest Ubuntu LTS Desktop or Server ISO."""
+    html = fetch_url("https://releases.ubuntu.com/")
+    versions = sorted(
+        re.findall(r'href="(\d+\.\d+(?:\.\d+)?)/"', html),
+        key=lambda x: [int(p) for p in x.split(".")],
+    )
+    lts_dirs = [v for v in versions if int(v.split(".")[0]) % 2 == 0 and v.split(".")[1] == "04"]
+    target_ver = lts_dirs[-1]
+
+    vhtml = fetch_url(f"https://releases.ubuntu.com/{target_ver}/")
+    kw = "desktop" if flavor == "desktop" else "live-server"
+    pattern = rf'(ubuntu-{target_ver}[^"]*-{kw}-amd64\.iso)'
+    matches = re.findall(pattern, vhtml)
+    if not matches:
+        raise RuntimeError(
+            f"Could not find Ubuntu {flavor} ISO in releases.ubuntu.com/{target_ver}/"
+        )
+    iso_name = matches[-1]
+    url = f"https://releases.ubuntu.com/{target_ver}/{iso_name}"
+
+    sha = None
+    try:
+        sums = fetch_url(f"https://releases.ubuntu.com/{target_ver}/SHA256SUMS")
+        for line in sums.splitlines():
+            if iso_name in line:
+                sha = line.split()[0]
+                break
+    except Exception:
+        pass
+
+    return {
+        "url": url,
+        "filename": iso_name,
+        "version": iso_name.replace(f"-{kw}-amd64.iso", "").replace("ubuntu-", ""),
+        "sha256": sha,
+    }
+
+
+def resolve_fedora(edition="Workstation"):
+    """Resolve latest Fedora Workstation or Server ISO."""
+    mirrors = [
+        "https://mirrors.kernel.org/fedora/releases/",
+        "https://dl.fedoraproject.org/pub/fedora/linux/releases/",
+    ]
+    for mirror in mirrors:
+        try:
+            html = fetch_url(mirror)
+            matches = re.findall(r'href="(\d+)/"', html)
+            versions = sorted(set(int(x) for x in matches))
+            for v in reversed(versions):
+                try:
+                    url = f"{mirror}{v}/{edition}/x86_64/iso/"
+                    vhtml = fetch_url(url)
+                    isos = re.findall(rf'(Fedora-(?:{edition}|Server)[^"]*\.iso)', vhtml)
+                    if isos:
+                        if edition == "Server":
+                            isos = [i for i in isos if "netinst" not in i] or isos
+                        target_iso = isos[0]
+                        return {
+                            "url": f"{url}{target_iso}",
+                            "filename": target_iso,
+                            "version": f"Fedora-{v}",
+                        }
+                except Exception:
+                    continue
+        except Exception:
+            continue
+    raise RuntimeError(f"Fedora {edition} release not found")
+
+
+def resolve_coreos():
+    """Resolve latest Fedora CoreOS stable metal ISO."""
+    raw = fetch_url("https://builds.coreos.fedoraproject.org/streams/stable.json")
+    data = json.loads(raw)
+    metal = data["architectures"]["x86_64"]["artifacts"]["metal"]["formats"]["iso"]["disk"]
+    url = metal["location"]
+    fn = url.split("/")[-1]
+    return {
+        "url": url,
+        "filename": fn,
+        "version": fn.replace("fedora-coreos-", "").replace("-live-iso.x86_64.iso", ""),
+        "sha256": metal.get("sha256"),
+    }
+
+
+def resolve_linux_mint():
+    """Resolve latest Linux Mint Cinnamon 64-bit ISO."""
+    html = fetch_url("https://mirrors.kernel.org/linuxmint/stable/")
+    versions = sorted(
+        re.findall(r'href="(\d+(?:\.\d+)?)/"', html), key=lambda x: [int(p) for p in x.split(".")]
+    )
+    latest = versions[-1]
+    vhtml = fetch_url(f"https://mirrors.kernel.org/linuxmint/stable/{latest}/")
+    isos = re.findall(r'(linuxmint-[^"]*-cinnamon-64bit\.iso)', vhtml)
+    if not isos:
+        raise RuntimeError(f"Linux Mint ISO not found in version {latest}")
+    target_iso = isos[0]
+    sha = None
+    try:
+        sums = fetch_url(f"https://mirrors.kernel.org/linuxmint/stable/{latest}/sha256sum.txt")
+        for line in sums.splitlines():
+            if target_iso in line:
+                sha = line.split()[0]
+                break
+    except Exception:
+        pass
+
+    return {
+        "url": f"https://mirrors.kernel.org/linuxmint/stable/{latest}/{target_iso}",
+        "filename": target_iso,
+        "version": f"Mint-{latest}",
+        "sha256": sha,
+    }
+
+
+def resolve_talos():
+    """Resolve latest Talos Linux bare-metal ISO from SideroLabs GitHub releases."""
+    raw = fetch_url("https://api.github.com/repos/siderolabs/talos/releases/latest")
+    data = json.loads(raw)
+    tag = data["tag_name"]
+    for asset in data["assets"]:
+        if asset["name"] == "metal-amd64.iso":
+            url = asset["browser_download_url"]
+            fn = f"talos-{tag}-metal-amd64.iso"
+            sha = None
+            for a2 in data["assets"]:
+                if a2["name"] == "sha256sum.txt":
+                    try:
+                        sums = fetch_url(a2["browser_download_url"])
+                        for line in sums.splitlines():
+                            if "metal-amd64.iso" in line:
+                                sha = line.split()[0]
+                                break
+                    except Exception:
+                        pass
+            return {"url": url, "filename": fn, "version": tag, "sha256": sha}
+    raise RuntimeError("Talos metal-amd64.iso asset not found in GitHub release")
+
+
+def resolve_kali():
+    """Resolve latest Kali Linux Live 64-bit ISO."""
+    html = fetch_url("https://cdimage.kali.org/current/")
+    isos = re.findall(r"(kali-linux-[\d\.]+-live-amd64\.iso)", html)
+    if not isos:
+        raise RuntimeError("Kali Live ISO not found")
+    target_iso = sorted(set(isos))[-1]
+    sha = None
+    try:
+        sums = fetch_url("https://cdimage.kali.org/current/SHA256SUMS")
+        for line in sums.splitlines():
+            if target_iso in line:
+                sha = line.split()[0]
+                break
+    except Exception:
+        pass
+
+    return {
+        "url": f"https://cdimage.kali.org/current/{target_iso}",
+        "filename": target_iso,
+        "version": target_iso.replace("kali-linux-", "").replace("-live-amd64.iso", ""),
+        "sha256": sha,
+    }
+
+
+def resolve_systemrescue():
+    """Resolve latest SystemRescue amd64 ISO."""
+    html = fetch_url("https://www.system-rescue.org/Download/")
+    urls = re.findall(r'href="(https://[^"]*systemrescue-[^"]*-amd64\.iso)"', html)
+    if not urls:
+        raise RuntimeError("SystemRescue download URL not found")
+    url = urls[0]
+    fn = url.split("/")[-1]
+    ver = re.search(r"systemrescue-([0-9\.]+)-amd64", fn)
+    return {"url": url, "filename": fn, "version": ver.group(1) if ver else "latest"}
+
+
+def resolve_gparted():
+    """Resolve latest GParted Live amd64 ISO via SourceForge release RSS."""
+    rss = fetch_url("https://sourceforge.net/projects/gparted/rss?path=/gparted-live-stable")
+    urls = re.findall(r'(https://[^"]*gparted-live-([0-9\.\-]+)-amd64\.iso)', rss)
+    if not urls:
+        raise RuntimeError("GParted release ISO not found in RSS")
+    url, ver = urls[0]
+    fn = f"gparted-live-{ver}-amd64.iso"
+    direct_url = f"https://downloads.sourceforge.net/project/gparted/gparted-live-stable/{ver}/{fn}"
+    return {"url": direct_url, "filename": fn, "version": ver}
+
+
+def resolve_clonezilla():
+    """Resolve latest Clonezilla Live amd64 ISO via SourceForge release RSS."""
+    rss = fetch_url("https://sourceforge.net/projects/clonezilla/rss?path=/clonezilla_live_stable")
+    urls = re.findall(r'(https://[^"]*clonezilla-live-([0-9\.\-]+)-amd64\.iso)', rss)
+    if not urls:
+        raise RuntimeError("Clonezilla release ISO not found in RSS")
+    url, ver = urls[0]
+    fn = f"clonezilla-live-{ver}-amd64.iso"
+    direct_url = (
+        f"https://downloads.sourceforge.net/project/clonezilla/clonezilla_live_stable/{ver}/{fn}"
+    )
+    return {"url": direct_url, "filename": fn, "version": ver}
+
+
+def resolve_archlinux():
+    """Resolve latest monthly Arch Linux ISO."""
+    html = fetch_url("https://geo.mirror.pkgbuild.com/iso/latest/")
+    isos = re.findall(r'href="(archlinux-[^"]*\.iso)"', html)
+    if not isos:
+        raise RuntimeError("Arch Linux ISO not found")
+    target_iso = isos[0]
+    sha = None
+    try:
+        sums = fetch_url("https://geo.mirror.pkgbuild.com/iso/latest/sha256sums.txt")
+        for line in sums.splitlines():
+            if target_iso in line:
+                sha = line.split()[0]
+                break
+    except Exception:
+        pass
+    ver = re.search(r"archlinux-([0-9\.]+)-x86_64", target_iso)
+    return {
+        "url": f"https://geo.mirror.pkgbuild.com/iso/latest/{target_iso}",
+        "filename": target_iso,
+        "version": ver.group(1) if ver else "latest",
+        "sha256": sha,
+    }
+
+
+def resolve_tails():
+    """Resolve latest Tails Live ISO."""
+    html = fetch_url("https://tails.net/install/download/")
+    m = re.findall(
+        r'(https://download\.tails\.net/tails/stable/tails-amd64-([^/"]+)/tails-amd64-[^/"]+\.iso)',
+        html,
+    )
+    if not m:
+        raise RuntimeError("Tails ISO link not found")
+    url, ver = m[0]
+    fn = url.split("/")[-1]
+    return {"url": url, "filename": fn, "version": ver}
+
+
+def resolve_proxmox():
+    """Resolve latest Proxmox VE bare-metal installer ISO."""
+    html = fetch_url("https://enterprise.proxmox.com/iso/")
+    isos = re.findall(r'(proxmox-ve_[0-9][^"\'>\s]*\.iso)', html)
+    if not isos:
+        raise RuntimeError("Proxmox VE ISO not found")
+    x86_isos = [i for i in set(isos) if "arm64" not in i]
+    target_iso = sorted(x86_isos)[-1]
+    ver = re.search(r"proxmox-ve_([0-9\.\-]+)\.iso", target_iso)
+    return {
+        "url": f"https://enterprise.proxmox.com/iso/{target_iso}",
+        "filename": target_iso,
+        "version": ver.group(1) if ver else "latest",
+    }
+
+
+# ==============================================================================
+# Distro Catalog Registry
+# ==============================================================================
+
+DISTROS = {
+    "win11": {
+        "name": "Windows 11 Pro x64",
+        "category": "windows",
+        "rel_dir": "windows",
+        "pattern": r"^(?:Win11_|win11|26100\.).*?\.iso$",
+        "resolver": resolve_win11,
+    },
+    "ubuntu-desktop": {
+        "name": "Ubuntu Desktop LTS",
+        "category": "ubuntu",
+        "rel_dir": "ubuntu",
+        "pattern": r"^ubuntu-[\d\.]+-desktop-amd64\.iso$",
+        "resolver": lambda: resolve_ubuntu("desktop"),
+    },
+    "ubuntu-server": {
+        "name": "Ubuntu Server LTS",
+        "category": "ubuntu",
+        "rel_dir": "ubuntu",
+        "pattern": r"^ubuntu-[\d\.]+-live-server-amd64\.iso$",
+        "resolver": lambda: resolve_ubuntu("server"),
+    },
+    "fedora-workstation": {
+        "name": "Fedora Workstation",
+        "category": "fedora",
+        "rel_dir": "fedora",
+        "pattern": r"^Fedora-Workstation-Live-.*?\.iso$",
+        "resolver": lambda: resolve_fedora("Workstation"),
+    },
+    "fedora-server": {
+        "name": "Fedora Server DVD",
+        "category": "fedora",
+        "rel_dir": "fedora",
+        "pattern": r"^Fedora-Server-dvd-.*?\.iso$",
+        "resolver": lambda: resolve_fedora("Server"),
+    },
+    "coreos": {
+        "name": "Fedora CoreOS Metal",
+        "category": "fedora",
+        "rel_dir": "fedora",
+        "pattern": r"^fedora-coreos-.*?\.iso$",
+        "resolver": resolve_coreos,
+    },
+    "linux-mint": {
+        "name": "Linux Mint Cinnamon",
+        "category": "mint",
+        "rel_dir": "mint",
+        "pattern": r"^linuxmint-[\d\.]+-cinnamon-64bit\.iso$",
+        "resolver": resolve_linux_mint,
+    },
+    "talos": {
+        "name": "Talos Linux Bare-Metal",
+        "category": "talos",
+        "rel_dir": "talos",
+        "pattern": r"^talos-.*?\.iso$",
+        "resolver": resolve_talos,
+    },
+    "kali": {
+        "name": "Kali Linux Live 64-bit",
+        "category": "kali",
+        "rel_dir": "kali",
+        "pattern": r"^kali-linux-[\d\.]+-live-amd64\.iso$",
+        "resolver": resolve_kali,
+    },
+    "systemrescue": {
+        "name": "SystemRescue Live",
+        "category": "rescue",
+        "rel_dir": "rescue",
+        "pattern": r"^systemrescue-.*?\.iso$",
+        "resolver": resolve_systemrescue,
+    },
+    "gparted": {
+        "name": "GParted Live",
+        "category": "rescue",
+        "rel_dir": "rescue",
+        "pattern": r"^gparted-live-.*?\.iso$",
+        "resolver": resolve_gparted,
+    },
+    "clonezilla": {
+        "name": "Clonezilla Live",
+        "category": "rescue",
+        "rel_dir": "rescue",
+        "pattern": r"^clonezilla-live-.*?\.iso$",
+        "resolver": resolve_clonezilla,
+    },
+    "archlinux": {
+        "name": "Arch Linux Install/Live",
+        "category": "rescue",
+        "rel_dir": "rescue",
+        "pattern": r"^archlinux-.*?\.iso$",
+        "resolver": resolve_archlinux,
+    },
+    "tails": {
+        "name": "Tails Incognito Live",
+        "category": "security",
+        "rel_dir": "security",
+        "pattern": r"^tails-amd64-.*?\.iso$",
+        "resolver": resolve_tails,
+    },
+    "proxmox-ve": {
+        "name": "Proxmox VE Installer",
+        "category": "rescue",
+        "rel_dir": "rescue",
+        "pattern": r"^proxmox-ve_.*?\.iso$",
+        "resolver": resolve_proxmox,
+    },
+}
+
+# ==============================================================================
+# Helper Utilities & Auto-Detection
+# ==============================================================================
+
+
+def detect_ventoy_target():
+    """Auto-detect mounted Ventoy drive partition or common mount points."""
+    candidates = []
+    try:
+        with open("/proc/mounts", "r") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) >= 2:
+                    dev, mnt = parts[0], parts[1]
+                    if "/Ventoy" in mnt or "Ventoy" in mnt:
+                        candidates.append(mnt)
+    except Exception:
+        pass
+
+    user = os.environ.get("USER", "root")
+    defaults = [
+        f"/run/media/{user}/Ventoy",
+        f"/media/{user}/Ventoy",
+        "/mnt/Ventoy",
+        "/media/Ventoy",
+    ]
+    for p in defaults:
+        if os.path.isdir(p) and p not in candidates:
+            candidates.append(p)
+
+    for c in candidates:
+        if os.path.isdir(c):
+            return c
+
+    label_path = "/dev/disk/by-label/Ventoy"
+    if os.path.exists(label_path):
+        try:
+            p = subprocess.run(
+                ["udisksctl", "mount", "-b", label_path], capture_output=True, text=True
+            )
+            m = re.search(r"Mounted (?:/dev/\S+) at (/run/media/\S+|/media/\S+)", p.stdout)
+            if m:
+                return m.group(1).rstrip(".")
+        except Exception:
+            pass
+
+    return None
+
+
+def find_local_iso(target_root, distro_id):
+    """Search for existing local ISO matching the distro pattern."""
+    meta = DISTROS[distro_id]
+    rel_dir = os.path.join(target_root, "ISO", meta["rel_dir"])
+    root_iso = os.path.join(target_root, "ISO")
+    regex = re.compile(meta["pattern"], re.IGNORECASE)
+
+    search_dirs = [rel_dir, root_iso, target_root]
+    found = []
+    for sdir in search_dirs:
+        if not os.path.isdir(sdir):
+            continue
+        for entry in os.listdir(sdir):
+            if regex.match(entry) and entry.endswith(".iso"):
+                full_path = os.path.join(sdir, entry)
+                if os.path.isfile(full_path):
+                    stat = os.stat(full_path)
+                    found.append(
+                        {
+                            "path": full_path,
+                            "filename": entry,
+                            "size": stat.st_size,
+                            "mtime": stat.st_mtime,
+                        }
+                    )
+
+    if not found:
+        return None
+    found.sort(key=lambda x: x["mtime"], reverse=True)
+    return found[0]
+
+
+def verify_file_sha256(file_path, expected_sha, progress_callback=None):
+    """Compute sha256 of file in 8MB chunks and verify."""
+    sha = hashlib.sha256()
+    total_size = os.path.getsize(file_path)
+    read_so_far = 0
+    with open(file_path, "rb") as f:
+        while True:
+            chunk = f.read(8 * 1024 * 1024)
+            if not chunk:
+                break
+            sha.update(chunk)
+            read_so_far += len(chunk)
+            if progress_callback:
+                progress_callback(read_so_far, total_size)
+    calculated = sha.hexdigest().lower()
+    return calculated, (calculated == expected_sha.lower() if expected_sha else True)
+
+
+def download_file_resumable(url, target_path, expected_sha=None):
+    """Download file with HTTP Range resume, live progress bar, and speed calculation."""
+    os.makedirs(os.path.dirname(target_path), exist_ok=True)
+    part_path = f"{target_path}.part"
+
+    existing_bytes = os.path.getsize(part_path) if os.path.exists(part_path) else 0
+
+    headers = {"User-Agent": USER_AGENT}
+    if existing_bytes > 0:
+        headers["Range"] = f"bytes={existing_bytes}-"
+
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        resp = urllib.request.urlopen(req, timeout=25)
+    except urllib.error.HTTPError as e:
+        if e.code == 416:
+            headers.pop("Range", None)
+            existing_bytes = 0
+            if os.path.exists(part_path):
+                os.remove(part_path)
+            req = urllib.request.Request(url, headers=headers)
+            resp = urllib.request.urlopen(req, timeout=25)
+        else:
+            raise
+
+    is_resume = resp.status == 206
+    if not is_resume and existing_bytes > 0:
+        existing_bytes = 0
+        part_mode = "wb"
+    else:
+        part_mode = "ab" if is_resume else "wb"
+
+    content_length = resp.headers.get("Content-Length")
+    total_bytes = (int(content_length) + existing_bytes) if content_length else None
+
+    chunk_size = 1024 * 1024
+    downloaded = existing_bytes
+    start_time = time.time()
+    last_print = 0
+
+    mode_str = (
+        f"Resuming at {format_bytes(downloaded)}"
+        if (is_resume and downloaded > 0)
+        else "Downloading"
+    )
+    print(f"  {Colors.CYAN}{mode_str}{Colors.NC} -> {os.path.basename(target_path)}")
+
+    with open(part_path, part_mode) as f:
+        while True:
+            chunk = resp.read(chunk_size)
+            if not chunk:
+                break
+            f.write(chunk)
+            downloaded += len(chunk)
+            now = time.time()
+            if now - last_print > 0.25:
+                elapsed = now - start_time
+                speed = (downloaded - existing_bytes) / elapsed if elapsed > 0 else 0
+                eta_str = ""
+                pct_str = ""
+                bar_str = ""
+                if total_bytes:
+                    pct = (downloaded / total_bytes) * 100
+                    pct_str = f"{pct:5.1f}%"
+                    rem_bytes = max(0, total_bytes - downloaded)
+                    eta_sec = int(rem_bytes / speed) if speed > 0 else 0
+                    m, s = divmod(eta_sec, 60)
+                    h, m = divmod(m, 60)
+                    eta_str = f"ETA {h:02d}:{m:02d}:{s:02d}" if h > 0 else f"ETA {m:02d}:{s:02d}"
+                    cols = shutil.get_terminal_size((80, 20)).columns
+                    bar_len = max(10, min(30, cols - 65))
+                    filled = int(bar_len * (downloaded / total_bytes))
+                    bar_str = f"[{'=' * filled}{'>' if filled < bar_len else ''}{' ' * (bar_len - filled - 1)}]"
+                else:
+                    pct_str = "  ? %"
+                    bar_str = "[ downloading ]"
+
+                speed_str = f"{speed / (1024 * 1024):.1f} MB/s"
+                size_str = f"{format_bytes(downloaded)} / {format_bytes(total_bytes)}"
+                sys.stdout.write(
+                    f"\r  {Colors.BOLD}{bar_str} {pct_str}{Colors.NC} {size_str} @ {speed_str} {eta_str}   "
+                )
+                sys.stdout.flush()
+                last_print = now
+
+    sys.stdout.write("\n")
+    os.sync()
+
+    if expected_sha:
+        sys.stdout.write(f"  {Colors.DIM}Verifying SHA256 checksum...{Colors.NC}")
+        sys.stdout.flush()
+        calc_sha, match = verify_file_sha256(part_path, expected_sha)
+        if not match:
+            print(
+                f"\n  {Colors.RED}CHECKSUM FAILED! Expected: {expected_sha}, Got: {calc_sha}{Colors.NC}"
+            )
+            raise ValueError(f"Checksum mismatch for {target_path}")
+        print(f" {Colors.GREEN}Verified OK ({calc_sha[:16]}...){Colors.NC}")
+
+    if os.path.exists(target_path):
+        os.remove(target_path)
+    os.rename(part_path, target_path)
+    os.sync()
+    print(
+        f"  {Colors.GREEN}✓ Finished: {os.path.basename(target_path)} ({format_bytes(downloaded)}){Colors.NC}"
+    )
+
+
+# ==============================================================================
+# CLI Commands & Workflow
+# ==============================================================================
+
+
+def print_banner(target):
+    print(
+        f"{Colors.BOLD}{Colors.HEADER}======================================================={Colors.NC}"
+    )
+    print(
+        f"{Colors.BOLD}{Colors.HEADER}          Ventoy ISO Reconciler & Manager             {Colors.NC}"
+    )
+    print(
+        f"{Colors.BOLD}{Colors.HEADER}======================================================={Colors.NC}"
+    )
+    print(f"Target Directory: {Colors.CYAN}{target}{Colors.NC}")
+    try:
+        usage = shutil.disk_usage(target)
+        free_pct = (usage.free / usage.total) * 100
+        print(
+            f"Disk Capacity:   {format_bytes(usage.used)} used / {format_bytes(usage.free)} free ({free_pct:.1f}% free of {format_bytes(usage.total)})"
+        )
+    except Exception:
+        pass
+    print()
+
+
+def get_selected_distros(args):
+    """Filter distros based on command-line flags."""
+    selected = {}
+    if args.distro:
+        requested = [d.strip().lower() for d in args.distro.split(",")]
+        for d in requested:
+            if d in DISTROS:
+                selected[d] = DISTROS[d]
+            else:
+                matches = [k for k in DISTROS if d in k]
+                if matches:
+                    for m in matches:
+                        selected[m] = DISTROS[m]
+                else:
+                    print(
+                        f"{Colors.RED}Unknown distro: {d}. Run 'ventoy list' for options.{Colors.NC}"
+                    )
+                    sys.exit(1)
+    elif args.category:
+        cat = args.category.strip().lower()
+        for k, v in DISTROS.items():
+            if v["category"].lower() == cat:
+                selected[k] = v
+        if not selected:
+            print(f"{Colors.RED}No distros found in category: {cat}{Colors.NC}")
+            sys.exit(1)
+    else:
+        selected = DISTROS
+    return selected
+
+
+def check_status(target, selected_distros, verbose=False):
+    """Inspect local ISOs vs remote latest releases without downloading."""
+    print_banner(target)
+    print(
+        f"{Colors.BOLD}{'DISTRO':<22} {'CATEGORY':<10} {'LOCAL VERSION':<30} {'LATEST UPSTREAM':<32} {'STATUS'}{Colors.NC}"
+    )
+    print("-" * 115)
+
+    reconcile_plan = []
+
+    for distro_id, meta in selected_distros.items():
+        local = find_local_iso(target, distro_id)
+        local_desc = (
+            f"{local['filename'][:21]}.. ({format_bytes(local['size'])})"
+            if local and len(local["filename"]) > 24
+            else (
+                f"{local['filename']} ({format_bytes(local['size'])})"
+                if local
+                else f"{Colors.DIM}(none){Colors.NC}"
+            )
+        )
+
+        try:
+            if verbose:
+                print(f"{Colors.DIM}Resolving {meta['name']}...{Colors.NC}")
+            remote = meta["resolver"]()
+            remote_fn = remote["filename"]
+
+            status = ""
+            action = "none"
+            if not local:
+                status = f"{Colors.YELLOW}[MISSING]{Colors.NC}"
+                action = "download"
+            elif local["filename"] == remote_fn:
+                status = f"{Colors.GREEN}[UP TO DATE]{Colors.NC}"
+                action = "uptodate"
+            else:
+                status = f"{Colors.BLUE}[UPDATE AVAIL]{Colors.NC}"
+                action = "update"
+
+            rem_disp = f"{remote_fn[:29]}..." if len(remote_fn) > 32 else remote_fn
+            print(
+                f"{meta['name'][:21]:<22} {meta['category']:<10} {local_desc:<30} {rem_disp:<32} {status}"
+            )
+            reconcile_plan.append(
+                {"id": distro_id, "meta": meta, "local": local, "remote": remote, "action": action}
+            )
+        except Exception as e:
+            print(
+                f"{meta['name'][:21]:<22} {meta['category']:<10} {local_desc:<30} {Colors.RED}Error: {str(e)[:25]}{Colors.NC}"
+            )
+
+    print()
+    return reconcile_plan
+
+
+def prune_old_versions(target, selected_distros, dry_run=False):
+    """Find and remove older versions of ISOs when a newer version is present."""
+    print(f"\n{Colors.BOLD}Checking for old superseded ISOs to prune...{Colors.NC}")
+    pruned_count = 0
+    freed_bytes = 0
+
+    for distro_id, meta in selected_distros.items():
+        rel_dir = os.path.join(target, "ISO", meta["rel_dir"])
+        if not os.path.isdir(rel_dir):
+            continue
+        regex = re.compile(meta["pattern"], re.IGNORECASE)
+        matching = []
+        for fn in os.listdir(rel_dir):
+            if regex.match(fn) and fn.endswith(".iso"):
+                full = os.path.join(rel_dir, fn)
+                matching.append((full, fn, os.path.getsize(full), os.path.getmtime(full)))
+
+        if len(matching) > 1:
+            matching.sort(key=lambda x: x[3], reverse=True)
+            keep = matching[0]
+            to_remove = matching[1:]
+            print(f"  Distro {Colors.CYAN}{meta['name']}{Colors.NC}: Keeping {keep[1]}")
+            for item in to_remove:
+                full, fn, sz, _ = item
+                pruned_count += 1
+                freed_bytes += sz
+                if dry_run:
+                    print(
+                        f"    {Colors.YELLOW}[DRY-RUN] Would prune:{Colors.NC} {fn} ({format_bytes(sz)})"
+                    )
+                else:
+                    os.remove(full)
+                    print(f"    {Colors.RED}[PRUNED]:{Colors.NC} {fn} ({format_bytes(sz)})")
+
+    if pruned_count == 0:
+        print(f"  {Colors.GREEN}No old ISO versions found to prune.{Colors.NC}")
+    else:
+        action_verb = "Would reclaim" if dry_run else "Reclaimed"
+        print(
+            f"  {Colors.BOLD}{action_verb} {format_bytes(freed_bytes)} across {pruned_count} old file(s).{Colors.NC}"
+        )
+
+
+def run_reconcile(target, selected_distros, args):
+    """Execute reconciliation: download missing and updated ISOs."""
+    plan = check_status(target, selected_distros, verbose=args.verbose)
+
+    to_download = [item for item in plan if item["action"] in ["download", "update"] or args.force]
+
+    if not to_download:
+        print(
+            f"{Colors.GREEN}{Colors.BOLD}All selected ISOs are up to date! Nothing to reconcile.{Colors.NC}\n"
+        )
+        if args.prune:
+            prune_old_versions(target, selected_distros, dry_run=args.dry_run)
+        return
+
+    print(f"{Colors.BOLD}Actions to take:{Colors.NC}")
+    for item in to_download:
+        act = (
+            "FORCE RE-DOWNLOAD"
+            if args.force and item["action"] == "uptodate"
+            else item["action"].upper()
+        )
+        fn = item["remote"]["filename"]
+        print(f"  • [{act}] {item['meta']['name']} -> {Colors.CYAN}{fn}{Colors.NC}")
+
+    if args.dry_run:
+        print(f"\n{Colors.YELLOW}[DRY-RUN MODE]{Colors.NC} No files were downloaded or modified.")
+        if args.prune:
+            prune_old_versions(target, selected_distros, dry_run=True)
+        return
+
+    if not args.yes:
+        ans = input(f"\nProceed with downloading {len(to_download)} ISO(s)? [Y/n] ").strip().lower()
+        if ans and ans not in ["y", "yes"]:
+            print("Aborted by user.")
+            return
+
+    print()
+    success_count = 0
+    for idx, item in enumerate(to_download, 1):
+        meta = item["meta"]
+        remote = item["remote"]
+        rel_dir = os.path.join(target, "ISO", meta["rel_dir"])
+        target_path = os.path.join(rel_dir, remote["filename"])
+
+        print(f"{Colors.BOLD}[{idx}/{len(to_download)}] Reconciling: {meta['name']}{Colors.NC}")
+        try:
+            download_file_resumable(
+                url=remote["url"], target_path=target_path, expected_sha=remote.get("sha256")
+            )
+            success_count += 1
+        except KeyboardInterrupt:
+            print(
+                f"\n{Colors.YELLOW}Download interrupted by user. Progress saved in .part file.{Colors.NC}"
+            )
+            sys.exit(130)
+        except Exception as e:
+            print(f"  {Colors.RED}Download failed: {e}{Colors.NC}")
+
+    print(
+        f"\n{Colors.GREEN}{Colors.BOLD}Reconciliation completed: {success_count}/{len(to_download)} succeeded.{Colors.NC}"
+    )
+
+    if args.prune:
+        prune_old_versions(target, selected_distros, dry_run=False)
+
+
+def list_distros():
+    """Print list of all registered distros and categories."""
+    print(f"{Colors.BOLD}{'ID':<22} {'CATEGORY':<12} {'NAME'}{Colors.NC}")
+    print("-" * 65)
+    for k, v in DISTROS.items():
+        print(f"{k:<22} {v['category']:<12} {v['name']}")
+    print(f"\nCategories: windows, ubuntu, fedora, mint, talos, kali, security, rescue")
+
+
+# ==============================================================================
+# Main Entry Point
+# ==============================================================================
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Ventoy ISO Reconciler: Keep your Ventoy USB loaded with the latest top distros.",
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+    parser.add_argument(
+        "command",
+        nargs="?",
+        default="reconcile",
+        choices=["reconcile", "sync", "status", "check", "prune", "list", "verify"],
+        help="Action to perform:\n"
+        "  reconcile / sync: Download missing or updated ISOs (default)\n"
+        "  status / check:   Show local vs upstream versions\n"
+        "  prune:            Delete older superseded ISO versions\n"
+        "  verify:           Verify SHA256 checksums of local files\n"
+        "  list:             List supported distros",
+    )
+    parser.add_argument(
+        "-t",
+        "--target",
+        help="Path to Ventoy partition mount or ISO directory (default: auto-detected)",
+    )
+    parser.add_argument(
+        "-d",
+        "--distro",
+        help="Comma-separated list of distro IDs (e.g. 'win11,talos,ubuntu-desktop')",
+    )
+    parser.add_argument(
+        "-c",
+        "--category",
+        help="Target specific category (windows, ubuntu, fedora, mint, talos, kali, rescue)",
+    )
+    parser.add_argument(
+        "-n",
+        "--dry-run",
+        action="store_true",
+        help="Inspect and report what would be updated without downloading",
+    )
+    parser.add_argument(
+        "-p",
+        "--prune",
+        action="store_true",
+        help="Automatically remove older versions after downloading new ones",
+    )
+    parser.add_argument(
+        "-f",
+        "--force",
+        action="store_true",
+        help="Force re-download even if local ISO appears up to date",
+    )
+    parser.add_argument(
+        "-y", "--yes", action="store_true", help="Automatic yes to download prompts"
+    )
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="Show detailed resolution output"
+    )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
+
+    args = parser.parse_args()
+
+    if args.command == "list":
+        list_distros()
+        return
+
+    target = args.target or detect_ventoy_target()
+    if not target:
+        print(f"{Colors.RED}Could not auto-detect mounted Ventoy USB partition.{Colors.NC}")
+        print("Please specify path with -t / --target (e.g. -t /run/media/$USER/Ventoy)")
+        sys.exit(1)
+
+    target = os.path.abspath(target)
+    selected_distros = get_selected_distros(args)
+
+    if args.command in ["status", "check"]:
+        check_status(target, selected_distros, verbose=args.verbose)
+    elif args.command == "prune":
+        print_banner(target)
+        prune_old_versions(target, selected_distros, dry_run=args.dry_run)
+    elif args.command == "verify":
+        print_banner(target)
+        print(f"{Colors.BOLD}Verifying local ISO checksums...{Colors.NC}")
+        for distro_id, meta in selected_distros.items():
+            local = find_local_iso(target, distro_id)
+            if not local:
+                continue
+            print(f"Checking {meta['name']} -> {local['filename']}...")
+            try:
+                remote = meta["resolver"]()
+                sha = remote.get("sha256")
+                calc_sha, match = verify_file_sha256(local["path"], sha)
+                if sha:
+                    status = (
+                        f"{Colors.GREEN}PASSED{Colors.NC}"
+                        if match
+                        else f"{Colors.RED}MISMATCH{Colors.NC}"
+                    )
+                    print(f"  SHA256: {calc_sha} [{status}]")
+                else:
+                    print(
+                        f"  SHA256: {calc_sha} ({Colors.DIM}no upstream checksum provided{Colors.NC})"
+                    )
+            except Exception as e:
+                print(f"  Error: {e}")
+    else:
+        run_reconcile(target, selected_distros, args)
+
+
+if __name__ == "__main__":
+    main()
