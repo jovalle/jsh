@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Configure opt-in EndeavourOS SSH, GPG, and Podman user services.
+# Configure opt-in Linux SSH, GPG, and Podman user services.
 
 set -euo pipefail
 
@@ -14,15 +14,6 @@ done
 unset library_file
 
 DRY_RUN=${JSH_CONFIGURE_DRY_RUN:-0}
-
-is_endeavouros() {
-  local os_release=${JSH_OS_RELEASE:-/etc/os-release}
-  [[ -r "${os_release}" ]] || return 1
-  local ID=
-  # shellcheck source=/dev/null
-  . "${os_release}"
-  [[ "${ID:-}" == endeavouros ]]
-}
 
 install_user_text() {
   local destination=$1 content=$2 temporary
@@ -62,20 +53,16 @@ enable_user_unit() {
 
 main() {
   [[ "$(uname -s)" == Linux ]] || return
-  is_endeavouros || {
-    jsh_note "Skipping user services: EndeavourOS not detected."
-    return
-  }
   command -v systemctl > /dev/null 2>&1 || {
     jsh_error "systemctl is required to configure user services."
     return 1
   }
 
   jsh_detail "This will configure SSH, GPG, and Podman user services."
-  jsh_prompt "Configure EndeavourOS user services? [y/N]: "
+  jsh_prompt "Configure Linux user services? [y/N]: "
   read -r answer || answer=
   [[ "${answer}" =~ ^[Yy]$ ]] || {
-    jsh_note "Skipping EndeavourOS user services."
+    jsh_note "Skipping Linux user services."
     return
   }
 
@@ -103,7 +90,7 @@ WantedBy=default.target"
   enable_user_unit ssh-agent.service
   enable_user_unit gpg-agent.socket
   enable_user_unit podman.socket
-  jsh_success "EndeavourOS user services configured."
+  jsh_success "Linux user services configured."
   jsh_detail "Log out and back in to load the environment files."
 }
 

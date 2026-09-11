@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install EndeavourOS packages with pacman, an AUR helper, and Flatpak.
+# Install distro-native system packages and cross-distribution Flatpak applications.
 
 set -euo pipefail
 
@@ -14,27 +14,45 @@ done
 unset library_file
 
 DRY_RUN=${JSH_INSTALL_DRY_RUN:-${JSH_CONFIGURE_DRY_RUN:-0}}
+PACKAGE_MANAGER=
+DISTRO_FAMILY=
+NATIVE_PACKAGES=()
 
-NATIVE_PACKAGES=(
-  actionlint age ansible arc-gtk-theme-eos atuin base-devel bash bat btop
-  bun bzip2 ca-certificates cifs-utils coreutils curl desktop-file-utils dconf
-  diffutils direnv dkms docker docker-buildx docker-compose earlyoom
-  eos-qogir-icons eslint eza fd flatpak fnm fzf gawk gemini-cli github-cli git
-  git-lfs gitleaks gnome-keyring gnupg go grep grc helm helmfile hugo jq k9s kubectl
-  libarchive libnotify make markdownlint-cli mpv ncdu net-tools nfs-utils
-  nmap ntfs-3g nvme-cli openssh parallel pipewire-pulse pnpm podman pre-commit
-  prettier procps-ng autopep8 python-black python-poetry
-  python-pylint readline reflector ripgrep rsync rust s-tui shellcheck shfmt sops
-  speedtest-cli sqlite sshpass stow syncthing tar tmux
-  ttf-jetbrains-mono-nerd unzip uv wireplumber xbindkeys xclip xdg-utils
-  xfce4-clipman-plugin xfce4-cpugraph-plugin xfce4-docklike-plugin
-  xfce4-systemload-plugin xfce4-taskmanager xfce4-terminal xorg-xrandr xz
-  go-yq yamllint zoxide zram-generator zsh
+ARCH_PACKAGES=(
+  base-devel bash bzip2 ca-certificates cifs-utils curl desktop-file-utils dconf
+  dkms earlyoom flatpak git gnome-keyring gnupg libarchive libnotify make
+  net-tools nfs-utils ntfs-3g nvme-cli openssh pipewire-pulse podman procps-ng
+  python readline rsync tar unzip wireplumber xbindkeys xclip xdg-utils
+  xorg-xrandr xz zram-generator zsh
 )
-AUR_PACKAGES=(
-  commitlint commitlint-config-conventional hadolint-bin
-  nodejs-commitizen nodejs-cz-conventional-changelog opencode-bin
-  visual-studio-code-bin waterfox-bin
+FEDORA_PACKAGES=(
+  bash bzip2 ca-certificates cifs-utils curl desktop-file-utils dconf dkms
+  earlyoom flatpak gcc gcc-c++ git gnome-keyring gnupg2 libarchive libnotify
+  make net-tools nfs-utils ntfs-3g nvme-cli openssh-clients openssh-server
+  pipewire-pulseaudio podman procps-ng python3 readline rsync tar unzip
+  wireplumber xbindkeys xclip xdg-utils xrandr xz zram-generator zsh
+)
+DEBIAN_PACKAGES=(
+  bash build-essential bzip2 ca-certificates cifs-utils curl desktop-file-utils
+  dconf-cli dkms earlyoom flatpak git gnome-keyring gnupg libarchive-tools
+  libnotify-bin make net-tools nfs-common ntfs-3g nvme-cli openssh-client
+  openssh-server pipewire-pulse podman procps python3 rsync tar unzip wireplumber
+  xbindkeys xclip xdg-utils x11-xserver-utils xz-utils systemd-zram-generator zsh
+)
+ARCH_XFCE_PACKAGES=(
+  xfce4-clipman-plugin xfce4-cpugraph-plugin xfce4-docklike-plugin
+  xfce4-systemload-plugin xfce4-taskmanager xfce4-terminal
+)
+FEDORA_XFCE_PACKAGES=(
+  arc-theme xfce4-clipman-plugin xfce4-cpugraph-plugin
+  xfce4-docklike-plugin xfce4-systemload-plugin xfce4-taskmanager xfce4-terminal
+)
+DEBIAN_XFCE_PACKAGES=(
+  arc-theme xfce4-clipman-plugin xfce4-cpugraph-plugin
+  xfce4-docklike-plugin xfce4-systemload-plugin xfce4-taskmanager xfce4-terminal
+)
+FLATPAK_APPLICATIONS=(
+  com.spotify.Client com.todoist.Todoist com.visualstudio.code net.waterfox.waterfox
 )
 
 confirm() {
@@ -51,135 +69,119 @@ confirm() {
   done
 }
 
-is_arch_family() {
-  local os_release=${JSH_OS_RELEASE:-/etc/os-release}
-  [[ -r "${os_release}" ]] || return 1
-
-  local ID='' ID_LIKE=''
-  # shellcheck source=/dev/null
-  . "${os_release}"
-  [[ " ${ID:-} ${ID_LIKE:-} " == *" endeavouros "* ||
-    " ${ID:-} ${ID_LIKE:-} " == *" arch "* ||
-    " ${ID:-} ${ID_LIKE:-} " == *" archlinux "* ]]
+select_native_packages() {
+  DISTRO_FAMILY=$(jsh_linux_family)
+  case "${DISTRO_FAMILY}" in
+    arch)
+      PACKAGE_MANAGER=pacman
+      NATIVE_PACKAGES=("${ARCH_PACKAGES[@]}")
+      [[ "$(jsh_linux_desktop)" != xfce ]] || NATIVE_PACKAGES+=("${ARCH_XFCE_PACKAGES[@]}")
+      ;;
+    fedora)
+      if command -v dnf5 > /dev/null 2>&1; then
+        PACKAGE_MANAGER=dnf5
+      else
+        PACKAGE_MANAGER=dnf
+      fi
+      NATIVE_PACKAGES=("${FEDORA_PACKAGES[@]}")
+      [[ "$(jsh_linux_desktop)" != xfce ]] || NATIVE_PACKAGES+=("${FEDORA_XFCE_PACKAGES[@]}")
+      ;;
+    debian)
+      PACKAGE_MANAGER=apt-get
+      NATIVE_PACKAGES=("${DEBIAN_PACKAGES[@]}")
+      [[ "$(jsh_linux_desktop)" != xfce ]] || NATIVE_PACKAGES+=("${DEBIAN_XFCE_PACKAGES[@]}")
+      ;;
+    unknown) return 1 ;;
+    *) return 1 ;;
+  esac
 }
 
-run_root() {
-  if [[ "${DRY_RUN}" == 1 ]]; then
-    jsh_detail "Would run as root: $*"
-  elif [[ "$(id -u)" -eq 0 ]]; then
-    "$@"
-  elif [[ -r /proc/self/status ]] && grep -Eq '^NoNewPrivs:[[:space:]]+1$' /proc/self/status; then
-    jsh_error "Cannot run sudo: this process has Linux no-new-privileges enabled."
-    jsh_detail "Rerun ./j.sh install from a regular terminal outside this restricted session."
-    return 1
-  elif command -v sudo > /dev/null 2>&1; then
-    sudo -- "$@"
-  else
-    jsh_error "sudo is required to install system packages."
-    return 1
-  fi
+package_installed() {
+  case "${DISTRO_FAMILY}" in
+    arch) pacman -Q "$1" > /dev/null 2>&1 ;;
+    fedora) rpm -q "$1" > /dev/null 2>&1 ;;
+    debian) dpkg-query -W -f='${db:Status-Status}' "$1" 2> /dev/null | grep -q 'installed$' ;;
+    *) return 1 ;;
+  esac
+}
+
+package_available() {
+  package_installed "$1" && return
+  case "${DISTRO_FAMILY}" in
+    arch) pacman -Si "$1" > /dev/null 2>&1 ;;
+    fedora) "${PACKAGE_MANAGER}" --quiet list --available "$1" > /dev/null 2>&1 ;;
+    debian) apt-cache show "$1" > /dev/null 2>&1 ;;
+    *) return 1 ;;
+  esac
 }
 
 install_native_packages() {
   local package
-  local -a missing=()
+  local -a missing=() unavailable=()
 
-  if pacman -Q yq > /dev/null 2>&1 && ! pacman -Q go-yq > /dev/null 2>&1; then
-    run_root pacman -R --noconfirm -- yq
-  fi
   for package in "${NATIVE_PACKAGES[@]}"; do
-    pacman -Q "${package}" > /dev/null 2>&1 || missing+=("${package}")
+    package_installed "${package}" && continue
+    if package_available "${package}"; then
+      missing+=("${package}")
+    else
+      unavailable+=("${package}")
+    fi
   done
+  ((${#unavailable[@]} == 0)) ||
+    jsh_note "Unavailable ${DISTRO_FAMILY} packages will use fallbacks when possible: ${unavailable[*]}"
   if ((${#missing[@]} > 0)); then
     if [[ "${DRY_RUN}" == 1 ]]; then
       jsh_detail "Would install native packages: ${missing[*]}"
     else
-      run_root pacman -S --needed --noconfirm -- "${missing[@]}"
+      case "${DISTRO_FAMILY}" in
+        arch) jsh_run_root pacman -S --needed --noconfirm -- "${missing[@]}" ;;
+        fedora) jsh_run_root "${PACKAGE_MANAGER}" install -y -- "${missing[@]}" ;;
+        debian) jsh_run_root apt-get install -y -- "${missing[@]}" ;;
+        *) return 1 ;;
+      esac
     fi
   fi
-  jsh_success "Native Arch packages are installed."
+  jsh_success "Native ${DISTRO_FAMILY} packages are installed."
 }
 
 update_native_packages() {
   if [[ "${DRY_RUN}" == 1 ]]; then
-    jsh_detail "Would update native Arch packages."
+    jsh_detail "Would update native ${DISTRO_FAMILY} packages."
     return
   fi
-  run_root pacman -Syu --noconfirm
-  jsh_success "Native Arch packages are up to date."
+  case "${DISTRO_FAMILY}" in
+    arch) jsh_run_root pacman -Syu --noconfirm ;;
+    fedora) jsh_run_root "${PACKAGE_MANAGER}" upgrade --refresh -y ;;
+    debian)
+      jsh_run_root apt-get update
+      jsh_run_root apt-get upgrade -y
+      ;;
+    *) return 1 ;;
+  esac
+  jsh_success "Native ${DISTRO_FAMILY} packages are up to date."
 }
 
-find_aur_helper() {
-  command -v yay 2> /dev/null || command -v paru 2> /dev/null
-}
-
-install_aur_helper() {
-  local build_dir package_file
-  find_aur_helper > /dev/null && return
-
-  if [[ "${DRY_RUN}" == 1 ]]; then
-    jsh_detail "Would install the yay AUR helper."
-    return
+prepare_native_packages() {
+  if [[ "${DISTRO_FAMILY}" == arch || ${JSH_UPDATE:-0} == 1 ]]; then
+    update_native_packages
+  elif [[ "${DISTRO_FAMILY}" == debian ]]; then
+    if [[ "${DRY_RUN}" == 1 ]]; then
+      jsh_detail "Would refresh Debian package metadata."
+    else
+      jsh_run_root apt-get update
+    fi
   fi
-
-  if pacman -Si yay > /dev/null 2>&1; then
-    run_root pacman -S --needed --noconfirm -- yay
-    return
-  fi
-
-  build_dir=$(mktemp -d "${TMPDIR:-${JSH_ROOT}/tmp}/jsh-yay-bin.XXXXXX")
-  trap 'rm -rf -- "${build_dir}"' RETURN
-  git clone --depth 1 https://aur.archlinux.org/yay-bin.git "${build_dir}"
-  (cd "${build_dir}" && makepkg --force --noconfirm)
-  package_file=$(find "${build_dir}" -maxdepth 1 -type f -name 'yay-bin-*.pkg.tar.*' -print -quit)
-  [[ -n "${package_file}" ]] || {
-    jsh_error "The yay build did not produce an installable package."
-    return 1
-  }
-  run_root pacman -U --noconfirm -- "${package_file}"
-}
-
-install_aur_packages() {
-  local helper package
-  local -a missing=()
-
-  for package in "${AUR_PACKAGES[@]}"; do
-    pacman -Q "${package}" > /dev/null 2>&1 || missing+=("${package}")
-  done
-  ((${#missing[@]} == 0)) && return
-
-  if [[ "${DRY_RUN}" == 1 ]]; then
-    jsh_detail "Would install AUR packages: ${missing[*]}"
-    return
-  fi
-
-  install_aur_helper
-  helper=$(find_aur_helper)
-  "${helper}" -S --needed --noconfirm -- "${missing[@]}"
-  jsh_success "AUR packages are installed."
-}
-
-update_aur_packages() {
-  local helper
-  helper=$(find_aur_helper) || return
-  if [[ "${DRY_RUN}" == 1 ]]; then
-    jsh_detail "Would update AUR packages with ${helper}."
-    return
-  fi
-  "${helper}" -Sua --noconfirm
-  jsh_success "AUR packages are up to date."
 }
 
 install_flatpaks() {
   local application
-  local -a applications=(com.spotify.Client com.todoist.Todoist)
 
   if [[ "${DRY_RUN}" == 1 ]]; then
-    jsh_detail "Would configure Flathub and install: ${applications[*]}"
+    jsh_detail "Would configure Flathub and install: ${FLATPAK_APPLICATIONS[*]}"
     return
   fi
   flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-  for application in "${applications[@]}"; do
+  for application in "${FLATPAK_APPLICATIONS[@]}"; do
     flatpak info --user "${application}" > /dev/null 2>&1 ||
       flatpak install --user --noninteractive flathub "${application}"
   done
@@ -202,36 +204,36 @@ main() {
 
   if [[ ${1:-} == --list-installed-packages ]]; then
     [[ "${platform}" == Linux ]] || return 0
-    is_arch_family || return 0
-    command -v pacman > /dev/null 2>&1 || return 0
-    for package in "${NATIVE_PACKAGES[@]}" "${AUR_PACKAGES[@]}"; do
-      pacman -Q "${package}" > /dev/null 2>&1 && printf '%s\n' "${package}"
+    select_native_packages || return 0
+    command -v "${PACKAGE_MANAGER}" > /dev/null 2>&1 || return 0
+    for package in "${NATIVE_PACKAGES[@]}"; do
+      package_installed "${package}" && printf '%s\n' "${package}"
     done
     return 0
   fi
 
   [[ "${platform}" == Linux ]] || return
-  is_arch_family || {
-    jsh_note "Skipping native packages: Arch Linux or EndeavourOS not detected."
+  select_native_packages || {
+    jsh_note "No native package map for this Linux distribution; using portable installers."
     return
   }
 
-  command -v pacman > /dev/null 2>&1 || {
-    jsh_error "pacman is required on Arch-family systems."
+  command -v "${PACKAGE_MANAGER}" > /dev/null 2>&1 || {
+    jsh_error "${PACKAGE_MANAGER} is required on ${DISTRO_FAMILY}-family systems."
     return 1
   }
-  confirm "Install native Arch and Flatpak packages?" || {
+  confirm "Install native ${DISTRO_FAMILY} and Flatpak packages?" || {
     jsh_note "Skipping native packages."
     return 0
   }
-  update_native_packages
+  prepare_native_packages
   install_native_packages
-  install_aur_packages
   install_flatpaks
   if [[ ${JSH_UPDATE:-0} == 1 ]]; then
-    update_aur_packages
     update_flatpaks
   fi
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

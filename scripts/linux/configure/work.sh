@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Configure opt-in EndeavourOS Citrix, Zoom, and Zoom VDI integration.
+# Configure opt-in Linux Citrix, Zoom, and Zoom VDI integration.
 
 set -euo pipefail
 
@@ -19,30 +19,18 @@ readonly ZOOM_VDI_RELEASE=${JSH_ZOOM_VDI_RELEASE:-6.4.16}
 readonly ZOOM_VDI_SHA256=${JSH_ZOOM_VDI_SHA256:-d6de6898132f8db425c6085bc8325ccf1813f7f6da6a73d5691a4b20dfabd220}
 readonly ZOOM_VDI_LIBRARY=/usr/lib/zoomvdi-universal-plugin/libZoomPlugin.so
 
-is_endeavouros() {
-  local os_release=${JSH_OS_RELEASE:-/etc/os-release}
-  [[ -r "${os_release}" ]] || return 1
-  local ID=
-  # shellcheck source=/dev/null
-  . "${os_release}"
-  [[ "${ID:-}" == endeavouros ]]
-}
-
-run_root() {
-  if [[ "$(id -u)" -eq 0 ]]; then
-    "$@"
-  else
-    sudo -- "$@"
-  fi
-}
-
 aur_helper() {
   command -v yay 2> /dev/null || command -v paru 2> /dev/null
 }
 
 install_work_packages() {
-  local helper package
+  local family helper package
   local -a missing=()
+  family=$(jsh_linux_family)
+  if [[ "${family}" != arch ]]; then
+    jsh_note "Automatic Citrix and Zoom package installation is unavailable for ${family}; using existing installations."
+    return
+  fi
   helper=$(aur_helper) || {
     jsh_error "yay or paru is required; run make install first."
     return 1
@@ -115,7 +103,7 @@ zoom_vdi_healthy() {
 
 register_zoom_vdi() {
   local module="${CITRIX_ROOT}/config/module.ini" temporary replacement backup
-  run_root ln -sfn "${ZOOM_VDI_LIBRARY}" "${CITRIX_ROOT}/ZoomMedia.so"
+  jsh_run_root ln -sfn "${ZOOM_VDI_LIBRARY}" "${CITRIX_ROOT}/ZoomMedia.so"
   temporary=$(mktemp "${JSH_ROOT}/tmp/module.ini.XXXXXX")
   cp "${module}" "${temporary}"
   if ! grep -Eq '^VirtualDriver[[:space:]]*=([[:space:]]*|.*[,[:space:]])ZoomMedia([,[:space:]]|$)' "${temporary}"; then
@@ -134,19 +122,15 @@ register_zoom_vdi() {
   fi
   backup="${XDG_STATE_HOME:-${HOME}/.local/state}/jsh/backups/$(date +%Y%m%d%H%M%S)${module}"
   mkdir -p "$(dirname -- "${backup}")"
-  if [[ "$(id -u)" -eq 0 ]]; then
-    cat "${module}" > "${backup}"
-  else
-    sudo cat "${module}" | command cat > "${backup}"
-  fi
+  jsh_run_root cat "${module}" > "${backup}"
   chmod 0600 "${backup}"
-  run_root install -m 0644 "${temporary}" "${module}"
+  jsh_run_root install -m 0644 "${temporary}" "${module}"
   rm -f "${temporary}"
   jsh_detail "Backup: ${backup}"
 }
 
 install_zoom_vdi() {
-  local temporary_dir package build_dir package_file actual url
+  local family temporary_dir package build_dir package_file actual url
   zoom_vdi_healthy && return
   [[ "${ZOOM_VDI_VERSION}" =~ ^[0-9]+(\.[0-9]+)*$ &&
     "${ZOOM_VDI_RELEASE}" =~ ^[0-9]+(\.[0-9]+)*$ &&
@@ -155,6 +139,11 @@ install_zoom_vdi() {
     return 1
   }
   if [[ ! -r "${ZOOM_VDI_LIBRARY}" ]]; then
+    family=$(jsh_linux_family)
+    if [[ "${family}" != arch ]]; then
+      jsh_note "Skipping Zoom VDI installation on ${family}; install the vendor plugin before rerunning this setup."
+      return
+    fi
     [[ "$(id -u)" -ne 0 ]] || {
       jsh_error "Zoom VDI must be built as a regular user."
       return 1
@@ -197,7 +186,7 @@ EOF
       jsh_error "Zoom VDI package build failed."
       return 1
     }
-    run_root pacman -U --noconfirm -- "${package_file}"
+    jsh_run_root pacman -U --noconfirm -- "${package_file}"
   fi
   register_zoom_vdi
   zoom_vdi_healthy
@@ -205,15 +194,11 @@ EOF
 
 main() {
   [[ "$(uname -s)" == Linux ]] || return
-  is_endeavouros || {
-    jsh_note "Skipping work setup: EndeavourOS not detected."
-    return
-  }
-  jsh_detail "This installs Citrix Workspace, Zoom, and a checksum-pinned Zoom VDI plugin."
-  jsh_prompt "Configure the EndeavourOS work environment? [y/N]: "
+  jsh_detail "This configures Citrix Workspace, Zoom, and the checksum-pinned Zoom VDI integration."
+  jsh_prompt "Configure the Linux work environment? [y/N]: "
   read -r answer || answer=
   [[ "${answer}" =~ ^[Yy]$ ]] || {
-    jsh_note "Skipping EndeavourOS work environment."
+    jsh_note "Skipping Linux work environment."
     return
   }
 
@@ -224,7 +209,7 @@ main() {
   }
   configure_citrix
   install_zoom_vdi
-  jsh_success "EndeavourOS work environment configured."
+  jsh_success "Linux work environment configured."
 }
 
 main "$@"

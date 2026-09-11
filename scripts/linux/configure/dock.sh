@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Configure an opt-in EndeavourOS XFCE application dock and pins.
+# Configure an opt-in Linux application dock and pins.
 
 set -euo pipefail
 
@@ -12,15 +12,6 @@ for library_file in "${JSH_ROOT}"/lib/*; do
   . "${library_file}"
 done
 unset library_file
-
-is_endeavouros() {
-  local os_release=${JSH_OS_RELEASE:-/etc/os-release}
-  [[ -r "${os_release}" ]] || return 1
-  local ID=
-  # shellcheck source=/dev/null
-  . "${os_release}"
-  [[ "${ID:-}" == endeavouros ]]
-}
 
 find_desktop_file() {
   local candidate directory
@@ -88,31 +79,36 @@ write_pins() {
   rm -f "${temporary}"
 }
 
-main() {
-  local pins panel_dir target plugin_id panel_id id autostart temporary
-  local -a plugin_ids=() array_args=()
-  [[ "$(uname -s)" == Linux ]] || return
-  is_endeavouros || {
-    jsh_note "Skipping application dock: EndeavourOS not detected."
-    return
-  }
-  command -v xfconf-query > /dev/null 2>&1 || {
-    jsh_note "Skipping application dock: xfconf-query is unavailable."
-    return
-  }
+configure_gnome_dock() {
+  local pins=$1 path desktop_id current existing serialized separator=''
+  local -a favorites=()
 
-  pins=$(dock_pins)
-  [[ -n "${pins}" ]] || {
-    jsh_note "Skipping application dock: no configured applications are installed."
-    return
-  }
-  jsh_detail "This will add or update the jsh-managed XFCE Docklike plugin."
-  jsh_prompt "Configure the EndeavourOS application dock? [y/N]: "
-  read -r answer || answer=
-  [[ "${answer}" =~ ^[Yy]$ ]] || {
-    jsh_note "Skipping EndeavourOS application dock."
-    return
-  }
+  if ! current=$(gsettings get org.gnome.shell favorite-apps); then
+    jsh_error "Unable to read existing GNOME favorites."
+    return 1
+  fi
+  while IFS= read -r existing; do
+    [[ -n "${existing}" ]] && favorites+=("${existing}")
+  done < <(grep -o "'[^']*'" <<< "${current}" | tr -d "'")
+  while IFS= read -r path; do
+    [[ -n "${path}" ]] || continue
+    desktop_id=${path##*/}
+    [[ " ${favorites[*]} " == *" ${desktop_id} "* ]] || favorites+=("${desktop_id}")
+  done < <(tr ';' '\n' <<< "${pins}")
+
+  serialized='['
+  for desktop_id in "${favorites[@]}"; do
+    serialized+="${separator}'${desktop_id}'"
+    separator=', '
+  done
+  serialized+=']'
+  gsettings set org.gnome.shell favorite-apps "${serialized}"
+}
+
+configure_xfce_dock() {
+  local pins=$1
+  local panel_dir target plugin_id panel_id id autostart temporary
+  local -a plugin_ids=() array_args=()
 
   panel_dir="${HOME}/.config/xfce4/panel"
   mkdir -p "${panel_dir}"
@@ -150,7 +146,36 @@ main() {
   install -m 0644 "${temporary}" "${autostart}"
   rm -f "${temporary}"
   xfce4-panel -r > /dev/null 2>&1 || true
-  jsh_success "EndeavourOS application dock configured."
+}
+
+main() {
+  local desktop pins
+  [[ "$(uname -s)" == Linux ]] || return
+  desktop=$(jsh_linux_desktop)
+  case "${desktop}" in
+    xfce) command -v xfconf-query > /dev/null 2>&1 || return ;;
+    gnome) command -v gsettings > /dev/null 2>&1 || return ;;
+    *)
+      jsh_note "Skipping application dock: XFCE or GNOME is not active."
+      return
+      ;;
+  esac
+
+  pins=$(dock_pins)
+  [[ -n "${pins}" ]] || {
+    jsh_note "Skipping application dock: no configured applications are installed."
+    return
+  }
+  jsh_detail "This will add installed Jsh applications to the ${desktop^^} dock."
+  jsh_prompt "Configure the ${desktop^^} application dock? [y/N]: "
+  read -r answer || answer=
+  [[ "${answer}" =~ ^[Yy]$ ]] || {
+    jsh_note "Skipping application dock."
+    return
+  }
+
+  "configure_${desktop}_dock" "${pins}"
+  jsh_success "${desktop^^} application dock configured."
 }
 
 main "$@"

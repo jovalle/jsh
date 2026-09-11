@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Configure opt-in EndeavourOS XFCE appearance and panel monitors.
+# Configure opt-in Linux desktop appearance and panel features.
 
 set -euo pipefail
 
@@ -12,15 +12,6 @@ for library_file in "${JSH_ROOT}"/lib/*; do
   . "${library_file}"
 done
 unset library_file
-
-is_endeavouros() {
-  local os_release=${JSH_OS_RELEASE:-/etc/os-release}
-  [[ -r "${os_release}" ]] || return 1
-  local ID=
-  # shellcheck source=/dev/null
-  . "${os_release}"
-  [[ "${ID:-}" == endeavouros ]]
-}
 
 xfconf_set() {
   local channel=$1 property=$2 type=$3 value=$4
@@ -106,33 +97,16 @@ configure_identity() {
   local avatar="${JSH_USER_AVATAR:-${JSH_ROOT}/.github/assets/j.jpg}"
 
   [[ ! -r "${avatar}" ]] || install -m 0644 "${avatar}" "${HOME}/.face"
-  mkdir -p "${HOME}/.config"
-  printf '%s\n' '## Configuration file for eos-welcome.' 'Greeter=disable' \
-    'OnceDaily=no' 'LastCheck=0' > "${HOME}/.config/EOS-greeter.conf"
 }
 
-main() {
-  [[ "$(uname -s)" == Linux ]] || return
-  is_endeavouros || {
-    jsh_note "Skipping XFCE configuration: EndeavourOS not detected."
-    return
-  }
-  command -v xfconf-query > /dev/null 2>&1 || {
-    jsh_note "Skipping XFCE configuration: xfconf-query is unavailable."
-    return
-  }
-
-  jsh_detail "This will replace managed XFCE theme, wallpaper, terminal, and panel settings."
-  jsh_prompt "Configure the EndeavourOS desktop? [y/N]: "
-  read -r answer || answer=
-  [[ "${answer}" =~ ^[Yy]$ ]] || {
-    jsh_note "Skipping EndeavourOS desktop configuration."
-    return
-  }
-
-  xfconf_set xsettings /Net/ThemeName string Arc-Dark
-  xfconf_set xsettings /Net/IconThemeName string Qogir-Dark
-  xfconf_set xfwm4 /general/theme string Arc-Dark
+configure_xfce() {
+  if [[ -d /usr/share/themes/Arc-Dark || -d "${HOME}/.themes/Arc-Dark" ]]; then
+    xfconf_set xsettings /Net/ThemeName string Arc-Dark
+    xfconf_set xfwm4 /general/theme string Arc-Dark
+  fi
+  if [[ -d /usr/share/icons/Qogir-Dark || -d "${HOME}/.icons/Qogir-Dark" ]]; then
+    xfconf_set xsettings /Net/IconThemeName string Qogir-Dark
+  fi
   xfconf_set xfce4-terminal /color-foreground string '#D7DAE0'
   xfconf_set xfce4-terminal /color-background string '#0D1117'
   xfconf_set xfce4-terminal /color-cursor string '#D7DAE0'
@@ -140,8 +114,50 @@ main() {
   xfconf_set xfce4-terminal /color-use-theme bool false
   configure_wallpaper
   configure_panel
+}
+
+configure_gnome() {
+  gsettings set org.gnome.desktop.interface color-scheme prefer-dark
+  if [[ "$(gsettings writable org.gnome.desktop.interface gtk-theme 2> /dev/null)" == true ]] &&
+    [[ -d /usr/share/themes/Arc-Dark || -d "${HOME}/.themes/Arc-Dark" ]]; then
+    gsettings set org.gnome.desktop.interface gtk-theme Arc-Dark
+  fi
+}
+
+main() {
+  local desktop
+  [[ "$(uname -s)" == Linux ]] || return
+  desktop=$(jsh_linux_desktop)
+  case "${desktop}" in
+    xfce)
+      command -v xfconf-query > /dev/null 2>&1 || {
+        jsh_note "Skipping XFCE configuration: xfconf-query is unavailable."
+        return
+      }
+      ;;
+    gnome)
+      command -v gsettings > /dev/null 2>&1 || {
+        jsh_note "Skipping GNOME configuration: gsettings is unavailable."
+        return
+      }
+      ;;
+    *)
+      jsh_note "Skipping desktop configuration: XFCE or GNOME is not active."
+      return
+      ;;
+  esac
+
+  jsh_detail "This will replace managed ${desktop^^} appearance and desktop settings."
+  jsh_prompt "Configure the ${desktop^^} desktop? [y/N]: "
+  read -r answer || answer=
+  [[ "${answer}" =~ ^[Yy]$ ]] || {
+    jsh_note "Skipping desktop configuration."
+    return
+  }
+
+  "configure_${desktop}"
   configure_identity
-  jsh_success "EndeavourOS desktop configured."
+  jsh_success "${desktop^^} desktop configured."
 }
 
 main "$@"
