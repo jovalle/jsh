@@ -67,6 +67,7 @@ The [`bin/`](bin/) directory is added to `PATH` inside Jsh.
 | [`jsh`](bin/jsh)             | Opens the isolated shell and dispatches runtime, install, update, and reload commands. |
 | [`jssh`](bin/jssh)           | Opens an ephemeral Jsh shell on a Linux host over SSH.                                 |
 | [`jstow`](bin/jstow)         | Provides a Bash implementation of GNU Stow for deploying and removing dotfile links.   |
+| [`jventoy`](bin/jventoy)     | Initializes and updates bootable ISO images on Ventoy drives.                          |
 | [`jvim`](bin/jvim)           | Runs Neovim with Jsh-local data and cache directories, with Vim or Vi as fallbacks.    |
 | [`kubecolor`](bin/kubecolor) | Colorizes interactive `kubectl` output while preserving machine-readable formats.      |
 | [`kubectx`](bin/kubectx)     | Lists, switches, renames, and removes Kubernetes contexts.                             |

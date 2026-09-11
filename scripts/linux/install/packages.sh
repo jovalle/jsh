@@ -23,7 +23,7 @@ NATIVE_PACKAGES=(
   git-lfs gitleaks gnome-keyring gnupg go grep grc helm helmfile hugo jq k9s kubectl
   libarchive libnotify make markdownlint-cli mpv ncdu net-tools nfs-utils
   nmap ntfs-3g nvme-cli openssh parallel pipewire-pulse pnpm podman pre-commit
-  prettier procps-ng python autopep8 python-black python-poetry
+  prettier procps-ng autopep8 python-black python-poetry
   python-pylint readline reflector ripgrep rsync rust s-tui shellcheck shfmt sops
   speedtest-cli sqlite sshpass stow syncthing tar tmux
   ttf-jetbrains-mono-nerd unzip uv wireplumber xbindkeys xclip xdg-utils

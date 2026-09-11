@@ -1,4 +1,4 @@
-CHECK_TARGETS := check-script-headers check-shell-syntax check-zsh-syntax check-python-syntax \
+CHECK_TARGETS := check-script-headers check-readme check-shell-syntax check-zsh-syntax check-python-syntax \
 	check-yaml-syntax check-json-syntax lint-shell lint-python \
 	lint-yaml lint-markdown lint-js
 FORMAT_TARGETS := format-shell format-python format-yaml format-json format-markdown
@@ -218,6 +218,23 @@ check-script-headers: # Check setup script headers
 		jsh_success "Setup script headers are standardized"; \
 	else \
 		jsh_error "Found $$errors setup script header error(s)"; \
+		exit 1; \
+	fi
+
+check-readme: # Check that every included command is documented
+	@$(OUTPUT) jsh_info "Checking README bin coverage..."
+	@$(OUTPUT) errors=0; \
+	for file in bin/*; do \
+		[ -f "$$file" ] || continue; \
+		if ! grep -Fq "](bin/$${file#bin/})" README.md; then \
+			jsh_error "Missing README entry: $$file"; \
+			errors=$$((errors + 1)); \
+		fi; \
+	done; \
+	if [ $$errors -eq 0 ]; then \
+		jsh_success "All included commands are documented"; \
+	else \
+		jsh_error "Found $$errors undocumented command(s)"; \
 		exit 1; \
 	fi
 

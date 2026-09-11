@@ -265,6 +265,34 @@ install_prerequisites() {
   fi
 }
 
+install_python_runtime() {
+  if command -v python3 > /dev/null 2>&1; then
+    jsh_success "Python 3 is already installed."
+    return
+  fi
+
+  jsh_note "Python 3 is required by included commands such as httpstat and jventoy."
+  if ! confirm "Install Python 3 now?"; then
+    jsh_note "Skipped Python 3 installation."
+    return
+  fi
+
+  if is_arch_family; then
+    install_arch_prerequisites python || return
+  else
+    load_brew
+    if ! command -v brew > /dev/null 2>&1; then
+      jsh_info "Homebrew is required to install Python 3."
+      /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" \
+        < "${TTY}" || return
+      load_brew
+    fi
+    brew list python > /dev/null 2>&1 || brew install python || return
+  fi
+
+  jsh_success "Python 3 is installed."
+}
+
 sync_submodules() {
   if ! confirm "Initialize and update Jsh submodules?"; then
     jsh_note "Skipped submodule initialization and update."
@@ -513,21 +541,24 @@ jsh_info "jsh install"
 jsh_detail "Install directory: ${JSH_DIR}"
 jsh_detail "Each phase explains its changes before it runs."
 
-heading "1/3" "Prerequisites" "Install Homebrew when needed, then ensure Git, Make, Zsh, and Bash 5 are available."
+heading "1/4" "Prerequisites" "Install Homebrew when needed, then ensure Git, Make, Zsh, and Bash 5 are available."
 if confirm "Run this phase?"; then
   install_prerequisites install 0
 else
   jsh_note "Skipped prerequisites."
 fi
 
-heading "2/3" "Repository" "Clone ${JSH_REPO}, or fast-forward an existing clean checkout."
+heading "2/4" "Repository" "Clone ${JSH_REPO}, or fast-forward an existing clean checkout."
 if confirm "Run this phase?"; then
   sync_repository
 else
   jsh_note "Skipped repository sync."
 fi
 
-heading "3/3" "System setup" "Deploy dotfiles, install packages, then run the conversational configuration scripts for this platform."
+heading "3/4" "Python 3 runtime" "Install Python 3 when needed by included commands such as httpstat and jventoy."
+install_python_runtime
+
+heading "4/4" "System setup" "Deploy dotfiles, install packages, then run the conversational configuration scripts for this platform."
 if confirm "Run this phase?"; then
   jsh_blank
   setup_system
