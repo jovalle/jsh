@@ -731,6 +731,7 @@ if has aws; then
   alias awsw='aws sts get-caller-identity'
   alias awsp='export AWS_PROFILE=$(aws configure list-profiles | fzf)'
 fi
+has fabric-ai && alias f='fabric-ai'
 has lazygit && alias lg='lazygit'
 has lazydocker && alias lzd='lazydocker'
 has k9s && alias k9='k9s'
@@ -1834,9 +1835,6 @@ source "${JSH}/lib/zsh/prompt.zsh"
 # ============================================================================
 # 9. PATH PRIORITIZATION / DEDUPLICATION
 # ============================================================================
-
-# Paths - ORDER MATTERS (priority: local > jsh > go > cargo)
-export PATH=${HOME}/.local/bin:${JSH}/bin:${FZF_BASE}/bin:${HOME}/go/bin:${PATH}:${HOME}/.cargo/bin
 
 # Function to remove duplicate PATH entries while preserving order
 dedup_path() {

@@ -52,7 +52,8 @@ DEBIAN_XFCE_PACKAGES=(
   xfce4-docklike-plugin xfce4-systemload-plugin xfce4-taskmanager xfce4-terminal
 )
 FLATPAK_APPLICATIONS=(
-  com.spotify.Client com.todoist.Todoist com.visualstudio.code net.waterfox.waterfox
+  com.spotify.Client com.todoist.Todoist com.visualstudio.code dev.zed.Zed
+  net.waterfox.waterfox
 )
 
 confirm() {
