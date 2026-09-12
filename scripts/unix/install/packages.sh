@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install Homebrew, Cargo, and npm packages.
+# Install Homebrew, Cargo, uv, and npm packages.
 
 set -euo pipefail
 
@@ -277,6 +277,45 @@ install_cargo_packages() {
   jsh_success "Cargo packages are installed."
 }
 
+uv_tool_installed() {
+  uv tool list | awk -v package="$1" '$1 == package { found = 1 } END { exit !found }'
+}
+
+install_uv_tools() {
+  local manifest=${JSH_ROOT}/conf/uv-tools.txt
+  local package
+  local -i installing=0
+  local -a packages=()
+
+  [[ -f "${manifest}" ]] || return 0
+  while IFS= read -r package || [[ -n "${package}" ]]; do
+    [[ -n "${package}" ]] && packages+=("${package}")
+  done < "${manifest}"
+
+  ((${#packages[@]} > 0)) || return 0
+  confirm "Install uv tools?" || {
+    jsh_note "Skipping uv tools."
+    return 0
+  }
+  command -v uv > /dev/null 2>&1 || {
+    jsh_error "uv is required by ${manifest}."
+    return 1
+  }
+
+  for package in "${packages[@]}"; do
+    claim_package uv "${package}" || continue
+    if [[ ${JSH_UPDATE:-0} != 1 ]] && uv_tool_installed "${package}"; then
+      continue
+    fi
+    if ((!installing)); then
+      jsh_info "Installing uv tools..."
+      installing=1
+    fi
+    uv tool install --upgrade "${package}"
+  done
+  jsh_success "uv tools are installed."
+}
+
 npm_package_installed() {
   npm list --global --depth=0 "$1" > /dev/null 2>&1
 }
@@ -345,6 +384,7 @@ main() {
   register_native_packages
   install_brew_packages "${package_scopes[@]}"
   install_cargo_packages
+  install_uv_tools
   install_npm_packages
 }
 
