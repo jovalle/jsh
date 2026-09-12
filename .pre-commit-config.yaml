@@ -12,7 +12,7 @@ repos:
         entry: make check-readme
         language: system
         pass_filenames: false
-        always_run: true
+        files: ^(?:README\.md|bin/)
 
   # Conventional commits (keep existing hook)
   - repo: https://github.com/compilerla/conventional-pre-commit

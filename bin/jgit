@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 ##% jgit
 ##+ git
-## identity [list|set NAME] ## Show, list, or set the repository identity
+## identity [list|set NAME] ## Choose, list, or set the repository identity
 ## identities ## List configured identities
-## profile [NAME|list] ## Show or apply a repository identity
+## profile [NAME|list] ## Choose or apply a repository identity
 ## profiles ## List configured identities
+## create NAME ## Create a Git project and select its identity
 ## commit [-t TIME] [ARGS...] ## Commit with an optional timestamp
 ## amend -t TIME [ARGS...] ## Amend the latest commit timestamp
 ## rewrite [--last N|REF...] ## Rewrite commit messages and timestamps
 ## update [--stash] [--all [DIR]] ## Fast-forward repositories from their upstreams
+## save [--exclude PATH]... ## Back up uncommitted changes to a secret gist
+## backup [--exclude PATH]... ## Alias for save
+## load [--exclude PATH]... ## Restore uncommitted changes from a secret gist
+## restore [--exclude PATH]... ## Alias for load
 ## @git-command ## Git command
 ##? identity list ## List configured identities
 ##? identity set ## Set the repository identity
@@ -18,6 +23,10 @@
 ##? update --stash ## Stash and restore local changes
 ##? update --all ## Update the base directory and immediate child repositories
 ##? update --all @directory ## Repository base directory
+##? save --exclude @path ## Exclude a repository-relative path
+##? backup --exclude @path ## Exclude a repository-relative path
+##? load --exclude @path ## Exclude a repository-relative path
+##? restore --exclude @path ## Exclude a repository-relative path
 
 set -euo pipefail
 
@@ -53,17 +62,22 @@ Run without arguments in a Git repository to show its status and identity.
 All unrecognized commands and options are passed directly to Git.
 
 Commands:
-  identity              Show the repository identity
+  identity              Choose the repository identity
   identity list         List configured identities
   identity set NAME     Set the repository identity
   profile [NAME|list]   Alias for identity commands
   profiles              Alias for identity list
+  create NAME           Create a Git project and select its identity
   commit [-t TIME]      Commit with a relative or absolute timestamp
   amend -t TIME         Amend the latest commit timestamp
   rewrite REF...        Rewrite selected commits by hash, tag, or other ref
   rewrite --last N      Rewrite the last N first-parent commits
   update [--stash]      Fast-forward the current branch from its upstream
   update --all [DIR]    Update repositories in DIR and its immediate children
+  save [--exclude PATH] Back up uncommitted changes to a secret gist
+  backup                 Alias for save
+  load [--exclude PATH] Restore uncommitted changes from a secret gist
+  restore                Alias for load
 
 Timestamp examples:
   +30m                  30 minutes after the latest commit
@@ -73,8 +87,16 @@ Timestamp examples:
 
 Relative offsets randomize unspecified lower-order time fields.
 
+Backup examples:
+  jgit save --exclude .env --exclude build
+  jgit load --exclude .env
+
+Backups preserve staged, unstaged, untracked, and recursive submodule changes.
+Secret gists are unlisted, not encrypted.
+
 Environment:
   JGIT_CONFIG           Profile file (default: conf/git.yaml)
+  JSH_PROJECT_DIR       Project directory (default: ~/projects)
 EOF
 }
 
@@ -433,6 +455,61 @@ _jgit_profile_list() {
   ((count > 0)) || _jgit_die "no profiles found in ${JGIT_CONFIG}"
 }
 
+_jgit_profile_choices() {
+  local preferred=$1 profile name email user label
+  if [[ -n ${preferred} ]] && _jgit_profile_exists "${preferred}"; then
+    name=$(_jgit_profile_field "${preferred}" name)
+    email=$(_jgit_profile_field "${preferred}" email)
+    user=$(_jgit_profile_field "${preferred}" user)
+    printf '%s\t%-16s %-24s %-36s %s\n' "${preferred}" "${preferred} *" "${name}" "${email}" "${user}"
+  fi
+  while IFS= read -r profile; do
+    [[ ${profile} != "${preferred}" ]] || continue
+    name=$(_jgit_profile_field "${profile}" name)
+    email=$(_jgit_profile_field "${profile}" email)
+    user=$(_jgit_profile_field "${profile}" user)
+    label=${profile}
+    printf '%s\t%-16s %-24s %-36s %s\n' "${profile}" "${label}" "${name}" "${email}" "${user}"
+  done < <(_jgit_profile_names)
+}
+
+_jgit_profile_select() {
+  local preferred=${1:-} selected answer
+  [[ -r ${JGIT_CONFIG} ]] || _jgit_die "profile config not found: ${JGIT_CONFIG}"
+  _jgit_profile_names | grep -q . || _jgit_die "no profiles found in ${JGIT_CONFIG}"
+
+  if command -v fzf > /dev/null 2>&1 && [[ -t 0 ]]; then
+    selected=$(_jgit_profile_choices "${preferred}" | fzf --height=40% --reverse --no-sort \
+      --prompt='profile> ' --header='PROFILE          NAME                     EMAIL                                USER' \
+      --delimiter=$'\t' --with-nth=2) || return 1
+    printf '%s\n' "${selected%%$'\t'*}"
+    return
+  fi
+
+  printf '%-16s %-24s %-36s %s\n' PROFILE NAME EMAIL USER >&2
+  _jgit_profile_choices "${preferred}" | cut -f2- >&2
+  if [[ -n ${preferred} ]]; then
+    jsh_prompt "Profile [${preferred}]: " >&2
+  else
+    jsh_prompt 'Profile: ' >&2
+  fi
+  read -r answer || return 1
+  selected=${answer:-${preferred}}
+  [[ -n ${selected} ]] || return 1
+  _jgit_profile_exists "${selected}" || _jgit_die "unknown profile: ${selected}"
+  printf '%s\n' "${selected}"
+}
+
+_jgit_profile_select_apply() {
+  local profile
+  git rev-parse --git-dir > /dev/null 2>&1 || _jgit_die 'not in a Git repository'
+  profile=$(_jgit_profile_select "$(_jgit_active_profile)") || {
+    jsh_warn 'Profile selection cancelled'
+    return 1
+  }
+  _jgit_profile_apply "${profile}"
+}
+
 _jgit_profile_apply() {
   local profile=$1 name email ssh_key key_path expanded_key ssh_command
   git rev-parse --git-dir > /dev/null 2>&1 || _jgit_die 'not in a Git repository'
@@ -459,7 +536,7 @@ _jgit_profile_apply() {
 
 _jgit_profile_command() {
   case ${1:-} in
-    '') _jgit_profile_status ;;
+    '') _jgit_profile_select_apply ;;
     list | ls) _jgit_profile_list ;;
     set)
       [[ -n ${2:-} ]] || _jgit_die 'profile set requires a profile name'
@@ -472,7 +549,7 @@ _jgit_profile_command() {
 
 _jgit_identity_command() {
   case ${1:-} in
-    '') _jgit_profile_status ;;
+    '') _jgit_profile_select_apply ;;
     list | ls) _jgit_profile_list ;;
     set)
       [[ -n ${2:-} ]] || _jgit_die 'identity set requires a profile name'
@@ -486,6 +563,34 @@ _jgit_identity_command() {
       ;;
     *) _jgit_profile_apply "$1" ;;
   esac
+}
+
+_jgit_create() {
+  local name project_root project_path preferred profile
+  (($# == 1)) || _jgit_die 'create requires one project name'
+  name=$1
+  case ${name} in
+    '' | . | .. | -* | */*) _jgit_die "invalid project name: ${name}" ;;
+  esac
+
+  project_root=$(_jgit_expand_home "${JSH_PROJECT_DIR:-~/projects}")
+  project_path=${project_root%/}/${name}
+  [[ ! -e ${project_path} && ! -L ${project_path} ]] || _jgit_die "project already exists: ${project_path}"
+  preferred=$(_jgit_active_profile)
+
+  mkdir -p "${project_root}"
+  mkdir "${project_path}"
+  git -C "${project_path}" init
+
+  profile=$(_jgit_profile_select "${preferred}") || {
+    jsh_warn "Profile selection cancelled; repository kept at ${project_path}"
+    return 1
+  }
+  (
+    cd "${project_path}"
+    _jgit_profile_apply "${profile}"
+  )
+  jsh_success "Created Git project ${project_path}"
 }
 
 _jgit_is_gnu_date() {
@@ -1124,6 +1229,10 @@ case ${1:-} in
     shift
     _jgit_profile_list "$@"
     ;;
+  create)
+    shift
+    _jgit_create "$@"
+    ;;
   commit)
     shift
     _jgit_commit "$@"
@@ -1147,6 +1256,18 @@ case ${1:-} in
   update)
     shift
     _jgit_update "$@"
+    ;;
+  save | backup)
+    shift
+    # shellcheck source=/dev/null
+    . "${JSH_ROOT}/lib/backup.sh"
+    _jgit_backup_save "$@"
+    ;;
+  load | restore)
+    shift
+    # shellcheck source=/dev/null
+    . "${JSH_ROOT}/lib/backup.sh"
+    _jgit_backup_load "$@"
     ;;
   *) exec git "$@" ;;
 esac

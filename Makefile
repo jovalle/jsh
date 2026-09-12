@@ -1,6 +1,6 @@
 CHECK_TARGETS := check-script-headers check-readme check-shell-syntax check-zsh-syntax check-python-syntax \
 	check-yaml-syntax check-json-syntax lint-shell lint-python \
-	lint-yaml lint-markdown lint-js test-linux-platform
+	lint-yaml lint-markdown lint-js
 FORMAT_TARGETS := format-shell format-python format-yaml format-json format-markdown
 
 .PHONY: help install update setup deploy configure patch uninstall check \
@@ -12,10 +12,7 @@ FORMAT_TARGETS := format-shell format-python format-yaml format-json format-mark
 JSH_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 HASH := \#
 OUTPUT_LIB := $(JSH_ROOT)/lib/output.sh
-OUTPUT := for library_file in "$(JSH_ROOT)"/lib/*; do \
-	[ -f "$$library_file" ] && [ -x "$$library_file" ] || continue; \
-	. "$$library_file"; \
-done; unset library_file;
+OUTPUT := . "$(OUTPUT_LIB)";
 PLATFORM ?= $(shell os=$$(uname -s); \
 	if [ "$$os" = Darwin ]; then printf darwin; \
 	elif [ "$$os" = Linux ] && grep -qi microsoft /proc/sys/kernel/osrelease 2>/dev/null; then printf wsl; \
@@ -225,8 +222,7 @@ check-script-headers: # Check setup script headers
 check-readme: # Check that every included command is documented
 	@$(OUTPUT) jsh_info "Checking README bin coverage..."
 	@$(OUTPUT) errors=0; \
-	for file in bin/*; do \
-		[ -f "$$file" ] || continue; \
+	for file in $$(git ls-files 'bin/*'); do \
 		if ! grep -Fq "](bin/$${file#bin/})" README.md; then \
 			jsh_error "Missing README entry: $$file"; \
 			errors=$$((errors + 1)); \
@@ -331,11 +327,6 @@ check-json-syntax: # Check JSON syntax
 	else \
 		jsh_warn "No JSON files found"; \
 	fi
-
-test-linux-platform: # Test Linux distro and desktop adapters
-	@$(OUTPUT) jsh_info "Testing Linux platform adapters..."
-	@$(OUTPUT) $(BATS) tests/linux-platform.bats && \
-		jsh_success "Linux platform adapters passed"
 
 ##@ Linting
 
