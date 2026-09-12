@@ -46,9 +46,12 @@ validate_waterfox_config() {
       and ([.addons[].id] | length == (unique | length))
       and all(.addons[];
         ((keys - ["autoUpdate", "dataCollection", "enabled", "fileAccess", "id",
-          "name", "origins", "permissions", "pinned", "privateBrowsing"]) | length == 0)
+          "installUrl", "name", "origins", "permissions", "pinned",
+          "privateBrowsing"]) | length == 0)
         and (.id | type == "string" and length > 0 and contains("/") == false)
         and (.name | type == "string" and length > 0)
+        and ((has("installUrl") | not) or (.installUrl | type == "string"
+          and test("^https://addons[.]mozilla[.]org/firefox/downloads/latest/[^/]+/latest[.]xpi$")))
         and ((has("enabled") | not) or (.enabled | type == "boolean"))
         and ((has("pinned") | not) or (.pinned | type == "boolean"))
         and ((has("privateBrowsing") | not) or (.privateBrowsing | type == "boolean"))

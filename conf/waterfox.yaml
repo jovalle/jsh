@@ -1,4 +1,8 @@
 addons:
+  - id: "@unitedstatesenglishdictionary"
+    installUrl: "https://addons.mozilla.org/firefox/downloads/latest/us-english-dictionary/latest.xpi"
+    name: English United States Dictionary
+
   - id: CanvasBlocker@kkapsner.de
     name: CanvasBlocker
     privateBrowsing: true
@@ -41,9 +45,21 @@ addons:
   - id: enhancerforyoutube@maximerf.addons.mozilla.org
     name: Enhancer for YouTube
 
+  - id: es-MX@dictionaries.addons.mozilla.org
+    installUrl: "https://addons.mozilla.org/firefox/downloads/latest/diccionario-espanol-mexico/latest.xpi"
+    name: Diccionario español México
+
   - id: idcac-pub@guus.ninja
     name: I still don't care about cookies
     privateBrowsing: true
+
+  - id: langpack-en-US@firefox.mozilla.org
+    installUrl: "https://addons.mozilla.org/firefox/downloads/latest/english-us-language-pack/latest.xpi"
+    name: "Language: English (US)"
+
+  - id: langpack-es-MX@firefox.mozilla.org
+    installUrl: "https://addons.mozilla.org/firefox/downloads/latest/spanish-mexico-language-pack/latest.xpi"
+    name: "Language: Español (MX) (Spanish, Mexico)"
 
   - id: openmultipleurls@ustat.de
     name: Open Multiple URLs
