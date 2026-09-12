@@ -23,13 +23,13 @@ if [ "${JSH_BASH_RUNTIME:-0}" = 1 ]; then
 
   jsh() {
     case ${1:-} in
-      runtime | install | update)
+      runtime | install | update | repair)
         JSH_INSTALL_RETURN=1 JSH_BASH_RUNTIME=0 command "${JSH_ROOT}/bin/jsh" "$@" || return
         JSH_BASH_RUNTIME=1 exec "${JSH_BASH}" --noprofile --rcfile "${JSH_ROOT}/bin/jsh" -i
         ;;
       --yes)
         case ${2:-} in
-          runtime | install | update)
+          runtime | install | update | repair)
             JSH_INSTALL_RETURN=1 JSH_BASH_RUNTIME=0 command "${JSH_ROOT}/bin/jsh" "$@" || return
             JSH_BASH_RUNTIME=1 exec "${JSH_BASH}" --noprofile --rcfile "${JSH_ROOT}/bin/jsh" -i
             ;;
@@ -80,6 +80,143 @@ if ! JSH_ROOT=$(CDPATH='' cd -P "${launcher%/*}/.." 2> /dev/null && pwd -P); the
   exit 1
 fi
 
+jsh_health_issue() {
+  jsh_health_status fail "$1"
+  JSH_HEALTH_ISSUES="${JSH_HEALTH_ISSUES}${JSH_HEALTH_ISSUES:+
+}$1"
+}
+
+jsh_health_status() {
+  [ "${JSH_HEALTH_VERBOSE:-0}" -eq 1 ] || return 0
+  printf '  [%-4s] %s\n' "$1" "$2" >&2
+}
+
+jsh_health_path() {
+  health_label=$1
+  health_path=$2
+  health_kind=$3
+
+  case ${health_kind} in
+    directory) [ -d "${health_path}" ] ;;
+    executable) [ -x "${health_path}" ] ;;
+    readable) [ -r "${health_path}" ] ;;
+  esac || {
+    jsh_health_issue "${health_label} is missing or incomplete (expected ${health_path})."
+    return
+  }
+  jsh_health_status ok "${health_label}: ${health_path}"
+}
+
+jsh_fzf_healthy() {
+  if command -v fzf > /dev/null 2>&1; then
+    fzf --version > /dev/null 2>&1
+  elif [ -x "${JSH_ROOT}/local/vendor/fzf/bin/fzf" ]; then
+    "${JSH_ROOT}/local/vendor/fzf/bin/fzf" --version > /dev/null 2>&1
+  else
+    return 1
+  fi
+}
+
+jsh_health_check() {
+  JSH_HEALTH_ISSUES=
+  JSH_HEALTH_VERBOSE=${1:-0}
+
+  [ "${JSH_HEALTH_VERBOSE}" -eq 0 ] || printf 'jsh: checking startup health...\n' >&2
+
+  if health_command=$(command -v git 2> /dev/null); then
+    jsh_health_status ok "Git: ${health_command}"
+  else
+    jsh_health_issue 'Git is unavailable.'
+  fi
+  if health_command=$(command -v "${JSH_ZSH:-zsh}" 2> /dev/null); then
+    jsh_health_status ok "Zsh: ${health_command}"
+  else
+    jsh_health_issue 'Zsh is unavailable.'
+  fi
+
+  jsh_health_path 'fzf submodule' "${JSH_ROOT}/local/vendor/fzf/install" executable
+  jsh_health_path 'fzf-tab submodule' "${JSH_ROOT}/local/vendor/fzf-tab/fzf-tab.plugin.zsh" readable
+  jsh_health_path 'zsh-autosuggestions submodule' "${JSH_ROOT}/local/vendor/zsh-autosuggestions/zsh-autosuggestions.zsh" readable
+  jsh_health_path 'zsh-completions submodule' "${JSH_ROOT}/local/vendor/zsh-completions/src" directory
+  jsh_health_path 'zsh-syntax-highlighting submodule' "${JSH_ROOT}/local/vendor/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" readable
+
+  if health_fzf=$(command -v fzf 2> /dev/null); then
+    if health_version=$("${health_fzf}" --version 2> /dev/null); then
+      jsh_health_status ok "fzf: ${health_version} (${health_fzf})"
+    else
+      jsh_health_issue "The fzf executable cannot run (${health_fzf})."
+    fi
+  elif [ -x "${JSH_ROOT}/local/vendor/fzf/bin/fzf" ]; then
+    health_fzf=${JSH_ROOT}/local/vendor/fzf/bin/fzf
+    if health_version=$("${health_fzf}" --version 2> /dev/null); then
+      jsh_health_status ok "fzf: ${health_version} (${health_fzf})"
+    else
+      jsh_health_issue "The vendored fzf executable cannot run (${health_fzf})."
+    fi
+  else
+    jsh_health_issue "The fzf executable is missing (expected ${JSH_ROOT}/local/vendor/fzf/bin/fzf or fzf in PATH)."
+  fi
+
+  if command -v git > /dev/null 2>&1 && [ -e "${JSH_ROOT}/.git" ]; then
+    if submodule_status=$(git -C "${JSH_ROOT}" submodule status --recursive 2> /dev/null); then
+      if printf '%s\n' "${submodule_status}" | grep -Eq '^[-+U]'; then
+        jsh_health_issue 'One or more Jsh submodules are not at their pinned revisions.'
+      else
+        jsh_health_status ok 'Pinned submodule revisions'
+      fi
+    else
+      jsh_health_issue 'Jsh submodule status could not be read.'
+    fi
+  else
+    jsh_health_status skip 'Pinned submodule revisions (Git checkout unavailable)'
+  fi
+
+  if [ -z "${JSH_HEALTH_ISSUES}" ]; then
+    [ "${JSH_HEALTH_VERBOSE}" -eq 0 ] || printf 'jsh: startup health check passed.\n' >&2
+    return 0
+  fi
+  [ "${JSH_HEALTH_VERBOSE}" -eq 0 ] || printf 'jsh: startup health check failed.\n' >&2
+  return 1
+}
+
+jsh_health_report() {
+  printf 'jsh: health check found problems:\n' >&2
+  printf '%s\n' "${JSH_HEALTH_ISSUES}" | while IFS= read -r issue; do
+    printf '  - %s\n' "${issue}" >&2
+  done
+  printf 'Run `jsh repair` to try to fix them, or set JSH_SKIP_HEALTH_CHECK=1 to silence this check.\n' >&2
+}
+
+jsh_repair() {
+  repair_failed=0
+
+  if command -v git > /dev/null 2>&1 && [ -e "${JSH_ROOT}/.git" ]; then
+    printf 'jsh: synchronizing submodules...\n'
+    git -C "${JSH_ROOT}" submodule sync --recursive &&
+      git -C "${JSH_ROOT}" submodule update --init --recursive || repair_failed=1
+  else
+    printf 'jsh: Git is required to repair submodules. Run `jsh runtime` first.\n' >&2
+    repair_failed=1
+  fi
+
+  if ! jsh_fzf_healthy; then
+    if [ -x "${JSH_ROOT}/local/vendor/fzf/install" ]; then
+      printf 'jsh: installing the vendored fzf executable...\n'
+      "${JSH_ROOT}/local/vendor/fzf/install" --bin || repair_failed=1
+    else
+      printf 'jsh: fzf cannot be installed until its submodule is initialized.\n' >&2
+      repair_failed=1
+    fi
+  fi
+
+  if [ "${repair_failed}" -eq 0 ] && jsh_health_check 1; then
+    return 0
+  fi
+
+  jsh_health_check 1 || jsh_health_report
+  return 1
+}
+
 assume_yes=
 if [ "${1:-}" = --yes ]; then
   assume_yes=$1
@@ -97,18 +234,31 @@ if [ "${1:-}" = runtime ] || [ "${1:-}" = install ] || [ "${1:-}" = update ]; th
   exec "${JSH_ROOT}/j.sh" "${action}" "$@"
 fi
 
+if [ "${1:-}" = repair ]; then
+  shift
+  if [ "$#" -ne 0 ]; then
+    printf 'jsh: repair does not accept arguments\n' >&2
+    exit 2
+  fi
+  jsh_repair
+  exit $?
+fi
+
 usage() {
   cat <<'EOF'
 Usage: jsh [zsh-options]
   jsh [--yes] runtime
   jsh [--yes] install
   jsh [--yes] update
+  jsh repair
 
 Open an isolated J shell environment.
 Run jsh runtime to install a persistent command without deploying managed dotfiles.
 Run jsh install to install packages, deploy dotfiles, and configure the system.
 Run jsh update to update the repository, dependencies, packages, and configuration.
+Run jsh repair to initialize submodules and install the vendored fzf executable.
 Use --yes to accept setup workflow prompts.
+Set JSH_SKIP_HEALTH_CHECK=1 to suppress startup health checks.
 Inside an active J shell, run jsh -r after configuration changes.
 EOF
 }
@@ -140,8 +290,41 @@ case ${1:-} in
 esac
 export JSH_ROOT JSH_RUNTIME_DIR JSH_ZSH ZDOTDIR
 
+jsh_interactive=0
+jsh_command=0
 if [ "$#" -eq 0 ]; then
+  jsh_interactive=1
   set -- -i
+else
+  for jsh_option do
+    case ${jsh_option} in
+      --) break ;;
+      --interactive) jsh_interactive=1 ;;
+      --nointeractive) jsh_interactive=0 ;;
+      --*) ;;
+      -*)
+        jsh_flags=${jsh_option#-}
+        case ${jsh_flags} in *i*) jsh_interactive=1 ;; esac
+        case ${jsh_flags} in *c*) jsh_command=1 ;; esac
+        ;;
+      +*)
+        jsh_flags=${jsh_option#+}
+        case ${jsh_flags} in *i*) jsh_interactive=0 ;; esac
+        ;;
+    esac
+  done
+fi
+
+if [ "${jsh_interactive}" -eq 1 ] && [ "${jsh_command}" -eq 0 ] &&
+  [ "${JSH_SKIP_HEALTH_CHECK:-0}" != 1 ] && ! jsh_health_check 1; then
+  jsh_health_report
+  if [ -t 0 ] && [ -t 1 ]; then
+    printf 'Try to repair these problems now? [y/N] ' >&2
+    IFS= read -r repair_answer
+    case ${repair_answer} in
+      y | Y | yes | YES) jsh_repair || true ;;
+    esac
+  fi
 fi
 
 exec "${JSH_ZSH}" -d "$@"

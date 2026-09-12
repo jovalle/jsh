@@ -232,7 +232,7 @@ _j_query() {
   (( $# != 1 )) || exact_query=$(_j_lowercase "$1")
 
   while IFS='|' read -r score candidate; do
-    [[ -n ${candidate} && -d ${candidate} && ${candidate} != ${PWD} ]] || continue
+    [[ -n ${candidate} && -d ${candidate} ]] || continue
     if (( $# == 0 )) || _j_matches "${candidate}" "$@"; then
       line="${score}|${candidate}"$'\n'
       if [[ -n ${exact_query} && $(_j_lowercase "${candidate:t}") == ${exact_query} ]]; then

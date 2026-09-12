@@ -64,6 +64,9 @@ export XDG_CONFIG_HOME="${HOME}/.config"         # Wwhere apps should store conf
 export JSH_VENDOR="${JSH}/local/vendor"
 export FZF_BASE="${JSH}/local/vendor/fzf"
 
+# Paths - ORDER MATTERS (priority: local > jsh > vendored fzf > go > cargo)
+export PATH=${HOME}/.local/bin:${JSH}/bin:${FZF_BASE}/bin:${HOME}/go/bin:${PATH}:${HOME}/.cargo/bin
+
 # Terminal optimizations
 export LESS="-RXE"                          # No wrapping, no clearing, exit on EOF
 setopt NO_PROMPT_CR                         # Don't add CR before prompt
@@ -1865,13 +1868,13 @@ dedup_path
 
 jsh() {
   case ${1:-} in
-    runtime|install|update)
+    runtime|install|update|repair)
       JSH_INSTALL_RETURN=1 command "${JSH}/bin/jsh" "$@" || return
       jsh reload
       ;;
     --yes)
       case ${2:-} in
-        runtime|install|update)
+        runtime|install|update|repair)
           JSH_INSTALL_RETURN=1 command "${JSH}/bin/jsh" "$@" || return
           jsh reload
           ;;

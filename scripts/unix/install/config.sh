@@ -27,6 +27,7 @@ main() {
 
 # JSH_PROMPT_MODE=nerdfont-v3
 # JSH_PROMPT_ASYNC=1
+# JSH_SKIP_HEALTH_CHECK=1
 EOF
   then
     jsh_success "Created sample configuration: ${destination}"
