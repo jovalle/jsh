@@ -358,6 +358,15 @@ prepare_policy() {
       protocol: .citrix.protocol,
       allowed_origins: .citrix.allowedOrigins
     }],
+    ExtensionSettings: (.addons
+      | map(select(has("installUrl")) | {
+          key: .id,
+          value: ({
+            installation_mode: "normal_installed",
+            install_url: .installUrl
+          } + if .autoUpdate == "off" then {updates_disabled: true} else {} end)
+        })
+      | from_entries),
     SearchEngines: {
       Default: .search.default,
       DefaultPrivate: .search.privateDefault
@@ -365,10 +374,16 @@ prepare_policy() {
   }')
   if [[ $(uname -s) == Darwin ]]; then
     merged=$(jq -c --argjson managed "${managed}" \
-      '.EnterprisePoliciesEnabled = true | . * $managed' <<< "${existing}")
+      'def merge_managed:
+        .ExtensionSettings = ((.ExtensionSettings // {}) * $managed.ExtensionSettings)
+        | . * ($managed | del(.ExtensionSettings));
+      .EnterprisePoliciesEnabled = true | merge_managed' <<< "${existing}")
   else
     merged=$(jq -c --argjson managed "${managed}" '
-      .policies = ((.policies // {}) * $managed)
+      def merge_managed:
+        .ExtensionSettings = ((.ExtensionSettings // {}) * $managed.ExtensionSettings)
+        | . * ($managed | del(.ExtensionSettings));
+      .policies = ((.policies // {}) | merge_managed)
     ' <<< "${existing}")
   fi
   current=$(jq -Sc . <<< "${existing}")
