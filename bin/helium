@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+##% helium
+## status ## Check whether Helium is patched
+## apply ## Upgrade and patch Helium
+## launch ## Verify and launch Helium
+## reset ## Reset the Helium profile
+## help ## Show help
+##? apply --quit ## Quit a running Helium instance before applying
+##? launch -- ## Pass remaining arguments to Helium
+##? reset --all ## Delete extension data during reset
+##? reset --force ## Skip reset confirmation
+
+set -euo pipefail
+
+readonly SCRIPT_NAME=${0##*/}
+case $0 in
+  /*) launcher=$0 ;;
+  *) launcher=${PWD}/$0 ;;
+esac
+
+if [[ -z ${JSH_ROOT:-} ]]; then
+  JSH_ROOT=$(CDPATH='' cd -P "${launcher%/*}/.." 2> /dev/null && pwd -P) || {
+    printf '%s: cannot locate the repository root\n' "${SCRIPT_NAME}" >&2
+    exit 1
+  }
+fi
+readonly JSH_ROOT
+readonly PATCH_SCRIPT="${JSH_ROOT}/scripts/darwin/patch/helium.sh"
+
+usage() {
+  cat << EOF
+Usage:
+  ${SCRIPT_NAME}
+  ${SCRIPT_NAME} status
+  ${SCRIPT_NAME} apply [--quit]
+  ${SCRIPT_NAME} launch [--] [BROWSER_ARGS...]
+  ${SCRIPT_NAME} reset [--all] [--force]
+
+Commands:
+  status  Check whether Helium is patched.
+  apply   Upgrade Helium and apply the patch.
+  launch  Verify the patch and launch Helium.
+  reset   Reset the profile, preserving extension data unless --all is used.
+
+With no command, apply the patch when needed. If Helium is already patched,
+prompt to launch it; the default is no.
+EOF
+}
+
+prompt_to_launch() {
+  local answer
+  [[ -t 0 ]] || return 0
+  printf 'Launch Helium? [y/N] ' >&2
+  IFS= read -r answer || answer=
+  case ${answer} in
+    [yY] | [yY][eE][sS]) exec "${PATCH_SCRIPT}" launch ;;
+    *) return 0 ;;
+  esac
+}
+
+[[ -x ${PATCH_SCRIPT} ]] || {
+  printf '%s: patch script is unavailable: %s\n' "${SCRIPT_NAME}" "${PATCH_SCRIPT}" >&2
+  exit 1
+}
+
+case ${1:-} in
+  '')
+    if "${PATCH_SCRIPT}" status; then
+      prompt_to_launch
+      exit 0
+    fi
+    exec "${PATCH_SCRIPT}" apply
+    ;;
+  -h | --help | help)
+    usage
+    ;;
+  status | apply | launch | reset)
+    exec "${PATCH_SCRIPT}" "$@"
+    ;;
+  *)
+    usage >&2
+    exit 64
+    ;;
+esac

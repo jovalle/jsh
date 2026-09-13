@@ -60,6 +60,7 @@ The [`bin/`](bin/) directory is added to `PATH` inside Jsh.
 | ---------------------------- | -------------------------------------------------------------------------------------- |
 | [`cafe`](bin/cafe)           | Keeps the system awake for a command or a specified duration.                          |
 | [`colours`](bin/colours)     | Prints the terminal's 256-color palette.                                               |
+| [`helium`](bin/helium)       | Applies, verifies, and launches a hardened Helium browser profile.                     |
 | [`httpstat`](bin/httpstat)   | HTTP(S) request visualizer.                                                            |
 | [`jbrew`](bin/jbrew)         | J-augmented {home,linux}brew command. Better cross-platform search and easy adoption.  |
 | [`jfetch`](bin/jfetch)       | J-augmented fastfetch-inspired command.                                                |
