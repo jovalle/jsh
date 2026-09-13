@@ -64,6 +64,7 @@ The [`bin/`](bin/) directory is added to `PATH` inside Jsh.
 | [`jbrew`](bin/jbrew)         | J-augmented {home,linux}brew command. Better cross-platform search and easy adoption.  |
 | [`jfetch`](bin/jfetch)       | J-augmented fastfetch-inspired command.                                                |
 | [`jgit`](bin/jgit)           | J-augmented git command.                                                               |
+| [`jgraphify`](bin/jgraphify) | Creates or incrementally updates Graphify data for a project.                          |
 | [`jsh`](bin/jsh)             | Opens the isolated shell and dispatches runtime, install, update, and reload commands. |
 | [`jssh`](bin/jssh)           | Opens an ephemeral Jsh shell on a Linux host over SSH.                                 |
 | [`jstow`](bin/jstow)         | Provides a Bash implementation of GNU Stow for deploying and removing dotfile links.   |
