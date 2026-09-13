@@ -511,7 +511,7 @@ _jgit_profile_select_apply() {
 }
 
 _jgit_profile_apply() {
-  local profile=$1 name email ssh_key key_path expanded_key ssh_command
+  local profile=$1 show_status=${2:-1} name email ssh_key key_path expanded_key ssh_command
   git rev-parse --git-dir > /dev/null 2>&1 || _jgit_die 'not in a Git repository'
   [[ -r ${JGIT_CONFIG} ]] || _jgit_die "profile config not found: ${JGIT_CONFIG}"
   _jgit_profile_exists "${profile}" || _jgit_die "unknown profile: ${profile}"
@@ -531,7 +531,9 @@ _jgit_profile_apply() {
   git config --local user.email "${email}"
   git config --local core.sshCommand "${ssh_command}"
   jsh_success "Applied Git profile '${profile}'"
-  _jgit_profile_status
+  if ((show_status)); then
+    _jgit_profile_status
+  fi
 }
 
 _jgit_profile_command() {
@@ -588,7 +590,7 @@ _jgit_create() {
   }
   (
     cd "${project_path}"
-    _jgit_profile_apply "${profile}"
+    _jgit_profile_apply "${profile}" 0
   )
   jsh_success "Created Git project ${project_path}"
 }

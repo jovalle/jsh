@@ -2,7 +2,7 @@
 
 # Human output uses cyan for activity, dim gray for notes and skips, green
 # checks for success, yellow for warnings, and red crosses for errors. Prompts
-# use cyan without a status mark. Emitters terminate one record; composing
+# use yellow without a status mark. Emitters terminate one record; composing
 # callers use jsh_blank between blocks, never before the first or after the
 # last. Keep structured data, command output, and generated files raw.
 
@@ -67,7 +67,7 @@ jsh_error() {
 
 jsh_prompt() {
   if jsh_color_enabled 1; then
-    printf '\033[36m%s\033[0m' "$*"
+    printf '\033[33m%s\033[0m' "$*"
   else
     printf '%s' "$*"
   fi
