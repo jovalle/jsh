@@ -48,7 +48,7 @@ if ! declare -F jsh_error > /dev/null; then
   jsh_error() { jsh_stderr 31 '✗ ' "$*"; }
   jsh_prompt() {
     if jsh_color_enabled 1; then
-      printf '\033[36m%s\033[0m' "$*"
+      printf '\033[33m%s\033[0m' "$*"
     else
       printf '%s' "$*"
     fi

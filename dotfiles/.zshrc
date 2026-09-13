@@ -1864,6 +1864,19 @@ dedup_path
 # 10. SHELL LIFECYCLE
 # ============================================================================
 
+jgit() {
+  local project_root=${JSH_PROJECT_DIR:-${HOME}/projects}
+  [[ ${project_root} != '~' ]] || project_root=${HOME}
+  [[ ${project_root} != '~/'* ]] || project_root=${HOME}/${project_root#\~/}
+  if [[ ${1:-} == create && $# == 2 && -d ${project_root%/}/$2 ]]; then
+    builtin cd -- "${project_root%/}/$2"
+    return
+  fi
+  command "${JSH}/bin/jgit" "$@" || return
+  [[ ${1:-} == create && $# == 2 ]] || return 0
+  builtin cd -- "${project_root%/}/$2"
+}
+
 jsh() {
   case ${1:-} in
     runtime|install|update|repair)
