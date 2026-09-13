@@ -338,7 +338,7 @@ prepare_policy() {
   local existing managed merged current
   POLICY_CHANGED=0
   POLICY_TARGET=$(policy_target) || {
-    jsh_note "Skipping Waterfox Citrix policy: browser executable not found."
+    jsh_note "Skipping Waterfox policy: browser executable not found."
     return
   }
   existing='{}'
@@ -358,6 +358,7 @@ prepare_policy() {
       protocol: .citrix.protocol,
       allowed_origins: .citrix.allowedOrigins
     }],
+    HttpAllowlist: ["http://go"],
     ExtensionSettings: (.addons
       | map(select(has("installUrl")) | {
           key: .id,
@@ -409,7 +410,7 @@ run_root() {
 install_policy() {
   local target_dir
   ((POLICY_CHANGED)) || {
-    [[ -z ${POLICY_TARGET} ]] || jsh_success "Waterfox Citrix policy current."
+    [[ -z ${POLICY_TARGET} ]] || jsh_success "Waterfox policy current."
     return
   }
   backup_file "${POLICY_TARGET}" policy
@@ -423,7 +424,7 @@ install_policy() {
     run_root install -d -- "${target_dir}"
     run_root install -m 0644 -- "${POLICY_SOURCE}" "${POLICY_TARGET}"
   fi
-  jsh_success "Waterfox Citrix policy updated."
+  jsh_success "Waterfox policy updated."
 }
 
 check_update() {
