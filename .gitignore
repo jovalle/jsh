@@ -69,6 +69,7 @@ __pycache__
 bh_unicode_properties.cache
 dotfiles/.config/gh/
 git.yaml
+graphify-out/
 node_modules/
 oscrypto-ca-bundle.crt
 sftp-config.json

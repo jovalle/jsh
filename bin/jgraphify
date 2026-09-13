@@ -1,0 +1,154 @@
+#!/usr/bin/env bash
+##% jgraphify
+## @directory ## Project directory
+
+set -euo pipefail
+
+readonly SCRIPT_NAME=${0##*/}
+
+case $0 in
+  /*) launcher=$0 ;;
+  *) launcher=${PWD}/$0 ;;
+esac
+
+if [[ -z ${JSH_ROOT:-} ]]; then
+  JSH_ROOT=$(CDPATH='' cd -P "${launcher%/*}/.." 2> /dev/null && pwd -P) || {
+    printf '%s: cannot locate the repository root\n' "${SCRIPT_NAME}" >&2
+    exit 1
+  }
+fi
+
+for library_file in "${JSH_ROOT}"/lib/*; do
+  [[ -f ${library_file} && -x ${library_file} ]] || continue
+  # shellcheck source=/dev/null
+  . "${library_file}"
+done
+unset library_file
+
+usage() {
+  cat << EOF
+Usage: ${SCRIPT_NAME} [DIRECTORY] [GRAPHIFY_OPTIONS...]
+
+Create or incrementally update Graphify data for a project. DIRECTORY defaults
+to the current working directory. Without --backend, configured API keys choose
+the backend automatically or open a selector when several are available.
+Additional options are passed to "graphify extract" and must follow DIRECTORY.
+
+Examples:
+  ${SCRIPT_NAME}
+  ${SCRIPT_NAME} ~/projects/example
+  ${SCRIPT_NAME} . --mode deep
+  ${SCRIPT_NAME} . --code-only --no-cluster
+EOF
+}
+
+die() {
+  jsh_error "$*"
+  exit 1
+}
+
+case ${1:-} in
+  -h | --help | help)
+    usage
+    exit 0
+    ;;
+  *) ;;
+esac
+
+project=.
+if (($#)) && [[ $1 != -* ]]; then
+  project=$1
+  shift
+fi
+
+[[ -d ${project} ]] || die "Not a directory: ${project}"
+project=$(CDPATH='' cd -P "${project}" 2> /dev/null && pwd -P) ||
+  die "Cannot access directory: ${project}"
+
+graphify_bin=$(command -v graphify 2> /dev/null) ||
+  die "Graphify is unavailable. Install it with: uv tool install graphifyy"
+
+backend_explicit=0
+code_only=0
+arguments=("$@")
+for ((index = 0; index < ${#arguments[@]}; index++)); do
+  case ${arguments[index]} in
+    --backend)
+      ((index + 1 < ${#arguments[@]})) || die '--backend requires a value'
+      backend_explicit=1
+      index=$((index + 1))
+      ;;
+    --backend=*) backend_explicit=1 ;;
+    --code-only) code_only=1 ;;
+    *) ;;
+  esac
+done
+
+if ((backend_explicit == 0 && code_only == 0)); then
+  backend_choices=()
+  [[ -z ${GEMINI_API_KEY:-}${GOOGLE_API_KEY:-} ]] ||
+    backend_choices+=(gemini 'Gemini (GEMINI_API_KEY or GOOGLE_API_KEY)')
+  [[ -z ${ANTHROPIC_API_KEY:-} ]] ||
+    backend_choices+=(claude 'Claude (ANTHROPIC_API_KEY)')
+  [[ -z ${OPENAI_API_KEY:-} ]] ||
+    backend_choices+=(openai 'OpenAI (OPENAI_API_KEY)')
+  [[ -z ${DEEPSEEK_API_KEY:-} ]] ||
+    backend_choices+=(deepseek 'DeepSeek (DEEPSEEK_API_KEY)')
+  [[ -z ${MOONSHOT_API_KEY:-} ]] ||
+    backend_choices+=(kimi 'Kimi (MOONSHOT_API_KEY)')
+  if [[ -n ${AZURE_OPENAI_API_KEY:-} && -n ${AZURE_OPENAI_ENDPOINT:-} ]]; then
+    backend_choices+=(azure 'Azure OpenAI (AZURE_OPENAI_API_KEY)')
+  fi
+
+  backend_count=$((${#backend_choices[@]} / 2))
+  case ${backend_count} in
+    0)
+      jsh_warn 'No supported Graphify API key is configured.'
+      jsh_detail "Open an AI agent in ${project} and run: /graphify ." >&2
+      exit 1
+      ;;
+    1) backend=${backend_choices[0]} ;;
+    *)
+      command -v fzf > /dev/null 2>&1 ||
+        die 'Multiple Graphify backends are available, but fzf is unavailable. Pass --backend NAME.'
+      [[ -t 0 ]] ||
+        die 'Multiple Graphify backends are available. Pass --backend NAME in noninteractive use.'
+      selector_choices=
+      for ((index = 0; index < ${#backend_choices[@]}; index += 2)); do
+        selector_choices+=${backend_choices[index]}$'\t'${backend_choices[index + 1]}$'\n'
+      done
+      if ! backend=$(printf '%s' "${selector_choices}" | fzf --height=40% --reverse --no-sort \
+        --prompt='backend> ' --header='GRAPHIFY BACKEND' --delimiter=$'\t' --with-nth=2); then
+        die 'Graphify backend selection cancelled. Pass --backend NAME to select one explicitly.'
+      fi
+      backend=${backend%%$'\t'*}
+      ;;
+  esac
+  set -- "$@" --backend "${backend}"
+fi
+
+graph_file=${project}/graphify-out/graph.json
+manifest_file=${project}/graphify-out/manifest.json
+had_graph=0
+before_manifest=
+if [[ -s ${graph_file} ]]; then
+  had_graph=1
+  [[ ! -s ${manifest_file} ]] || before_manifest=$(cksum < "${manifest_file}")
+  jsh_info "Checking Graphify data for ${project}..."
+else
+  jsh_info "Creating Graphify data for ${project}..."
+fi
+
+"${graphify_bin}" extract "${project}" "$@"
+
+[[ -s ${graph_file} ]] || die "Graphify completed without producing ${graph_file}"
+
+after_manifest=
+[[ ! -s ${manifest_file} ]] || after_manifest=$(cksum < "${manifest_file}")
+if ((had_graph == 0)); then
+  jsh_success "Created ${graph_file}"
+elif [[ -n ${before_manifest} && ${before_manifest} == "${after_manifest}" ]]; then
+  jsh_success "Graphify data is current."
+else
+  jsh_success "Updated ${graph_file}"
+fi
