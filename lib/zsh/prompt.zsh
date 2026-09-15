@@ -45,6 +45,28 @@ case ${JSH_PROMPT_MODE:-nerdfont-v3} in
 		;;
 esac
 
+typeset -g _JSH_DISTRO_ID=linux
+if [[ ${OSTYPE} == linux* && -r ${JSH_OS_RELEASE:-/etc/os-release} ]]; then
+    while IFS='=' read -r key value; do
+        if [[ ${key} == ID ]]; then
+            _JSH_DISTRO_ID=${value//[\"\']/}
+            break
+        fi
+    done < "${JSH_OS_RELEASE:-/etc/os-release}"
+fi
+if [[ ${JSH_PROMPT_MODE:-nerdfont-v3} == nerdfont-v3 ]]; then
+    case ${_JSH_DISTRO_ID} in
+        debian) _JSH_PROMPT_ICON[linux]=$'\uf306' ;;
+        ubuntu) _JSH_PROMPT_ICON[linux]=$'\uf31b' ;;
+        arch|endeavouros|manjaro) _JSH_PROMPT_ICON[linux]=$'\uf303' ;;
+        fedora) _JSH_PROMPT_ICON[linux]=$'\uf30a' ;;
+        linuxmint) _JSH_PROMPT_ICON[linux]=$'\uf30e' ;;
+        opensuse*) _JSH_PROMPT_ICON[linux]=$'\uf314' ;;
+    esac
+else
+    _JSH_PROMPT_ICON[linux]=${_JSH_DISTRO_ID}
+fi
+
 typeset -ga JSH_PROMPT_LEFT JSH_PROMPT_RIGHT
 (( ${#JSH_PROMPT_LEFT} )) || JSH_PROMPT_LEFT=(os directory git)
 (( ${#JSH_PROMPT_RIGHT} )) || \
@@ -60,7 +82,7 @@ typeset -g JSH_PROMPT_KUBE=${JSH_PROMPT_KUBE:-auto}
 if [[ ${JSH_PLAIN_OUTPUT:-0} != 1 && ${JSH_COLOR:-auto} != never && \
 	-z ${NO_COLOR+x} && ${TERM:-dumb} != dumb ]]; then
 	typeset -g _JSH_C_RESET=$'%{\e[0m%}'
-	typeset -g _JSH_C_OS=''
+	typeset -g _JSH_C_OS=$'%{\e[1;97m%}'
 	typeset -g _JSH_C_DIR=$'%{\e[1;38;2;0;191;255m%}'
 	typeset -g _JSH_C_CLEAN=$'%{\e[38;2;95;255;0m%}'
 	typeset -g _JSH_C_MODIFIED=$'%{\e[38;2;255;215;0m%}'
