@@ -12,7 +12,21 @@ current_toolbar_state() {
 }
 
 waterfox_config_json() {
-  yq -o=json '.' "${WATERFOX_CONFIG}"
+  local config=${1:-${WATERFOX_CONFIG}}
+  local out
+  if out=$(yq -o=json '.' "${config}" 2> /dev/null); then
+    printf '%s\n' "${out}"
+    return 0
+  fi
+  yq '.' "${config}"
+}
+
+waterfox_json_to_yaml() {
+  if yq --version 2>&1 | grep -q 'mikefarah'; then
+    yq -P '.'
+  else
+    yq -y '.'
+  fi
 }
 
 validate_waterfox_config() {
@@ -51,7 +65,7 @@ validate_waterfox_config() {
         and (.id | type == "string" and length > 0 and contains("/") == false)
         and (.name | type == "string" and length > 0)
         and ((has("installUrl") | not) or (.installUrl | type == "string"
-          and test("^https://addons[.]mozilla[.]org/firefox/downloads/latest/[^/]+/latest[.]xpi$")))
+          and test("^https://addons[.]mozilla[.]org/firefox/downloads/(latest/[^/]+/latest[.]xpi|file/[0-9]+/[^/]+[.]xpi)$")))
         and ((has("enabled") | not) or (.enabled | type == "boolean"))
         and ((has("pinned") | not) or (.pinned | type == "boolean"))
         and ((has("privateBrowsing") | not) or (.privateBrowsing | type == "boolean"))
@@ -222,9 +236,22 @@ set_macos_url_handler() {
   [[ ${current} == "${bundle_id}" ]] || duti -s "${bundle_id}" "${scheme}"
 }
 
+set_linux_mime_handler() {
+  local desktop=$1 mime=$2
+  [[ $(xdg-mime query default "${mime}") == "${desktop}" ]] ||
+    xdg-mime default "${desktop}" "${mime}"
+}
+
 configure_associations() {
   local config desktop alternative application_dir citrix_bundle html_type ica_type
   local html_bundle http_bundle https_bundle citrix_ica citrix_receiver
+  local application_paths=(
+    "${XDG_DATA_HOME:-${HOME}/.local/share}/applications"
+    /usr/share/applications
+    /usr/local/share/applications
+    /var/lib/flatpak/exports/share/applications
+  )
+  local have_citrix_ica have_citrix_receiver path
   config=$(waterfox_config_json)
   if [[ $(uname -s) == Darwin ]]; then
     if ! command -v duti > /dev/null 2>&1; then
@@ -255,22 +282,33 @@ configure_associations() {
   alternative=$(jq -r '.associations.linux.browserDesktopAlternative' <<< "${config}")
   for association in html http https; do
     desktop=$(jq -r ".associations.linux.${association}Desktop" <<< "${config}")
-    if [[ ${desktop} == waterfox.desktop \
+    if [[ ${desktop} == waterfox.desktop && ! -r ${application_dir}/waterfox.desktop && ! -r /usr/share/applications/waterfox.desktop \
       && (-r ${application_dir}/${alternative} || -r /usr/share/applications/${alternative}) ]]; then
       desktop=${alternative}
     fi
     case ${association} in
-      html) xdg-mime default "${desktop}" text/html ;;
-      *) xdg-mime default "${desktop}" "x-scheme-handler/${association}" ;;
+      html) set_linux_mime_handler "${desktop}" text/html ;;
+      *) set_linux_mime_handler "${desktop}" "x-scheme-handler/${association}" ;;
     esac
   done
+  python3 "${JSH_ROOT}/lib/desktop_defaults.py" --browser "${desktop}"
   citrix_ica=$(jq -r '.associations.linux.citrixIcaDesktop' <<< "${config}")
   citrix_receiver=$(jq -r '.associations.linux.citrixReceiverDesktop' <<< "${config}")
-  if [[ -r ${application_dir}/${citrix_ica} ]]; then
-    xdg-mime default "${citrix_ica}" application/x-ica
+
+  have_citrix_ica=false
+  for path in "${application_paths[@]}"; do
+    [[ -r "${path}/${citrix_ica}" ]] && have_citrix_ica=true && break
+  done
+  if [[ ${have_citrix_ica} == true ]]; then
+    set_linux_mime_handler "${citrix_ica}" application/x-ica
   fi
-  if [[ -r ${application_dir}/${citrix_receiver} ]]; then
-    xdg-mime default "${citrix_receiver}" x-scheme-handler/receiver
+
+  have_citrix_receiver=false
+  for path in "${application_paths[@]}"; do
+    [[ -r "${path}/${citrix_receiver}" ]] && have_citrix_receiver=true && break
+  done
+  if [[ ${have_citrix_receiver} == true ]]; then
+    set_linux_mime_handler "${citrix_receiver}" x-scheme-handler/receiver
   fi
   jsh_success "Linux Waterfox and Citrix associations configured."
 }
@@ -456,7 +494,7 @@ write_active_waterfox_config() {
     | .search = $policy.search
     | .citrix = $policy.citrix
     | .associations = $associations
-  ' | yq -P '.' > "${output}"
+  ' | waterfox_json_to_yaml > "${output}"
 }
 
 write_active_preferences() {
@@ -527,7 +565,7 @@ show_waterfox_review() {
   WATERFOX_SETTINGS_DIFFER=0
 
   waterfox_config_json | jq -S . > "${current_config}"
-  yq -o=json '.' "${ACTIVE_WATERFOX_CONFIG}" | jq -S . > "${active_config}"
+  waterfox_config_json "${ACTIVE_WATERFOX_CONFIG}" | jq -S . > "${active_config}"
   write_preference_records "${WATERFOX_OVERRIDES}" > "${current_prefs}"
   write_preference_records "${ACTIVE_WATERFOX_PREFERENCES}" > "${active_prefs}"
   if [[ ${direction} == apply ]]; then
@@ -551,7 +589,7 @@ show_waterfox_review() {
     "${prefs_from}" "${prefs_to}" > "${prefs_diff}" || diff_status=$?
   [[ ${diff_status} -le 1 ]] || return "${diff_status}"
   if [[ ! -s ${config_diff} && ! -s ${prefs_diff} ]]; then
-    jsh_success "Waterfox managed state already matches."
+    jsh_note "Waterfox managed state already matches."
     return
   fi
   WATERFOX_SETTINGS_DIFFER=1
@@ -569,7 +607,7 @@ show_waterfox_review() {
 
 confirm_waterfox_review() {
   local action=$1 prompt
-  [[ ${JSH_CONFIGURE_ASSUME_YES:-0} != 1 ]] || return 0
+  [[ ${JSH_CONFIGURE_ASSUME_YES:-${JSH_ASSUME_YES:-0}} != 1 ]] || return 0
   case ${action} in
     apply) prompt='Apply this configuration to Waterfox?' ;;
     backup) prompt='Replace the managed Waterfox configuration with active values?' ;;
