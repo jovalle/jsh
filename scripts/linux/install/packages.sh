@@ -19,37 +19,43 @@ DISTRO_FAMILY=
 NATIVE_PACKAGES=()
 
 ARCH_PACKAGES=(
-  base-devel bash bzip2 ca-certificates cifs-utils curl desktop-file-utils dconf
-  dkms earlyoom flatpak git gnome-keyring gnupg libarchive libnotify make
+  base-devel bash bats bzip2 ca-certificates cargo cifs-utils curl desktop-file-utils dconf
+  dkms earlyoom eza fd flatpak git gnome-keyring gnupg jq libarchive libnotify make
   net-tools nfs-utils ntfs-3g nvme-cli openssh pipewire-pulse podman procps-ng
-  python readline rsync tar unzip wireplumber xbindkeys xclip xdg-utils
-  xorg-xrandr xz zram-generator zsh
+  python python-yaml readline ripgrep rsync tar unzip wireplumber xbindkeys xclip xdg-utils
+  xorg-xrandr xz yq zram-generator zsh
 )
 FEDORA_PACKAGES=(
-  bash bzip2 ca-certificates cifs-utils curl desktop-file-utils dconf dkms
-  earlyoom flatpak gcc gcc-c++ git gnome-keyring gnupg2 libarchive libnotify
+  bash bats bzip2 ca-certificates cargo cifs-utils curl desktop-file-utils dconf dkms
+  earlyoom eza fd-find flatpak gcc gcc-c++ git gnome-keyring gnupg2 jq libarchive libnotify
   make net-tools nfs-utils ntfs-3g nvme-cli openssh-clients openssh-server
-  pipewire-pulseaudio podman procps-ng python3 readline rsync tar unzip
-  wireplumber xbindkeys xclip xdg-utils xrandr xz zram-generator zsh
+  pipewire-pulseaudio podman procps-ng python3 python3-pyyaml readline ripgrep rsync tar unzip
+  wireplumber xbindkeys xclip xdg-utils xrandr xz yq zram-generator zsh
 )
 DEBIAN_PACKAGES=(
-  bash build-essential bzip2 ca-certificates cifs-utils curl desktop-file-utils
-  dconf-cli dkms earlyoom flatpak git gnome-keyring gnupg libarchive-tools
+  age ansible bat btop direnv fzf gh git-lfs golang-go grc hugo mpv ncdu netcat-openbsd nmap parallel python3-poetry sshpass stow syncthing tmux yamllint zoxide
+  bash bats build-essential bzip2 ca-certificates cargo cifs-utils curl desktop-file-utils
+  dconf-cli dkms earlyoom eza fd-find flatpak git gnome-keyring gnupg jq libarchive-tools
   libnotify-bin make net-tools nfs-common ntfs-3g nvme-cli openssh-client
-  openssh-server pipewire-pulse podman procps python3 rsync tar unzip wireplumber
-  xbindkeys xclip xdg-utils x11-xserver-utils xz-utils systemd-zram-generator zsh
+  openssh-server pipewire-pulse podman procps python3 python3-yaml ripgrep rsync tar unzip wireplumber
+  xbindkeys xclip xdg-utils x11-xserver-utils xz-utils yq systemd-zram-generator zsh
 )
 ARCH_XFCE_PACKAGES=(
-  xfce4-clipman-plugin xfce4-cpugraph-plugin xfce4-docklike-plugin
+  fontconfig xfce4-appfinder pavucontrol xfce4-clipman-plugin xfce4-cpugraph-plugin xfce4-docklike-plugin
+  xfce4-fsguard-plugin xfce4-genmon-plugin xfce4-netload-plugin xfce4-pulseaudio-plugin xfce4-screensaver
   xfce4-systemload-plugin xfce4-taskmanager xfce4-terminal
 )
 FEDORA_XFCE_PACKAGES=(
-  arc-theme xfce4-clipman-plugin xfce4-cpugraph-plugin
-  xfce4-docklike-plugin xfce4-systemload-plugin xfce4-taskmanager xfce4-terminal
+  fontconfig xfce4-appfinder arc-theme papirus-icon-theme pavucontrol xfce4-clipman-plugin xfce4-cpugraph-plugin
+  xfce4-docklike-plugin xfce4-fsguard-plugin xfce4-genmon-plugin xfce4-netload-plugin
+  xfce4-pulseaudio-plugin xfce4-screensaver xfce4-systemload-plugin
+  xfce4-taskmanager xfce4-terminal
 )
 DEBIAN_XFCE_PACKAGES=(
-  arc-theme xfce4-clipman-plugin xfce4-cpugraph-plugin
-  xfce4-docklike-plugin xfce4-systemload-plugin xfce4-taskmanager xfce4-terminal
+  fontconfig xfce4-appfinder arc-theme papirus-icon-theme pavucontrol xfce4-clipman-plugin xfce4-cpugraph-plugin
+  xfce4-docklike-plugin xfce4-fsguard-plugin xfce4-genmon-plugin xfce4-netload-plugin
+  xfce4-pulseaudio-plugin xfce4-screensaver xfce4-systemload-plugin
+  xfce4-taskmanager xfce4-terminal
 )
 FLATPAK_APPLICATIONS=(
   com.spotify.Client com.todoist.Todoist com.visualstudio.code dev.zed.Zed
@@ -61,7 +67,7 @@ confirm() {
   [[ ${JSH_ASSUME_YES:-0} == 1 ]] && return 0
   while :; do
     jsh_prompt "$1 [Y/n]: "
-    read -r answer || answer=
+    if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then answer=y; else read -r answer || answer=; fi
     case "${answer}" in
       '' | y | Y | yes | YES) return 0 ;;
       n | N | no | NO) return 1 ;;
@@ -101,7 +107,7 @@ package_installed() {
   case "${DISTRO_FAMILY}" in
     arch) pacman -Q "$1" > /dev/null 2>&1 ;;
     fedora) rpm -q "$1" > /dev/null 2>&1 ;;
-    debian) dpkg-query -W -f='${db:Status-Status}' "$1" 2> /dev/null | grep -q 'installed$' ;;
+    debian) dpkg-query -W -f='${db:Status-Status}' "$1" 2> /dev/null | grep -Fxq installed ;;
     *) return 1 ;;
   esac
 }
@@ -111,7 +117,7 @@ package_available() {
   case "${DISTRO_FAMILY}" in
     arch) pacman -Si "$1" > /dev/null 2>&1 ;;
     fedora) "${PACKAGE_MANAGER}" --quiet list --available "$1" > /dev/null 2>&1 ;;
-    debian) apt-cache show "$1" > /dev/null 2>&1 ;;
+    debian) apt-cache policy "$1" | awk '$1 == "Candidate:" && $2 != "(none)" { found=1 } END { exit !found }'  ;;
     *) return 1 ;;
   esac
 }
@@ -128,8 +134,10 @@ install_native_packages() {
       unavailable+=("${package}")
     fi
   done
-  ((${#unavailable[@]} == 0)) ||
-    jsh_note "Unavailable ${DISTRO_FAMILY} packages will use fallbacks when possible: ${unavailable[*]}"
+  if ((${#unavailable[@]} > 0)); then
+    jsh_error "Unresolved ${DISTRO_FAMILY} packages: ${unavailable[*]}"
+    return 1
+  fi
   if ((${#missing[@]} > 0)); then
     if [[ "${DRY_RUN}" == 1 ]]; then
       jsh_detail "Would install native packages: ${missing[*]}"
@@ -137,12 +145,34 @@ install_native_packages() {
       case "${DISTRO_FAMILY}" in
         arch) jsh_run_root pacman -S --needed --noconfirm -- "${missing[@]}" ;;
         fedora) jsh_run_root "${PACKAGE_MANAGER}" install -y -- "${missing[@]}" ;;
-        debian) jsh_run_root apt-get install -y -- "${missing[@]}" ;;
+        debian)
+          if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then
+            jsh_run_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -- "${missing[@]}"
+          else
+            jsh_run_root apt-get install -y -- "${missing[@]}"
+          fi
+          ;;
         *) return 1 ;;
       esac
     fi
   fi
-  jsh_success "Native ${DISTRO_FAMILY} packages are installed."
+  if [[ "${DISTRO_FAMILY}" == debian && "$(jsh_linux_desktop)" == xfce ]] && package_installed xfce4-screensaver && package_installed light-locker; then
+    if [[ "${DRY_RUN}" == 1 ]]; then
+      jsh_detail "Would remove light-locker (breaks display wakeup; replaced by xfce4-screensaver)."
+    else
+      jsh_run_root apt-get remove -y light-locker
+    fi
+  fi
+  if [[ ${DRY_RUN} != 1 ]]; then
+    for package in "${NATIVE_PACKAGES[@]}"; do
+      package_installed "${package}" || { jsh_error "Package verification failed: ${package}"; return 1; }
+    done
+    if ((${#missing[@]})); then
+      jsh_success "Native ${DISTRO_FAMILY} packages are installed."
+    else
+      jsh_note "Native ${DISTRO_FAMILY} packages are current."
+    fi
+  fi
 }
 
 update_native_packages() {
@@ -164,7 +194,9 @@ update_native_packages() {
 
 prepare_native_packages() {
   if [[ "${DISTRO_FAMILY}" == arch || ${JSH_UPDATE:-0} == 1 ]]; then
-    update_native_packages
+    if [[ ${JSH_UPGRADE_SYSTEM:-0} == 1 || "${DISTRO_FAMILY}" == arch ]]; then
+      update_native_packages
+    fi
   elif [[ "${DISTRO_FAMILY}" == debian ]]; then
     if [[ "${DRY_RUN}" == 1 ]]; then
       jsh_detail "Would refresh Debian package metadata."
@@ -175,7 +207,7 @@ prepare_native_packages() {
 }
 
 install_flatpaks() {
-  local application
+  local application changed=0
 
   if [[ "${DRY_RUN}" == 1 ]]; then
     jsh_detail "Would configure Flathub and install: ${FLATPAK_APPLICATIONS[*]}"
@@ -183,10 +215,16 @@ install_flatpaks() {
   fi
   flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
   for application in "${FLATPAK_APPLICATIONS[@]}"; do
-    flatpak info --user "${application}" > /dev/null 2>&1 ||
+    if ! flatpak info --user "${application}" > /dev/null 2>&1; then
       flatpak install --user --noninteractive flathub "${application}"
+      changed=1
+    fi
   done
-  jsh_success "Flatpak applications are installed."
+  if ((changed)); then
+    jsh_success "Flatpak applications are installed."
+  else
+    jsh_note "Flatpak applications are current."
+  fi
 }
 
 update_flatpaks() {
@@ -229,6 +267,9 @@ main() {
   }
   prepare_native_packages
   install_native_packages
+  if [[ "${DISTRO_FAMILY}" == debian ]]; then
+    FLATPAK_APPLICATIONS=(com.spotify.Client com.todoist.Todoist dev.zed.Zed)
+  fi
   install_flatpaks
   if [[ ${JSH_UPDATE:-0} == 1 ]]; then
     update_flatpaks
