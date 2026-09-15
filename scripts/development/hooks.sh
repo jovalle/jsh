@@ -4,7 +4,7 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
-JSH_ROOT=$(cd -- "${SCRIPT_DIR}/../../.." && pwd -P)
+JSH_ROOT=$(cd -- "${SCRIPT_DIR}/../.." && pwd -P)
 readonly SCRIPT_DIR JSH_ROOT
 for library_file in "${JSH_ROOT}"/lib/*; do
   [[ -f ${library_file} && -x ${library_file} ]] || continue
@@ -17,7 +17,7 @@ confirm() {
   local answer
   [[ ${JSH_ASSUME_YES:-0} == 1 ]] && return 0
   jsh_prompt "Install repository hooks? [y/N]: "
-  read -r answer || answer=
+  if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then answer=y; else read -r answer || answer=; fi
   case "${answer}" in
     y | Y | yes | YES) return 0 ;;
     *) return 1 ;;

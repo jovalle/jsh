@@ -1,13 +1,15 @@
 CHECK_TARGETS := check-script-headers check-readme check-shell-syntax check-zsh-syntax check-python-syntax \
 	check-yaml-syntax check-json-syntax lint-shell lint-python \
-	lint-yaml lint-markdown lint-js
+	lint-yaml lint-markdown lint-js test-reconciliation
 FORMAT_TARGETS := format-shell format-python format-yaml format-json format-markdown
 
-.PHONY: help install update setup deploy configure patch uninstall check \
+.PHONY: help install update setup deploy configure patch hooks uninstall check \
 	format clean \
 	check-tools check-syntax lint ci validate pre-commit pre-commit-run commit \
 	commit-msg-check $(CHECK_TARGETS) $(FORMAT_TARGETS)
 .DEFAULT_GOAL := help
+
+SHELL := /bin/bash
 
 JSH_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 HASH := \#
@@ -29,7 +31,7 @@ define run_scripts
 		jsh_error "Unsupported platform: $(PLATFORM)"; \
 		exit 1; \
 	fi
-	@$(OUTPUT) failed_scripts=0; script_status=0; \
+	@$(OUTPUT) LC_ALL=C; export LC_ALL; failed_scripts=0; script_status=0; \
 	first_script=1; \
 	for action in $(1); do \
 		action_platforms="$(PLATFORM_DIRS)"; \
@@ -107,8 +109,11 @@ configure: ## Configure the current platform
 patch: ## Apply patches for the current platform
 	$(call run_scripts,patch)
 
-setup: ## Run full platform setup
-	$(call run_scripts,deploy install configure patch)
+setup: ## Discover and run the current platform setup
+	$(call run_scripts,install deploy configure)
+
+hooks: ## Install repository hooks
+	@"$(JSH_ROOT)/scripts/development/hooks.sh"
 
 uninstall: ## Remove dotfile links managed by jstow
 	@$(OUTPUT) jsh_prompt "Remove managed dotfile links from $(HOME)? [y/N]: "; \
@@ -436,3 +441,8 @@ clean: ## Remove temporary files and caches
 	@find . -type d -name "__pycache__" ! -path "./local/vendor/*" -delete
 	@find . -type d -name ".mypy_cache" ! -path "./local/vendor/*" -delete
 	@$(OUTPUT) jsh_success "Cleanup complete"
+
+.PHONY: test-reconciliation
+test-reconciliation: ## Test planning, idempotency and platform adapters
+	@$(BATS) tests/linux-platform.bats
+	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m unittest discover -s tests -p 'test_*.py'

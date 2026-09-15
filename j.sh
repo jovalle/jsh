@@ -98,7 +98,7 @@ command_seen=0
 while (($#)); do
   case $1 in
     --yes)
-      export JSH_ASSUME_YES=1
+      export JSH_ASSUME_YES=1 JSH_CONFIGURE_ASSUME_YES=1 JSH_UPDATE_ASSUME_YES=1
       ;;
     runtime | install | update)
       if ((command_seen)); then
@@ -122,47 +122,21 @@ while (($#)); do
   shift
 done
 
-if [[ ! -r "${TTY}" ]] || [[ ! -w "${TTY}" ]]; then
-  jsh_error "jsh needs an interactive terminal."
-  exit 1
+if ! ( : <> "${TTY}" ) 2>/dev/null; then
+  if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then
+    TTY=/dev/null
+  else
+    jsh_error "jsh needs an interactive terminal."
+    exit 1
+  fi
 fi
 
-relaunch_if_privileges_restricted() {
-  local script_path
-  local -a relaunch
-
-  [[ ${mode} == install || ${mode} == update ]] || return 0
-  [[ -r /proc/self/status ]] || return 0
-  grep -Eq '^NoNewPrivs:[[:space:]]+1$' /proc/self/status || return 0
-
-  if [[ ${JSH_SYSTEMD_REEXEC:-0} == 1 ]]; then
-    jsh_error "The user systemd manager also launched Jsh with no-new-privileges enabled."
-    return 1
+if [[ -r /proc/self/status ]] && grep -Eq '^NoNewPrivs:[[:space:]]+1$' /proc/self/status; then
+  if [[ ${mode} == install || ${mode} == update ]]; then
+    jsh_error "This session prohibits privilege elevation. Run Jsh from a regular terminal."
+    exit 1
   fi
-  command -v systemd-run > /dev/null 2>&1 || {
-    jsh_error "Cannot elevate from this restricted session, and systemd-run is unavailable."
-    jsh_detail "Rerun ./j.sh ${mode} from a terminal outside this restricted session."
-    return 1
-  }
-
-  script_path=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/$(basename -- "${BASH_SOURCE[0]}")
-  relaunch=(
-    systemd-run --user --quiet --pty --wait --collect --same-dir
-    --setenv="JSH_SYSTEMD_REEXEC=1"
-    --setenv="JSH_DIR=${JSH_DIR}"
-    --setenv="JSH_REPO=${JSH_REPO}"
-    --setenv="JSH_INSTALL_RETURN=${JSH_INSTALL_RETURN:-0}"
-    --setenv="PATH=${PATH}"
-    "${script_path}"
-  )
-  [[ ${JSH_ASSUME_YES:-0} != 1 ]] || relaunch+=(--yes)
-  relaunch+=("${mode}")
-
-  jsh_note "Relaunching Jsh through the user systemd manager to enable sudo."
-  exec "${relaunch[@]}"
-}
-
-relaunch_if_privileges_restricted
+fi
 
 heading() {
   jsh_blank
@@ -248,7 +222,7 @@ install_linux_prerequisites() {
 }
 
 install_prerequisites() {
-  local install_mode=$1 prompt_for_install=$2 package
+  local install_mode=$1 prompt_for_install=$2 manager package
   local -a packages=()
   command -v git > /dev/null 2>&1 || packages+=(git)
   command -v zsh > /dev/null 2>&1 || packages+=(zsh)
@@ -256,6 +230,13 @@ install_prerequisites() {
     command -v make > /dev/null 2>&1 || packages+=(make)
     if ! command -v bash > /dev/null 2>&1 || ! bash -c '((BASH_VERSINFO[0] >= 5))' 2> /dev/null; then
       packages+=(bash)
+    fi
+    if ! command -v python3 > /dev/null 2>&1; then
+      package=python
+      if manager=$(linux_package_manager) && [[ ${manager} != pacman ]]; then
+        package=python3
+      fi
+      packages+=("${package}")
     fi
   fi
 
@@ -280,7 +261,7 @@ install_prerequisites() {
       done
     fi
   else
-    jsh_success "Required tools are already installed."
+    jsh_note "Required tools are already installed."
   fi
 
   if ! linux_package_manager > /dev/null && command -v brew > /dev/null 2>&1; then
@@ -288,37 +269,6 @@ install_prerequisites() {
     PATH="${brew_prefix}/bin:${brew_prefix}/opt/make/libexec/gnubin:${PATH}"
     export PATH
   fi
-}
-
-install_python_runtime() {
-  local manager package
-  if command -v python3 > /dev/null 2>&1; then
-    jsh_success "Python 3 is already installed."
-    return
-  fi
-
-  jsh_note "Python 3 is required by included commands such as httpstat and jventoy."
-  if ! confirm "Install Python 3 now?"; then
-    jsh_note "Skipped Python 3 installation."
-    return
-  fi
-
-  if manager=$(linux_package_manager); then
-    package=python3
-    [[ "${manager}" != pacman ]] || package=python
-    install_linux_prerequisites "${package}" || return
-  else
-    load_brew
-    if ! command -v brew > /dev/null 2>&1; then
-      jsh_info "Homebrew is required to install Python 3."
-      /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" \
-        < "${TTY}" || return
-      load_brew
-    fi
-    brew list python > /dev/null 2>&1 || brew install python || return
-  fi
-
-  jsh_success "Python 3 is installed."
 }
 
 sync_submodules() {
@@ -413,7 +363,7 @@ install_runtime_launcher() {
   mkdir -p -- "${commands_dir}"
   if [[ -e ${launcher} || -L ${launcher} ]]; then
     if [[ ${launcher} -ef ${target} ]]; then
-      jsh_success "Jsh command is already installed: ${launcher}"
+      jsh_note "Jsh command is already installed: ${launcher}"
       return
     fi
     jsh_error "Cannot install Jsh command; path already exists: ${launcher}"
@@ -433,7 +383,7 @@ configure_runtime_path_file() {
     grep -Fqx -- "${block_end}" "${rc_file}" 2> /dev/null; then
     if grep -Fqx -- "${block_start}" "${rc_file}" 2> /dev/null &&
       grep -Fqx -- "${block_end}" "${rc_file}" 2> /dev/null; then
-      jsh_success "Jsh PATH is already configured: ${rc_file}"
+      jsh_note "Jsh PATH is already configured: ${rc_file}"
       return
     fi
     jsh_error "Incomplete Jsh PATH block in ${rc_file}; repair or remove it before retrying."
@@ -533,10 +483,13 @@ if [[ ${mode} == runtime ]]; then
     jsh_note "Skipped repository sync."
   fi
 
-  heading "3/3" "Shell runtime" "Install the launcher and optionally configure Bash and Zsh PATH."
+  heading "3/3" "Shell runtime" "Install the launcher, configure Bash and Zsh PATH, and optionally change default shell to Zsh."
   if confirm "Run this phase?"; then
     install_runtime_launcher
     configure_runtime_path
+    if [[ -x "${JSH_DIR}/scripts/unix/configure/shell.sh" ]]; then
+      "${JSH_DIR}/scripts/unix/configure/shell.sh" < "${TTY}"
+    fi
   else
     jsh_note "Skipped shell runtime installation."
   fi
@@ -559,7 +512,6 @@ if [[ ${mode} == update ]]; then
   run_update_step "Betterfox" "${JSH_DIR}/scripts/unix/configure/waterfox.sh" update
   run_update_step "Dotfiles" run_make_target deploy
   run_update_step "Configuration" run_make_target configure
-  run_update_step "Patches" run_make_target patch
   print_update_summary
   ((${#UPDATE_ERRORS[@]} == 0))
   exit
@@ -569,26 +521,25 @@ jsh_info "jsh install"
 jsh_detail "Install directory: ${JSH_DIR}"
 jsh_detail "Each phase explains its changes before it runs."
 
-heading "1/4" "Prerequisites" "Install Homebrew when needed, then ensure Git, Make, Zsh, and Bash 5 are available."
+heading "1/3" "Prerequisites" "Install Homebrew when needed, then ensure Git, Make, Zsh, Bash 5, and Python 3 are available."
 if confirm "Run this phase?"; then
   install_prerequisites install 0
 else
   jsh_note "Skipped prerequisites."
 fi
 
-heading "2/4" "Repository" "Clone ${JSH_REPO}, or fast-forward an existing clean checkout."
+heading "2/3" "Repository" "Clone ${JSH_REPO}, or fast-forward an existing clean checkout."
 if confirm "Run this phase?"; then
   sync_repository
 else
   jsh_note "Skipped repository sync."
 fi
 
-heading "3/4" "Python 3 runtime" "Install Python 3 when needed by included commands such as httpstat and jventoy."
-install_python_runtime
-
-heading "4/4" "System setup" "Deploy dotfiles, install packages, then run the conversational configuration scripts for this platform."
+heading "3/3" "System setup" "Deploy dotfiles, install packages, then run the conversational configuration scripts for this platform."
 if confirm "Run this phase?"; then
   jsh_blank
+  install_runtime_launcher
+  configure_runtime_path
   setup_system
 else
   jsh_note "Skipped system setup."
@@ -596,6 +547,6 @@ fi
 
 jsh_blank
 jsh_success "Installation finished."
-[[ ${JSH_INSTALL_RETURN:-0} == 1 ]] && exit 0
+[[ ${JSH_INSTALL_RETURN:-0} == 1 || ${TTY} == /dev/null || ${JSH_ASSUME_YES:-0} == 1 ]] && exit 0
 jsh_blank
 exec "${JSH_DIR}/bin/jsh" < "${TTY}"
