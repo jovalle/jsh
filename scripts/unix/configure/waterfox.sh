@@ -311,7 +311,7 @@ install_preferences() {
     return 1
   }
   if cmp -s -- "${source}" "${target}"; then
-    jsh_success "Waterfox preferences current."
+    jsh_note "Waterfox preferences current."
     return
   fi
   backup_file "${target}" user.js
@@ -329,6 +329,9 @@ policy_target() {
     printf '/Library/Preferences/net.waterfox.waterfox.plist\n'
   else
     binary=$(waterfox_binary) || return 1
+    if [[ -z ${JSH_WATERFOX_BIN:-} && -x /usr/local/bin/waterfox && -L /usr/local/bin/waterfox ]]; then
+      binary=/usr/local/bin/waterfox
+    fi
     resolved=$(realpath "${binary}" 2> /dev/null || printf '%s' "${binary}")
     printf '%s/distribution/policies.json\n' "${resolved%/*}"
   fi
@@ -410,7 +413,7 @@ run_root() {
 install_policy() {
   local target_dir
   ((POLICY_CHANGED)) || {
-    [[ -z ${POLICY_TARGET} ]] || jsh_success "Waterfox policy current."
+    [[ -z ${POLICY_TARGET} ]] || jsh_note "Waterfox policy current."
     return
   }
   backup_file "${POLICY_TARGET}" policy
@@ -438,7 +441,7 @@ check_update() {
     return 1
   }
   if [[ ${latest} == "${current}" ]]; then
-    jsh_success "Betterfox ${current} is the latest release."
+    jsh_note "Betterfox ${current} is the latest release."
   else
     jsh_warn "Betterfox ${latest} is available; reviewed pin is ${current}."
   fi
@@ -446,9 +449,9 @@ check_update() {
 
 confirm_betterfox_update() {
   local answer
-  [[ ${JSH_UPDATE_ASSUME_YES:-0} != 1 ]] || return 0
+  [[ ${JSH_UPDATE_ASSUME_YES:-${JSH_ASSUME_YES:-0}} != 1 ]] || return 0
   jsh_prompt "Update the reviewed Betterfox pin? [Y/n]: "
-  read -r answer || answer=
+  if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then answer=y; else read -r answer || answer=; fi
   [[ -z ${answer} || ${answer} =~ ^[Yy]$ ]]
 }
 
@@ -472,7 +475,7 @@ update_betterfox() {
     ($latest | split(".") | map(tonumber)) > ($current | split(".") | map(tonumber))
   ' > /dev/null; then
     if [[ ${latest} == "${current}" ]]; then
-      jsh_success "Betterfox ${current} is the latest release."
+      jsh_note "Betterfox ${current} is the latest release."
     else
       jsh_warn "Reviewed Betterfox pin ${current} is newer than latest release ${latest}; keeping it."
     fi
@@ -534,33 +537,39 @@ apply_configuration() {
     bootstrap_profile "${root}" "${binary}"
     profile=$(selected_profile "${root}")
   fi
+  validate_configured_addons "${profile}"
+  prepare_waterfox_review "${profile}"
+  show_waterfox_review apply
+  stage_betterfox
+  prepare_policy
+  composed="${TEMP_DIR}/user.js"
+  compose_preferences "${profile}" "${composed}"
+  if ((!WATERFOX_SETTINGS_DIFFER && !POLICY_CHANGED)) && cmp -s -- "${composed}" "${profile}/user.js"; then
+    configure_associations
+    jsh_note "Waterfox configuration is current; leaving the browser open."
+    return
+  fi
+  if ! confirm_waterfox_review apply; then
+    jsh_warn "Keeping the active Waterfox configuration."
+    return
+  fi
   if profile_is_locked "${profile}"; then
     jsh_warn "Waterfox is open on profile ${profile##*/}."
     jsh_prompt "Close Waterfox and continue? [y/N]: "
-    read -r answer || answer=
+    if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then answer=y; else read -r answer || answer=; fi
     if [[ ! ${answer} =~ ^[Yy]$ ]]; then
       jsh_note "Skipping Waterfox configuration."
       jsh_detail "Run later: ${JSH_ROOT}/scripts/unix/configure/waterfox.sh apply"
-      return
+      return 10
     fi
     if ! close_waterfox "${profile}"; then
       jsh_note "Waterfox did not close; skipping configuration."
       jsh_detail "Run later: ${JSH_ROOT}/scripts/unix/configure/waterfox.sh apply"
-      return
+      return 10
     fi
   fi
 
-  validate_configured_addons "${profile}"
-  prepare_waterfox_review "${profile}"
-  show_waterfox_review apply
-  if ((WATERFOX_SETTINGS_DIFFER)) && ! confirm_waterfox_review apply; then
-    jsh_warn "Keeping the active Waterfox configuration."
-    return
-  fi
-
-  stage_betterfox
-  prepare_policy
-  composed="${TEMP_DIR}/user.js"
+  # Shutdown can flush live toolbar/add-on state; compose again before editing.
   compose_preferences "${profile}" "${composed}"
   reconcile_addon_state "${profile}"
   reconcile_addon_permissions "${profile}"
@@ -583,4 +592,6 @@ main() {
   esac
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi
