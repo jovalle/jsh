@@ -8,7 +8,7 @@ environment across a machine. It supports macOS, Linux, and Windows Subsystem fo
 ## Contents
 
 - [Run Jsh](#run-jsh)
-- [Install the Jsh Command](#install-the-jsh-command)
+- [Deploy Jsh Runtime](#deploy-jsh-runtime)
 - [Install Jsh](#install-jsh)
 - [Included Commands](#included-commands)
 
@@ -26,7 +26,7 @@ before installing it with pacman, DNF, or APT on supported Linux distributions, 
 
 Leave the runtime with `exit`.
 
-## Install the Jsh Command
+## Deploy Jsh Runtime
 
 To keep Jsh available as a command without deploying managed dotfiles or configuring the system, run:
 
@@ -56,23 +56,24 @@ dependencies, packages, and managed configuration.
 
 The [`bin/`](bin/) directory is added to `PATH` inside Jsh.
 
-| Command                      | Description                                                                            |
-| ---------------------------- | -------------------------------------------------------------------------------------- |
-| [`cafe`](bin/cafe)           | Keeps the system awake for a command or a specified duration.                          |
-| [`colours`](bin/colours)     | Prints the terminal's 256-color palette.                                               |
-| [`helium`](bin/helium)       | Applies, verifies, and launches a hardened Helium browser profile.                     |
-| [`httpstat`](bin/httpstat)   | HTTP(S) request visualizer.                                                            |
-| [`jbrew`](bin/jbrew)         | J-augmented {home,linux}brew command. Better cross-platform search and easy adoption.  |
-| [`jfetch`](bin/jfetch)       | J-augmented fastfetch-inspired command.                                                |
-| [`jgit`](bin/jgit)           | J-augmented git command.                                                               |
-| [`jgraphify`](bin/jgraphify) | Creates or incrementally updates Graphify data for a project.                          |
-| [`jsh`](bin/jsh)             | Opens the isolated shell and dispatches runtime, install, update, and reload commands. |
-| [`jssh`](bin/jssh)           | Opens an ephemeral Jsh shell on a Linux host over SSH.                                 |
-| [`jstow`](bin/jstow)         | Provides a Bash implementation of GNU Stow for deploying and removing dotfile links.   |
-| [`jventoy`](bin/jventoy)     | Initializes and updates bootable ISO images on Ventoy drives.                          |
-| [`jvim`](bin/jvim)           | Runs Neovim with Jsh-local data and cache directories, with Vim or Vi as fallbacks.    |
-| [`kubecolor`](bin/kubecolor) | Colorizes interactive `kubectl` output while preserving machine-readable formats.      |
-| [`kubectx`](bin/kubectx)     | Lists, switches, renames, and removes Kubernetes contexts.                             |
-| [`kubens`](bin/kubens)       | Lists and switches Kubernetes namespaces for the current context.                      |
-| [`nukem`](bin/nukem)         | Helps handle those pesky Kubernetes finalizers.                                        |
-| [`proxy`](bin/proxy)         | Forces commands through proxy.                                                         |
+| Command                      | Description                                                                           |
+| ---------------------------- | ------------------------------------------------------------------------------------- |
+| [`cafe`](bin/cafe)           | Keeps the system awake for a command or a specified duration.                         |
+| [`colours`](bin/colours)     | Prints the terminal's 256-color palette.                                              |
+| [`helium`](bin/helium)       | Applies, verifies, and launches a hardened Helium browser profile.                    |
+| [`httpstat`](bin/httpstat)   | HTTP(S) request visualizer.                                                           |
+| [`jadopt`](bin/jadopt)       | Moves selected home paths into the shared dotfiles package.                           |
+| [`jbrew`](bin/jbrew)         | J-augmented {home,linux}brew command. Better cross-platform search and easy adoption. |
+| [`jfetch`](bin/jfetch)       | J-augmented fastfetch-inspired command.                                               |
+| [`jgit`](bin/jgit)           | J-augmented git command.                                                              |
+| [`jgraphify`](bin/jgraphify) | Creates or incrementally updates Graphify data for a project.                         |
+| [`jsh`](bin/jsh)             | Opens the isolated shell and dispatches setup, repair, adoption, and app commands.    |
+| [`jssh`](bin/jssh)           | Opens an ephemeral Jsh shell on a Linux host over SSH.                                |
+| [`jstow`](bin/jstow)         | Provides a Bash implementation of GNU Stow for deploying and removing dotfile links.  |
+| [`jventoy`](bin/jventoy)     | Initializes and updates bootable ISO images on Ventoy drives.                         |
+| [`jvim`](bin/jvim)           | Runs Neovim with Jsh-local data and cache directories, with Vim or Vi as fallbacks.   |
+| [`kubecolor`](bin/kubecolor) | Colorizes interactive `kubectl` output while preserving machine-readable formats.     |
+| [`kubectx`](bin/kubectx)     | Lists, switches, renames, and removes Kubernetes contexts.                            |
+| [`kubens`](bin/kubens)       | Lists and switches Kubernetes namespaces for the current context.                     |
+| [`nukem`](bin/nukem)         | Helps handle those pesky Kubernetes finalizers.                                       |
+| [`proxy`](bin/proxy)         | Forces commands through proxy.                                                        |
