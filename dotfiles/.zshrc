@@ -34,7 +34,6 @@ fi
 export CLICOLORS=1                               # Colorize output
 export EDITOR=vim                                # Default CLI editor
 export VISUAL=vim                                # Default full-screen editor
-export TERM=xterm-256color                       # Terminal type for 256 colors
 export SH=${SHELL##*/}                           # Shell type reference
 
 # Project/work directories
@@ -56,9 +55,10 @@ export DIRENV_WARN_TIMEOUT=30s                   # Direnv timeout
 export PYTHONDONTWRITEBYTECODE=1                 # No .pyc files on import
 
 # Shell environment
-export LANG=${JSH_LANG:-en_US.UTF-8}             # Default locale
-export LC_ALL=${JSH_LANG:-en_US.UTF-8}           # Override all locales
-export XDG_CONFIG_HOME="${HOME}/.config"         # Wwhere apps should store config files, cache files, and data files
+if [[ -n ${JSH_LANG:-} ]]; then
+  export LANG=${JSH_LANG}
+fi
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-${HOME}/.config}"         # Wwhere apps should store config files, cache files, and data files
 
 # Vendored shell dependencies
 export JSH_VENDOR="${JSH}/local/vendor"
@@ -66,6 +66,12 @@ export FZF_BASE="${JSH}/local/vendor/fzf"
 
 # Paths - ORDER MATTERS (priority: local > jsh > vendored fzf > go > cargo)
 export PATH=${HOME}/.local/bin:${JSH}/bin:${FZF_BASE}/bin:${HOME}/go/bin:${PATH}:${HOME}/.cargo/bin
+# Locate an existing Homebrew installation before shell hooks and completions.
+for _jsh_brew_bin in /opt/homebrew/bin /usr/local/bin /home/linuxbrew/.linuxbrew/bin; do
+  [[ ! -x ${_jsh_brew_bin}/brew ]] || path+=(${_jsh_brew_bin})
+done
+unset _jsh_brew_bin
+
 
 # Terminal optimizations
 export LESS="-RXE"                          # No wrapping, no clearing, exit on EOF
@@ -1925,3 +1931,10 @@ if (( _jsh_runtime_active )); then
   fi
 fi
 unset _jsh_runtime_active _jsh_runtime_had_xdg_cache _jsh_runtime_xdg_cache
+
+# jsh runtime path: begin
+case ":${PATH}:" in
+  *:"${HOME}/.local/bin":*) ;;
+  *) export PATH="${HOME}/.local/bin:${PATH}" ;;
+esac
+# jsh runtime path: end

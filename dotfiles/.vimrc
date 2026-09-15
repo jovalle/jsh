@@ -1,5 +1,7 @@
 " Enable syntax
-syntax on
+if has("syntax")
+  syntax on
+endif
 
 " Enable 256 colors palette
 set t_Co=256
@@ -130,7 +132,9 @@ map <space> /
 map <c-space> ?
 
 " Enable mouse
-set ttymouse=xterm2
+if exists("+ttymouse")
+  set ttymouse=xterm2
+endif
 set mouse=a
 
 " Return to last known position
@@ -141,12 +145,23 @@ endif
 " Remove all trailing whitespace on save
 autocmd BufWritePre * %s/\s\+$//e
 
+" Tiny Vim provides the portable core above but cannot evaluate plugin settings.
+if !has("eval")
+  finish
+endif
+
 " Avoid Vim plugins on remote hosts
 if !exists("$SSHHOME")
   " Install Vim Plug if not installed
   if empty(glob('~/.vim/autoload/plug.vim'))
     silent !proxy curl -fLo ~/.vim/autoload/plug.vim --create-dirs https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim
     autocmd VimEnter * PlugInstall
+  endif
+
+  if filereadable(expand('~/.vim/autoload/plug.vim'))
+    execute 'source ' . fnameescape(expand('~/.vim/autoload/plug.vim'))
+  else
+    finish
   endif
 
   " Start plugin injection
@@ -193,27 +208,31 @@ vnoremap <leader><leader>c :call NERDComment(0,"toggle")<CR>
 
 " For NerdTree
 autocmd StdinReadPre * let s:std_in=1
-autocmd VimEnter * if argc() == 0 && !exists("s:std_in") | NERDTree | endif
-autocmd VimEnter * if argc() == 1 && isdirectory(argv()[0]) && !exists("s:std_in") | exe 'NERDTree' argv()[0] | wincmd p | ene | exe 'cd '.argv()[0] | endif
+autocmd VimEnter * if argc() == 0 && !exists("s:std_in") | silent! NERDTree | endif
+autocmd VimEnter * if argc() == 1 && isdirectory(argv()[0]) && !exists("s:std_in") | silent! exe 'NERDTree' argv()[0] | wincmd p | ene | exe 'cd '.argv()[0] | endif
 map <C-n> :NERDTreeToggle<CR>
 
 " For netrw
-let g:netrw_browse_split=4  " open in prior window
-let g:netrw_altv=1          " open splits to the right
-let g:netrw_liststyle=3     " tree view
+if has("eval")
+  let g:netrw_browse_split=4  " open in prior window
+  let g:netrw_altv=1          " open splits to the right
+  let g:netrw_liststyle=3     " tree view
 
-" Enable completion where available.
-let g:ale_completion_enabled = 1
+  " Enable completion where available.
+  let g:ale_completion_enabled = 1
 
-" Set this. Airline will handle the rest.
-let g:airline#extensions#ale#enabled = 1
+  " Set this. Airline will handle the rest.
+  let g:airline#extensions#ale#enabled = 1
+endif
 
 " python
 autocmd FileType python setlocal shiftwidth=4 softtabstop=4 expandtab
 autocmd FileType python map <buffer> <F9> :w<CR>:exec '!python3' shellescape(@%, 1)<CR>
 autocmd FileType python imap <buffer> <F9> <esc>:w<CR>:exec '!python3' shellescape(@%, 1)<CR>
 
-let python_highlight_all = 1
+if has("eval")
+  let python_highlight_all = 1
+endif
 au FileType python syn keyword pythonDecorator True None False self
 
 au BufNewFile,BufRead *.jinja set syntax=htmljinja
