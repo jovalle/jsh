@@ -32,16 +32,35 @@ backup_root_file() {
   chmod 0600 "${backup}"
 }
 
+root_text_matches() {
+  local destination=$1 content=$2 temporary matches=1
+  [[ -e "${destination}" ]] || return 1
+  mkdir -p "${JSH_ROOT}/tmp"
+  temporary=$(mktemp "${JSH_ROOT}/tmp/system-check.XXXXXX")
+  printf '%s\n' "${content}" > "${temporary}"
+  if [[ -r "${destination}" ]] && cmp -s "${temporary}" "${destination}"; then
+    matches=0
+  elif jsh_run_root cmp -s "${temporary}" "${destination}" 2> /dev/null; then
+    matches=0
+  else
+    matches=1
+  fi
+  rm -f "${temporary}"
+  return "${matches}"
+}
+
 install_root_text() {
   local destination=$1 content=$2 temporary
+  if [[ "${DRY_RUN}" != 1 ]] && root_text_matches "${destination}" "${content}"; then
+    return 0
+  fi
+  if [[ "${DRY_RUN}" == 1 ]]; then
+    jsh_detail "Would write configuration to ${destination}"
+    return 0
+  fi
   mkdir -p "${JSH_ROOT}/tmp"
   temporary=$(mktemp "${JSH_ROOT}/tmp/system-config.XXXXXX")
   printf '%s\n' "${content}" > "${temporary}"
-  if [[ "${DRY_RUN}" != 1 && -e "${destination}" ]] &&
-    jsh_run_root cmp -s "${temporary}" "${destination}"; then
-    rm -f "${temporary}"
-    return
-  fi
   backup_root_file "${destination}"
   jsh_run_root install -D -o root -g root -m 0644 "${temporary}" "${destination}"
   rm -f "${temporary}"
@@ -54,14 +73,85 @@ enable_system_unit() {
     return
   fi
   case "${action}" in
-    enable) jsh_run_root systemctl enable --now "${unit}" ;;
-    start) jsh_run_root systemctl start "${unit}" ;;
+    enable)
+      if systemctl is-enabled --quiet "${unit}" 2> /dev/null &&
+        systemctl is-active --quiet "${unit}" 2> /dev/null; then
+        return 0
+      fi
+      jsh_run_root systemctl enable --now "${unit}"
+      ;;
+    start)
+      if systemctl is-active --quiet "${unit}" 2> /dev/null; then
+        return 0
+      fi
+      jsh_run_root systemctl start "${unit}"
+      ;;
   esac
+}
+
+configure_kernel_tweaks() {
+  local key desired current tweak
+  local -A tweaks=(
+    ["vm.swappiness"]="180"
+    ["vm.watermark_boost_factor"]="0"
+    ["vm.watermark_scale_factor"]="125"
+    ["vm.page-cluster"]="0"
+  )
+  local -a keys=("vm.swappiness" "vm.watermark_boost_factor" "vm.watermark_scale_factor" "vm.page-cluster")
+  local -a missing_tweaks=()
+  local sysctl_conf="/etc/sysctl.d/99-jsh-memory.conf"
+  local desired_conf="# Managed by jsh
+vm.swappiness = 180
+vm.watermark_boost_factor = 0
+vm.watermark_scale_factor = 125
+vm.page-cluster = 0"
+
+  local conf_needs_update=0
+  if ! root_text_matches "${sysctl_conf}" "${desired_conf}"; then
+    conf_needs_update=1
+  fi
+
+  for key in "${keys[@]}"; do
+    desired="${tweaks[${key}]}"
+    current=$(sysctl -n "${key}" 2> /dev/null || true)
+    current=$(printf '%s' "${current}" | tr -d '[:space:]')
+    if [[ "${current}" != "${desired}" ]]; then
+      missing_tweaks+=("${key}=${desired}")
+    fi
+  done
+
+  if ((conf_needs_update == 0 && ${#missing_tweaks[@]} == 0)); then
+    jsh_note "Kernel tweaks are already set."
+    return 0
+  fi
+
+  if ((conf_needs_update)); then
+    install_root_text "${sysctl_conf}" "${desired_conf}"
+  fi
+
+  if ((${#missing_tweaks[@]} > 0)); then
+    for tweak in "${missing_tweaks[@]}"; do
+      jsh_detail "Applying kernel tweak: ${tweak}"
+      jsh_run_root sysctl -w "${tweak}"
+    done
+  fi
+}
+
+configure_timezone() {
+  local target_tz="${JSH_TIMEZONE:-America/New_York}"
+  local current_tz
+  current_tz=$(timedatectl show -p Timezone --value 2> /dev/null || true)
+  if [[ -n "${current_tz}" && "${current_tz}" == "${target_tz}" ]]; then
+    jsh_note "Timezone is already ${target_tz}."
+    return 0
+  fi
+  jsh_run_root timedatectl set-timezone "${target_tz}"
 }
 
 main() {
   local command
   [[ "$(uname -s)" == Linux ]] || return
+  export PATH="${PATH}:/usr/sbin:/sbin"
   for command in systemctl sysctl timedatectl; do
     command -v "${command}" > /dev/null 2>&1 || {
       jsh_error "${command} is required to configure Linux system policy."
@@ -69,41 +159,87 @@ main() {
     }
   done
 
-  jsh_detail "This will change memory policy, disable coredump storage, and enable earlyoom and zram."
-  jsh_prompt "Configure Linux system policy? [y/N]: "
-  read -r answer || answer=
-  [[ "${answer}" =~ ^[Yy]$ ]] || {
-    jsh_note "Skipping Linux system policy."
-    return
-  }
+  jsh_detail "This will change memory policy, disable coredump storage, enable earlyoom and zram, and configure USB wakeup and power management."
+  if [[ ${JSH_ASSUME_YES:-0} != 1 ]]; then
+    jsh_prompt "Configure Linux system policy? [y/N]: "
+    if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then answer=y; else read -r answer || answer=; fi
+    [[ "${answer}" =~ ^[Yy]$ ]] || {
+      jsh_note "Skipping Linux system policy."
+      return
+    }
+  fi
 
-  install_root_text /etc/default/earlyoom \
-    "# Managed by jsh
+  local earlyoom_conf="# Managed by jsh
 EARLYOOM_ARGS=\"-m 4 -s 15 -r 60 --avoid '(^|/)(init|systemd|Xorg|Xwayland|xfce4-session|gnome-shell|sshd)$' --prefer '(^|/)(code|waterfox|electron|zoom)$'\""
-  install_root_text /etc/sysctl.d/99-jsh-memory.conf \
-    "# Managed by jsh
-vm.swappiness = 180
-vm.watermark_boost_factor = 0
-vm.watermark_scale_factor = 125
-vm.page-cluster = 0"
-  install_root_text /etc/systemd/coredump.conf.d/99-jsh-storage.conf \
-    "# Managed by jsh
+  local coredump_conf="# Managed by jsh
 [Coredump]
 Storage=none
 ProcessSizeMax=0"
-  install_root_text /etc/systemd/zram-generator.conf \
-    "# Managed by jsh
+  local zram_conf="# Managed by jsh
 [zram0]
 zram-size = ram
 compression-algorithm = zstd"
+  local sleep_conf="# Managed by jsh
+[Login]
+HandlePowerKey=suspend
+HandlePowerKeyLongPress=poweroff
+HandleLidSwitch=suspend
+HandleLidSwitchExternalPower=suspend"
+  local usb_rules="# Managed by jsh
+ACTION==\"add|change\", SUBSYSTEM==\"usb\", TEST==\"power/wakeup\", ATTR{power/wakeup}=\"enabled\""
 
-  jsh_run_root timedatectl set-timezone "${JSH_TIMEZONE:-America/New_York}"
-  jsh_run_root sysctl --system
-  jsh_run_root systemctl daemon-reload
+  local systemd_reload_needed=0
+  local udev_reload_needed=0
+  local logind_reload_needed=0
+
+  if ! root_text_matches /etc/default/earlyoom "${earlyoom_conf}"; then
+    install_root_text /etc/default/earlyoom "${earlyoom_conf}"
+    systemd_reload_needed=1
+  fi
+
+  configure_kernel_tweaks
+
+  if ! root_text_matches /etc/systemd/coredump.conf.d/99-jsh-storage.conf "${coredump_conf}"; then
+    install_root_text /etc/systemd/coredump.conf.d/99-jsh-storage.conf "${coredump_conf}"
+    systemd_reload_needed=1
+  fi
+
+  if ! root_text_matches /etc/systemd/zram-generator.conf "${zram_conf}"; then
+    install_root_text /etc/systemd/zram-generator.conf "${zram_conf}"
+    systemd_reload_needed=1
+  fi
+
+  if ! root_text_matches /etc/systemd/logind.conf.d/99-jsh-sleep.conf "${sleep_conf}"; then
+    install_root_text /etc/systemd/logind.conf.d/99-jsh-sleep.conf "${sleep_conf}"
+    logind_reload_needed=1
+  fi
+
+  if ! root_text_matches /etc/udev/rules.d/90-jsh-usb-wakeup.rules "${usb_rules}"; then
+    install_root_text /etc/udev/rules.d/90-jsh-usb-wakeup.rules "${usb_rules}"
+    udev_reload_needed=1
+  fi
+
+  configure_timezone
+
+  if ((systemd_reload_needed)); then
+    jsh_run_root systemctl daemon-reload
+  fi
+
+  if ((udev_reload_needed)) && command -v udevadm > /dev/null 2>&1; then
+    jsh_run_root udevadm control --reload
+    jsh_run_root udevadm trigger --subsystem-match=usb
+  fi
+
+  if ((logind_reload_needed)); then
+    jsh_run_root systemctl kill -s HUP systemd-logind.service 2> /dev/null || true
+  fi
+
   enable_system_unit earlyoom.service enable
   enable_system_unit systemd-zram-setup@zram0.service start
   [[ -z "${BACKUP_ROOT}" ]] || jsh_detail "Backups: ${BACKUP_ROOT}"
   jsh_success "Linux system policy configured."
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi
