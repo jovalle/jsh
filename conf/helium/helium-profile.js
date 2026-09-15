@@ -1,4 +1,6 @@
-ObjC.import('Foundation');
+const isJXA = typeof ObjC !== 'undefined';
+if (isJXA) ObjC.import('Foundation');
+const fs = isJXA ? null : require('node:fs');
 
 const preferenceValues = [
   [['helium', 'completed_onboarding'], true],
@@ -40,6 +42,13 @@ const localStateValues = [
 ];
 
 function readJSON(file, optional) {
+  if (!isJXA) {
+    if (!fs.existsSync(file)) {
+      if (optional) return {};
+      throw new Error(`cannot read ${file}`);
+    }
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  }
   if (!$.NSFileManager.defaultManager.fileExistsAtPath(file)) {
     if (optional) return {};
     throw new Error(`cannot read ${file}`);
@@ -51,6 +60,10 @@ function readJSON(file, optional) {
 }
 
 function writeJSON(file, value) {
+  if (!isJXA) {
+    fs.writeFileSync(file, JSON.stringify(value));
+    return;
+  }
   const text = $(JSON.stringify(value));
   if (!text.writeToFileAtomicallyEncodingError(file, true, $.NSUTF8StringEncoding, null)) {
     throw new Error(`cannot write ${file}`);
@@ -118,6 +131,7 @@ function verify(argv) {
 }
 
 function verifyPolicy(argv) {
+  if (!isJXA) throw new Error('managed preference verification requires macOS');
   const domainName = argv.shift();
   const domain = $(domainName);
   const settingsKey = $('ExtensionSettings');
@@ -144,6 +158,32 @@ function verifyPolicy(argv) {
   });
 }
 
+function policyValues(argv) {
+  const separator = argv.indexOf('--');
+  const settingsIDs = argv.slice(0, separator);
+  const forceIDs = argv.slice(separator + 1);
+  return {
+    ExtensionInstallForcelist: forceIDs,
+    ExtensionSettings: Object.fromEntries(
+      settingsIDs.map((id) => [id, { toolbar_pin: 'force_pinned' }]),
+    ),
+  };
+}
+
+function stagePolicy(argv) {
+  const policyFile = argv.shift();
+  writeJSON(policyFile, policyValues(argv));
+}
+
+function verifyPolicyFile(argv) {
+  const policyFile = argv.shift();
+  const actual = readJSON(policyFile, false);
+  const expected = policyValues(argv);
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    throw new Error('Helium extension policy does not match the managed configuration');
+  }
+}
+
 function pinExtensions(argv) {
   const preferencesFile = argv.shift();
   const preferences = readJSON(preferencesFile, false);
@@ -151,12 +191,22 @@ function pinExtensions(argv) {
   writeJSON(preferencesFile, preferences);
 }
 
-// eslint-disable-next-line no-unused-vars -- osascript invokes the JXA entrypoint.
 function run(argv) {
   const command = argv.shift();
   if (command === 'stage') return stage(argv);
   if (command === 'verify') return verify(argv);
   if (command === 'verify-policy') return verifyPolicy(argv);
+  if (command === 'stage-policy') return stagePolicy(argv);
+  if (command === 'verify-policy-file') return verifyPolicyFile(argv);
   if (command === 'pin-extensions') return pinExtensions(argv);
   throw new Error(`unknown command: ${command || '(missing)'}`);
+}
+
+if (!isJXA) {
+  try {
+    run(process.argv.slice(2));
+  } catch (error) {
+    console.error(error.message);
+    process.exitCode = 1;
+  }
 }
