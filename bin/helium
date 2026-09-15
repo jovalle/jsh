@@ -25,7 +25,7 @@ if [[ -z ${JSH_ROOT:-} ]]; then
   }
 fi
 readonly JSH_ROOT
-readonly PATCH_SCRIPT="${JSH_ROOT}/scripts/darwin/patch/helium.sh"
+readonly PATCH_SCRIPT="${JSH_ROOT}/scripts/unix/configure/helium.sh"
 
 usage() {
   cat << EOF

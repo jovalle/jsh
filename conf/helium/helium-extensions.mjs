@@ -152,9 +152,13 @@ function verifyState(secureFile, preferencesFile, ids) {
   const separator = ids.indexOf('--');
   const extensionIds = ids.slice(0, separator);
   const incognitoIds = ids.slice(separator + 1);
-  const settings = JSON.parse(fs.readFileSync(secureFile, 'utf8')).extensions?.settings || {};
-  const pinned =
-    JSON.parse(fs.readFileSync(preferencesFile, 'utf8')).extensions?.pinned_extensions || [];
+  const securePreferences = JSON.parse(fs.readFileSync(secureFile, 'utf8'));
+  const preferences = JSON.parse(fs.readFileSync(preferencesFile, 'utf8'));
+  const settings = {
+    ...(securePreferences.extensions?.settings || {}),
+    ...(preferences.extensions?.settings || {}),
+  };
+  const pinned = preferences.extensions?.pinned_extensions || [];
   const missing = extensionIds.filter((id) => !settings[id]);
   const temporary = extensionIds.filter((id) => settings[id]?.location === 8);
   const unavailable = incognitoIds.filter((id) => settings[id]?.incognito !== true);
