@@ -33,7 +33,7 @@ windows_link_matches() {
 
 if windows_link_matches "${KEY_DEST}" "${KEY_SOURCE}" &&
   windows_link_matches "${CONFIG_DEST}" "${CONFIG_SOURCE}"; then
-  jsh_success "Windows SSH is already configured."
+  jsh_note "Windows SSH is already configured."
   exit 0
 fi
 
@@ -42,7 +42,7 @@ jsh_detail "Key source: ${KEY_SOURCE} -> ${KEY_DEST}"
 jsh_detail "Config source: ${CONFIG_SOURCE} -> ${CONFIG_DEST}"
 jsh_warn "Existing destination files will be replaced."
 jsh_prompt "Configure Windows SSH? [y/N]: "
-read -r CONFIRM || CONFIRM=
+if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then CONFIRM=y; else read -r CONFIRM || CONFIRM=; fi
 if [[ ! "${CONFIRM}" =~ ^[Yy]$ ]]; then
   jsh_note "Skipping Windows SSH configuration."
   exit 0

@@ -15,7 +15,7 @@ unset library_file
 
 confirm() {
   jsh_prompt "Configure macOS display resolutions? [y/N]: "
-  read -r answer || answer=
+  if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then answer=y; else read -r answer || answer=; fi
   [[ "${answer}" =~ ^[Yy]$ ]]
 }
 

@@ -16,7 +16,7 @@ unset library_file
 confirm() {
   jsh_detail "This will apply the managed macOS privacy, input, Finder, and application preferences."
   jsh_prompt "Configure macOS preferences? [y/N]: "
-  read -r answer || answer=
+  if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then answer=y; else read -r answer || answer=; fi
   [[ "${answer}" =~ ^[Yy]$ ]]
 }
 

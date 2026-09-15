@@ -35,14 +35,14 @@ SETTINGS_SRC_WIN=$(wslpath -w "${SETTINGS_SRC}")
 SETTINGS_DEST_WIN="${TERMINAL_SETTINGS_DIR}\\settings.json"
 
 if powershell.exe -NoProfile -Command "\$item = Get-Item -LiteralPath '${SETTINGS_DEST_WIN}' -ErrorAction SilentlyContinue; if (\$null -ne \$item -and \$item.LinkType -eq 'SymbolicLink' -and \$item.Target -contains '${SETTINGS_SRC_WIN}') { exit 0 }; exit 1"; then
-  jsh_success "Windows Terminal is already configured."
+  jsh_note "Windows Terminal is already configured."
   exit 0
 fi
 
 jsh_info "Creating symlink: ${SETTINGS_DEST_WIN} -> ${SETTINGS_SRC_WIN}"
 jsh_warn "The existing settings file may be replaced."
 jsh_prompt "Configure Windows Terminal? [y/N]: "
-read -r CONFIRM || CONFIRM=
+if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then CONFIRM=y; else read -r CONFIRM || CONFIRM=; fi
 if [[ ! "${CONFIRM}" =~ ^[Yy]$ ]]; then
   jsh_note "Skipping Windows Terminal configuration."
   exit 0
