@@ -35,7 +35,8 @@ dock_pins() {
   local pins='' desktop_file
   desktop_file=$(find_desktop_file com.mitchellh.ghostty.desktop xfce4-terminal.desktop xfce4-terminal-emulator.desktop) && pins+="${desktop_file};"
   desktop_file=$(find_desktop_file waterfox.desktop net.waterfox.waterfox.desktop) && pins+="${desktop_file};"
-  desktop_file=$(find_desktop_file visual-studio-code.desktop code.desktop code-oss.desktop) && pins+="${desktop_file};"
+  desktop_file=$(find_desktop_file helium.desktop) && pins+="${desktop_file};"
+  desktop_file=$(find_desktop_file code.desktop visual-studio-code.desktop com.visualstudio.code.desktop code-oss.desktop) && pins+="${desktop_file};"
   desktop_file=$(find_desktop_file com.spotify.Client.desktop) && pins+="${desktop_file};"
   desktop_file=$(find_desktop_file com.todoist.Todoist.desktop) && pins+="${desktop_file};"
   printf '%s\n' "${pins}"
@@ -54,6 +55,21 @@ managed_dock_target() {
     return
   done < <(find "${panel_dir}" -maxdepth 1 -name 'docklike-*.rc' -print 2> /dev/null | sort)
   return 1
+}
+
+find_xfce_dock_panel() {
+  local id position size
+  while IFS= read -r id; do
+    [[ "${id}" =~ ^[0-9]+$ ]] || continue
+    position=$(xfconf-query -c xfce4-panel -p "/panels/panel-${id}/position" 2> /dev/null || true)
+    size=$(xfconf-query -c xfce4-panel -p "/panels/panel-${id}/size" 2> /dev/null || true)
+    if [[ "${position}" =~ p=(8|9|10|11|12) ]] || (( ${size:-0} >= 36 )); then
+      printf '%s\n' "${id}"
+      return
+    fi
+  done < <(xfconf-query -c xfce4-panel -p /panels 2> /dev/null | grep -E '^[0-9]+$' | sort -nr)
+
+  xfconf-query -c xfce4-panel -p /panels 2> /dev/null | grep -E '^[0-9]+$' | tail -n 1
 }
 
 write_pins() {
@@ -107,45 +123,83 @@ configure_gnome_dock() {
 
 configure_xfce_dock() {
   local pins=$1
-  local panel_dir target plugin_id panel_id id autostart temporary
+  local panel_dir target plugin_id panel_id id temporary filename ptype
   local -a plugin_ids=() array_args=()
 
   panel_dir="${HOME}/.config/xfce4/panel"
   mkdir -p "${panel_dir}"
+  panel_id=$(find_xfce_dock_panel)
+  [[ "${panel_id}" =~ ^[0-9]+$ ]] || {
+    jsh_error "No XFCE panel is available for the application dock."
+    return 1
+  }
+
   target=$(managed_dock_target "${panel_dir}" || true)
   if [[ -z "${target}" ]]; then
     plugin_id=$(xfconf-query -c xfce4-panel -lv 2> /dev/null |
       sed -n 's|^/plugins/plugin-\([0-9][0-9]*\).*|\1|p' | sort -n | tail -1)
     plugin_id=$((${plugin_id:-0} + 1))
-    panel_id=$(xfconf-query -c xfce4-panel -p /panels 2> /dev/null |
-      sed -n '/^[0-9][0-9]*$/ { p; q; }')
-    [[ "${panel_id}" =~ ^[0-9]+$ ]] || {
-      jsh_error "No XFCE panel is available for the application dock."
-      return 1
-    }
     target="${panel_dir}/docklike-${plugin_id}.rc"
     xfconf-query -c xfce4-panel -p "/plugins/plugin-${plugin_id}" -n -t string -s docklike > /dev/null
     xfconf-query -c xfce4-panel -p "/plugins/plugin-${plugin_id}/jsh-managed" -n -t bool -s true > /dev/null
-    while IFS= read -r id; do
-      [[ "${id}" =~ ^[0-9]+$ ]] && plugin_ids+=("${id}")
-    done < <(xfconf-query -c xfce4-panel -p "/panels/panel-${panel_id}/plugin-ids" 2> /dev/null)
-    plugin_ids+=("${plugin_id}")
-    for id in "${plugin_ids[@]}"; do
-      array_args+=(-t int -s "${id}")
-    done
-    xfconf-query -c xfce4-panel -p "/panels/panel-${panel_id}/plugin-ids" -a "${array_args[@]}" > /dev/null
+  else
+    filename=${target##*/}
+    plugin_id=${filename#docklike-}
+    plugin_id=${plugin_id%.rc}
   fi
+
+  local dock_present=0
+  while IFS= read -r id; do
+    [[ "${id}" =~ ^[0-9]+$ ]] || continue
+    ptype=$(xfconf-query -c xfce4-panel -p "/plugins/plugin-${id}" 2> /dev/null || true)
+    if [[ "${id}" == "${plugin_id}" ]]; then
+      dock_present=1
+      plugin_ids+=("${id}")
+    elif [[ "${ptype}" == launcher ]]; then
+      if (( ! dock_present )); then
+        plugin_ids+=("${plugin_id}")
+        dock_present=1
+      fi
+    else
+      plugin_ids+=("${id}")
+    fi
+  done < <(xfconf-query -c xfce4-panel -p "/panels/panel-${panel_id}/plugin-ids" 2> /dev/null)
+  (( dock_present )) || plugin_ids+=("${plugin_id}")
+
+  for id in "${plugin_ids[@]}"; do
+    array_args+=(-t int -s "${id}")
+  done
+  xfconf-query -c xfce4-panel -p "/panels/panel-${panel_id}/plugin-ids" -a "${array_args[@]}" > /dev/null
+
+  # Remove docklike from any other panel (e.g. top bar)
+  local other_id other_ptype
+  local -a other_plugins=() other_args=()
+  for other_id in $(xfconf-query -c xfce4-panel -p /panels 2> /dev/null | grep -E '^[0-9]+$'); do
+    [[ "${other_id}" == "${panel_id}" ]] && continue
+    other_plugins=()
+    other_args=()
+    while IFS= read -r id; do
+      [[ "${id}" =~ ^[0-9]+$ ]] || continue
+      other_ptype=$(xfconf-query -c xfce4-panel -p "/plugins/plugin-${id}" 2> /dev/null || true)
+      [[ "${other_ptype}" != docklike && "${id}" != "${plugin_id}" ]] && other_plugins+=("${id}")
+    done < <(xfconf-query -c xfce4-panel -p "/panels/panel-${other_id}/plugin-ids" 2> /dev/null)
+    for id in "${other_plugins[@]}"; do
+      other_args+=(-t int -s "${id}")
+    done
+    if ((${#other_args[@]} > 0)); then
+      xfconf-query -c xfce4-panel -p "/panels/panel-${other_id}/plugin-ids" -a "${other_args[@]}" > /dev/null
+    fi
+  done
 
   [[ -e "${target}" ]] || printf '[user]\n' > "${target}"
   write_pins "${target}" "${pins}"
-  autostart="${HOME}/.config/autostart/jsh-dock.desktop"
-  mkdir -p "$(dirname -- "${autostart}")"
-  temporary=$(mktemp "${autostart}.XXXXXX")
-  printf '%s\n' '[Desktop Entry]' 'Type=Application' 'Name=jsh application dock' \
-    "Exec=${SCRIPT_DIR}/dock.sh" 'OnlyShowIn=XFCE;' 'X-GNOME-Autostart-enabled=true' > "${temporary}"
-  install -m 0644 "${temporary}" "${autostart}"
-  rm -f "${temporary}"
-  xfce4-panel -r > /dev/null 2>&1 || true
+  if pgrep -x xfce4-panel > /dev/null 2>&1; then
+    timeout 5 xfce4-panel -r > /dev/null 2>&1 || true
+    sleep 1
+    if ! pgrep -x xfce4-panel > /dev/null 2>&1; then
+      DISPLAY="${DISPLAY:-:0}" nohup xfce4-panel > /dev/null 2>&1 &
+    fi
+  fi
 }
 
 main() {
@@ -167,12 +221,14 @@ main() {
     return
   }
   jsh_detail "This will add installed Jsh applications to the ${desktop^^} dock."
-  jsh_prompt "Configure the ${desktop^^} application dock? [y/N]: "
-  read -r answer || answer=
-  [[ "${answer}" =~ ^[Yy]$ ]] || {
-    jsh_note "Skipping application dock."
-    return
-  }
+  if [[ ${JSH_ASSUME_YES:-0} != 1 ]]; then
+    jsh_prompt "Configure the ${desktop^^} application dock? [y/N]: "
+    if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then answer=y; else read -r answer || answer=; fi
+    [[ "${answer}" =~ ^[Yy]$ ]] || {
+      jsh_note "Skipping application dock."
+      return
+    }
+  fi
 
   "configure_${desktop}_dock" "${pins}"
   jsh_success "${desktop^^} application dock configured."

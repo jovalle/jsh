@@ -55,6 +55,7 @@ toggle_layout() {
     xrandr --delmonitor "${LEFT_NAME}" 2> /dev/null || true
     xrandr --delmonitor "${RIGHT_NAME}" 2> /dev/null || true
     refresh_layout || true
+    "${SCRIPT_DIR}/wallpaper.sh"
     notify_layout "Restored the physical ultrawide display."
     return
   fi
@@ -93,6 +94,7 @@ toggle_layout() {
   xrandr --setmonitor "*${LEFT_NAME}" "${half}/${half_mm}x${height}/${mm_height}+${x}+${y}" "${output}"
   xrandr --setmonitor "${RIGHT_NAME}" "${half}/${half_mm}x${height}/${mm_height}+$((x + half))+${y}" "${output}"
   refresh_layout || true
+  "${SCRIPT_DIR}/wallpaper.sh"
   notify_layout "Split the ultrawide display into two logical monitors."
 }
 
@@ -103,12 +105,14 @@ configure_shortcut() {
   local bindings="${HOME}/.xbindkeysrc" autostart="${HOME}/.config/autostart/jsh-keybindings.desktop"
   local existing='' cleaned content temporary
   jsh_detail "This will bind Ctrl+Alt+Super+M to toggle an ultrawide display split."
-  jsh_prompt "Configure the display shortcut? [y/N]: "
-  read -r answer || answer=
-  [[ "${answer}" =~ ^[Yy]$ ]] || {
-    jsh_note "Skipping display shortcut."
-    return
-  }
+  if [[ ${JSH_ASSUME_YES:-0} != 1 ]]; then
+    jsh_prompt "Configure the display shortcut? [y/N]: "
+    if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then answer=y; else read -r answer || answer=; fi
+    [[ "${answer}" =~ ^[Yy]$ ]] || {
+      jsh_note "Skipping display shortcut."
+      return
+    }
+  fi
 
   desktop=$(jsh_linux_desktop)
   case "${desktop}" in

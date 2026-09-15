@@ -70,7 +70,14 @@ jsh_gnome_custom_shortcut() {
     serialized+=']'
     gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings "${serialized}"
   fi
-  gsettings set "${schema}:${path}" name "${name}"
-  gsettings set "${schema}:${path}" binding "${binding}"
-  gsettings set "${schema}:${path}" command "${command}"
+  local setting expected value
+  for setting in name binding command; do
+    case ${setting} in
+      name) expected=${name} ;;
+      binding) expected=${binding} ;;
+      command) expected=${command} ;;
+    esac
+    value=$(gsettings get "${schema}:${path}" "${setting}") || return 1
+    [[ ${value} == "'${expected}'" ]] || gsettings set "${schema}:${path}" "${setting}" "${expected}"
+  done
 }

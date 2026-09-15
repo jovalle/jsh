@@ -14,6 +14,7 @@ done
 unset library_file
 
 DRY_RUN=${JSH_CONFIGURE_DRY_RUN:-0}
+USER_UNITS_CHANGED=0
 
 install_user_text() {
   local destination=$1 content=$2 temporary
@@ -24,6 +25,7 @@ install_user_text() {
     jsh_detail "Would write ${destination}"
     return
   fi
+  USER_UNITS_CHANGED=1
   mkdir -p "$(dirname -- "${destination}")"
   temporary=$(mktemp "${destination}.XXXXXX")
   printf '%s\n' "${content}" > "${temporary}"
@@ -38,6 +40,9 @@ enable_user_unit() {
     return
   fi
   state=$(systemctl --user is-enabled "${unit}" 2> /dev/null || true)
+  if [[ ${state} == enabled || ${state} == static ]] && systemctl --user is-active --quiet "${unit}"; then
+    return 0
+  fi
   if [[ "${DRY_RUN}" == 1 ]]; then
     if [[ "${state}" == static ]]; then
       jsh_detail "Would start static user unit ${unit}"
@@ -59,12 +64,14 @@ main() {
   }
 
   jsh_detail "This will configure SSH, GPG, and Podman user services."
-  jsh_prompt "Configure Linux user services? [y/N]: "
-  read -r answer || answer=
-  [[ "${answer}" =~ ^[Yy]$ ]] || {
-    jsh_note "Skipping Linux user services."
-    return
-  }
+  if [[ ${JSH_ASSUME_YES:-0} != 1 ]]; then
+    jsh_prompt "Configure Linux user services? [y/N]: "
+    if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then answer=y; else read -r answer || answer=; fi
+    [[ "${answer}" =~ ^[Yy]$ ]] || {
+      jsh_note "Skipping Linux user services."
+      return
+    }
+  fi
 
   install_user_text "${HOME}/.config/systemd/user/ssh-agent.service" \
     "[Unit]
@@ -84,7 +91,7 @@ WantedBy=default.target"
 
   if [[ "${DRY_RUN}" == 1 ]]; then
     jsh_detail "Would reload the user systemd manager."
-  else
+  elif ((USER_UNITS_CHANGED)); then
     systemctl --user daemon-reload
   fi
   enable_user_unit ssh-agent.service

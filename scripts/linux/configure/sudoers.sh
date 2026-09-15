@@ -23,18 +23,36 @@ SUDOERS_LINE="${USERNAME} ALL=(ALL) NOPASSWD:ALL"
 SUDOERS_FILE="/etc/sudoers.d/${USERNAME}"
 
 if sudo -n grep -Fxq "${SUDOERS_LINE}" "${SUDOERS_FILE}" 2>/dev/null; then
-  jsh_success "Sudoers already configured for ${USERNAME}."
+  jsh_note "Sudoers already configured for ${USERNAME}."
   exit 0
 fi
 
 jsh_detail "This will grant ${USERNAME} passwordless sudo access."
-jsh_prompt "Configure sudoers? [y/N]: "
-read -r CONFIRM || CONFIRM=
-if [[ ! "${CONFIRM}" =~ ^[Yy]$ ]]; then
-  jsh_note "Skipping sudoers configuration."
-  exit 0
+if [[ ${JSH_ASSUME_YES:-0} != 1 ]]; then
+  jsh_prompt "Configure sudoers? [y/N]: "
+  if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then CONFIRM=y; else read -r CONFIRM || CONFIRM=; fi
+  if [[ ! "${CONFIRM}" =~ ^[Yy]$ ]]; then
+    jsh_note "Skipping sudoers configuration."
+    exit 0
+  fi
 fi
 
-echo "${SUDOERS_LINE}" | sudo tee "${SUDOERS_FILE}" > /dev/null
-sudo chmod 0440 "${SUDOERS_FILE}"
+if [[ ${JSH_CONFIGURE_DRY_RUN:-0} == 1 ]]; then
+  jsh_detail "Would validate and install ${SUDOERS_FILE}"
+  exit 0
+fi
+temporary=$(mktemp)
+trap 'rm -f -- "${temporary}"' EXIT
+printf '%s\n' "${SUDOERS_LINE}" > "${temporary}"
+sudo visudo -cf "${temporary}"
+if [[ -e ${SUDOERS_FILE} ]]; then
+  backup="${XDG_STATE_HOME:-${HOME}/.local/state}/jsh/backups/$(date +%s)-$$/sudoers"
+  mkdir -p "$(dirname -- "${backup}")"
+  # shellcheck disable=SC2024 # Deliberately keep the private backup owned by the invoking user.
+  (umask 077; sudo cat "${SUDOERS_FILE}" > "${backup}")
+fi
+staging=$(sudo mktemp /etc/sudoers.d/.jsh-XXXXXX)
+trap 'rm -f -- "${temporary}"; sudo rm -f -- "${staging}"' EXIT
+sudo install -o root -g root -m 0440 "${temporary}" "${staging}"
+sudo mv -f -- "${staging}" "${SUDOERS_FILE}"
 jsh_success "Sudoers configured for ${USERNAME} with no password prompt."
