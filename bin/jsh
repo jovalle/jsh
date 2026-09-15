@@ -1,6 +1,8 @@
 #!/bin/sh
 ##% jsh
 ## runtime ## Run an ephemeral J shell without deploying dotfiles
+## apps ## Plan, apply, or check native Debian applications
+## adopt ## Move selected home paths into Jsh dotfiles
 ## install ## Install Jsh as the main shell environment
 ## update ## Update Jsh, dependencies, packages, and managed configuration
 ## reload ## Reload the active J shell
@@ -26,6 +28,9 @@ if [ "${JSH_BASH_RUNTIME:-0}" = 1 ]; then
       runtime | install | update | repair)
         JSH_INSTALL_RETURN=1 JSH_BASH_RUNTIME=0 command "${JSH_ROOT}/bin/jsh" "$@" || return
         JSH_BASH_RUNTIME=1 exec "${JSH_BASH}" --noprofile --rcfile "${JSH_ROOT}/bin/jsh" -i
+        ;;
+      adopt)
+        JSH_BASH_RUNTIME=0 command "${JSH_ROOT}/bin/jsh" "$@"
         ;;
       --yes)
         case ${2:-} in
@@ -217,10 +222,25 @@ jsh_repair() {
   return 1
 }
 
+case ${1:-} in
+  apps)
+    shift
+    exec python3 "${JSH_ROOT}/lib/apps.py" "$@"
+    ;;
+esac
+
 assume_yes=
 if [ "${1:-}" = --yes ]; then
   assume_yes=$1
   shift
+fi
+
+if [ "${1:-}" = adopt ]; then
+  shift
+  if [ -n "${assume_yes}" ]; then
+    set -- --yes "$@"
+  fi
+  exec "${JSH_ROOT}/bin/jadopt" "$@"
 fi
 
 if [ "${1:-}" = runtime ] || [ "${1:-}" = install ] || [ "${1:-}" = update ]; then
@@ -247,15 +267,19 @@ fi
 usage() {
   cat <<'EOF'
 Usage: jsh [zsh-options]
+  jsh apps {plan|apply|check} [options]
   jsh [--yes] runtime
   jsh [--yes] install
   jsh [--yes] update
+  jsh [--yes] adopt [--dry-run] PATH...
   jsh repair
 
 Open an isolated J shell environment.
+Run jsh apps to inspect or install native Debian desktop applications.
 Run jsh runtime to install a persistent command without deploying managed dotfiles.
 Run jsh install to install packages, deploy dotfiles, and configure the system.
 Run jsh update to update the repository, dependencies, packages, and configuration.
+Run jsh adopt to move selected home paths into the shared dotfiles package.
 Run jsh repair to initialize submodules and install the vendored fzf executable.
 Use --yes to accept setup workflow prompts.
 Set JSH_SKIP_HEALTH_CHECK=1 to suppress startup health checks.

@@ -50,7 +50,7 @@ confirm() {
   [[ ${JSH_ASSUME_YES:-0} == 1 ]] && return 0
   while :; do
     jsh_prompt "$1 [Y/n]: "
-    read -r answer || answer=
+    if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then answer=y; else read -r answer || answer=; fi
     case "${answer}" in
       '' | y | Y | yes | YES) return 0 ;;
       n | N | no | NO) return 1 ;;
@@ -68,8 +68,8 @@ claim_package() {
   fi
 
   if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then
-    PACKAGE_OWNERS[${package}]=${manager}
-    return
+    jsh_note "Keeping ${package} with ${owner}; skipping ${manager}."
+    return 1
   fi
 
   jsh_prompt "${package} is already declared for ${owner}. Install it with ${manager} instead? [y/N]: "
@@ -93,6 +93,14 @@ register_native_packages() {
   while IFS= read -r package; do
     [[ -n "${package}" ]] || continue
     PACKAGE_OWNERS[${package}]=os
+    case ${package} in
+      fd-find) PACKAGE_OWNERS[fd]=os ;;
+      fd) PACKAGE_OWNERS[fd-find]=os ;;
+      bats) PACKAGE_OWNERS[bats-core]=os ;;
+      golang-go) PACKAGE_OWNERS[go]=os ;;
+      python3-poetry) PACKAGE_OWNERS[poetry]=os ;;
+      netcat-openbsd) PACKAGE_OWNERS[netcat]=os ;;
+    esac
   done < <("${installer}" --list-installed-packages)
 }
 
@@ -105,6 +113,7 @@ register_brew_packages() {
     while IFS= read -r package; do
       [[ -n "${package}" ]] || continue
       [[ -n "${PACKAGE_OWNERS[${package}]:-}" ]] || PACKAGE_OWNERS[${package}]=brew
+      [[ ${package} != fd ]] || PACKAGE_OWNERS[fd-find]=${PACKAGE_OWNERS[fd]}
     done < <(sed -nE 's/^[[:space:]]*(brew|cask) "([^"]+)".*/\2/p' "${brewfile}")
   done
 }
@@ -177,12 +186,6 @@ install_scope() {
 
   [[ -f "${brewfile}" ]] || return 0
   [[ "${scope}" != contrib ]] || migrate_legacy_npm_packages
-  if ((installed_scope)); then
-    jsh_blank
-  else
-    installed_scope=1
-  fi
-  jsh_info "Installing ${scope} packages..."
   mkdir -p "${JSH_ROOT}/tmp"
   temporary=$(mktemp "${JSH_ROOT}/tmp/Brewfile.${scope}.XXXXXX")
   while IFS= read -r line || [[ -n "${line}" ]]; do
@@ -192,13 +195,25 @@ install_scope() {
     fi
     printf '%s\n' "${line}" >> "${temporary}"
   done < "${brewfile}"
-  brew bundle --file="${temporary}"
+  if [[ ${JSH_UPDATE:-0} != 1 ]] && HOMEBREW_NO_AUTO_UPDATE=1 brew bundle check --no-upgrade --file="${temporary}" > /dev/null 2>&1; then
+    jsh_note "${scope} packages are current."
+    rm -f "${temporary}"
+    return
+  fi
+  jsh_info "Installing ${scope} packages..."
+  if [[ ${JSH_UPDATE:-0} == 1 ]]; then
+    brew bundle --file="${temporary}"
+  else
+    HOMEBREW_NO_AUTO_UPDATE=1 brew bundle check --no-upgrade --file="${temporary}" > /dev/null 2>&1 ||
+      HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade --file="${temporary}"
+  fi
+  brew bundle check --no-upgrade --file="${temporary}"
   rm -f "${temporary}"
 }
 
 install_brew_packages() {
   local scope
-  local -i installed_scope=0 has_brewfile=0
+  local -i has_brewfile=0
 
   for scope in "$@"; do
     if [[ -f "${JSH_ROOT}/conf/brew/${scope}/Brewfile" ]]; then
@@ -208,6 +223,8 @@ install_brew_packages() {
   done
   ((has_brewfile)) || return 0
 
+  # Native packages cover the base system; Homebrew supplies declared CLI gaps.
+  load_brew
   confirm "Install Homebrew packages?" || {
     jsh_note "Skipping Homebrew packages."
     return 0
@@ -228,8 +245,7 @@ install_brew_packages() {
   done
 
   if [[ ${JSH_UPDATE:-0} == 1 ]]; then
-    brew upgrade
-    jsh_success "Homebrew packages are up to date."
+    jsh_success "Declared Homebrew packages are up to date."
   fi
 }
 
@@ -244,10 +260,10 @@ install_cargo_packages() {
   local -a packages=()
 
   [[ -f "${manifest}" ]] || return 0
-  command -v cargo > /dev/null 2>&1 || {
-    jsh_error "cargo is required by ${manifest}."
-    return 1
-  }
+  if ! command -v cargo > /dev/null 2>&1; then
+    jsh_note "cargo is not installed; skipping Cargo packages."
+    return 0
+  fi
   command -v jq > /dev/null 2>&1 || {
     jsh_error "jq is required to read ${manifest}."
     return 1
@@ -274,7 +290,7 @@ install_cargo_packages() {
     fi
     cargo install --locked "${package}"
   done
-  jsh_success "Cargo packages are installed."
+  if ((installing)); then jsh_success "Cargo packages are installed."; else jsh_note "Cargo packages are current."; fi
 }
 
 uv_tool_installed() {
@@ -313,7 +329,7 @@ install_uv_tools() {
     fi
     uv tool install --upgrade "${package}"
   done
-  jsh_success "uv tools are installed."
+  if ((installing)); then jsh_success "uv tools are installed."; else jsh_note "uv tools are current."; fi
 }
 
 npm_package_installed() {
@@ -339,10 +355,10 @@ install_npm_packages() {
     jsh_note "Skipping npm packages."
     return 0
   }
-  command -v npm > /dev/null 2>&1 || {
-    jsh_error "npm is required by the active package suite."
-    return 1
-  }
+  if ! command -v npm > /dev/null 2>&1; then
+    jsh_note "npm is not installed; skipping npm packages."
+    return 0
+  fi
 
   for ((index = 0; index < ${#packages[@]}; index++)); do
     package=${packages[index]}
