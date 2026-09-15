@@ -96,8 +96,8 @@ while IFS= read -r -d $'\0' link; do
   home_relative=${link#"${HOME}/"}
   repo_relative=${target#"${repo_root}/"}
 
-  if [[ "${target}" == "${dotfiles_dir}/${home_relative}" ]] || \
-    { [[ "${target}" == "${repo_root}"/* ]] && [[ "${home_relative}" == "${repo_relative}" ]]; }; then
+  [[ "${target}" != "${dotfiles_dir}/${home_relative}" ]] || continue
+  if [[ "${target}" == "${repo_root}"/* && "${home_relative}" == "${repo_relative}" ]]; then
     jsh_info "Removing managed symlink: ${link}"
     stash_path "${link}"
   fi
@@ -113,6 +113,9 @@ jstow_args=(--restow --dir "${repo_root}" --target "${HOME}")
 while IFS= read -r -d $'\0' source; do
   relative=${source#"${dotfiles_dir}/"}
   target="${HOME}/${relative}"
+
+  # Stow may link a parent directory; its children already are the source files.
+  [[ ! -e "${target}" || ! "${target}" -ef "${source}" ]] || continue
 
   if [[ -L "${target}" ]]; then
     destination=$(readlink "${target}")

@@ -1,0 +1,375 @@
+#!/usr/bin/env bash
+##% jadopt
+## PATH... ## Move selected home files or directories into Jsh dotfiles
+
+set -euo pipefail
+
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+readonly SCRIPT_DIR
+readonly JSH_ROOT=${JSH_DIR:-$(cd -- "${SCRIPT_DIR}/.." && pwd -P)}
+readonly DOTFILES_DIR=${JSH_ROOT}/dotfiles
+readonly LINK_COMMAND=${JADOPT_LINK_COMMAND:-ln}
+
+# shellcheck source=../lib/output.sh
+source "${JSH_ROOT}/lib/output.sh"
+
+ASSUME_YES=${JSH_ASSUME_YES:-0}
+DRY_RUN=0
+APPLYING=0
+SOURCE_PATHS=()
+DESTINATION_PATHS=()
+RELATIVE_PATHS=()
+LINK_TARGETS=()
+MOVED_SOURCES=()
+MOVED_DESTINATIONS=()
+REMOVED_LINK_SOURCES=()
+REMOVED_LINK_TARGETS=()
+REMOVED_DIRECTORIES=()
+CREATED_LINKS=()
+
+shopt -s dotglob nullglob
+
+usage() {
+  cat <<'EOF'
+Usage: jsh adopt [--dry-run] [--yes] PATH...
+
+Move selected files or directories from the home directory into Jsh's shared
+dotfiles package, then replace them with managed symlinks.
+
+Options:
+  -n, --dry-run  Show the adoption plan without changing files
+  -y, --yes      Apply the plan without prompting
+  -h, --help     Show this help
+EOF
+}
+
+die() {
+  jsh_error "$*"
+  exit 1
+}
+
+canonical_path() {
+  local input=$1 parent name
+
+  [[ ${input} == /* ]] || input=${PWD}/${input}
+  while [[ ${input} != / && ${input} == */ ]]; do
+    input=${input%/}
+  done
+
+  parent=${input%/*}
+  name=${input##*/}
+  [[ -n ${parent} ]] || parent=/
+  parent=$(cd -P -- "${parent}" 2>/dev/null && pwd -P) ||
+    die "Parent directory does not exist: ${input%/*}"
+  if [[ ${parent} == / ]]; then
+    printf '/%s\n' "${name}"
+  else
+    printf '%s/%s\n' "${parent}" "${name}"
+  fi
+}
+
+relative_link_target() {
+  local destination=$1 origin=$2 index=0 cursor part
+  local -a destination_parts=() origin_parts=() result=()
+
+  IFS='/' read -r -a destination_parts <<<"${destination#/}"
+  IFS='/' read -r -a origin_parts <<<"${origin#/}"
+  while ((index < ${#destination_parts[@]} && index < ${#origin_parts[@]})) &&
+    [[ ${destination_parts[index]} == "${origin_parts[index]}" ]]; do
+    ((index += 1))
+  done
+  for ((cursor = index; cursor < ${#origin_parts[@]}; cursor++)); do
+    result+=(..)
+  done
+  for ((cursor = index; cursor < ${#destination_parts[@]}; cursor++)); do
+    part=${destination_parts[cursor]}
+    result+=("${part}")
+  done
+
+  local IFS=/
+  printf '%s\n' "${result[*]}"
+}
+
+already_adopted() {
+  local source=$1 destination=$2
+  [[ -L ${source} && -e ${destination} && ${source} -ef ${destination} ]]
+}
+
+selected_path_covers() {
+  local relative_path=$1 selected_path
+  for selected_path in "${RELATIVE_PATHS[@]}"; do
+    [[ ${relative_path} == "${selected_path}" || ${relative_path} == "${selected_path}/"* ]] && return 0
+  done
+  return 1
+}
+
+path_is_covered() {
+  local relative_path=$1 source=${HOME_ABS}/$1 destination=${DOTFILES_DIR}/$1 child
+  local -a children=()
+
+  selected_path_covers "${relative_path}" && return 0
+  already_adopted "${source}" "${destination}" && return 0
+  [[ -d ${source} && ! -L ${source} ]] || return 1
+
+  children=("${source}"/*)
+  ((${#children[@]} > 0)) || return 1
+  for child in "${children[@]}"; do
+    path_is_covered "${relative_path}/${child##*/}" || return 1
+  done
+}
+
+can_consolidate() {
+  local relative_path=$1 source=${HOME_ABS}/$1 child
+  local -a children=()
+
+  [[ -d ${source} && ! -L ${source} ]] || return 1
+  children=("${source}"/*)
+  ((${#children[@]} > 1)) || return 1
+  for child in "${children[@]}"; do
+    path_is_covered "${relative_path}/${child##*/}" || return 1
+  done
+}
+
+consolidate_paths() {
+  local ceiling relative_path parent selected_path duplicate
+  local -a candidates=() consolidated=()
+
+  ceiling=${RELATIVE_PATHS[0]%/*}
+  [[ ${ceiling} != "${RELATIVE_PATHS[0]}" ]] || ceiling=
+  for relative_path in "${RELATIVE_PATHS[@]:1}"; do
+    while [[ -n ${ceiling} && ${relative_path} != "${ceiling}/"* ]]; do
+      [[ ${ceiling} == */* ]] && ceiling=${ceiling%/*} || ceiling=
+    done
+  done
+
+  for relative_path in "${RELATIVE_PATHS[@]}"; do
+    [[ ${relative_path} == */* ]] || continue
+    parent=${relative_path%/*}
+    while [[ -n ${parent} ]]; do
+      duplicate=0
+      for selected_path in "${candidates[@]}"; do
+        [[ ${selected_path} == "${parent}" ]] && duplicate=1
+      done
+      ((duplicate)) || candidates+=("${parent}")
+      [[ ${parent} == "${ceiling}" || ${parent} != */* ]] && break
+      parent=${parent%/*}
+    done
+  done
+
+  for parent in "${candidates[@]}"; do
+    selected_path_covers "${parent}" && continue
+    can_consolidate "${parent}" || continue
+    consolidated=()
+    for selected_path in "${RELATIVE_PATHS[@]}"; do
+      [[ ${selected_path} == "${parent}/"* ]] || consolidated+=("${selected_path}")
+    done
+    consolidated+=("${parent}")
+    RELATIVE_PATHS=("${consolidated[@]}")
+    jsh_note "Consolidating managed paths at ~/${parent}"
+  done
+}
+
+validate_merge() {
+  local source=$1 destination=$2 child
+  local -a children=()
+
+  already_adopted "${source}" "${destination}" && return 0
+  [[ -e ${destination} || -L ${destination} ]] || return 0
+  if [[ -d ${source} && ! -L ${source} && -d ${destination} && ! -L ${destination} ]]; then
+    children=("${source}"/*)
+    for child in "${children[@]}"; do
+      validate_merge "${child}" "${destination}/${child##*/}"
+    done
+    return 0
+  fi
+  die "Repository destination already exists: ${destination}"
+}
+
+merge_path() {
+  local source=$1 destination=$2 child target
+  local -a children=()
+
+  if already_adopted "${source}" "${destination}"; then
+    target=$(readlink -- "${source}")
+    rm -- "${source}"
+    REMOVED_LINK_SOURCES+=("${source}")
+    REMOVED_LINK_TARGETS+=("${target}")
+    return
+  fi
+  if [[ ! -e ${destination} && ! -L ${destination} ]]; then
+    mkdir -p -- "${destination%/*}"
+    mv -- "${source}" "${destination}"
+    MOVED_SOURCES+=("${source}")
+    MOVED_DESTINATIONS+=("${destination}")
+    return
+  fi
+
+  children=("${source}"/*)
+  for child in "${children[@]}"; do
+    merge_path "${child}" "${destination}/${child##*/}"
+  done
+  rmdir -- "${source}"
+  REMOVED_DIRECTORIES+=("${source}")
+}
+
+rollback() {
+  local exit_status=$? index source destination target failed=0
+  trap - EXIT INT TERM
+  ((APPLYING)) || exit "${exit_status}"
+
+  jsh_warn "Adoption failed; restoring moved paths."
+  for ((index = ${#CREATED_LINKS[@]} - 1; index >= 0; index--)); do
+    source=${CREATED_LINKS[index]}
+    if [[ -L ${source} ]]; then
+      rm -- "${source}" || failed=1
+    elif [[ -e ${source} ]]; then
+      jsh_error "Cannot remove adoption link ${source}: the path was recreated"
+      failed=1
+    fi
+  done
+  for ((index = ${#REMOVED_DIRECTORIES[@]} - 1; index >= 0; index--)); do
+    mkdir -- "${REMOVED_DIRECTORIES[index]}" || failed=1
+  done
+  for ((index = ${#MOVED_SOURCES[@]} - 1; index >= 0; index--)); do
+    source=${MOVED_SOURCES[index]}
+    destination=${MOVED_DESTINATIONS[index]}
+    if [[ -e ${source} || -L ${source} ]]; then
+      jsh_error "Cannot restore ${source}: the path was recreated during adoption"
+      failed=1
+      continue
+    fi
+    mv -- "${destination}" "${source}" || failed=1
+  done
+  for ((index = ${#REMOVED_LINK_SOURCES[@]} - 1; index >= 0; index--)); do
+    source=${REMOVED_LINK_SOURCES[index]}
+    target=${REMOVED_LINK_TARGETS[index]}
+    if [[ -e ${source} || -L ${source} ]]; then
+      jsh_error "Cannot restore ${source}: the path was recreated during adoption"
+      failed=1
+      continue
+    fi
+    ln -s -- "${target}" "${source}" || failed=1
+  done
+  ((failed == 0)) || jsh_error "Adoption recovery is incomplete"
+  exit "${exit_status}"
+}
+
+arguments=()
+while (($#)); do
+  case $1 in
+    -n | --dry-run) DRY_RUN=1 ;;
+    -y | --yes) ASSUME_YES=1 ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      arguments+=("$@")
+      break
+      ;;
+    -*) die "Unknown option: $1" ;;
+    *) arguments+=("$1") ;;
+  esac
+  shift
+done
+
+((${#arguments[@]} > 0)) || {
+  usage >&2
+  exit 2
+}
+
+[[ -d ${DOTFILES_DIR} ]] || die "Dotfiles directory not found: ${DOTFILES_DIR}"
+command -v "${LINK_COMMAND}" >/dev/null 2>&1 || die "Link command is unavailable: ${LINK_COMMAND}"
+HOME_ABS=$(cd -P -- "${HOME}" 2>/dev/null && pwd -P) || die "Home directory is unavailable: ${HOME}"
+
+for argument in "${arguments[@]}"; do
+  source_path=$(canonical_path "${argument}")
+  [[ -e ${source_path} || -L ${source_path} ]] || die "Path does not exist: ${argument}"
+
+  case ${source_path} in
+    "${HOME_ABS}") die "The home directory itself cannot be adopted" ;;
+    "${HOME_ABS}"/*) ;;
+    *) die "Path must be inside the home directory: ${argument}" ;;
+  esac
+  case ${source_path} in
+    "${JSH_ROOT}" | "${JSH_ROOT}"/*) die "The Jsh repository cannot adopt itself: ${argument}" ;;
+  esac
+
+  relative_path=${source_path#"${HOME_ABS}"/}
+  destination_path=${DOTFILES_DIR}/${relative_path}
+
+  if already_adopted "${source_path}" "${destination_path}"; then
+    jsh_note "Already adopted: ${source_path}"
+    continue
+  fi
+  [[ ! -L ${source_path} ]] || die "Symbolic links cannot be adopted: ${argument}"
+
+  for selected_path in "${RELATIVE_PATHS[@]}"; do
+    [[ ${relative_path} == "${selected_path}" || ${relative_path} == "${selected_path}/"* ]] && continue 2
+  done
+  consolidated_paths=()
+  for selected_path in "${RELATIVE_PATHS[@]}"; do
+    [[ ${selected_path} == "${relative_path}/"* ]] || consolidated_paths+=("${selected_path}")
+  done
+  RELATIVE_PATHS=("${consolidated_paths[@]}")
+  RELATIVE_PATHS+=("${relative_path}")
+done
+
+((${#RELATIVE_PATHS[@]} > 0)) || {
+  jsh_success "All selected paths are already adopted"
+  exit 0
+}
+
+consolidate_paths
+
+for relative_path in "${RELATIVE_PATHS[@]}"; do
+  source_path=${HOME_ABS}/${relative_path}
+  destination_path=${DOTFILES_DIR}/${relative_path}
+  validate_merge "${source_path}" "${destination_path}"
+  SOURCE_PATHS+=("${source_path}")
+  DESTINATION_PATHS+=("${destination_path}")
+  LINK_TARGETS+=("$(relative_link_target "${destination_path}" "${source_path%/*}")")
+done
+
+jsh_info "Adoption plan:"
+for ((index = 0; index < ${#SOURCE_PATHS[@]}; index++)); do
+  jsh_detail "  Move: ${SOURCE_PATHS[index]}"
+  jsh_detail "    to: ${DESTINATION_PATHS[index]}"
+  jsh_detail "  Link: ${SOURCE_PATHS[index]} -> ${LINK_TARGETS[index]}"
+done
+
+if ((DRY_RUN)); then
+  jsh_success "Dry run complete; no files changed"
+  exit 0
+fi
+
+if [[ ${ASSUME_YES} != 1 ]]; then
+  jsh_prompt "Adopt these paths? [y/N]: "
+  read -r confirm || confirm=
+  case ${confirm} in
+    y | Y | yes | YES) ;;
+    *)
+      jsh_note "Adoption cancelled."
+      exit 0
+      ;;
+  esac
+fi
+
+APPLYING=1
+trap rollback EXIT
+trap 'exit 130' INT TERM
+
+for ((index = 0; index < ${#SOURCE_PATHS[@]}; index++)); do
+  source_path=${SOURCE_PATHS[index]}
+  destination_path=${DESTINATION_PATHS[index]}
+  merge_path "${source_path}" "${destination_path}"
+  CREATED_LINKS+=("${source_path}")
+  "${LINK_COMMAND}" -s -- "${LINK_TARGETS[index]}" "${source_path}"
+done
+
+APPLYING=0
+trap - EXIT INT TERM
+for relative_path in "${RELATIVE_PATHS[@]}"; do
+  jsh_success "Adopted ~/${relative_path}"
+done
