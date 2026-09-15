@@ -31,7 +31,7 @@ cleanup() {
 
 confirm_import() {
   jsh_prompt "Apply this backup to Vorssaint? [y/N]: "
-  read -r answer || answer=
+  if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then answer=y; else read -r answer || answer=; fi
   if [[ "${answer}" =~ ^[Yy]$ ]]; then
     IMPORT_CONFIRMED=1
   fi
@@ -39,7 +39,7 @@ confirm_import() {
 
 confirm_backup() {
   jsh_prompt "Replace the managed backup with these active settings? [y/N]: "
-  read -r answer || answer=
+  if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then answer=y; else read -r answer || answer=; fi
   if [[ "${answer}" =~ ^[Yy]$ ]]; then
     BACKUP_CONFIRMED=1
   fi
@@ -308,7 +308,7 @@ backup_settings() {
   create_backup_candidate "${managed_active_plist}" "${candidate_settings}" "${candidate_backup}"
   show_backup_diff "${candidate_backup}"
   if [[ "${SETTINGS_DIFFER}" -eq 0 ]]; then
-    jsh_success "The managed Vorssaint backup already matches active settings."
+    jsh_note "The managed Vorssaint backup already matches active settings."
     return
   fi
 
@@ -507,7 +507,7 @@ main() {
       jsh_warn "Keeping the active Vorssaint settings."
     fi
   else
-    jsh_success "Vorssaint settings already match the managed backup."
+    jsh_note "Vorssaint settings already match the managed backup."
   fi
 
   configure_onboarding "${managed_backup_plist}"
