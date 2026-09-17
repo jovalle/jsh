@@ -7,7 +7,7 @@
 ## profiles ## List configured identities
 ## create NAME ## Create a Git project and select its identity
 ## commit [-t TIME] [ARGS...] ## Commit with an optional timestamp
-## amend -t TIME [ARGS...] ## Amend the latest commit timestamp
+## amend [REF] -t TIME [--dry-run] [--yes] ## Move a commit timestamp and following commits
 ## rewrite [--last N|REF...] ## Rewrite commit messages and timestamps
 ## update [--stash] [--all [DIR]] ## Fast-forward repositories from their upstreams
 ## save [--exclude PATH]... ## Back up uncommitted changes to a secret gist
@@ -20,6 +20,8 @@
 ##? identity set @profile ## Configured identity
 ##? identity @profile ## Configured identity
 ##? profile @profile ## Configured identity
+##? amend --dry-run ## Preview timestamp changes without rewriting history
+##? amend --yes ## Rewrite history without confirmation
 ##? update --stash ## Stash and restore local changes
 ##? update --all ## Update the base directory and immediate child repositories
 ##? update --all @directory ## Repository base directory
@@ -49,7 +51,7 @@ for library_file in "${JSH_ROOT}"/lib/*; do
 done
 unset library_file
 
-JGIT_CONFIG=${JGIT_CONFIG:-${JSH_ROOT}/conf/git.yaml}
+JGIT_CONFIG=${JGIT_CONFIG:-${JSH_ROOT}/conf/git.json}
 JGIT_VERSION=1.0.0
 JGIT_COLOR=0
 jsh_color_enabled 1 && JGIT_COLOR=1
@@ -69,7 +71,7 @@ Commands:
   profiles              Alias for identity list
   create NAME           Create a Git project and select its identity
   commit [-t TIME]      Commit with a relative or absolute timestamp
-  amend -t TIME         Amend the latest commit timestamp
+  amend [REF] -t TIME   Move a commit timestamp and following commits
   rewrite REF...        Rewrite selected commits by hash, tag, or other ref
   rewrite --last N      Rewrite the last N first-parent commits
   update [--stash]      Fast-forward the current branch from its upstream
@@ -83,9 +85,14 @@ Timestamp examples:
   +30m                  30 minutes after the latest commit
   -2h                   2 hours before the latest commit
   now, now+1h           Current time, optionally with an offset
+  2026-09-05 14         Absolute hour; randomizes minutes and seconds
   2026-09-05 14:30      Absolute local date and time
 
-Relative offsets randomize unspecified lower-order time fields.
+Unspecified lower-order fields are randomized. Add zero-valued units for exact
+relative offsets, for example +5h0m0s.
+
+Amending an older first-parent commit shifts every following first-parent commit
+by the same effective delta while preserving trees, messages, and merge parents.
 
 Backup examples:
   jgit save --exclude .env --exclude build
@@ -95,7 +102,7 @@ Backups preserve staged, unstaged, untracked, and recursive submodule changes.
 Secret gists are unlisted, not encrypted.
 
 Environment:
-  JGIT_CONFIG           Profile file (default: conf/git.yaml)
+  JGIT_CONFIG           Profile file (default: conf/git.json)
   JSH_PROJECT_DIR       Project directory (default: ~/projects)
 EOF
 }
@@ -200,14 +207,7 @@ _jgit_generate_ssh_key() {
 
 _jgit_profile_names() {
   [[ -r ${JGIT_CONFIG} ]] || return 0
-  awk '
-    /^  [[:alnum:]_.-]+:[[:space:]]*$/ && $0 !~ /^    / {
-      line = $0
-      sub(/^  /, "", line)
-      sub(/:[[:space:]]*$/, "", line)
-      print line
-    }
-  ' "${JGIT_CONFIG}"
+  jq -er '.profiles | keys_unsorted[]' "${JGIT_CONFIG}"
 }
 
 _jgit_git_commands() {
@@ -233,33 +233,8 @@ _jgit_git_commands() {
 _jgit_profile_field() {
   local profile=$1 field=$2
   [[ -r ${JGIT_CONFIG} ]] || return 1
-  awk -v wanted_profile="${profile}" -v wanted_field="${field}" '
-    function trim(value) {
-      sub(/^[[:space:]]+/, "", value)
-      sub(/[[:space:]]+$/, "", value)
-      return value
-    }
-    /^  [[:alnum:]_.-]+:[[:space:]]*$/ && $0 !~ /^    / {
-      current = $0
-      sub(/^  /, "", current)
-      sub(/:[[:space:]]*$/, "", current)
-      next
-    }
-    current == wanted_profile && /^    [[:alnum:]_.-]+:/ {
-      line = substr($0, 5)
-      key = line
-      sub(/:.*/, "", key)
-      if (key != wanted_field) next
-      sub(/^[^:]+:/, "", line)
-      line = trim(line)
-      if ((substr(line, 1, 1) == "\"" && substr(line, length(line), 1) == "\"") ||
-          (substr(line, 1, 1) == "\047" && substr(line, length(line), 1) == "\047")) {
-        line = substr(line, 2, length(line) - 2)
-      }
-      print line
-      exit
-    }
-  ' "${JGIT_CONFIG}"
+  jq -er --arg profile "${profile}" --arg field "${field}" \
+    '.profiles[$profile][$field] // empty' "${JGIT_CONFIG}"
 }
 
 _jgit_profile_exists() {
@@ -615,7 +590,7 @@ _jgit_parse_offset() {
   esac
   while [[ -n ${remaining} ]]; do
     [[ ${remaining} =~ ^([0-9]+)([smhdwMy])(.*)$ ]] || return 1
-    number=${BASH_REMATCH[1]}
+    number=$((10#${BASH_REMATCH[1]}))
     unit=${BASH_REMATCH[2]}
     remaining=${BASH_REMATCH[3]}
     case ${unit} in
@@ -641,15 +616,68 @@ _jgit_parse_offset() {
 }
 
 _jgit_parse_absolute() {
-  local input=$1 format
+  local parsed
+  parsed=$(_jgit_parse_absolute_with_precision "$1") || return 1
+  printf '%s\n' "${parsed%% *}"
+}
+
+_jgit_parse_absolute_with_precision() {
+  local input=$1 normalized format precision epoch round_trip
+  case ${input} in
+    ????-??-??)
+      [[ ${input} =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || return 1
+      normalized="${input} 00:00:00"
+      format='%Y-%m-%d %H:%M:%S'
+      precision=86400
+      ;;
+    ????-??-??\ ??)
+      [[ ${input} =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}$ ]] || return 1
+      normalized="${input}:00:00"
+      format='%Y-%m-%d %H:%M:%S'
+      precision=3600
+      ;;
+    ????-??-??\ ??:??)
+      [[ ${input} =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}$ ]] || return 1
+      normalized="${input}:00"
+      format='%Y-%m-%d %H:%M:%S'
+      precision=60
+      ;;
+    ????-??-??\ ??:??:??)
+      [[ ${input} =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}\ [0-9]{2}:[0-9]{2}:[0-9]{2}$ ]] || return 1
+      normalized=${input}
+      format='%Y-%m-%d %H:%M:%S'
+      precision=1
+      ;;
+    ??)
+      [[ ${input} =~ ^[0-9]{2}$ ]] || return 1
+      normalized="$(date +%Y-%m-%d) ${input}:00:00"
+      format='%Y-%m-%d %H:%M:%S'
+      precision=3600
+      ;;
+    ??:??)
+      [[ ${input} =~ ^[0-9]{2}:[0-9]{2}$ ]] || return 1
+      normalized="$(date +%Y-%m-%d) ${input}:00"
+      format='%Y-%m-%d %H:%M:%S'
+      precision=60
+      ;;
+    ??:??:??)
+      [[ ${input} =~ ^[0-9]{2}:[0-9]{2}:[0-9]{2}$ ]] || return 1
+      normalized="$(date +%Y-%m-%d) ${input}"
+      format='%Y-%m-%d %H:%M:%S'
+      precision=1
+      ;;
+    *) return 1 ;;
+  esac
+
   if _jgit_is_gnu_date; then
-    date -d "${input}" +%s 2> /dev/null
-    return
+    epoch=$(date -d "${normalized}" +%s 2> /dev/null) || return 1
+    round_trip=$(date -d "@${epoch}" '+%Y-%m-%d %H:%M:%S') || return 1
+  else
+    epoch=$(date -j -f "${format}" "${normalized}" +%s 2> /dev/null) || return 1
+    round_trip=$(date -r "${epoch}" '+%Y-%m-%d %H:%M:%S') || return 1
   fi
-  for format in '%Y-%m-%d %H:%M:%S' '%Y-%m-%d %H:%M' '%Y-%m-%d' '%H:%M:%S' '%H:%M'; do
-    date -j -f "${format}" "${input}" +%s 2> /dev/null && return 0
-  done
-  return 1
+  [[ ${round_trip} == "${normalized}" ]] || return 1
+  printf '%s %s\n' "${epoch}" "${precision}"
 }
 
 _jgit_random_below() {
@@ -716,7 +744,12 @@ _jgit_resolve_timestamp_from() {
       precision=${parsed#* }
       _jgit_randomize_timestamp "$((base + offset))" "${precision}"
       ;;
-    *) _jgit_parse_absolute "${input}" ;;
+    *)
+      parsed=$(_jgit_parse_absolute_with_precision "${input}") || return 1
+      offset=${parsed%% *}
+      precision=${parsed#* }
+      _jgit_randomize_timestamp "${offset}" "${precision}"
+      ;;
   esac
 }
 
@@ -762,14 +795,204 @@ _jgit_commit() {
     git commit --date="${git_date}" "${GIT_ARGS[@]}"
 }
 
+_jgit_amend_map_parent() {
+  local parent=$1 index
+  for ((index = 0; index < ${#AMEND_OLD_COMMITS[@]}; index++)); do
+    if [[ ${AMEND_OLD_COMMITS[index]} == "${parent}" ]]; then
+      printf '%s\n' "${AMEND_NEW_COMMITS[index]}"
+      return
+    fi
+  done
+  printf '%s\n' "${parent}"
+}
+
+_jgit_amend_reject_extra_headers() {
+  local commit=$1 header
+  while IFS= read -r header; do
+    case ${header} in
+      tree | parent | author | committer) ;;
+      *) _jgit_die "cannot safely rewrite ${commit:0:12}: unsupported ${header} header" ;;
+    esac
+  done < <(git cat-file commit "${commit}" | awk '/^$/{exit} /^[^ ]/{print $1}')
+}
+
+_jgit_amend_cleanup() {
+  [[ -z ${JGIT_AMEND_TEMP:-} ]] || rm -rf "${JGIT_AMEND_TEMP}"
+}
+
 _jgit_amend() {
-  local epoch git_date
-  _jgit_parse_timestamp_args "$@"
-  [[ -n ${TIMESTAMP} ]] || _jgit_die 'amend requires -t or --timestamp'
-  epoch=$(_jgit_resolve_timestamp "${TIMESTAMP}") || _jgit_die "invalid timestamp: ${TIMESTAMP}"
-  git_date=$(_jgit_git_date "${epoch}")
-  GIT_AUTHOR_DATE=${git_date} GIT_COMMITTER_DATE=${git_date} \
-    git commit --amend --no-edit --date="${git_date}" "${GIT_ARGS[@]}"
+  local target_ref=HEAD target_set=0 timestamp='' dry_run=0 assume_yes=0 argument target old_tip branch
+  local target_epoch resolved_epoch delta index commit parent parent_epoch new_author new_committer
+  local author_timezone committer_timezone tree message rewritten_message new_commit answer
+  local -a parents parent_args
+  AMEND_OLD_COMMITS=()
+  AMEND_NEW_COMMITS=()
+  AMEND_AUTHOR_EPOCHS=()
+  AMEND_COMMITTER_EPOCHS=()
+
+  while (($#)); do
+    argument=$1
+    case ${argument} in
+      -t | --timestamp)
+        (($# >= 2)) || _jgit_die "option ${argument} requires a timestamp"
+        timestamp=$2
+        shift 2
+        ;;
+      -t=* | --timestamp=*) timestamp=${argument#*=}; shift ;;
+      --dry-run) dry_run=1; shift ;;
+      -y | --yes) assume_yes=1; shift ;;
+      -h | --help)
+        printf '%s\n' \
+          'Usage: jgit amend [REF] -t TIME [--dry-run] [--yes]' \
+          '' \
+          'Moves REF (default HEAD) and every following first-parent commit by' \
+          'the effective timestamp delta. Trees, messages, and merge topology are preserved.'
+        return
+        ;;
+      -*) _jgit_die "unknown amend option: ${argument}" ;;
+      *)
+        ((target_set == 0)) || _jgit_die 'amend accepts at most one commit ref'
+        target_ref=${argument}
+        target_set=1
+        shift
+        ;;
+    esac
+  done
+
+  [[ -n ${timestamp} ]] || _jgit_die 'amend requires -t or --timestamp'
+  git rev-parse --git-dir > /dev/null 2>&1 || _jgit_die 'not in a Git repository'
+  branch=$(git symbolic-ref --quiet HEAD 2> /dev/null) || _jgit_die 'amend requires a branch checkout'
+  old_tip=$(git rev-parse --verify HEAD) || _jgit_die 'amend requires at least one commit'
+  target=$(git rev-parse --verify "${target_ref}^{commit}" 2> /dev/null) ||
+    _jgit_die "invalid commit ref: ${target_ref}"
+  [[ $(git rev-parse --is-shallow-repository) == false ]] ||
+    _jgit_die 'amend requires complete history; unshallow the repository first'
+  [[ -z $(git replace -l) ]] || _jgit_die 'amend does not support replacement refs'
+  [[ -z $(git rev-parse -q --verify MERGE_HEAD 2> /dev/null || true) ]] ||
+    _jgit_die 'a merge is in progress'
+  [[ -z $(git rev-parse -q --verify CHERRY_PICK_HEAD 2> /dev/null || true) ]] ||
+    _jgit_die 'a cherry-pick is in progress'
+  [[ -z $(git rev-parse -q --verify REVERT_HEAD 2> /dev/null || true) ]] ||
+    _jgit_die 'a revert is in progress'
+  [[ ! -d $(git rev-parse --git-path rebase-merge) && ! -d $(git rev-parse --git-path rebase-apply) ]] ||
+    _jgit_die 'a rebase is in progress'
+  [[ ! -d $(git rev-parse --git-path sequencer) ]] || _jgit_die 'a sequencer operation is in progress'
+
+  while IFS= read -r commit; do
+    if [[ ${commit} == "${target}" || -n ${AMEND_OLD_COMMITS[0]+set} ]]; then
+      AMEND_OLD_COMMITS+=("${commit}")
+    fi
+  done < <(git rev-list --first-parent --reverse HEAD)
+  [[ -n ${AMEND_OLD_COMMITS[0]+set} ]] ||
+    _jgit_die 'target must be on the current branch first-parent history'
+
+  target_epoch=$(git show -s --format='%ct' "${target}")
+  resolved_epoch=$(_jgit_resolve_timestamp_from "${timestamp}" "${target_epoch}") ||
+    _jgit_die "invalid timestamp: ${timestamp}"
+  delta=$((resolved_epoch - target_epoch))
+
+  for ((index = 0; index < ${#AMEND_OLD_COMMITS[@]}; index++)); do
+    commit=${AMEND_OLD_COMMITS[index]}
+    _jgit_amend_reject_extra_headers "${commit}"
+    if ((index == 0)); then
+      new_author=${resolved_epoch}
+      new_committer=${resolved_epoch}
+    else
+      new_author=$(($(git show -s --format='%at' "${commit}") + delta))
+      new_committer=$(($(git show -s --format='%ct' "${commit}") + delta))
+    fi
+    _jgit_git_date "${new_author}" > /dev/null 2>&1 || _jgit_die 'author date is out of range'
+    _jgit_git_date "${new_committer}" > /dev/null 2>&1 || _jgit_die 'committer date is out of range'
+    AMEND_AUTHOR_EPOCHS+=("${new_author}")
+    AMEND_COMMITTER_EPOCHS+=("${new_committer}")
+  done
+
+  for ((index = 0; index < ${#AMEND_OLD_COMMITS[@]}; index++)); do
+    commit=${AMEND_OLD_COMMITS[index]}
+    new_committer=${AMEND_COMMITTER_EPOCHS[index]}
+    for parent in $(git show -s --format='%P' "${commit}"); do
+      parent_epoch=$(git show -s --format='%ct' "${parent}")
+      for ((argument = 0; argument < ${#AMEND_OLD_COMMITS[@]}; argument++)); do
+        if [[ ${AMEND_OLD_COMMITS[argument]} == "${parent}" ]]; then
+          parent_epoch=${AMEND_COMMITTER_EPOCHS[argument]}
+          break
+        fi
+      done
+      ((new_committer >= parent_epoch)) ||
+        _jgit_die "timestamp would place ${commit:0:12} before parent ${parent:0:12}"
+    done
+  done
+
+  printf 'Commits to move by %+d seconds:\n' "${delta}"
+  for ((index = 0; index < ${#AMEND_OLD_COMMITS[@]}; index++)); do
+    commit=${AMEND_OLD_COMMITS[index]}
+    printf '  %s  %s -> %s  %s\n' "${commit:0:12}" \
+      "$(_jgit_git_date "$(git show -s --format='%ct' "${commit}")")" \
+      "$(_jgit_git_date "${AMEND_COMMITTER_EPOCHS[index]}")" \
+      "$(git show -s --format='%s' "${commit}")"
+  done
+  if ((dry_run)); then
+    return 0
+  fi
+
+  jsh_warn 'This rewrites commit IDs and may require a force push.'
+  if ((assume_yes == 0)); then
+    jsh_prompt 'Continue? [y/N]: '
+    read -r answer || answer=
+    [[ ${answer} == [Yy]* ]] || { jsh_warn 'Amend cancelled'; return; }
+  fi
+
+  JGIT_AMEND_TEMP=$(mktemp -d "$(git rev-parse --git-path jgit-amend.XXXXXX)") ||
+    _jgit_die 'could not create amend workspace'
+  trap '_jgit_amend_cleanup' EXIT
+  trap '_jgit_amend_cleanup; exit 130' HUP INT TERM
+  message=${JGIT_AMEND_TEMP}/message
+  rewritten_message=${JGIT_AMEND_TEMP}/rewritten-message
+
+  for ((index = 0; index < ${#AMEND_OLD_COMMITS[@]}; index++)); do
+    commit=${AMEND_OLD_COMMITS[index]}
+    tree=$(git show -s --format='%T' "${commit}")
+    read -r -a parents <<< "$(git show -s --format='%P' "${commit}")"
+    parent_args=()
+    for parent in ${parents[@]+"${parents[@]}"}; do
+      parent=$(_jgit_amend_map_parent "${parent}")
+      parent_args+=(-p "${parent}")
+    done
+    git cat-file commit "${commit}" | sed '1,/^$/d' > "${message}"
+    author_timezone=$(git show -s --format='%ai' "${commit}")
+    author_timezone=${author_timezone##* }
+    committer_timezone=$(git show -s --format='%ci' "${commit}")
+    committer_timezone=${committer_timezone##* }
+    if ((index == 0)); then
+      author_timezone=$(_jgit_git_date "${AMEND_AUTHOR_EPOCHS[index]}")
+      author_timezone=${author_timezone##* }
+      committer_timezone=${author_timezone}
+    fi
+    new_commit=$(
+      GIT_AUTHOR_NAME="$(git show -s --format='%an' "${commit}")" \
+      GIT_AUTHOR_EMAIL="$(git show -s --format='%ae' "${commit}")" \
+      GIT_AUTHOR_DATE="@${AMEND_AUTHOR_EPOCHS[index]} ${author_timezone}" \
+      GIT_COMMITTER_NAME="$(git show -s --format='%cn' "${commit}")" \
+      GIT_COMMITTER_EMAIL="$(git show -s --format='%ce' "${commit}")" \
+      GIT_COMMITTER_DATE="@${AMEND_COMMITTER_EPOCHS[index]} ${committer_timezone}" \
+        git commit-tree "${tree}" ${parent_args[@]+"${parent_args[@]}"} -F "${message}"
+    ) || _jgit_die "could not rewrite ${commit:0:12}"
+    [[ $(git show -s --format='%T' "${new_commit}") == "${tree}" ]] ||
+      _jgit_die "tree changed while rewriting ${commit:0:12}"
+    git cat-file commit "${new_commit}" | sed '1,/^$/d' > "${rewritten_message}"
+    cmp -s "${message}" "${rewritten_message}" ||
+      _jgit_die "message changed while rewriting ${commit:0:12}"
+    AMEND_NEW_COMMITS+=("${new_commit}")
+  done
+
+  new_commit=${AMEND_NEW_COMMITS[${#AMEND_NEW_COMMITS[@]} - 1]}
+  git update-ref -m "jgit amend ${target_ref} ${timestamp}" "${branch}" "${new_commit}" "${old_tip}" ||
+    _jgit_die 'branch changed while rewriting; no ref was updated'
+  _jgit_amend_cleanup
+  trap - EXIT HUP INT TERM
+  unset JGIT_AMEND_TEMP
+  jsh_success "Moved ${#AMEND_OLD_COMMITS[@]} commit$([[ ${#AMEND_OLD_COMMITS[@]} == 1 ]] || printf s)"
+  printf 'Rollback: git update-ref %q %q %q\n' "${branch}" "${old_tip}" "${new_commit}"
 }
 
 _jgit_rewrite_add_commit() {
