@@ -13,20 +13,7 @@ current_toolbar_state() {
 
 waterfox_config_json() {
   local config=${1:-${WATERFOX_CONFIG}}
-  local out
-  if out=$(yq -o=json '.' "${config}" 2> /dev/null); then
-    printf '%s\n' "${out}"
-    return 0
-  fi
-  yq '.' "${config}"
-}
-
-waterfox_json_to_yaml() {
-  if yq --version 2>&1 | grep -q 'mikefarah'; then
-    yq -P '.'
-  else
-    yq -y '.'
-  fi
+  jq '.' "${config}"
 }
 
 validate_waterfox_config() {
@@ -54,8 +41,11 @@ validate_waterfox_config() {
         | keys == ["browserDesktopAlternative", "citrixIcaDesktop",
           "citrixReceiverDesktop", "htmlDesktop", "httpDesktop", "httpsDesktop"])
       and (all(.associations[][]; type == "string" and length > 0))
-      and (.toolbar | keys == ["remove"])
+      and (.toolbar | (keys - ["placements", "remove"]) == [])
       and (.toolbar.remove | string_array)
+      and ((.toolbar.placements // {}) | type == "object" and all(.[]; string_array))
+      and ([((.toolbar.placements // {})[][])] | length == (unique | length))
+      and ((.toolbar.remove - [((.toolbar.placements // {})[][])]) == .toolbar.remove)
       and (.addons | type == "array")
       and ([.addons[].id] | length == (unique | length))
       and all(.addons[];
@@ -100,16 +90,22 @@ configured_action_widgets() {
 }
 
 managed_toolbar_state() {
-  local profile=$1 state pinned unpinned removed
+  local profile=$1 state pinned unpinned removed placements
   state=$(current_toolbar_state "${profile}") || return 1
   pinned=$(configured_action_widgets "${profile}" true \
     | jq -Rsc 'split("\n") | map(select(length > 0))')
   unpinned=$(configured_action_widgets "${profile}" false \
     | jq -Rsc 'split("\n") | map(select(length > 0))')
   removed=$(waterfox_config_json | jq -c '.toolbar.remove')
+  placements=$(waterfox_config_json | jq -c '.toolbar.placements // {}')
   jq -c --argjson pinned "${pinned}" --argjson unpinned "${unpinned}" \
-    --argjson removed "${removed}" '
+    --argjson removed "${removed}" --argjson placements "${placements}" '
     ([.placements[][] | select(endswith("-browser-action"))] + $removed | unique) as $remove
+    | (.placements | to_entries | map(
+        . as $entry
+        | select(any($entry.value[]; . as $widget | $remove | index($widget)))
+        | .key
+      )) as $removedAreas
     | reduce $remove[] as $widget (.;
         .placements |= with_entries(.value |= map(select(. != $widget)))
         | .seen = ((.seen // []) | map(select(. != $widget)))
@@ -119,8 +115,12 @@ managed_toolbar_state() {
     )
     | .placements["nav-bar"] = ((.placements["nav-bar"] // []) + $pinned)
     | .placements["unified-extensions-area"] = $unpinned
+    | ([$placements[][]]) as $placed
+    | .placements |= with_entries(.value |= map(. as $widget | select($placed | index($widget) | not)))
+    | .placements *= $placements
     | .seen = ((.seen // []) + $pinned + $unpinned | unique)
-    | .dirtyAreaCache = ((.dirtyAreaCache // []) + ["nav-bar", "unified-extensions-area"] | unique)
+    | .dirtyAreaCache = ((.dirtyAreaCache // []) + ["nav-bar", "unified-extensions-area"]
+        + $removedAreas + ($placements | keys) | unique)
   ' <<< "${state}"
 }
 
@@ -236,10 +236,111 @@ set_macos_url_handler() {
   [[ ${current} == "${bundle_id}" ]] || duti -s "${bundle_id}" "${scheme}"
 }
 
+set_macos_content_handler() {
+  local bundle_id=$1 content_type=$2 current
+  current=$(macos_content_handler "${content_type}" || true)
+  [[ ${current} == "${bundle_id}" ]] || duti -s "${bundle_id}" "${content_type}" all
+}
+
 set_linux_mime_handler() {
   local desktop=$1 mime=$2
-  [[ $(xdg-mime query default "${mime}") == "${desktop}" ]] ||
+  [[ $(xdg-mime query default "${mime}") == "${desktop}" ]] && return
+  if [[ ${JSH_CONFIGURE_DRY_RUN:-0} == 1 ]]; then
+    jsh_detail "Would set ${mime} to ${desktop}."
+  else
     xdg-mime default "${desktop}" "${mime}"
+  fi
+}
+
+configure_linux_default_browser() {
+  local browser=$1 data config launcher command bare with_url helper registry registry_source candidate
+  local current mime ensure_status
+  local -a roots mimes
+  data=${XDG_DATA_HOME:-${HOME}/.local/share}
+  config=${XDG_CONFIG_HOME:-${HOME}/.config}
+  roots=("${data}" /usr/local/share /usr/share)
+  IFS=: read -r -a roots <<< "${data}:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+  launcher=
+  for root in "${roots[@]}"; do
+    if [[ -f ${root}/applications/${browser} ]]; then
+      launcher=${root}/applications/${browser}
+      break
+    fi
+  done
+  [[ -n ${launcher} ]] || {
+    jsh_error "Browser launcher is missing: ${data}/applications/${browser}"
+    return 1
+  }
+
+  if [[ ${XDG_CURRENT_DESKTOP:-${DESKTOP_SESSION:-}} == *[Xx][Ff][Cc][Ee]* ]]; then
+    command=$(sed -n 's/^Exec=//p' "${launcher}" | head -n 1)
+    [[ -n ${command} ]] || {
+      jsh_error "Browser launcher has no Exec command: ${launcher}"
+      return 1
+    }
+    bare=$(sed -E 's/[[:space:]]+%[fFuU]//g' <<< "${command}")
+    with_url=$(sed -E 's/%[fFuU]/"%s"/g' <<< "${command}")
+    mkdir -p "${JSH_ROOT}/tmp"
+    helper=$(mktemp "${JSH_ROOT}/tmp/waterfox-helper.XXXXXXXXXX")
+    declare -F jsh_interrupt_cleanup_path >/dev/null && jsh_interrupt_cleanup_path "${helper}"
+    {
+      printf '[Desktop Entry]\nType=X-XFCE-Helper\nName=Waterfox\nIcon=waterfox\n'
+      printf 'X-XFCE-Category=WebBrowser\nX-XFCE-Commands=%s;\n' "${bare}"
+      printf 'X-XFCE-CommandsWithParameter=%s;\n' "${with_url}"
+    } > "${helper}"
+    jsh_ensure_file "${data}/xfce4/helpers/${browser}" "${helper}" 0644 || {
+      ensure_status=$?
+      rm -f -- "${helper}"
+      [[ ${ensure_status} == 1 ]] || return "${ensure_status}"
+    }
+    rm -f -- "${helper}"
+
+    registry=${config}/xfce4/helpers.rc
+    registry_source=${registry}
+    [[ -f ${registry_source} ]] || registry_source=/dev/null
+    candidate=$(mktemp "${JSH_ROOT}/tmp/waterfox-registry.XXXXXXXXXX")
+    declare -F jsh_interrupt_cleanup_path >/dev/null && jsh_interrupt_cleanup_path "${candidate}"
+    awk -v value="${browser%.desktop}" '
+      /^WebBrowser=/ { if (!found) { print "WebBrowser=" value; found=1 }; next }
+      { print }
+      END { if (!found) print "WebBrowser=" value }
+    ' "${registry_source}" > "${candidate}"
+    jsh_ensure_file "${registry}" "${candidate}" 0644 || {
+      ensure_status=$?
+      rm -f -- "${candidate}"
+      [[ ${ensure_status} == 1 ]] || return "${ensure_status}"
+    }
+    rm -f -- "${candidate}"
+  else
+    current=$(xdg-settings get default-web-browser)
+    if [[ ${current} != "${browser}" ]]; then
+      if [[ ${JSH_CONFIGURE_DRY_RUN:-0} == 1 ]]; then
+        jsh_detail "Would set the default browser to ${browser}."
+      else
+        xdg-settings set default-web-browser "${browser}"
+      fi
+    fi
+  fi
+
+  mimes=(
+    x-scheme-handler/http x-scheme-handler/https text/html application/xhtml+xml
+    application/x-extension-htm application/x-extension-html application/x-extension-shtml
+    application/x-extension-xhtml application/x-extension-xht
+  )
+  for mime in "${mimes[@]}"; do
+    set_linux_mime_handler "${browser}" "${mime}"
+  done
+  [[ ${JSH_CONFIGURE_DRY_RUN:-0} == 1 ]] && return
+  [[ $(xdg-settings get default-web-browser) == "${browser}" ]] || {
+    jsh_error "Desktop preferred browser did not change to ${browser}."
+    return 1
+  }
+  for mime in "${mimes[@]}"; do
+    [[ $(xdg-mime query default "${mime}") == "${browser}" ]] || {
+      jsh_error "Browser association did not take effect: ${mime}"
+      return 1
+    }
+  done
 }
 
 configure_associations() {
@@ -264,11 +365,11 @@ configure_associations() {
     https_bundle=$(jq -r '.associations.macos.httpsBundleId' <<< "${config}")
     html_type=$(jq -r '.associations.macos.htmlType' <<< "${config}")
     ica_type=$(jq -r '.associations.macos.icaType' <<< "${config}")
-    duti -s "${html_bundle}" "${html_type}" all
+    set_macos_content_handler "${html_bundle}" "${html_type}"
     set_macos_url_handler "${http_bundle}" http
     set_macos_url_handler "${https_bundle}" https
     if [[ -d ${JSH_CITRIX_APP:-/Applications/Citrix Workspace.app} ]]; then
-      duti -s "${citrix_bundle}" "${ica_type}" all
+      set_macos_content_handler "${citrix_bundle}" "${ica_type}"
     fi
     jsh_success "macOS Waterfox and Citrix associations configured."
     return
@@ -291,7 +392,7 @@ configure_associations() {
       *) set_linux_mime_handler "${desktop}" "x-scheme-handler/${association}" ;;
     esac
   done
-  python3 "${JSH_ROOT}/lib/desktop_defaults.py" --browser "${desktop}"
+  configure_linux_default_browser "${desktop}"
   citrix_ica=$(jq -r '.associations.linux.citrixIcaDesktop' <<< "${config}")
   citrix_receiver=$(jq -r '.associations.linux.citrixReceiverDesktop' <<< "${config}")
 
@@ -491,10 +592,13 @@ write_active_waterfox_config() {
         | if .dataCollection == [] then del(.dataCollection) else . end
       )
     | .toolbar.remove |= map(. as $button | select(($placements | index($button)) == null))
+    | if .toolbar.placements then
+        .toolbar.placements |= with_entries(.value = ($toolbar.placements[.key] // []))
+      else . end
     | .search = $policy.search
     | .citrix = $policy.citrix
     | .associations = $associations
-  ' | waterfox_json_to_yaml > "${output}"
+  ' > "${output}"
 }
 
 write_active_preferences() {
@@ -547,7 +651,7 @@ write_preference_records() {
 prepare_waterfox_review() {
   local profile=$1
   ACTIVE_WATERFOX_PROFILE=${profile}
-  ACTIVE_WATERFOX_CONFIG="${TEMP_DIR}/active-waterfox.yaml"
+  ACTIVE_WATERFOX_CONFIG="${TEMP_DIR}/active-waterfox.json"
   ACTIVE_WATERFOX_PREFERENCES="${TEMP_DIR}/active-waterfox.js"
   write_active_waterfox_config "${profile}" "${ACTIVE_WATERFOX_CONFIG}"
   write_active_preferences "${profile}" "${ACTIVE_WATERFOX_PREFERENCES}"
@@ -621,7 +725,6 @@ backup_waterfox_configuration() {
   local binary root profile profile_status config_candidate preferences_candidate
   require_command jq
   require_command unzip
-  require_command yq
   validate_manifest
   validate_waterfox_config
   binary=$(waterfox_binary 2> /dev/null || true)
@@ -659,7 +762,7 @@ backup_waterfox_configuration() {
   preferences_candidate=$(mktemp "${WATERFOX_OVERRIDES}.XXXXXX")
   install -m 0644 -- "${ACTIVE_WATERFOX_CONFIG}" "${config_candidate}"
   install -m 0644 -- "${ACTIVE_WATERFOX_PREFERENCES}" "${preferences_candidate}"
-  yq -e '.' "${config_candidate}" > /dev/null
+  jq -e '.' "${config_candidate}" > /dev/null
   grep -q '^user_pref' "${preferences_candidate}"
   mv -f -- "${config_candidate}" "${WATERFOX_CONFIG}"
   mv -f -- "${preferences_candidate}" "${WATERFOX_OVERRIDES}"

@@ -14,9 +14,17 @@ done
 unset library_file
 
 confirm() {
+  [[ ${JSH_ASSUME_YES:-0} == 1 ]] && return 0
   jsh_prompt "$1 [y/N]: "
-  if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then answer=y; else read -r answer || answer=; fi
+  read -r answer || answer=
   [[ "${answer}" =~ ^[Yy]$ ]]
+}
+
+pin_dock_app() {
+  local app_path=$1
+  [[ -d ${app_path} ]] || return 0
+  defaults write com.apple.dock persistent-apps -array-add \
+    "{\"tile-data\" = {\"file-data\" = {\"_CFURLString\" = \"file://${app_path}/\"; \"_CFURLStringType\" = 15;};}; \"tile-type\" = \"file-tile\";}"
 }
 
 configure_appearance() {
@@ -34,6 +42,7 @@ configure_appearance() {
   defaults write NSGlobalDomain AppleInterfaceStyleSwitchesAutomatically -bool false
   defaults write com.apple.dock persistent-apps -array
   defaults write com.apple.dock persistent-others -array
+  pin_dock_app /Applications/Helium.app
   defaults write com.apple.dock launchanim -bool false
   defaults write com.apple.dock expose-animation-duration -float 0.1
   defaults write com.apple.dock show-recents -bool false
@@ -81,6 +90,13 @@ main() {
     jsh_error "defaults is required to configure macOS."
     return 1
   }
+
+  local arg
+  for arg in "$@"; do
+    case "${arg}" in
+      -y | --yes) JSH_ASSUME_YES=1 ;;
+    esac
+  done
 
   jsh_warn "Appearance setup clears pinned Dock items and replaces the desktop wallpaper."
   if confirm "Configure macOS appearance and Dock?"; then

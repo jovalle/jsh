@@ -461,6 +461,9 @@ clean: ## Remove temporary files and caches
 
 .PHONY: test-reconciliation
 test-reconciliation: ## Test planning, completions, idempotency and platform adapters
+	@$(BATS) tests/cafe.bats
 	@$(BATS) tests/completions.bats
+	@$(BATS) tests/jgit.bats
 	@$(BATS) tests/linux-platform.bats
+	@$(BATS) tests/waterfox.bats
 	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m unittest discover -s tests -p 'test_*.py'

@@ -32,3 +32,8 @@ selection-background = #3a3d41
 selection-foreground = #e0e0e0
 theme = Dark+
 window-theme = dark
+
+# Compact UI / Tabbed Title Bar
+gtk-titlebar-style = tabs
+gtk-wide-tabs = false
+gtk-toolbar-style = flat

@@ -20,7 +20,7 @@ readonly CONFIG_DIR="${JSH_ROOT}/conf/gecko"
 readonly BETTERFOX_MANIFEST=${JSH_BETTERFOX_MANIFEST:-${CONFIG_DIR}/betterfox.json}
 readonly WATERFOX_OVERRIDES=${JSH_WATERFOX_OVERRIDES:-${CONFIG_DIR}/waterfox.js}
 # shellcheck disable=SC2034 # Consumed by sourced lib/unix/waterfox.sh.
-readonly WATERFOX_CONFIG=${JSH_WATERFOX_CONFIG:-${JSH_ROOT}/conf/waterfox.yaml}
+readonly WATERFOX_CONFIG=${JSH_WATERFOX_CONFIG:-${CONFIG_DIR}/waterfox.json}
 readonly BETTERFOX_RAW_BASE=${BETTERFOX_RAW_BASE:-https://raw.githubusercontent.com/yokoffing/Betterfox}
 readonly BETTERFOX_API_URL=${BETTERFOX_API_URL:-https://api.github.com/repos/yokoffing/Betterfox/releases/latest}
 readonly STATE_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/jsh/backups/waterfox"
@@ -130,7 +130,14 @@ waterfox_binary() {
     done
     return 1
   fi
-  command -v waterfox 2> /dev/null
+  for candidate in "${JSH_WATERFOX_SYSTEM_BIN:-/usr/local/bin/waterfox}" /usr/bin/waterfox; do
+    [[ -x ${candidate} ]] || continue
+    printf '%s\n' "${candidate}"
+    return
+  done
+  candidate=$(command -v waterfox 2> /dev/null) || return 1
+  [[ $(readlink -f -- "${candidate}") != "${JSH_ROOT}/bin/waterfox" ]] || return 1
+  printf '%s\n' "${candidate}"
 }
 
 waterfox_root() {
@@ -141,6 +148,54 @@ waterfox_root() {
   else
     printf '%s\n' "${HOME}/.waterfox"
   fi
+}
+
+configure_linux_entry_points() {
+  local binary=$1 applications=${XDG_DATA_HOME:-${HOME}/.local/share}/applications
+  local flatpak_profile=${HOME}/.var/app/net.waterfox.waterfox/.waterfox
+  local temporary ensure_status resolved_binary icon
+  [[ $(uname -s) == Linux ]] || return
+
+  resolved_binary=$(readlink -f -- "${binary}" 2> /dev/null || printf '%s\n' "${binary}")
+  icon=${resolved_binary%/waterfox}/browser/chrome/icons/default/default128.png
+  [[ -r ${icon} ]] || icon=waterfox
+
+  if [[ ! -e ${HOME}/.waterfox && -d ${flatpak_profile} ]]; then
+    if [[ ${JSH_CONFIGURE_DRY_RUN:-0} == 1 ]]; then
+      jsh_detail 'Would copy the existing Flatpak Waterfox profile to the native location.'
+    else
+      jsh_info 'Copying existing Flatpak Waterfox profile to the native location...'
+      mkdir -p "${HOME}/.waterfox"
+      tar -C "${flatpak_profile}" \
+        --exclude=lock --exclude=.parentlock --exclude=parent.lock -cf - . |
+        tar -C "${HOME}/.waterfox" -xf -
+    fi
+  fi
+
+  mkdir -p "${JSH_ROOT}/tmp"
+  temporary=$(mktemp "${JSH_ROOT}/tmp/waterfox.desktop.XXXXXXXXXX")
+  jsh_interrupt_cleanup_path "${temporary}"
+  {
+    printf '[Desktop Entry]\nType=Application\nName=Waterfox\n'
+    printf 'Exec=%s open -- %%u\n' "$(jsh_desktop_executable "${JSH_ROOT}/bin/waterfox")"
+    printf 'Icon=%s\n' "${icon}"
+    printf 'Categories=Network;WebBrowser;\n'
+    printf 'MimeType=text/html;x-scheme-handler/http;x-scheme-handler/https;\n'
+    printf 'StartupNotify=true\n'
+  } > "${temporary}"
+  jsh_ensure_file "${applications}/waterfox.desktop" "${temporary}" 0644 || {
+    ensure_status=$?
+    rm -f -- "${temporary}"
+    [[ ${ensure_status} == 1 ]] || return "${ensure_status}"
+  }
+
+  printf '[Desktop Entry]\nType=Application\nHidden=true\n' > "${temporary}"
+  jsh_ensure_file "${applications}/net.waterfox.waterfox.desktop" "${temporary}" 0644 || {
+    ensure_status=$?
+    rm -f -- "${temporary}"
+    [[ ${ensure_status} == 1 ]] || return "${ensure_status}"
+  }
+  rm -f -- "${temporary}"
 }
 
 validate_profile_path() {
@@ -316,6 +371,7 @@ install_preferences() {
   fi
   backup_file "${target}" user.js
   temporary=$(mktemp "${profile}/user.js.jsh.XXXXXX")
+  jsh_interrupt_cleanup_path "${temporary}"
   install -m 0600 -- "${source}" "${temporary}"
   mv -f -- "${temporary}" "${target}"
   jsh_success "Waterfox preferences updated."
@@ -345,15 +401,25 @@ prepare_policy() {
     return
   }
   existing='{}'
+  if [[ -L ${POLICY_TARGET} ]]; then
+    jsh_error "Refusing to replace symlinked Waterfox policy: ${POLICY_TARGET}"
+    return 1
+  fi
   if [[ -e ${POLICY_TARGET} ]]; then
     [[ -r ${POLICY_TARGET} ]] || {
       jsh_error "Waterfox policy is not readable: ${POLICY_TARGET}"
       return 1
     }
     if [[ $(uname -s) == Darwin ]]; then
-      existing=$(plutil -convert json -o - -- "${POLICY_TARGET}")
+      if ! existing=$(plutil -convert json -o - -- "${POLICY_TARGET}"); then
+        jsh_error "Waterfox policy is not a valid plist: ${POLICY_TARGET}"
+        return 1
+      fi
     else
-      existing=$(jq -c . "${POLICY_TARGET}")
+      if ! existing=$(jq -c . "${POLICY_TARGET}"); then
+        jsh_error "Waterfox policy is not valid JSON: ${POLICY_TARGET}"
+        return 1
+      fi
     fi
   fi
   managed=$(waterfox_config_json | jq -c '{
@@ -361,6 +427,14 @@ prepare_policy() {
       protocol: .citrix.protocol,
       allowed_origins: .citrix.allowedOrigins
     }],
+    Handlers: {
+      mimeTypes: {
+        "application/x-ica": {action: "useSystemDefault", ask: false}
+      },
+      schemes: {
+        (.citrix.protocol): {action: "useSystemDefault", ask: false}
+      }
+    },
     HttpAllowlist: ["http://go"],
     ExtensionSettings: (.addons
       | map(select(has("installUrl")) | {
@@ -380,13 +454,15 @@ prepare_policy() {
     merged=$(jq -c --argjson managed "${managed}" \
       'def merge_managed:
         .ExtensionSettings = ((.ExtensionSettings // {}) * $managed.ExtensionSettings)
-        | . * ($managed | del(.ExtensionSettings));
+        | .Handlers = ((.Handlers // {}) * $managed.Handlers)
+        | . * ($managed | del(.ExtensionSettings, .Handlers));
       .EnterprisePoliciesEnabled = true | merge_managed' <<< "${existing}")
   else
     merged=$(jq -c --argjson managed "${managed}" '
       def merge_managed:
         .ExtensionSettings = ((.ExtensionSettings // {}) * $managed.ExtensionSettings)
-        | . * ($managed | del(.ExtensionSettings));
+        | .Handlers = ((.Handlers // {}) * $managed.Handlers)
+        | . * ($managed | del(.ExtensionSettings, .Handlers));
       .policies = ((.policies // {}) | merge_managed)
     ' <<< "${existing}")
   fi
@@ -451,7 +527,7 @@ confirm_betterfox_update() {
   local answer
   [[ ${JSH_UPDATE_ASSUME_YES:-${JSH_ASSUME_YES:-0}} != 1 ]] || return 0
   jsh_prompt "Update the reviewed Betterfox pin? [Y/n]: "
-  if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then answer=y; else read -r answer || answer=; fi
+  read -r answer || answer=
   [[ -z ${answer} || ${answer} =~ ^[Yy]$ ]]
 }
 
@@ -490,6 +566,7 @@ update_betterfox() {
 
   mkdir -p "${JSH_ROOT}/tmp"
   TEMP_DIR=$(mktemp -d "${JSH_ROOT}/tmp/betterfox.XXXXXX")
+  jsh_interrupt_cleanup_path "${TEMP_DIR}"
   downloaded="${TEMP_DIR}/user.js"
   if ! curl -fsSL --retry 2 --output "${downloaded}" \
     "${BETTERFOX_RAW_BASE}/${revision}/user.js"; then
@@ -513,7 +590,6 @@ apply_configuration() {
   require_command curl
   require_command jq
   require_command unzip
-  require_command yq
   validate_manifest
   validate_waterfox_config
   binary=$(waterfox_binary 2> /dev/null || true)
@@ -522,8 +598,14 @@ apply_configuration() {
     jsh_note "Skipping Waterfox configuration: Waterfox is not installed."
     return
   fi
+  if [[ ${JSH_CONFIGURE_DRY_RUN:-0} == 1 ]]; then
+    jsh_detail 'Would reconcile the Waterfox profile, policy, launcher, and associations.'
+    return
+  fi
+  [[ -z ${binary} ]] || configure_linux_entry_points "${binary}"
   mkdir -p "${JSH_ROOT}/tmp"
   TEMP_DIR=$(mktemp -d "${JSH_ROOT}/tmp/waterfox.XXXXXX")
+  jsh_interrupt_cleanup_path "${TEMP_DIR}"
 
   if profile=$(selected_profile "${root}"); then
     :
@@ -555,8 +637,12 @@ apply_configuration() {
   fi
   if profile_is_locked "${profile}"; then
     jsh_warn "Waterfox is open on profile ${profile##*/}."
-    jsh_prompt "Close Waterfox and continue? [y/N]: "
-    if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then answer=y; else read -r answer || answer=; fi
+    if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then
+      answer=y
+    else
+      jsh_prompt "Close Waterfox and continue? [y/N]: "
+      read -r answer || answer=
+    fi
     if [[ ! ${answer} =~ ^[Yy]$ ]]; then
       jsh_note "Skipping Waterfox configuration."
       jsh_detail "Run later: ${JSH_ROOT}/scripts/unix/configure/waterfox.sh apply"

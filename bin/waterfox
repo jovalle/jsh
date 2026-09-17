@@ -1,0 +1,1607 @@
+#!/usr/bin/env python3
+"""Organize Waterfox bookmarks and fetch favicons without opening browser tabs."""
+
+from __future__ import annotations
+
+import argparse
+import configparser
+import gzip
+import io
+import json
+import os
+import secrets
+import shutil
+import sqlite3
+import subprocess
+import sys
+import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
+from html.parser import HTMLParser
+from pathlib import Path
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+
+ICON_SIZE = 32
+MAX_ICON_BYTES = 1024 * 1024
+MAX_DOCUMENT_BYTES = 2 * 1024 * 1024
+HASH_MASK = 0xFFFFFFFF
+GOLDEN_RATIO = 0x9E3779B9
+EXPIRY_SECONDS = 30 * 24 * 60 * 60
+TRASH_FOLDER = "_trash"
+DUPLICATES_FOLDER = "_duplicates"
+NO_ICON_FOLDER = "_faviconless"
+BLOAT_FOLDERS = {"Mozilla Firefox", "Waterfox"}
+IMPORT_BUTTON = "import-button"
+CUSTOMIZATION_PREFERENCE = "browser.uiCustomization.state"
+WATERFOX_PROCESS_NAMES = ("waterfox", "waterfox-bin")
+JSH_ROOT = Path(__file__).resolve().parents[1]
+WATERFOX_CONFIGURATOR = JSH_ROOT / "scripts/unix/configure/waterfox.sh"
+
+Bookmark = Tuple[str, int]
+
+GREEN = "\033[32m"
+RED = "\033[31m"
+YELLOW = "\033[33m"
+CYAN = "\033[36m"
+DIM = "\033[2m"
+RESET = "\033[0m"
+
+
+class FaviconFetchError(Exception):
+    pass
+
+
+@dataclass
+class OrganizationPlan:
+    dead_ids: set[int]
+    duplicate_ids: set[int]
+    no_icon_ids: set[int]
+    title_ids: set[int]
+    delete_ids: set[int]
+    bloat_folder_ids: set[int]
+    empty_folder_ids: set[int]
+    sortable_folders: List[int]
+    unfiled_id: int
+
+
+class IconLinkParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.base_href: Optional[str] = None
+        self.icon_hrefs: List[str] = []
+        self.manifest_hrefs: List[str] = []
+        self.tile_hrefs: List[str] = []
+
+    def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]) -> None:
+        values = {name.lower(): value or "" for name, value in attrs}
+        if tag.lower() == "meta" and values.get("name", "").lower() == "msapplication-tileimage":
+            content = values.get("content")
+            if content:
+                self.tile_hrefs.append(content)
+            return
+        href = values.get("href")
+        if not href:
+            return
+        if tag.lower() == "base" and self.base_href is None:
+            self.base_href = href
+            return
+        if tag.lower() != "link":
+            return
+        rel = set(values.get("rel", "").lower().split())
+        if "icon" in rel or rel & {"apple-touch-icon", "apple-touch-icon-precomposed", "mask-icon"}:
+            self.icon_hrefs.append(href)
+        elif "manifest" in rel:
+            self.manifest_hrefs.append(href)
+
+
+def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=(
+            "Organize Waterfox bookmarks, delete bloat and empty folders, move final-404 "
+            "pages and toolbar exceptions into review folders, and fetch missing favicons. "
+            "Use --refresh to fetch existing icons again."
+        )
+    )
+    parser.add_argument(
+        "--profile",
+        type=Path,
+        help="Waterfox profile directory (auto-detected when omitted)",
+    )
+    parser.add_argument(
+        "--delay",
+        type=float,
+        default=0.1,
+        help="per-worker cooldown after each domain (default: 0.1)",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=8,
+        help="number of concurrent domain fetches (default: 8)",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=5.0,
+        help="network timeout in seconds (default: 5)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="scan and show planned changes without modifying databases",
+    )
+    parser.add_argument(
+        "--refresh",
+        action="store_true",
+        help="refetch favicons even when Waterfox already has them",
+    )
+    parser.add_argument(
+        "--skip-health-check",
+        action="store_true",
+        help="skip dead-page checks and trash moves",
+    )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="apply Waterfox and bookmark changes without confirmation",
+    )
+    parser.add_argument(
+        "command",
+        nargs="?",
+        choices=("open", "stop", "restart"),
+        help="control the Waterfox application instead of maintaining its profile",
+    )
+    parser.add_argument("browser_args", nargs=argparse.REMAINDER, help=argparse.SUPPRESS)
+    args = parser.parse_args(argv)
+    if args.delay < 0:
+        parser.error("--delay cannot be negative")
+    if args.timeout <= 0:
+        parser.error("--timeout must be greater than zero")
+    if not 1 <= args.workers <= 64:
+        parser.error("--workers must be between 1 and 64")
+    return args
+
+
+def waterfox_root() -> Path:
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "Waterfox"
+    if sys.platform.startswith("linux"):
+        return Path.home() / ".waterfox"
+    if os.name == "nt":
+        return Path(os.environ["APPDATA"]) / "Waterfox"
+    raise RuntimeError("Unsupported operating system; pass --profile explicitly")
+
+
+def resolve_profile(profile_arg: Optional[Path]) -> Path:
+    if profile_arg is not None:
+        profile = profile_arg.expanduser().resolve()
+    else:
+        root = waterfox_root()
+        profiles_ini = root / "profiles.ini"
+        if not profiles_ini.is_file():
+            raise RuntimeError(f"Waterfox profiles file not found: {profiles_ini}")
+
+        config = configparser.RawConfigParser()
+        config.read(profiles_ini, encoding="utf-8")
+        selected = None
+
+        for section in config.sections():
+            if section.startswith("Install") and config.has_option(section, "Default"):
+                candidate = root / config.get(section, "Default")
+                if candidate.is_dir():
+                    selected = candidate
+                    break
+
+        if selected is None:
+            for section in config.sections():
+                if not section.startswith("Profile"):
+                    continue
+                if config.getboolean(section, "Default", fallback=False):
+                    candidate = Path(config.get(section, "Path"))
+                    if config.getboolean(section, "IsRelative", fallback=True):
+                        candidate = root / candidate
+                    selected = candidate
+                    break
+
+        if selected is None:
+            raise RuntimeError("Could not determine Waterfox's default profile")
+        profile = selected.resolve()
+
+    for database in ("places.sqlite", "favicons.sqlite"):
+        if not (profile / database).is_file():
+            raise RuntimeError(f"Missing {database} in profile: {profile}")
+    return profile
+
+
+def updated_customization_line(line: str, source: Path) -> Tuple[str, bool]:
+    newline = "\r\n" if line.endswith("\r\n") else "\n" if line.endswith("\n") else ""
+    content = line[: -len(newline)] if newline else line
+    prefix = f'user_pref("{CUSTOMIZATION_PREFERENCE}", '
+    if not content.startswith(prefix) or not content.endswith(");"):
+        return line, False
+    try:
+        state = json.loads(json.loads(content[len(prefix) : -2]))
+    except (json.JSONDecodeError, TypeError) as error:
+        raise RuntimeError(f"Invalid {CUSTOMIZATION_PREFERENCE} in {source}") from error
+    if not isinstance(state, dict):
+        raise RuntimeError(f"Invalid {CUSTOMIZATION_PREFERENCE} in {source}")
+
+    changed = False
+    removed_areas: List[str] = []
+    placements = state.get("placements", {})
+    if not isinstance(placements, dict):
+        raise RuntimeError(f"Invalid {CUSTOMIZATION_PREFERENCE} placements in {source}")
+    for area, widgets in placements.items():
+        if not isinstance(widgets, list):
+            raise RuntimeError(f"Invalid {CUSTOMIZATION_PREFERENCE} placements in {source}")
+        if IMPORT_BUTTON in widgets:
+            placements[area] = [widget for widget in widgets if widget != IMPORT_BUTTON]
+            removed_areas.append(area)
+            changed = True
+
+    seen = state.get("seen", [])
+    if not isinstance(seen, list):
+        raise RuntimeError(f"Invalid {CUSTOMIZATION_PREFERENCE} seen widgets in {source}")
+    if IMPORT_BUTTON in seen:
+        state["seen"] = [widget for widget in seen if widget != IMPORT_BUTTON]
+        changed = True
+    if not changed:
+        return line, False
+
+    dirty_areas = state.get("dirtyAreaCache", [])
+    if not isinstance(dirty_areas, list):
+        raise RuntimeError(f"Invalid {CUSTOMIZATION_PREFERENCE} dirty areas in {source}")
+    state["dirtyAreaCache"] = list(dict.fromkeys(dirty_areas + removed_areas))
+    serialized = json.dumps(state, separators=(",", ":"))
+    return f"{prefix}{json.dumps(serialized)});{newline}", True
+
+
+def plan_import_button_removal(profile: Path) -> Dict[Path, str]:
+    updates: Dict[Path, str] = {}
+    for name in ("prefs.js", "user.js"):
+        path = profile / name
+        if not path.is_file():
+            continue
+        changed = False
+        lines = []
+        with path.open("r", encoding="utf-8", newline="") as preference_file:
+            for line in preference_file:
+                updated, line_changed = updated_customization_line(line, path)
+                lines.append(updated)
+                changed = changed or line_changed
+        if changed:
+            updates[path] = "".join(lines)
+    return updates
+
+
+def apply_preference_updates(updates: Dict[Path, str]) -> List[Path]:
+    backups: List[Path] = []
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    for path, content in updates.items():
+        backup = path.with_name(f"{path.name}.backup-{stamp}")
+        suffix = 1
+        while backup.exists():
+            backup = path.with_name(f"{path.name}.backup-{stamp}-{suffix}")
+            suffix += 1
+        shutil.copy2(path, backup)
+        temporary = path.with_name(f".{path.name}.waterfox-{secrets.token_hex(4)}")
+        try:
+            temporary.write_text(content, encoding="utf-8")
+            temporary.chmod(path.stat().st_mode & 0o777)
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+        backups.append(backup)
+    return backups
+
+
+def waterfox_is_running() -> bool:
+    try:
+        for process_name in WATERFOX_PROCESS_NAMES:
+            result = subprocess.run(
+                ["pgrep", "-x", process_name],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            if result.returncode == 0:
+                return True
+        return False
+    except FileNotFoundError:
+        return False
+
+
+def default_waterfox_profile_name() -> Optional[str]:
+    root = waterfox_root()
+    registry = configparser.ConfigParser()
+    registry.read(root / "profiles.ini")
+    installs = configparser.ConfigParser()
+    installs.read(root / "installs.ini")
+    preferred = next(
+        (
+            installs[section].get("Default")
+            for section in installs.sections()
+            if installs[section].get("Default")
+        ),
+        None,
+    )
+    return next(
+        (
+            registry[section].get("Name")
+            for section in registry.sections()
+            if section.startswith("Profile") and registry[section].get("Path") == preferred
+        ),
+        None,
+    )
+
+
+def waterfox_native_binary() -> Optional[Path]:
+    configured = os.environ.get("JSH_WATERFOX_BIN")
+    candidates = ([Path(configured)] if configured else []) + [
+        Path("/usr/local/bin/waterfox"),
+        Path("/usr/bin/waterfox"),
+    ]
+    command_path = Path(__file__).resolve()
+    for candidate in candidates:
+        if (
+            candidate.is_file()
+            and os.access(candidate, os.X_OK)
+            and candidate.resolve() != command_path
+        ):
+            return candidate
+    return None
+
+
+def waterfox_launch_command(arguments: Sequence[str]) -> List[str]:
+    browser_arguments = list(arguments)
+    if browser_arguments[:1] == ["--"]:
+        browser_arguments = browser_arguments[1:]
+    if sys.platform == "darwin":
+        return [
+            "open",
+            "-a",
+            "Waterfox",
+            *(["--args"] + browser_arguments if browser_arguments else []),
+        ]
+    if sys.platform.startswith("linux"):
+        binary = waterfox_native_binary()
+        if binary is not None:
+            profile_arguments: List[str] = []
+            profile_switches = {
+                "-P",
+                "-profile",
+                "--profile",
+                "-ProfileManager",
+                "--ProfileManager",
+            }
+            if not any(argument in profile_switches for argument in browser_arguments):
+                profile_name = default_waterfox_profile_name()
+                if profile_name:
+                    profile_arguments = ["-P", profile_name]
+            return [str(binary), *profile_arguments, *browser_arguments]
+        if shutil.which("flatpak"):
+            installed = subprocess.run(
+                ["flatpak", "info", "net.waterfox.waterfox"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            if installed.returncode == 0:
+                return ["flatpak", "run", "net.waterfox.waterfox", *browser_arguments]
+    raise RuntimeError("Waterfox is not installed")
+
+
+def open_waterfox(arguments: Sequence[str] = ()) -> None:
+    subprocess.Popen(
+        waterfox_launch_command(arguments),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
+def run_waterfox_configuration(assume_yes: bool) -> None:
+    environment = os.environ.copy()
+    environment["JSH_INTERRUPT_REPORT"] = "0"
+    if assume_yes:
+        environment["JSH_ASSUME_YES"] = "1"
+        environment["JSH_CONFIGURE_ASSUME_YES"] = "1"
+    result = subprocess.run(
+        [str(WATERFOX_CONFIGURATOR), "apply"],
+        env=environment,
+        check=False,
+    )
+    if result.returncode == 130:
+        raise KeyboardInterrupt
+    if result.returncode != 0:
+        raise RuntimeError(f"Waterfox configuration failed with status {result.returncode}")
+
+
+def stop_waterfox(check_running: bool = True) -> None:
+    if check_running and not waterfox_is_running():
+        return
+    if sys.platform == "darwin":
+        result = subprocess.run(
+            ["osascript", "-e", 'tell application "Waterfox" to quit'],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            reason = result.stderr.strip() or "macOS rejected the quit request"
+            raise RuntimeError(f"Could not quit Waterfox: {reason}")
+    elif sys.platform.startswith("linux"):
+        try:
+            for process_name in WATERFOX_PROCESS_NAMES:
+                subprocess.run(
+                    ["pkill", "-TERM", "-x", process_name],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                )
+        except FileNotFoundError as error:
+            raise RuntimeError("Could not close Waterfox because pkill is unavailable") from error
+    else:
+        raise RuntimeError("Automatic Waterfox shutdown is unsupported on this platform")
+
+    deadline = time.monotonic() + 30
+    while waterfox_is_running() and time.monotonic() < deadline:
+        time.sleep(0.25)
+    if waterfox_is_running():
+        raise RuntimeError("Waterfox did not close within 30 seconds")
+
+
+def ensure_waterfox_closed(assume_yes: bool = False) -> None:
+    if not waterfox_is_running():
+        return
+
+    print(
+        "Warning: Waterfox is open and its profile database is locked; "
+        "waterfox cannot make changes.",
+        file=sys.stderr,
+    )
+    if not assume_yes:
+        if not sys.stdin.isatty():
+            raise RuntimeError("Waterfox cannot be closed without an interactive prompt or --yes")
+        answer = input("Close Waterfox and try again? [Y/n] ").strip().lower()
+        if answer not in ("", "y", "yes"):
+            raise RuntimeError("Cancelled; Waterfox remains open")
+    stop_waterfox(check_running=False)
+
+
+def connect_read_only(database: Path) -> sqlite3.Connection:
+    uri = "file:{}?mode=ro".format(urllib.parse.quote(str(database), safe="/"))
+    return sqlite3.connect(uri, uri=True, timeout=1)
+
+
+def read_bookmarks(profile: Path) -> List[Bookmark]:
+    with connect_read_only(profile / "places.sqlite") as connection:
+        rows = connection.execute("""
+            SELECT DISTINCT p.url, p.url_hash
+            FROM moz_bookmarks AS b
+            JOIN moz_places AS p ON p.id = b.fk
+            WHERE b.type = 1
+              AND (p.url LIKE 'http://%' OR p.url LIKE 'https://%')
+            ORDER BY p.url
+            """).fetchall()
+    return [(str(url), int(url_hash)) for url, url_hash in rows]
+
+
+def read_cached_page_urls(profile: Path) -> set[str]:
+    with connect_read_only(profile / "favicons.sqlite") as connection:
+        rows = connection.execute("""
+            SELECT DISTINCT p.page_url
+            FROM moz_pages_w_icons AS p
+            JOIN moz_icons_to_pages AS ip ON ip.page_id = p.id
+            JOIN moz_icons AS i ON i.id = ip.icon_id
+            WHERE i.data IS NOT NULL AND length(i.data) > 0
+            """).fetchall()
+    return {str(row[0]) for row in rows}
+
+
+def normalized_hostname(url: str) -> Optional[str]:
+    try:
+        hostname = urllib.parse.urlsplit(url).hostname
+        if not hostname:
+            return None
+        return hostname.rstrip(".").encode("idna").decode("ascii").lower()
+    except (UnicodeError, ValueError):
+        return None
+
+
+def group_by_hostname(bookmarks: Iterable[Bookmark]) -> Dict[str, List[Bookmark]]:
+    grouped: Dict[str, List[Bookmark]] = OrderedDict()
+    for bookmark in bookmarks:
+        hostname = normalized_hostname(bookmark[0])
+        if hostname:
+            grouped.setdefault(hostname, []).append(bookmark)
+    return grouped
+
+
+def favicon_url(hostname: str) -> str:
+    domain = urllib.parse.quote(hostname, safe="")
+    return f"https://www.google.com/s2/favicons?domain={domain}&sz={ICON_SIZE}"
+
+
+def looks_like_image(data: bytes) -> bool:
+    prefix = data[:512].lstrip().lower()
+    return (
+        data.startswith((b"\x89PNG\r\n\x1a\n", b"GIF87a", b"GIF89a", b"\xff\xd8\xff"))
+        or data.startswith(b"\x00\x00\x01\x00")
+        or (data.startswith(b"RIFF") and data[8:12] == b"WEBP")
+        or b"<svg" in prefix
+    )
+
+
+def download_icon(url: str, timeout: float) -> Tuple[str, bytes]:
+    request = urllib.request.Request(
+        url,
+        headers={"User-Agent": "waterfox/1.0"},
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        data = response.read(MAX_ICON_BYTES + 1)
+    if len(data) > MAX_ICON_BYTES:
+        raise ValueError("response exceeds 1 MiB")
+    if not looks_like_image(data):
+        raise ValueError("response is not a supported image")
+    return url, data
+
+
+def download_document(url: str, timeout: float) -> Tuple[str, str]:
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "waterfox/1.0",
+            "Accept": "text/html,application/manifest+json,application/json",
+            "Accept-Encoding": "gzip",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        data = response.read(MAX_DOCUMENT_BYTES + 1)
+        final_url = response.geturl()
+        content_encoding = response.headers.get("Content-Encoding", "").lower()
+        charset = response.headers.get_content_charset() or "utf-8"
+    if len(data) > MAX_DOCUMENT_BYTES:
+        raise ValueError("document exceeds 2 MiB")
+    if content_encoding == "gzip":
+        with gzip.GzipFile(fileobj=io.BytesIO(data)) as compressed:
+            data = compressed.read(MAX_DOCUMENT_BYTES + 1)
+        if len(data) > MAX_DOCUMENT_BYTES:
+            raise ValueError("decompressed document exceeds 2 MiB")
+    return final_url, data.decode(charset, errors="replace")
+
+
+def parse_manifest_icons(manifest: str) -> List[str]:
+    payload = json.loads(manifest)
+    if not isinstance(payload, dict) or not isinstance(payload.get("icons"), list):
+        return []
+    return [
+        icon["src"]
+        for icon in payload["icons"]
+        if isinstance(icon, dict) and isinstance(icon.get("src"), str)
+    ]
+
+
+def site_favicon_urls(bookmarks: Iterable[Bookmark]) -> List[str]:
+    urls: List[str] = []
+    for bookmark_url, _ in bookmarks:
+        try:
+            parsed = urllib.parse.urlsplit(bookmark_url)
+            hostname = parsed.hostname
+            if parsed.scheme not in ("http", "https") or not hostname:
+                continue
+            host = f"[{hostname}]" if ":" in hostname else hostname
+            netloc = f"{host}:{parsed.port}" if parsed.port else host
+            origin = urllib.parse.urlunsplit((parsed.scheme, netloc, "/", "", ""))
+            for path in ("favicon.ico", "favicon.png", "favicon.svg", "apple-touch-icon.png"):
+                candidate = urllib.parse.urljoin(origin, path)
+                if candidate not in urls:
+                    urls.append(candidate)
+        except ValueError:
+            continue
+    return urls
+
+
+def site_document_urls(bookmarks: Iterable[Bookmark]) -> List[str]:
+    urls: List[str] = []
+    for bookmark_url, _ in bookmarks:
+        parsed = urllib.parse.urlsplit(bookmark_url)
+        origin = urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, "/", "", ""))
+        if origin not in urls:
+            urls.append(origin)
+        candidate = urllib.parse.urlunsplit(
+            (parsed.scheme, parsed.netloc, parsed.path or "/", parsed.query, "")
+        )
+        if candidate not in urls:
+            urls.append(candidate)
+    return urls
+
+
+def fetch_icon(
+    hostname: str,
+    bookmarks: Iterable[Bookmark],
+    timeout: float,
+    cancelled: Optional[threading.Event] = None,
+) -> Tuple[str, bytes]:
+    errors: List[str] = []
+    candidates = [
+        ("Google", favicon_url(hostname)),
+        *(("Site", url) for url in site_favicon_urls(bookmarks)),
+    ]
+
+    def try_candidates(items: Iterable[Tuple[str, str]]) -> Optional[Tuple[str, bytes]]:
+        for source, url in items:
+            if cancelled is not None and cancelled.is_set():
+                raise FaviconFetchError("Cancelled")
+            try:
+                return download_icon(url, timeout)
+            except (OSError, ValueError, urllib.error.URLError) as error:
+                errors.append(f"{source}: {url}\n    {download_error_reason(error)}")
+        return None
+
+    result = try_candidates(candidates)
+    if result is not None:
+        return result
+
+    for document_url in site_document_urls(bookmarks):
+        if cancelled is not None and cancelled.is_set():
+            raise FaviconFetchError("Cancelled")
+        try:
+            page_url, html = download_document(document_url, timeout)
+        except (OSError, ValueError, urllib.error.URLError) as error:
+            errors.append(f"HTML: {document_url}\n    {download_error_reason(error)}")
+            continue
+
+        parser = IconLinkParser()
+        parser.feed(html)
+        base_url = urllib.parse.urljoin(page_url, parser.base_href or "")
+        result = try_candidates(
+            ("HTML icon", urllib.parse.urljoin(base_url, href))
+            for href in (*parser.icon_hrefs, *parser.tile_hrefs)
+            if href
+        )
+        if result is not None:
+            return result
+
+        if not parser.icon_hrefs and not parser.tile_hrefs and not parser.manifest_hrefs:
+            errors.append(f"HTML: {page_url}\n    no icon or manifest links declared")
+
+        for href in parser.manifest_hrefs:
+            manifest_url = urllib.parse.urljoin(base_url, href)
+            try:
+                final_manifest_url, manifest = download_document(manifest_url, timeout)
+                manifest_icons = parse_manifest_icons(manifest)
+            except (OSError, ValueError, json.JSONDecodeError, urllib.error.URLError) as error:
+                errors.append(f"Manifest: {manifest_url}\n    {download_error_reason(error)}")
+                continue
+            if not manifest_icons:
+                errors.append(f"Manifest: {manifest_url}\n    no icons declared")
+                continue
+            result = try_candidates(
+                ("Manifest icon", urllib.parse.urljoin(final_manifest_url, href))
+                for href in manifest_icons
+            )
+            if result is not None:
+                return result
+    raise FaviconFetchError("\n".join(errors))
+
+
+def download_error_reason(error: BaseException) -> str:
+    if isinstance(error, urllib.error.HTTPError):
+        return f"HTTP {error.code}: {error.reason}"
+    if isinstance(error, urllib.error.URLError):
+        return str(error.reason)
+    return str(error)
+
+
+def format_duration(seconds: float) -> str:
+    seconds = max(0, round(seconds))
+    minutes, seconds = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m"
+    if minutes:
+        return f"{minutes}m {seconds:02d}s"
+    return f"{seconds}s"
+
+
+def show_progress(
+    completed: int,
+    total: int,
+    succeeded: int,
+    failed: int,
+    started_at: float,
+    hostname: str,
+    label: str = "Fetching",
+) -> None:
+    elapsed = time.monotonic() - started_at
+    remaining = total - completed
+    eta = elapsed / completed * remaining if completed else 0
+    interactive = sys.stdout.isatty()
+
+    if not interactive:
+        if completed % 25 and completed != total:
+            return
+        print(
+            f"{label} {completed}/{total} | {succeeded} ok | {failed} failed | "
+            f"{remaining} remaining | ETA {format_duration(eta)}"
+        )
+        return
+
+    columns = shutil.get_terminal_size().columns
+    width = max(10, min(30, columns - 72))
+    filled = round(width * completed / total) if total else width
+    bar = f"{CYAN}{'━' * filled}{DIM}{'─' * (width - filled)}{RESET}"
+    percent = completed / total * 100 if total else 100
+    status = (
+        f"\r\033[K{label} {bar} {percent:5.1f}%  {completed}/{total}  "
+        f"{GREEN}✓ {succeeded}{RESET}  {RED}✗ {failed}{RESET}  "
+        f"{remaining} left  ETA {format_duration(eta)}"
+    )
+    ansi_length = len(CYAN) + len(DIM) + len(GREEN) + len(RED) + 3 * len(RESET)
+    visible_status_length = len(status) - ansi_length
+    available = columns - visible_status_length - 2
+    host = f"  {DIM}{hostname[:available]}{RESET}" if available >= 12 else ""
+    line = status + host
+    print(line, end="\n" if completed == total else "", flush=True)
+
+
+def log_failure(hostname: str, error: FaviconFetchError) -> None:
+    interactive = sys.stdout.isatty()
+    if interactive:
+        print("\r\033[K", end="")
+    color = RED if interactive else ""
+    dim = DIM if interactive else ""
+    reset = RESET if interactive else ""
+    print(f"{color}Failed {hostname}{reset}")
+    for line in str(error).splitlines():
+        print(f"  {dim}{line}{reset}")
+
+
+def clear_progress() -> None:
+    if sys.stdout.isatty():
+        print("\r\033[K", end="", flush=True)
+
+
+def fetch_icons(
+    grouped: Dict[str, List[Bookmark]], timeout: float, delay: float, workers: int
+) -> Tuple[Dict[str, Tuple[str, bytes]], List[Tuple[str, str]]]:
+    hostname_list = list(grouped)
+    downloaded: Dict[str, Tuple[str, bytes]] = {}
+    failures: List[Tuple[str, str]] = []
+    started_at = time.monotonic()
+    cancelled = threading.Event()
+
+    def fetch_one(hostname: str) -> Tuple[str, bytes]:
+        try:
+            return fetch_icon(hostname, grouped[hostname], timeout, cancelled)
+        finally:
+            if delay and not cancelled.is_set():
+                time.sleep(delay)
+
+    executor = ThreadPoolExecutor(max_workers=workers)
+    futures = {}
+    try:
+        futures = {executor.submit(fetch_one, hostname): hostname for hostname in hostname_list}
+        for completed, future in enumerate(as_completed(futures), start=1):
+            hostname = futures[future]
+            try:
+                downloaded[hostname] = future.result()
+            except FaviconFetchError as error:
+                failures.append((hostname, str(error)))
+                log_failure(hostname, error)
+
+            show_progress(
+                completed,
+                len(hostname_list),
+                len(downloaded),
+                len(failures),
+                started_at,
+                hostname,
+            )
+    except KeyboardInterrupt:
+        cancelled.set()
+        for future in futures:
+            future.cancel()
+        executor.shutdown(wait=False, cancel_futures=True)
+        clear_progress()
+        raise
+    else:
+        executor.shutdown()
+
+    return downloaded, failures
+
+
+def check_page(url: str, timeout: float) -> Tuple[Optional[int], str, Optional[str]]:
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "waterfox/1.0",
+            "Accept": "text/html,application/xhtml+xml,*/*;q=0.1",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            response.read(1)
+            return response.status, response.geturl(), None
+    except urllib.error.HTTPError as error:
+        return error.code, error.geturl(), f"HTTP {error.code}: {error.reason}"
+    except (OSError, ValueError, urllib.error.URLError) as error:
+        return None, url, download_error_reason(error)
+
+
+def log_health_result(url: str, final_url: str, status: Optional[int], reason: str) -> None:
+    interactive = sys.stdout.isatty()
+    if interactive:
+        print("\r\033[K", end="")
+    color = RED if status == 404 else YELLOW
+    reset = RESET if interactive else ""
+    color = color if interactive else ""
+    redirect = f" -> {final_url}" if final_url != url else ""
+    label = "Dead" if status == 404 else "Inconclusive"
+    print(f"{color}{label}: {url}{redirect}{reset}")
+    print(f"  {reason}")
+
+
+def check_pages(
+    bookmarks: Iterable[Bookmark], timeout: float, workers: int
+) -> Tuple[set[str], List[Tuple[str, str]]]:
+    urls = list(dict.fromkeys(url for url, _ in bookmarks))
+    dead: set[str] = set()
+    inconclusive: List[Tuple[str, str]] = []
+    started_at = time.monotonic()
+    cancelled = threading.Event()
+    executor = ThreadPoolExecutor(max_workers=workers)
+    futures = {}
+    try:
+        futures = {executor.submit(check_page, url, timeout): url for url in urls}
+        for completed, future in enumerate(as_completed(futures), start=1):
+            url = futures[future]
+            status, final_url, reason = future.result()
+            if status == 404:
+                dead.add(url)
+                log_health_result(url, final_url, status, reason or "HTTP 404")
+            elif status is None:
+                detail = reason or "unknown network error"
+                inconclusive.append((url, detail))
+                log_health_result(url, final_url, status, detail)
+            show_progress(
+                completed,
+                len(urls),
+                completed - len(dead) - len(inconclusive),
+                len(dead) + len(inconclusive),
+                started_at,
+                urllib.parse.urlsplit(url).hostname or url,
+                "Checking",
+            )
+    except KeyboardInterrupt:
+        cancelled.set()
+        for future in futures:
+            future.cancel()
+        executor.shutdown(wait=False, cancel_futures=True)
+        clear_progress()
+        raise
+    else:
+        executor.shutdown()
+    return dead, inconclusive
+
+
+def read_bookmark_rows(profile: Path) -> List[sqlite3.Row]:
+    with connect_read_only(profile / "places.sqlite") as connection:
+        connection.row_factory = sqlite3.Row
+        return connection.execute("""
+                     SELECT b.id, b.type, b.fk, b.parent, b.position, b.title, b.dateAdded,
+                         b.syncStatus, b.guid, p.url
+            FROM moz_bookmarks AS b
+            LEFT JOIN moz_places AS p ON p.id = b.fk
+            ORDER BY b.parent, b.position
+            """).fetchall()
+
+
+def folder_id(rows: Iterable[sqlite3.Row], guid: str) -> int:
+    for row in rows:
+        if row["guid"] == guid:
+            return int(row["id"])
+    raise RuntimeError(f"Missing Waterfox bookmark root: {guid}")
+
+
+def review_folder_id(rows: Iterable[sqlite3.Row], parent: int, title: str) -> Optional[int]:
+    for row in rows:
+        if row["type"] == 2 and row["parent"] == parent and row["title"] == title:
+            return int(row["id"])
+    return None
+
+
+def folder_is_sorted(rows: Iterable[sqlite3.Row]) -> bool:
+    segment: List[sqlite3.Row] = []
+    for row in rows:
+        if row["type"] == 3:
+            if segment != sorted(segment, key=bookmark_sort_key):
+                return False
+            segment.clear()
+        else:
+            segment.append(row)
+    return segment == sorted(segment, key=bookmark_sort_key)
+
+
+def plan_organization(
+    profile: Path, dead_urls: set[str], icon_urls: Optional[set[str]] = None
+) -> OrganizationPlan:
+    rows = read_bookmark_rows(profile)
+    toolbar_id = folder_id(rows, "toolbar_____")
+    unfiled_id = folder_id(rows, "unfiled_____")
+    tags_id = folder_id(rows, "tags________")
+    tag_folder_ids = {
+        int(row["id"]) for row in rows if row["type"] == 2 and row["parent"] == tags_id
+    }
+    trash_id = review_folder_id(rows, unfiled_id, TRASH_FOLDER)
+    duplicates_id = review_folder_id(rows, unfiled_id, DUPLICATES_FOLDER)
+    no_icon_id = review_folder_id(rows, unfiled_id, NO_ICON_FOLDER)
+    children: Dict[int, List[sqlite3.Row]] = {}
+    for row in rows:
+        children.setdefault(int(row["parent"]), []).append(row)
+    protected_folder_ids = {
+        int(row["id"])
+        for row in rows
+        if row["guid"]
+        in (
+            "root________",
+            "menu________",
+            "toolbar_____",
+            "unfiled_____",
+            "mobile______",
+            "tags________",
+        )
+    } | tag_folder_ids
+    bloat_folder_ids = {
+        int(row["id"])
+        for row in rows
+        if row["type"] == 2
+        and row["title"] in BLOAT_FOLDERS
+        and int(row["id"]) not in protected_folder_ids
+    }
+    delete_ids = set(bloat_folder_ids)
+    pending_folders = list(bloat_folder_ids)
+    while pending_folders:
+        parent = pending_folders.pop()
+        for child in children.get(parent, []):
+            child_id = int(child["id"])
+            if child_id in delete_ids:
+                continue
+            delete_ids.add(child_id)
+            if child["type"] == 2:
+                pending_folders.append(child_id)
+
+    dead_ids = {
+        int(row["id"])
+        for row in rows
+        if row["type"] == 1
+        and row["url"] in dead_urls
+        and row["parent"] != trash_id
+        and row["parent"] not in tag_folder_ids
+        and int(row["id"]) not in delete_ids
+    }
+
+    toolbar = [
+        row
+        for row in rows
+        if row["type"] == 1
+        and row["parent"] == toolbar_id
+        and int(row["id"]) not in dead_ids | delete_ids
+    ]
+    duplicate_candidates = sorted(
+        (
+            row
+            for row in rows
+            if row["type"] == 1
+            and row["parent"] != toolbar_id
+            and row["parent"] != duplicates_id
+            and row["parent"] not in tag_folder_ids
+            and int(row["id"]) not in dead_ids
+            and int(row["id"]) not in delete_ids
+        ),
+        key=lambda row: (int(row["dateAdded"]), int(row["id"])),
+    )
+    seen_urls: set[str] = set()
+    duplicate_ids: set[int] = set()
+    for row in duplicate_candidates:
+        url = str(row["url"] or "")
+        if url in seen_urls:
+            duplicate_ids.add(int(row["id"]))
+        else:
+            seen_urls.add(url)
+
+    no_icon_ids = (
+        {
+            int(row["id"])
+            for row in toolbar
+            if int(row["id"]) not in duplicate_ids and row["url"] not in icon_urls
+        }
+        if icon_urls is not None
+        else set()
+    )
+    title_ids = {
+        int(row["id"])
+        for row in toolbar
+        if int(row["id"]) not in duplicate_ids | no_icon_ids and row["title"] is not None
+    }
+    folder_ids = [
+        int(row["id"])
+        for row in rows
+        if row["type"] == 2
+        and row["guid"] not in ("root________", "tags________")
+        and int(row["id"]) not in tag_folder_ids
+    ]
+    moved_ids = dead_ids | duplicate_ids | no_icon_ids
+    incoming_folder_ids = {
+        folder
+        for folder, moved in (
+            (trash_id, dead_ids),
+            (duplicates_id, duplicate_ids),
+            (no_icon_id, no_icon_ids),
+        )
+        if folder is not None and moved
+    }
+    empty_folder_ids: set[int] = set()
+    while True:
+        newly_empty = {
+            parent
+            for parent in folder_ids
+            if parent not in delete_ids | incoming_folder_ids
+            and parent not in protected_folder_ids
+            and all(
+                int(child["id"]) in delete_ids | moved_ids for child in children.get(parent, [])
+            )
+        }
+        if not newly_empty:
+            break
+        empty_folder_ids.update(newly_empty)
+        delete_ids.update(newly_empty)
+
+    sortable_folders = [
+        parent
+        for parent in folder_ids
+        if parent not in delete_ids and not folder_is_sorted(children.get(parent, []))
+    ]
+    if dead_ids or duplicate_ids or no_icon_ids or title_ids or delete_ids:
+        sortable_folders = [parent for parent in folder_ids if parent not in delete_ids]
+    return OrganizationPlan(
+        dead_ids,
+        duplicate_ids,
+        no_icon_ids,
+        title_ids,
+        delete_ids,
+        bloat_folder_ids,
+        empty_folder_ids,
+        sortable_folders,
+        unfiled_id,
+    )
+
+
+def print_organization_plan(
+    plan: OrganizationPlan,
+    inconclusive: Sequence[Tuple[str, str]],
+    remove_import_button: bool,
+) -> None:
+    print("Bookmark changes:")
+    print(f"  Move {len(plan.dead_ids)} confirmed-404 bookmarks to {TRASH_FOLDER}")
+    print(f"  Move {len(plan.duplicate_ids)} duplicate bookmarks to {DUPLICATES_FOLDER}")
+    print(f"  Move {len(plan.no_icon_ids)} iconless toolbar bookmarks to {NO_ICON_FOLDER}")
+    print(f"  Clear {len(plan.title_ids)} toolbar titles")
+    contained_items = len(plan.delete_ids - plan.bloat_folder_ids - plan.empty_folder_ids)
+    print(
+        f"  Delete {len(plan.bloat_folder_ids)} Mozilla Firefox/Waterfox folders and "
+        f"{contained_items} contained items"
+    )
+    print(f"  Delete {len(plan.empty_folder_ids)} empty folders")
+    print(f"  Sort {len(plan.sortable_folders)} bookmark folders")
+    if remove_import_button:
+        print("  Remove Import bookmarks item from the bookmarks bar")
+    if inconclusive:
+        print(f"  Preserve {len(inconclusive)} bookmarks with inconclusive network checks")
+
+
+def confirm_changes(assume_yes: bool) -> bool:
+    if assume_yes:
+        return True
+    if not sys.stdin.isatty():
+        raise RuntimeError("Waterfox changes require an interactive prompt or --yes")
+    return input("Apply these Waterfox changes? [y/N] ").strip().lower() in ("y", "yes")
+
+
+def current_timestamp() -> int:
+    timestamp = int(time.time() * 1_000_000)
+    return timestamp - timestamp % 1000
+
+
+def find_or_create_folder(
+    connection: sqlite3.Connection, parent: int, title: str, timestamp: int
+) -> int:
+    row = connection.execute(
+        "SELECT id FROM moz_bookmarks WHERE type = 2 AND parent = ? AND title = ? LIMIT 1",
+        (parent, title),
+    ).fetchone()
+    if row:
+        return int(row[0])
+    position = int(
+        connection.execute(
+            "SELECT COALESCE(MAX(position) + 1, 0) FROM moz_bookmarks WHERE parent = ?",
+            (parent,),
+        ).fetchone()[0]
+    )
+    cursor = connection.execute(
+        """
+        INSERT INTO moz_bookmarks
+            (type, fk, parent, position, title, dateAdded, lastModified,
+             guid, syncStatus, syncChangeCounter)
+        VALUES (2, NULL, ?, ?, ?, ?, ?, ?, 1, 1)
+        """,
+        (parent, position, title, timestamp, timestamp, secrets.token_urlsafe(9)),
+    )
+    if cursor.lastrowid is None:
+        raise RuntimeError(f"Waterfox did not return an ID for {title}")
+    return cursor.lastrowid
+
+
+def touch_bookmark(connection: sqlite3.Connection, bookmark_id: int, timestamp: int) -> None:
+    connection.execute(
+        """
+        UPDATE moz_bookmarks
+        SET lastModified = ?, syncChangeCounter = syncChangeCounter + 1
+        WHERE id = ?
+        """,
+        (timestamp, bookmark_id),
+    )
+
+
+def move_bookmarks(
+    connection: sqlite3.Connection, bookmark_ids: Iterable[int], destination: int, timestamp: int
+) -> None:
+    position = int(
+        connection.execute(
+            "SELECT COALESCE(MAX(position) + 1, 0) FROM moz_bookmarks WHERE parent = ?",
+            (destination,),
+        ).fetchone()[0]
+    )
+    for bookmark_id in bookmark_ids:
+        row = connection.execute(
+            "SELECT parent FROM moz_bookmarks WHERE id = ?", (bookmark_id,)
+        ).fetchone()
+        if row is None or int(row[0]) == destination:
+            continue
+        old_parent = int(row[0])
+        connection.execute(
+            """
+            UPDATE moz_bookmarks
+            SET parent = ?, position = ?, lastModified = ?,
+                syncChangeCounter = syncChangeCounter + 1
+            WHERE id = ?
+            """,
+            (destination, position, timestamp, bookmark_id),
+        )
+        touch_bookmark(connection, old_parent, timestamp)
+        position += 1
+    touch_bookmark(connection, destination, timestamp)
+
+
+def delete_bookmark_items(
+    connection: sqlite3.Connection, bookmark_ids: Iterable[int], timestamp: int
+) -> None:
+    ids = [(bookmark_id,) for bookmark_id in bookmark_ids]
+    if not ids:
+        return
+    connection.execute("CREATE TEMP TABLE waterfox_deletions (id INTEGER PRIMARY KEY)")
+    connection.executemany("INSERT INTO waterfox_deletions VALUES (?)", ids)
+    parent_ids = {int(row[0]) for row in connection.execute("""
+            SELECT DISTINCT parent
+            FROM moz_bookmarks
+                        WHERE id IN waterfox_deletions
+                            AND parent NOT IN waterfox_deletions
+            """)}
+    connection.execute(
+        """
+        INSERT OR REPLACE INTO moz_bookmarks_deleted (guid, dateRemoved)
+        SELECT guid, ?
+        FROM moz_bookmarks
+        WHERE id IN waterfox_deletions AND syncStatus = 2
+        """,
+        (timestamp,),
+    )
+    connection.execute("DELETE FROM moz_items_annos WHERE item_id IN waterfox_deletions")
+    connection.execute("DELETE FROM moz_bookmarks WHERE id IN waterfox_deletions")
+    connection.execute("DROP TABLE waterfox_deletions")
+    for parent_id in parent_ids:
+        touch_bookmark(connection, parent_id, timestamp)
+
+
+def bookmark_sort_key(row: sqlite3.Row) -> Tuple[int, str, int]:
+    if row["type"] == 2:
+        return 0, str(row["title"] or "").casefold(), int(row["id"])
+    url = str(row["url"] or "")
+    label = str(row["title"] or "") or normalized_hostname(url) or url
+    return 1, label.casefold(), int(row["id"])
+
+
+def sort_folder(connection: sqlite3.Connection, parent: int, timestamp: int) -> int:
+    connection.row_factory = sqlite3.Row
+    rows = connection.execute(
+        """
+        SELECT b.id, b.type, b.position, b.title, p.url
+        FROM moz_bookmarks AS b
+        LEFT JOIN moz_places AS p ON p.id = b.fk
+        WHERE b.parent = ?
+        ORDER BY b.position
+        """,
+        (parent,),
+    ).fetchall()
+    changed = 0
+    segment: List[sqlite3.Row] = []
+    ordered: List[sqlite3.Row] = []
+
+    def sort_segment() -> None:
+        ordered.extend(sorted(segment, key=bookmark_sort_key))
+        segment.clear()
+
+    for row in rows:
+        if row["type"] == 3:
+            sort_segment()
+            ordered.append(row)
+        else:
+            segment.append(row)
+    sort_segment()
+    for position, row in enumerate(ordered):
+        if int(row["position"]) != position:
+            connection.execute(
+                """
+                UPDATE moz_bookmarks
+                SET position = ?, lastModified = ?,
+                    syncChangeCounter = syncChangeCounter + 1
+                WHERE id = ?
+                """,
+                (position, timestamp, int(row["id"])),
+            )
+            changed += 1
+    if changed:
+        touch_bookmark(connection, parent, timestamp)
+    return changed
+
+
+def apply_organization(profile: Path, plan: OrganizationPlan) -> Tuple[int, Path]:
+    database = profile / "places.sqlite"
+    connection = sqlite3.connect(database, timeout=1)
+    connection.row_factory = sqlite3.Row
+    try:
+        check = connection.execute("PRAGMA quick_check").fetchone()
+        if check is None or check[0] != "ok":
+            raise RuntimeError("Waterfox reported an unhealthy places.sqlite database")
+        backup = create_backup(connection, database)
+        connection.execute("BEGIN IMMEDIATE")
+        timestamp = current_timestamp()
+        unfiled_id = plan.unfiled_id
+        review_ids: List[int] = []
+        if plan.dead_ids:
+            trash_id = find_or_create_folder(connection, unfiled_id, TRASH_FOLDER, timestamp)
+            move_bookmarks(connection, sorted(plan.dead_ids), trash_id, timestamp)
+            review_ids.append(trash_id)
+        if plan.duplicate_ids:
+            duplicates_id = find_or_create_folder(
+                connection, unfiled_id, DUPLICATES_FOLDER, timestamp
+            )
+            move_bookmarks(connection, sorted(plan.duplicate_ids), duplicates_id, timestamp)
+            review_ids.append(duplicates_id)
+        if plan.no_icon_ids:
+            no_icon_id = find_or_create_folder(connection, unfiled_id, NO_ICON_FOLDER, timestamp)
+            move_bookmarks(connection, sorted(plan.no_icon_ids), no_icon_id, timestamp)
+            review_ids.append(no_icon_id)
+        for bookmark_id in plan.title_ids:
+            connection.execute(
+                """
+                UPDATE moz_bookmarks
+                SET title = NULL, lastModified = ?,
+                    syncChangeCounter = syncChangeCounter + 1
+                WHERE id = ?
+                """,
+                (timestamp, bookmark_id),
+            )
+        delete_bookmark_items(connection, plan.delete_ids, timestamp)
+        changed_positions = 0
+        folder_ids = list(plan.sortable_folders)
+        for review_id in review_ids:
+            if review_id not in folder_ids:
+                folder_ids.append(review_id)
+        for parent in folder_ids:
+            changed_positions += sort_folder(connection, parent, timestamp)
+        connection.commit()
+        check = connection.execute("PRAGMA quick_check").fetchone()
+        if check is None or check[0] != "ok":
+            raise RuntimeError("Places database failed its post-update check")
+        return changed_positions, backup
+    except BaseException:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+
+def rotate_left_5(value: int) -> int:
+    return ((value << 5) | (value >> 27)) & HASH_MASK
+
+
+def places_hash_string(value: str) -> int:
+    result = 0
+    for byte in value.encode("utf-8")[:1500]:
+        result = (GOLDEN_RATIO * (rotate_left_5(result) ^ byte)) & HASH_MASK
+    return result
+
+
+def fixed_icon_url_hash(url: str) -> int:
+    fixed = url
+    for prefix in ("http://", "https://", "ftp://"):
+        if fixed.startswith(prefix):
+            fixed = fixed[len(prefix) :]
+            break
+    if fixed.startswith("www."):
+        fixed = fixed[4:]
+    return places_hash_string(fixed)
+
+
+def validate_favicon_database(connection: sqlite3.Connection) -> None:
+    required = {
+        "moz_icons": {
+            "id",
+            "icon_url",
+            "fixed_icon_url_hash",
+            "width",
+            "root",
+            "expire_ms",
+            "data",
+        },
+        "moz_pages_w_icons": {"id", "page_url", "page_url_hash"},
+        "moz_icons_to_pages": {"page_id", "icon_id", "expire_ms"},
+    }
+    for table, columns in required.items():
+        actual = {str(row[1]) for row in connection.execute(f"PRAGMA table_info({table})")}
+        missing = columns - actual
+        if missing:
+            raise RuntimeError(
+                f"Unsupported favicons.sqlite schema; {table} lacks: " + ", ".join(sorted(missing))
+            )
+
+    quick_check = connection.execute("PRAGMA quick_check").fetchone()
+    if quick_check is None or quick_check[0] != "ok":
+        raise RuntimeError("Waterfox reported an unhealthy favicons.sqlite database")
+
+
+def create_backup(connection: sqlite3.Connection, database: Path) -> Path:
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    backup = database.with_name(f"{database.name}.backup-{timestamp}")
+    suffix = 1
+    while backup.exists():
+        backup = database.with_name(f"{database.name}.backup-{timestamp}-{suffix}")
+        suffix += 1
+
+    with sqlite3.connect(backup) as destination:
+        connection.backup(destination)
+    backup.chmod(0o600)
+    return backup
+
+
+def find_or_create_icon(
+    connection: sqlite3.Connection, icon_url: str, data: bytes, expire_ms: int
+) -> int:
+    icon_hash = fixed_icon_url_hash(icon_url)
+    row = connection.execute(
+        """
+        SELECT id FROM moz_icons
+        WHERE fixed_icon_url_hash = ? AND icon_url = ?
+        LIMIT 1
+        """,
+        (icon_hash, icon_url),
+    ).fetchone()
+    if row:
+        icon_id = int(row[0])
+        connection.execute(
+            """
+            UPDATE moz_icons
+            SET width = ?, root = 0, expire_ms = ?, data = ?
+            WHERE id = ?
+            """,
+            (ICON_SIZE, expire_ms, data, icon_id),
+        )
+        return icon_id
+
+    cursor = connection.execute(
+        """
+        INSERT INTO moz_icons
+            (icon_url, fixed_icon_url_hash, width, root, expire_ms, data)
+        VALUES (?, ?, ?, 0, ?, ?)
+        """,
+        (icon_url, icon_hash, ICON_SIZE, expire_ms, data),
+    )
+    if cursor.lastrowid is None:
+        raise RuntimeError("Waterfox did not return an ID for the inserted icon")
+    return cursor.lastrowid
+
+
+def find_or_create_page(connection: sqlite3.Connection, page_url: str, page_hash: int) -> int:
+    row = connection.execute(
+        """
+        SELECT id, page_url_hash FROM moz_pages_w_icons
+        WHERE page_url = ?
+        LIMIT 1
+        """,
+        (page_url,),
+    ).fetchone()
+    if row:
+        page_id = int(row[0])
+        if int(row[1]) != page_hash:
+            connection.execute(
+                "UPDATE moz_pages_w_icons SET page_url_hash = ? WHERE id = ?",
+                (page_hash, page_id),
+            )
+        return page_id
+
+    cursor = connection.execute(
+        "INSERT INTO moz_pages_w_icons (page_url, page_url_hash) VALUES (?, ?)",
+        (page_url, page_hash),
+    )
+    if cursor.lastrowid is None:
+        raise RuntimeError("Waterfox did not return an ID for the inserted page")
+    return cursor.lastrowid
+
+
+def update_favicons(
+    profile: Path,
+    grouped: Dict[str, List[Bookmark]],
+    downloaded: Dict[str, Tuple[str, bytes]],
+) -> Tuple[int, Path]:
+    database = profile / "favicons.sqlite"
+    connection = sqlite3.connect(database, timeout=1)
+    try:
+        connection.execute("PRAGMA foreign_keys = ON")
+        validate_favicon_database(connection)
+        backup = create_backup(connection, database)
+        connection.execute("BEGIN IMMEDIATE")
+        expire_ms = int((time.time() + EXPIRY_SECONDS) * 1000)
+        associated = 0
+
+        for hostname, (icon_url, data) in downloaded.items():
+            icon_id = find_or_create_icon(connection, icon_url, data, expire_ms)
+            for page_url, page_hash in grouped[hostname]:
+                page_id = find_or_create_page(connection, page_url, page_hash)
+                connection.execute(
+                    """
+                    INSERT INTO moz_icons_to_pages (page_id, icon_id, expire_ms)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(page_id, icon_id)
+                    DO UPDATE SET expire_ms = excluded.expire_ms
+                    """,
+                    (page_id, icon_id, expire_ms),
+                )
+                associated += 1
+
+        foreign_key_error = connection.execute("PRAGMA foreign_key_check").fetchone()
+        if foreign_key_error is not None:
+            raise RuntimeError("Favicon update failed its foreign-key check")
+        connection.commit()
+
+        quick_check = connection.execute("PRAGMA quick_check").fetchone()
+        if quick_check is None or quick_check[0] != "ok":
+            raise RuntimeError("Favicon database failed its post-update check")
+        return associated, backup
+    except BaseException:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    args = parse_args(argv)
+    try:
+        if args.command:
+            if args.command in ("stop", "restart"):
+                stop_waterfox()
+            if args.command in ("open", "restart"):
+                open_waterfox(args.browser_args)
+            return 0
+        if not args.dry_run and args.profile is None:
+            run_waterfox_configuration(args.yes)
+        profile = resolve_profile(args.profile)
+        preference_updates = plan_import_button_removal(profile)
+
+        bookmarks = read_bookmarks(profile)
+        dead_urls: set[str] = set()
+        inconclusive: List[Tuple[str, str]] = []
+        print(f"Profile: {profile}")
+        print(f"Found {len(bookmarks)} HTTP(S) bookmarks")
+        if args.skip_health_check:
+            print("Skipping page health checks")
+        else:
+            dead_urls, inconclusive = check_pages(bookmarks, args.timeout, args.workers)
+
+        existing_cached_urls = read_cached_page_urls(profile)
+        cached_urls = set() if args.refresh else existing_cached_urls
+        pending_bookmarks = [
+            bookmark
+            for bookmark in bookmarks
+            if bookmark[0] not in cached_urls and bookmark[0] not in dead_urls
+        ]
+        grouped = group_by_hostname(pending_bookmarks)
+        if args.refresh:
+            print(
+                f"Refresh enabled; fetching {len(pending_bookmarks)} bookmarks across {len(grouped)} domains"
+            )
+        else:
+            print(f"Using {len(existing_cached_urls)} cached bookmark favicons")
+            print(
+                f"Fetching {len(pending_bookmarks)} missing bookmarks across {len(grouped)} domains"
+            )
+
+        downloaded: Dict[str, Tuple[str, bytes]] = {}
+        failures: List[Tuple[str, str]] = []
+        if grouped:
+            downloaded, failures = fetch_icons(grouped, args.timeout, args.delay, args.workers)
+
+        downloaded_urls = {url for hostname in downloaded for url, _ in grouped[hostname]}
+        plan = plan_organization(profile, dead_urls, existing_cached_urls | downloaded_urls)
+        print_organization_plan(plan, inconclusive, bool(preference_updates))
+        organization_changes = bool(
+            plan.dead_ids
+            or plan.duplicate_ids
+            or plan.no_icon_ids
+            or plan.title_ids
+            or plan.delete_ids
+            or plan.sortable_folders
+        )
+        profile_changes = organization_changes or bool(preference_updates)
+        if args.dry_run:
+            print("Dry run; no databases changed")
+            return 0
+        if profile_changes and not confirm_changes(args.yes):
+            print("Cancelled; no databases changed")
+            return 0
+
+        ensure_waterfox_closed(args.yes)
+
+        if preference_updates:
+            preference_backups = apply_preference_updates(preference_updates)
+            print("Removed Import bookmarks item from the bookmarks bar")
+            for preference_backup in preference_backups:
+                print(f"Preferences backup: {preference_backup}")
+        if organization_changes:
+            changed_positions, places_backup = apply_organization(profile, plan)
+            print(f"Organized bookmarks ({changed_positions} positions changed)")
+            print(f"Places backup: {places_backup}")
+        if downloaded:
+            associated, favicon_backup = update_favicons(profile, grouped, downloaded)
+            print(f"Associated favicons with {associated} bookmarked URLs")
+            print(f"Favicons backup: {favicon_backup}")
+        elif grouped:
+            print("No favicons could be downloaded")
+        elif not profile_changes:
+            print("Nothing to change. Use --refresh to fetch existing favicons again.")
+
+        if failures:
+            print(
+                f"Could not fetch {len(failures)} domains after trying all sources.",
+                file=sys.stderr,
+            )
+            return 1
+        return 0
+    except (OSError, RuntimeError, sqlite3.Error) as error:
+        print(f"Error: {error}", file=sys.stderr)
+        return 2
+    except KeyboardInterrupt:
+        clear_progress()
+        print("Interrupted.", file=sys.stderr)
+        return 130
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

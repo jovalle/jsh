@@ -30,16 +30,24 @@ cleanup() {
 }
 
 confirm_import() {
+  if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then
+    IMPORT_CONFIRMED=1
+    return
+  fi
   jsh_prompt "Apply this backup to Vorssaint? [y/N]: "
-  if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then answer=y; else read -r answer || answer=; fi
+  read -r answer || answer=
   if [[ "${answer}" =~ ^[Yy]$ ]]; then
     IMPORT_CONFIRMED=1
   fi
 }
 
 confirm_backup() {
+  if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then
+    BACKUP_CONFIRMED=1
+    return
+  fi
   jsh_prompt "Replace the managed backup with these active settings? [y/N]: "
-  if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then answer=y; else read -r answer || answer=; fi
+  read -r answer || answer=
   if [[ "${answer}" =~ ^[Yy]$ ]]; then
     BACKUP_CONFIRMED=1
   fi
@@ -420,6 +428,13 @@ configure_onboarding() {
   local backup_plist=$1 onboarding_version
   onboarding_version=$(plutil -extract featuresOnboardingVersion raw -o - "${backup_plist}")
 
+  if [[ $(defaults read "${BUNDLE_ID}" hasOnboarded 2> /dev/null || true) == "1" && \
+        $(defaults read "${BUNDLE_ID}" onboardingStep 2> /dev/null || true) == "0" && \
+        $(defaults read "${BUNDLE_ID}" featuresOnboardingVersion 2> /dev/null || true) == "${onboarding_version}" ]]; then
+    jsh_note "Vorssaint onboarding is already marked complete."
+    return 0
+  fi
+
   defaults write "${BUNDLE_ID}" hasOnboarded -bool true
   defaults write "${BUNDLE_ID}" onboardingStep -int 0
   defaults write "${BUNDLE_ID}" featuresOnboardingVersion -int "${onboarding_version}"
@@ -427,10 +442,14 @@ configure_onboarding() {
 }
 
 configure_login_item() {
-  local login_item_exists
+  local login_item_exists launch_wanted
 
-  defaults write "${BUNDLE_ID}" launchAtLoginWanted -bool true
-  login_item_exists=$(osascript -e 'tell application "System Events" to exists login item "Vorssaint"')
+  launch_wanted=$(defaults read "${BUNDLE_ID}" launchAtLoginWanted 2> /dev/null || true)
+  if [[ "${launch_wanted}" != "1" ]]; then
+    defaults write "${BUNDLE_ID}" launchAtLoginWanted -bool true
+  fi
+
+  login_item_exists=$(osascript -e 'tell application "System Events" to exists login item "Vorssaint"' 2> /dev/null || true)
   if [[ "${login_item_exists}" != true ]]; then
     osascript - "${APP_PATH}" << 'APPLESCRIPT'
 on run arguments
@@ -439,26 +458,28 @@ on run arguments
   end tell
 end run
 APPLESCRIPT
+    jsh_success "Vorssaint will start at login."
+  else
+    jsh_note "Vorssaint is already configured to start at login."
   fi
-  jsh_success "Vorssaint will start at login."
 }
 
 main() {
-  local action=${1:-apply}
+  local action=apply
   local active_plist managed_active_plist managed_backup_plist merged_plist
   local candidate_settings candidate_backup operating_system
+  local arg
 
-  if [[ "$#" -gt 1 ]]; then
-    jsh_error "Usage: $0 [apply|backup]"
-    return 1
-  fi
-  case ${action} in
-    apply | backup) ;;
-    *)
-      jsh_error "Usage: $0 [apply|backup]"
-      return 1
-      ;;
-  esac
+  for arg in "$@"; do
+    case ${arg} in
+      -y | --yes) JSH_ASSUME_YES=1 ;;
+      apply | backup) action=${arg} ;;
+      *)
+        jsh_error "Usage: $0 [--yes] [apply|backup]"
+        return 1
+        ;;
+    esac
+  done
 
   operating_system=$(uname -s)
   [[ "${operating_system}" == Darwin ]] || {
