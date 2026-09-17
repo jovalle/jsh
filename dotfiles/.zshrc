@@ -37,7 +37,7 @@ export VISUAL=vim                                # Default full-screen editor
 export SH=${SHELL##*/}                           # Shell type reference
 
 # Project/work directories
-export GIT_BASE=${HOME}/projects                 # Git projects base
+export GIT_BASE=${HOME}/Projects                 # Git projects base
 export WORK_DIR=${GIT_BASE}                      # Default work directory
 export JSH=${${(%):-%N}:A:h:h}                   # Jsh repository root
 
@@ -138,7 +138,7 @@ typeset -gUa fpath
 # Initialize completion system
 typeset _jsh_compdump=${ZDOTDIR:-${HOME}}/.zcompdump
 (( _jsh_runtime_active )) && _jsh_compdump=${JSH_RUNTIME_DIR}/cache/.zcompdump
-autoload -Uz compinit && compinit -d "${_jsh_compdump}"
+autoload -Uz compinit && compinit -u -d "${_jsh_compdump}"
 unset _jsh_compdump
 
 # shellcheck disable=SC1090  # Pinned repository submodule
@@ -167,6 +167,10 @@ for completion_dir in ${(s.:.)JSH_COMPLETION_PATHS}; do
   done
 done
 unset completion_command completion_dir completion_line completion_line_count completion_source
+
+# Derive options from --help when a command has no dedicated completer.
+autoload -Uz _jsh_fallback
+compdef _jsh_fallback -default-
 
 # Completion styling
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'  # Case insensitive
@@ -330,7 +334,7 @@ fi
 alias cp='cp -iv'
 alias mv='mv -iv'
 alias rm='rm -i'
-alias mkdir='mkdir -pv'
+alias mkdir='mkdir -p'
 alias ln='ln -iv'
 alias t='touch'
 alias dud='du -d 1 -h' duf='du -sh *'
@@ -1871,7 +1875,7 @@ dedup_path
 # ============================================================================
 
 jgit() {
-  local project_root=${JSH_PROJECT_DIR:-${HOME}/projects}
+  local project_root=${JSH_PROJECT_DIR:-${HOME}/Projects}
   [[ ${project_root} != '~' ]] || project_root=${HOME}
   [[ ${project_root} != '~/'* ]] || project_root=${HOME}/${project_root#\~/}
   if [[ ${1:-} == create && $# == 2 && -d ${project_root%/}/$2 ]]; then

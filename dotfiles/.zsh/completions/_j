@@ -1,0 +1,52 @@
+#compdef j
+
+_j() {
+	emulate -L zsh
+	setopt extendedglob
+
+	local state entry_path display_path candidate
+	local -a candidates
+	local -A seen
+
+	_arguments -C \
+		'(- *)'{-h,--help}'[show help]' \
+		'(- *)'{-a,--add}'[add the current directory]' \
+		'(- *)--remove[remove the current directory]' \
+		'(- *)--db[show tracked directories and scores]' \
+		'(- *)--clean[remove missing directories]' \
+		'(-c --code)'{-c,--code}'[open the match in Visual Studio Code]' \
+		'(-v --verbose)'{-v,--verbose}'[show search details]' \
+		'*:directory query:->directories'
+
+	[[ ${state} == directories ]] || return
+
+	candidates=(
+		'-:previous directory'
+		'.:current directory'
+		'fetch:run jfetch'
+	)
+
+	while IFS='|' read -r _ entry_path; do
+		[[ -n ${entry_path} && -d ${entry_path} ]] || continue
+		candidate=${entry_path:t}
+		[[ -n ${candidate} && -z ${seen[${candidate}]-} ]] || continue
+		seen[${candidate}]=1
+		display_path=$(_j_display_path "${entry_path}")
+		display_path=${display_path//:/\:}
+		candidates+=("${candidate}:${display_path}")
+	done < <(_j_query)
+
+	while IFS= read -r entry_path; do
+		[[ -n ${entry_path} && -d ${entry_path} ]] || continue
+		candidate=${entry_path:t}
+		[[ -n ${candidate} && -z ${seen[${candidate}]-} ]] || continue
+		seen[${candidate}]=1
+		display_path=$(_j_display_path "${entry_path}")
+		display_path=${display_path//:/\:}
+		candidates+=("${candidate}:${display_path}")
+	done < <(_j_get_projects)
+
+	_describe 'directory' candidates
+}
+
+_j "$@"

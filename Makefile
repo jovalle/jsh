@@ -43,6 +43,11 @@ define run_scripts
 			[ -d "$$dir" ] || continue; \
 			for script in "$$dir"/*; do \
 				[ -f "$$script" ] && [ -x "$$script" ] || continue; \
+				case "$$script" in \
+					*sync-conflict*) continue ;; \
+					*.sh|*.zsh) ;; \
+					*) continue ;; \
+				esac; \
 				[ "$$first_script" -eq 1 ] || jsh_blank; \
 				first_script=0; \
 				jsh_info "Running $$script"; \
@@ -70,16 +75,16 @@ YAMLLINT_CONFIG := dotfiles/.yamllint
 
 # Find files by type
 # Shell files: Find by .sh extension OR by shebang in bin/ directory
-SHELL_FILES := $(shell find . -type f -name "*.sh" ! -path "*/node_modules/*" ! -path "*/.git/*" ! -path "./local/vendor/*" ! -path "./tmp/*" ! -path "*/.config/*"; \
+SHELL_FILES := $(shell find . -type f -name "*.sh" ! -path "*/node_modules/*" ! -path "*/.git/*" ! -path "./local/vendor/*" ! -path "./tmp/*" ! -path "*/.config/*" ! -name "*sync-conflict*"; \
 	find bin -type f 2>/dev/null | while read -r f; do head -n1 "$$f" 2>/dev/null | grep -qE '^$(HASH)!/usr/bin/env bash|^$(HASH)!/bin/(ba)?sh' && echo "$$f"; done)
-ZSH_FILES := $(shell find . -type f \( -name "*.zsh" -o -name ".zshrc" \) ! -path "*/.git/*" ! -path "./local/vendor/*" ! -path "./tmp/*")
-SCRIPT_FILES := $(shell find scripts -type f \( -name "*.sh" -o -name "*.zsh" \) | sort)
-PYTHON_FILES := $(shell find . -type f -name "*.py" ! -path "*/\.*" ! -path "*/node_modules/*" ! -path "*/.venv/*" ! -path "./local/vendor/*" ! -path "./tmp/*"; \
+ZSH_FILES := $(shell find . -type f \( -name "*.zsh" -o -name ".zshrc" \) ! -path "*/.git/*" ! -path "./local/vendor/*" ! -path "./tmp/*" ! -name "*sync-conflict*")
+SCRIPT_FILES := $(shell find scripts -type f \( -name "*.sh" -o -name "*.zsh" \) ! -name "*sync-conflict*" | sort)
+PYTHON_FILES := $(shell find . -type f -name "*.py" ! -path "*/\.*" ! -path "*/node_modules/*" ! -path "*/.venv/*" ! -path "./local/vendor/*" ! -path "./tmp/*" ! -name "*sync-conflict*"; \
 	find bin -type f 2>/dev/null | while read -r f; do head -n1 "$$f" 2>/dev/null | grep -qE '^$(HASH)!/usr/bin/env python3?' && echo "$$f"; done)
-YAML_FILES := $(shell find . -type f \( -name "*.yaml" -o -name "*.yml" \) ! -path "*/\.*" ! -path "*/node_modules/*" ! -path "./local/vendor/*" ! -path "./tmp/*")
-JSON_FIND := find . -type f -name "*.json" ! -path "*/\.*" ! -path "*/node_modules/*" ! -path "*/package*.json" ! -path "./local/*" ! -path "./tmp/*"
+YAML_FILES := $(shell find . -type f \( -name "*.yaml" -o -name "*.yml" \) ! -path "*/\.*" ! -path "*/node_modules/*" ! -path "./local/vendor/*" ! -path "./tmp/*" ! -name "*sync-conflict*")
+JSON_FIND := find . -type f -name "*.json" ! -path "*/\.*" ! -path "*/node_modules/*" ! -path "*/package*.json" ! -path "./local/*" ! -path "./tmp/*" ! -name "*sync-conflict*"
 JSON_FILES := $(shell $(JSON_FIND))
-MD_FILES := $(shell find . -type f -name "*.md" ! -path "*/\.*" ! -path "*/node_modules/*" ! -path "./local/vendor/*" ! -path "./tmp/*")
+MD_FILES := $(shell find . -type f -name "*.md" ! -path "*/\.*" ! -path "*/node_modules/*" ! -path "./local/vendor/*" ! -path "./tmp/*" ! -name "*sync-conflict*")
 
 ##@ General
 
@@ -116,8 +121,10 @@ hooks: ## Install repository hooks
 	@"$(JSH_ROOT)/scripts/development/hooks.sh"
 
 uninstall: ## Remove dotfile links managed by jstow
-	@$(OUTPUT) jsh_prompt "Remove managed dotfile links from $(HOME)? [y/N]: "; \
-	read -r confirm || confirm=; \
+	@$(OUTPUT) if [ "$${JSH_ASSUME_YES:-0}" = 1 ]; then confirm=y; else \
+		jsh_prompt "Remove managed dotfile links from $(HOME)? [y/N]: "; \
+		read -r confirm || confirm=; \
+	fi; \
 	case $$confirm in \
 		[Yy]) ;; \
 		*) jsh_warn "Skipping uninstall."; exit 0 ;; \
@@ -298,7 +305,7 @@ check-yaml-syntax: # Check YAML syntax
 	@$(OUTPUT) if [ -n "$(YAML_FILES)" ]; then \
 		errors=0; \
 		for file in $(YAML_FILES); do \
-			$(PYTHON) -c "import yaml; yaml.safe_load(open('$$file'))" 2>&1 || errors=$$((errors + 1)); \
+			yq '.' "$$file" > /dev/null 2>&1 || errors=$$((errors + 1)); \
 		done; \
 		if [ $$errors -eq 0 ]; then \
 			jsh_success "All YAML files have valid syntax"; \
@@ -440,9 +447,11 @@ clean: ## Remove temporary files and caches
 	@find . -type f -name "*.pyc" ! -path "./local/vendor/*" -delete
 	@find . -type d -name "__pycache__" ! -path "./local/vendor/*" -delete
 	@find . -type d -name ".mypy_cache" ! -path "./local/vendor/*" -delete
+	@find . -name "*sync-conflict-*" -delete
 	@$(OUTPUT) jsh_success "Cleanup complete"
 
 .PHONY: test-reconciliation
-test-reconciliation: ## Test planning, idempotency and platform adapters
+test-reconciliation: ## Test planning, completions, idempotency and platform adapters
+	@$(BATS) tests/completions.bats
 	@$(BATS) tests/linux-platform.bats
 	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m unittest discover -s tests -p 'test_*.py'

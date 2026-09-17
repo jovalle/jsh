@@ -1,0 +1,21 @@
+#compdef just
+
+emulate -L zsh
+setopt extendedglob
+
+local line recipe description
+local -a recipes
+
+while IFS= read -r line; do
+	recipe=${line%%' # '*}
+	recipe=${recipe%%[[:space:]]#}
+	recipe=${recipe%%[[:space:]]*}
+	[[ -n ${recipe} ]] || continue
+	[[ ${recipe} == \[*\] ]] && continue
+	description=${line#*' # '}
+	[[ ${description} == ${line} ]] && description=
+	description=${description//:/\:}
+	recipes+=("${recipe}:${description}")
+done < <(command just --list --unsorted --list-heading '' --list-prefix '' 2>/dev/null)
+
+_describe 'recipe' recipes

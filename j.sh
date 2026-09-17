@@ -45,6 +45,7 @@ if ! declare -F jsh_error > /dev/null; then
   jsh_note() { jsh_stdout '2;37' '' "$*"; }
   jsh_success() { jsh_stdout 32 '✓ ' "$*"; }
   jsh_warn() { jsh_stderr 33 '' "$*"; }
+  jsh_warn_stdout() { jsh_stdout 33 '' "$*"; }
   jsh_error() { jsh_stderr 31 '✗ ' "$*"; }
   jsh_prompt() {
     if jsh_color_enabled 1; then
@@ -333,14 +334,9 @@ setup_system() {
     exit 1
   fi
 
-  if command -v make > /dev/null 2>&1; then
-    make --no-print-directory -C "${JSH_DIR}" setup < "${TTY}"
-  elif command -v gmake > /dev/null 2>&1; then
-    gmake --no-print-directory -C "${JSH_DIR}" setup < "${TTY}"
-  else
-    jsh_error "Make is required. Run the prerequisite phase first."
-    exit 1
-  fi
+  JSH_UPDATE=1 run_make_target install
+  run_make_target deploy
+  run_make_target configure
 }
 
 run_make_target() {

@@ -8,6 +8,7 @@
 *.db
 *.gpg
 *.last-run
+*.lock
 *.log
 *.min.js
 *.mk

@@ -1,5 +1,5 @@
 .cache
-.git/objects/pack/*
+.git
 .kube/cache
 .venv
 /local/vendor/

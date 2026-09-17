@@ -2,6 +2,7 @@
 # Deploy managed dotfiles and command links.
 
 set -eu
+unsetopt monitor
 
 readonly repo_root=${0:A:h:h:h:h}
 readonly dotfiles_dir="${repo_root}/dotfiles"
@@ -15,6 +16,7 @@ done
 unset library_file
 recovery_dir=
 backup_root=
+commands_link_created=0
 typeset -a stashed_paths stashed_backups
 
 stash_path() {
@@ -48,6 +50,13 @@ backup_path() {
 restore_stashed() {
   local exit_status=$? index target backup failed=0
   (( exit_status == 0 )) && return
+  if (( commands_link_created )); then
+    if [[ -L "${commands_link}" && "${commands_link:A}" == "${commands_dir:A}" ]]; then
+      rm -- "${commands_link}" || failed=1
+    else
+      failed=1
+    fi
+  fi
   for (( index = ${#stashed_paths}; index >= 1; index-- )); do
     target=${stashed_paths[index]}
     backup=${stashed_backups[index]}
@@ -76,8 +85,14 @@ if [[ ! -d "${commands_dir}" ]]; then
   exit 1
 fi
 
+for arg in "$@"; do
+  case "${arg}" in
+    -y | --yes) JSH_ASSUME_YES=1 ;;
+  esac
+done
+
 jsh_detail "This will back up conflicting paths and deploy managed dotfiles into ${HOME}."
-if [[ ${JSH_ASSUME_YES:-0} != 1 ]]; then
+if [[ ${JSH_ASSUME_YES:-0} != 1 && -t 0 ]]; then
   jsh_prompt "Continue? [Y/n]: "
   if ! read -r confirm; then
     confirm=
@@ -89,7 +104,9 @@ if [[ ${JSH_ASSUME_YES:-0} != 1 ]]; then
 fi
 
 jsh_info "Checking for legacy Jsh symlinks..."
+typeset -a dotfile_sources
 while IFS= read -r -d $'\0' link; do
+  [[ -n "${link}" ]] || continue
   target=$(readlink "${link}")
   [[ "${target}" == /* ]] || target="${link:h}/${target}"
   target=${target:a}
@@ -108,10 +125,32 @@ done < <(
 )
 
 typeset -a jstow_args
-jstow_args=(--restow --dir "${repo_root}" --target "${HOME}")
+jstow_args=(
+  --restow
+  --dir "${repo_root}"
+  --target "${HOME}"
+  '--ignore=(^|/)[.]zcompdump([.-].*)?$'
+)
 
-while IFS= read -r -d $'\0' source; do
+if git -C "${repo_root}" rev-parse --is-inside-work-tree > /dev/null 2>&1; then
+  while IFS= read -r -d $'\0' source; do
+    dotfile_sources+=("${repo_root}/${source}")
+  done < <(git -C "${repo_root}" ls-files --cached --others --exclude-standard -z -- dotfiles)
+
+  while IFS= read -r -d $'\0' ignored; do
+    ignored=${ignored#dotfiles/}
+    ignored=${ignored%/}
+    ignored=$(printf '%s' "${ignored}" | sed 's/[][\.^$*+?(){}|]/\\&/g')
+    jstow_args+=("--ignore=^${ignored}(/.*)?$")
+  done < <(git -C "${repo_root}" ls-files --others --ignored --exclude-standard --directory -z -- dotfiles)
+else
+  dotfile_sources=(${(0)"$(find "${dotfiles_dir}" \( -type f -o -type l \) -print0)"})
+fi
+
+for source in "${dotfile_sources[@]}"; do
+  [[ -n "${source}" ]] || continue
   relative=${source#"${dotfiles_dir}/"}
+  [[ ${relative} != .zcompdump && ${relative} != .zcompdump[.-]* ]] || continue
   target="${HOME}/${relative}"
 
   # Stow may link a parent directory; its children already are the source files.
@@ -126,9 +165,7 @@ while IFS= read -r -d $'\0' source; do
     jsh_warn "Backing up unmanaged path: ${target}"
     backup_path "${target}"
   fi
-done < <(find "${dotfiles_dir}" \( -type f -o -type l \) -print0)
-
-"${commands_dir}/jstow" "${jstow_args[@]}" dotfiles
+done
 
 if [[ -e "${commands_link}" || -L "${commands_link}" ]]; then
   if [[ -L "${commands_link}" ]]; then
@@ -144,7 +181,11 @@ if [[ -e "${commands_link}" || -L "${commands_link}" ]]; then
 else
   jsh_info "Linking command directory: ${commands_link}"
   ln -s -- "${commands_dir}" "${commands_link}"
+  commands_link_created=1
 fi
+
+"${commands_dir}/jstow" "${jstow_args[@]}" dotfiles
+
 if [[ -n "${recovery_dir}" ]]; then
   rm -rf -- "${recovery_dir}"
 fi

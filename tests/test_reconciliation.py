@@ -261,6 +261,33 @@ apply_configuration
                     TEST_PROFILE=directory,
                     TEST_EVENTS=str(events),
                     TEST_DRIFT=str(drift),
+    @unittest.skipUnless(sys.platform == "linux" and shutil.which("zsh"), "Linux/Zsh required")
+    def test_prompt_uses_ascii_icons_in_c_locale(self):
+        with tempfile.TemporaryDirectory() as directory:
+            release = Path(directory) / "os-release"
+            release.write_text("ID=testlinux\n")
+            env = dict(
+                os.environ,
+                JSH_OS_RELEASE=str(release),
+                JSH_PROMPT_MODE="nerdfont-v3",
+                LC_ALL="C",
+            )
+            result = subprocess.run(
+                [
+                    "zsh",
+                    "-fc",
+                    'source "$1"; print -rn -- "${_JSH_PROMPT_MODE}:${_JSH_PROMPT_ICON[linux]}:${_JSH_PROMPT_ICON[prompt]}"',
+                    "test",
+                    str(ROOT / "lib/zsh/prompt.zsh"),
+                ],
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.stdout, "ascii:testlinux:>")
+            self.assertEqual(result.stderr, "")
+
                     JSH_ASSUME_YES="1",
                 )
                 subprocess.run(
@@ -392,6 +419,112 @@ class MakeOrchestrationTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertEqual(
                 events,
+    @unittest.skipUnless(shutil.which("zsh"), "Zsh is required for dotfile deployment")
+    def test_deploy_failure_restores_conflicts_and_command_link(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "repo"
+            home = Path(directory) / "home"
+            home.mkdir()
+            for relative in ("scripts/unix/deploy/dotfiles.zsh", "lib/output.sh"):
+                target = root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(ROOT / relative, target)
+            jstow = root / "bin/jstow"
+            jstow.parent.mkdir(parents=True)
+            jstow.write_text("#!/bin/sh\nexit 1\n")
+            jstow.chmod(0o755)
+            source = root / "dotfiles/.config/example/settings.json"
+            source.parent.mkdir(parents=True)
+            source.write_text("managed\n")
+            conflict = home / ".config/example/settings.json"
+            conflict.parent.mkdir(parents=True)
+            conflict.write_text("original\n")
+            env = dict(
+                os.environ,
+                HOME=str(home),
+                XDG_STATE_HOME=str(home / "state"),
+                JSH_ASSUME_YES="1",
+                JSH_PLAIN_OUTPUT="1",
+            )
+
+            result = subprocess.run(
+                ["zsh", str(root / "scripts/unix/deploy/dotfiles.zsh")],
+                env=env,
+                capture_output=True,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(conflict.read_text(), "original\n")
+            self.assertFalse((home / ".bin").exists())
+            backups = home / "state/jsh/backups"
+            self.assertFalse(backups.exists() and any(backups.iterdir()))
+
+    @unittest.skipUnless(shutil.which("zsh"), "Zsh is required for dotfile deployment")
+    def test_deploy_ignores_generated_zsh_completion_dumps(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "repo"
+            home = Path(directory) / "home"
+            home.mkdir()
+            for relative in ("scripts/unix/deploy/dotfiles.zsh", "bin/jstow", "lib/output.sh"):
+                target = root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(ROOT / relative, target)
+            (root / "dotfiles").mkdir()
+            (root / "dotfiles/.zcompdump").write_text("repository cache\n")
+            home_cache = home / ".zcompdump"
+            home_cache.write_text("home cache\n")
+            env = dict(
+                os.environ,
+                HOME=str(home),
+                XDG_STATE_HOME=str(home / "state"),
+                JSH_ASSUME_YES="1",
+                JSH_PLAIN_OUTPUT="1",
+            )
+            command = ["zsh", str(root / "scripts/unix/deploy/dotfiles.zsh")]
+
+            subprocess.run(command, env=env, capture_output=True, check=True)
+            subprocess.run(command, env=env, capture_output=True, check=True)
+
+            self.assertEqual(home_cache.read_text(), "home cache\n")
+            self.assertFalse(home_cache.is_symlink())
+            self.assertFalse((home / "state/jsh/backups").exists())
+
+    @unittest.skipUnless(shutil.which("zsh"), "Zsh is required for dotfile deployment")
+    def test_deploy_tolerates_restricted_home_subtrees(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "repo"
+            home = Path(directory) / "home"
+            shim_dir = Path(directory) / "bin"
+            home.mkdir()
+            shim_dir.mkdir()
+            for relative in ("scripts/unix/deploy/dotfiles.zsh", "bin/jstow", "lib/output.sh"):
+                target = root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(ROOT / relative, target)
+            source = root / "dotfiles/.config/example/settings.json"
+            source.parent.mkdir(parents=True)
+            source.write_text('{"personal": true}\n')
+            find_shim = shim_dir / "find"
+            find_shim.write_text('#!/bin/sh\n"$REAL_FIND" "$@"\n' '[ "$1" != "$HOME" ]\n')
+            find_shim.chmod(0o755)
+            env = dict(
+                os.environ,
+                HOME=str(home),
+                JSH_ASSUME_YES="1",
+                JSH_PLAIN_OUTPUT="1",
+                PATH=f"{shim_dir}:{os.environ['PATH']}",
+                REAL_FIND=shutil.which("find"),
+            )
+
+            subprocess.run(
+                ["zsh", str(root / "scripts/unix/deploy/dotfiles.zsh")],
+                env=env,
+                capture_output=True,
+                check=True,
+            )
+
+            self.assertTrue((home / ".config/example/settings.json").samefile(source))
+
                 [
                     "linux-packages",
                     "linux-applications",
@@ -423,6 +556,43 @@ class MakeOrchestrationTests(unittest.TestCase):
                     result, events = self.run_make(root, "configure", platform)
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                     self.assertEqual(events, expected)
+    @unittest.skipUnless(shutil.which("zsh"), "Zsh is required for dotfile deployment")
+    def test_deploy_leaves_gitignored_dotfile_state_unmanaged(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "repo"
+            home = Path(directory) / "home"
+            home.mkdir()
+            for relative in ("scripts/unix/deploy/dotfiles.zsh", "bin/jstow", "lib/output.sh"):
+                target = root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(ROOT / relative, target)
+            ignored_source = root / "dotfiles/.config/example/runtime.json"
+            ignored_source.parent.mkdir(parents=True)
+            ignored_source.write_text("repository runtime\n")
+            (root / ".gitignore").write_text("dotfiles/.config/example/\n")
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            live_state = home / ".config/example/runtime.json"
+            live_state.parent.mkdir(parents=True)
+            live_state.write_text("live runtime\n")
+            env = dict(
+                os.environ,
+                HOME=str(home),
+                XDG_STATE_HOME=str(home / "state"),
+                JSH_ASSUME_YES="1",
+                JSH_PLAIN_OUTPUT="1",
+            )
+
+            subprocess.run(
+                ["zsh", str(root / "scripts/unix/deploy/dotfiles.zsh")],
+                env=env,
+                capture_output=True,
+                check=True,
+            )
+
+            self.assertEqual(live_state.read_text(), "live runtime\n")
+            self.assertFalse(live_state.is_symlink())
+            self.assertFalse((home / "state/jsh/backups").exists())
+
 
     def test_failure_mode_is_fail_fast_or_continue_on_error(self):
         with tempfile.TemporaryDirectory() as directory:
