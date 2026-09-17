@@ -2,8 +2,22 @@ setopt PROMPT_SUBST
 zmodload zsh/datetime 2>/dev/null || true
 autoload -Uz add-zsh-hook
 
+typeset -g _JSH_PROMPT_MODE=${JSH_PROMPT_MODE:-nerdfont-v3}
+case ${_JSH_PROMPT_MODE} in
+	nerdfont-v3|unicode|ascii) ;;
+	*)
+		print -u2 -- "jsh: unsupported JSH_PROMPT_MODE: ${JSH_PROMPT_MODE}"
+		print -u2 -- 'jsh: expected nerdfont-v3, unicode, or ascii'
+		_JSH_PROMPT_MODE=nerdfont-v3
+		;;
+esac
+case ${${LC_ALL:-${LC_CTYPE:-${LANG:-C}}}:l} in
+	*utf-8*|*utf8*) ;;
+	*) [[ ${_JSH_PROMPT_MODE} == ascii ]] || _JSH_PROMPT_MODE=ascii ;;
+esac
+
 typeset -gA _JSH_PROMPT_ICON
-case ${JSH_PROMPT_MODE:-nerdfont-v3} in
+case ${_JSH_PROMPT_MODE} in
 	nerdfont-v3)
 		_JSH_PROMPT_ICON=(
 			apple $'\uf179' linux $'\uf17c' branch $'\uf126 '
@@ -31,18 +45,6 @@ case ${JSH_PROMPT_MODE:-nerdfont-v3} in
 			jobs 'jobs:' python 'py:' node 'node:' kube 'kube:'
 		)
 		;;
-	*)
-		print -u2 -- "jsh: unsupported JSH_PROMPT_MODE: ${JSH_PROMPT_MODE}"
-		print -u2 -- 'jsh: expected nerdfont-v3, unicode, or ascii'
-		JSH_PROMPT_MODE=nerdfont-v3
-		_JSH_PROMPT_ICON=(
-			apple $'\uf179' linux $'\uf17c' branch $'\uf126 '
-			prompt '❯' command '❮' visual 'V' overwrite '▶'
-			fail '✘' ahead '⇡' behind '⇣' stash '*'
-			conflict '~' staged '+' unstaged '!' untracked '?'
-			jobs $'\uf013' python $'\ue73c' node $'\ue718' kube '⎈'
-		)
-		;;
 esac
 
 typeset -g _JSH_DISTRO_ID=linux
@@ -54,7 +56,7 @@ if [[ ${OSTYPE} == linux* && -r ${JSH_OS_RELEASE:-/etc/os-release} ]]; then
         fi
     done < "${JSH_OS_RELEASE:-/etc/os-release}"
 fi
-if [[ ${JSH_PROMPT_MODE:-nerdfont-v3} == nerdfont-v3 ]]; then
+if [[ ${_JSH_PROMPT_MODE} == nerdfont-v3 ]]; then
     case ${_JSH_DISTRO_ID} in
         debian) _JSH_PROMPT_ICON[linux]=$'\uf306' ;;
         ubuntu) _JSH_PROMPT_ICON[linux]=$'\uf31b' ;;
@@ -617,7 +619,7 @@ jsh_prompt_refresh() {
 }
 
 jsh_prompt_status() {
-	print -r -- "runtime=jsh glyphs=${JSH_PROMPT_MODE:-nerdfont-v3} async=${JSH_PROMPT_ASYNC}"
+	print -r -- "runtime=jsh glyphs=${_JSH_PROMPT_MODE} async=${JSH_PROMPT_ASYNC}"
 }
 
 add-zsh-hook preexec _jsh_prompt_preexec

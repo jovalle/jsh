@@ -1,6 +1,6 @@
 typeset -g J_DATA=${J_DATA:-${JSH}/local/j.db}
 typeset -g J_EXCLUDE=${J_EXCLUDE:-${HOME}}
-typeset -g J_PATHS=${J_PATHS-${GIT_BASE:-${HOME}/projects}}
+typeset -g J_PATHS=${J_PATHS-${GIT_BASE:-${HOME}/Projects}}
 typeset -gF _J_DECAY=0.99
 typeset -gF _J_MIN_SCORE=0.01
 typeset -g _J_PREV_DIR=""

@@ -1,0 +1,15 @@
+# shellcheck disable=SC2154
+
+_jsh_fallback() {
+  emulate -L zsh
+
+  local command_name=${words[1]:t}
+
+  if [[ ${PREFIX} == -* && -n ${commands[${command_name}]-} ]]; then
+    _gnu_generic "$@" && return
+  fi
+
+  _default "$@"
+}
+
+_jsh_fallback "$@"

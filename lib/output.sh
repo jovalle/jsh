@@ -61,6 +61,10 @@ jsh_warn() {
   jsh_stderr 33 '' "$*"
 }
 
+jsh_warn_stdout() {
+  jsh_stdout 33 '' "$*"
+}
+
 jsh_error() {
   jsh_stderr 31 '✗ ' "$*"
 }

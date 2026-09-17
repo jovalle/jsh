@@ -25,7 +25,7 @@ confirm() {
 }
 
 main() {
-  local platform
+  local platform arg
   platform=$(uname -s)
   case "${platform}" in
     Darwin | Linux) ;;
@@ -35,14 +35,38 @@ main() {
       ;;
   esac
 
-  if command -v pre-commit >/dev/null 2>&1; then
-    confirm || {
-      jsh_note "Skipping repository hooks."
-      return
-    }
-    jsh_info "Installing repository hooks..."
-    (cd "${JSH_ROOT}" && pre-commit install --install-hooks) || \
-      jsh_warn "Pre-commit hook setup failed."
+  for arg in "$@"; do
+    case "${arg}" in
+      -y | --yes) JSH_ASSUME_YES=1 ;;
+    esac
+  done
+
+  if ! command -v pre-commit >/dev/null 2>&1; then
+    jsh_note "pre-commit is not installed; skipping repository hooks."
+    return 0
+  fi
+
+  if [[ ! -d "${JSH_ROOT}/.git" ]]; then
+    jsh_note "Not a git repository; skipping repository hooks."
+    return 0
+  fi
+
+  if [[ -f "${JSH_ROOT}/.git/hooks/pre-commit" ]] && grep -Fq "pre-commit" "${JSH_ROOT}/.git/hooks/pre-commit" 2> /dev/null; then
+    if [[ ${JSH_UPDATE:-0} != 1 ]]; then
+      jsh_note "Repository hooks are already installed."
+      return 0
+    fi
+  fi
+
+  confirm || {
+    jsh_note "Skipping repository hooks."
+    return
+  }
+  jsh_info "Installing repository hooks..."
+  if (cd "${JSH_ROOT}" && pre-commit install --install-hooks); then
+    jsh_success "Repository hooks installed."
+  else
+    jsh_warn "Pre-commit hook setup failed."
   fi
 }
 
