@@ -52,6 +52,11 @@ runs. Some platform scripts make privileged or destructive changes; review their
 `--yes` to accept the setup workflow prompts. After installation, run `jsh update` to update the repository,
 dependencies, packages, and managed configuration.
 
+Package selection is declared in [`conf/packages.json`](conf/packages.json). Its additive layers match the current
+operating system, Linux distribution, desktop, hostname, and architecture, then feed the native package manager,
+Homebrew, Flatpak, Cargo, uv, and npm installers. Applications with custom release or configuration requirements are
+owned by their component scripts. Installers inspect current state before changing it and verify convergence afterward.
+
 ## Included Commands
 
 The [`bin/`](bin/) directory is added to `PATH` inside Jsh.
@@ -67,7 +72,7 @@ The [`bin/`](bin/) directory is added to `PATH` inside Jsh.
 | [`jfetch`](bin/jfetch)       | J-augmented fastfetch-inspired command.                                               |
 | [`jgit`](bin/jgit)           | J-augmented git command.                                                              |
 | [`jgraphify`](bin/jgraphify) | Creates or incrementally updates Graphify data for a project.                         |
-| [`jsh`](bin/jsh)             | Opens the isolated shell and dispatches setup, repair, adoption, and app commands.    |
+| [`jsh`](bin/jsh)             | Opens the isolated shell and dispatches setup, repair, and adoption commands.         |
 | [`jssh`](bin/jssh)           | Opens an ephemeral Jsh shell on a Linux host over SSH.                                |
 | [`jstow`](bin/jstow)         | Provides a Bash implementation of GNU Stow for deploying and removing dotfile links.  |
 | [`jventoy`](bin/jventoy)     | Initializes and updates bootable ISO images on Ventoy drives.                         |
@@ -77,3 +82,5 @@ The [`bin/`](bin/) directory is added to `PATH` inside Jsh.
 | [`kubens`](bin/kubens)       | Lists and switches Kubernetes namespaces for the current context.                     |
 | [`nukem`](bin/nukem)         | Helps handle those pesky Kubernetes finalizers.                                       |
 | [`proxy`](bin/proxy)         | Forces commands through proxy.                                                        |
+| [`spotify`](bin/spotify)     | Updates and controls Spotify, including random saved-playlist playback.               |
+| [`waterfox`](bin/waterfox)   | Controls Waterfox, organizes bookmarks, and restores missing favicons.                |

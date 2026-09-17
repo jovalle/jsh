@@ -12,6 +12,8 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 JSH_ROOT=${JSH_DIR:-$(cd -- "${SCRIPT_DIR}/.." && pwd -P)}
 BREW=${JBREW_BREW:-brew}
 readonly SCRIPT_DIR JSH_ROOT BREW
+# shellcheck source=../lib/manifest.sh
+. "${JSH_ROOT}/lib/manifest.sh"
 
 RESULT_KINDS=()
 RESULT_NAMES=()
@@ -582,48 +584,20 @@ whatprovides_command() {
   return "${missing}"
 }
 
-configured_in() {
-  local kind=$1 name=$2 brewfile configured_kind configured_name
-
-  for brewfile in "${JSH_ROOT}"/conf/brew/*/Brewfile; do
-    [[ -f ${brewfile} ]] || continue
-    while IFS=$'\t' read -r configured_kind configured_name; do
-      if [[ ${configured_kind} == "${kind}" && ${configured_name} == "${name}" ]]; then
-        printf '%s\n' "${brewfile#"${JSH_ROOT}/"}"
-        return 0
-      fi
-    done < <(sed -nE 's/^[[:space:]]*(brew|cask) "([^"]+)".*/\1\t\2/p' "${brewfile}")
-  done
+manifest() {
+  jsh_manifest_main "$@"
 }
 
-add_to_brewfile() {
-  local kind=$1 name=$2 scope=$3 brewfile line list_file output_file
-  brewfile=${JSH_ROOT}/conf/brew/${scope}/Brewfile
-  line="${kind} \"${name}\""
-  [[ -f ${brewfile} ]] || die "missing ${brewfile#"${JSH_ROOT}/"}"
+configured_in() {
+  manifest configured "$1" "$2"
+}
 
-  list_file=${brewfile}.list.$$
-  output_file=${brewfile}.tmp.$$
-  {
-    sed -n "/^${kind} \"/p" "${brewfile}"
-    printf '%s\n' "${line}"
-  } | LC_ALL=C sort -u >"${list_file}"
-  awk -v kind="${kind}" -v list_file="${list_file}" '
-    function emit(line) {
-      while ((getline line < list_file) > 0) print line
-      close(list_file)
-    }
-    $0 ~ ("^" kind " \\\"") {
-      if (!emitted) { emit(); emitted = 1 }
-      next
-    }
-    { print }
-    END { if (!emitted) emit() }
-  ' "${brewfile}" >"${output_file}"
-  chmod 0644 "${output_file}"
-  mv "${output_file}" "${brewfile}"
-  rm -f "${list_file}"
-  printf '%s✔%s Added %s to %s\n' "${C_GREEN}" "${C_RESET}" "${line}" "${brewfile#"${JSH_ROOT}/"}"
+add_to_manifest() {
+  local kind=$1 name=$2 layer=$3
+
+  manifest adopt "${kind}" "${name}" "${layer}"
+  printf '%s✔%s Added %s "%s" to conf/packages.json:%s\n' \
+    "${C_GREEN}" "${C_RESET}" "${kind}" "${name}" "${layer}"
 }
 
 adopt_command() {
@@ -663,7 +637,7 @@ adopt_command() {
       metadata_for "${name}"
       [[ ${META_STATE} != disabled ]] || die "${name} is disabled"
       if [[ ${META_MAC} == yes && ${META_LIN} == yes ]]; then
-        scope=common
+        scope=unix
       elif [[ ${META_MAC} == yes && ${META_LIN} == no ]]; then
         scope=macos
       elif [[ ${META_MAC} == no && ${META_LIN} == yes ]]; then
@@ -686,7 +660,7 @@ adopt_command() {
       continue
     fi
     heading "Adopting ${name}"
-    add_to_brewfile "${kind}" "${name}" "${scope}"
+    add_to_manifest "${kind}" "${name}" "${scope}"
   done
 }
 

@@ -32,6 +32,11 @@ define run_scripts
 		exit 1; \
 	fi
 	@$(OUTPUT) LC_ALL=C; export LC_ALL; failed_scripts=0; script_status=0; \
+	setup_interrupt_report=$${JSH_INTERRUPT_REPORT:-1}; \
+	trap 'trap - HUP INT TERM; exit 129' HUP; \
+	trap 'trap - HUP INT TERM; [ "$$setup_interrupt_report" -ne 1 ] || printf "\nInterrupted.\n" >&2; exit 130' INT; \
+	trap 'trap - HUP INT TERM; exit 143' TERM; \
+	JSH_INTERRUPT_REPORT=0; export JSH_INTERRUPT_REPORT; \
 	first_script=1; \
 	for action in $(1); do \
 		action_platforms="$(PLATFORM_DIRS)"; \
@@ -55,6 +60,10 @@ define run_scripts
 					:; \
 				else \
 					script_status=$$?; \
+					if [ "$$script_status" -eq 129 ] || [ "$$script_status" -eq 130 ] || [ "$$script_status" -eq 143 ]; then \
+						[ "$$script_status" -ne 130 ] || [ "$$setup_interrupt_report" -ne 1 ] || printf '\nInterrupted.\n' >&2; \
+						exit "$$script_status"; \
+					fi; \
 					if [ "$${JSH_CONTINUE_ON_ERROR:-0}" = 1 ]; then \
 						jsh_error "Failed: $$script"; \
 						failed_scripts=$$((failed_scripts + 1)); \

@@ -1,7 +1,6 @@
 #!/bin/sh
 ##% jsh
 ## runtime ## Run an ephemeral J shell without deploying dotfiles
-## apps ## Plan, apply, or check native Debian applications
 ## adopt ## Move selected home paths into Jsh dotfiles
 ## install ## Install Jsh as the main shell environment
 ## update ## Update Jsh, dependencies, packages, and managed configuration
@@ -222,13 +221,6 @@ jsh_repair() {
   return 1
 }
 
-case ${1:-} in
-  apps)
-    shift
-    exec python3 "${JSH_ROOT}/lib/apps.py" "$@"
-    ;;
-esac
-
 assume_yes=
 if [ "${1:-}" = --yes ]; then
   assume_yes=$1
@@ -267,7 +259,6 @@ fi
 usage() {
   cat <<'EOF'
 Usage: jsh [zsh-options]
-  jsh apps {plan|apply|check} [options]
   jsh [--yes] runtime
   jsh [--yes] install
   jsh [--yes] update
@@ -275,7 +266,6 @@ Usage: jsh [zsh-options]
   jsh repair
 
 Open an isolated J shell environment.
-Run jsh apps to inspect or install native Debian desktop applications.
 Run jsh runtime to install a persistent command without deploying managed dotfiles.
 Run jsh install to install packages, deploy dotfiles, and configure the system.
 Run jsh update to update the repository, dependencies, packages, and configuration.

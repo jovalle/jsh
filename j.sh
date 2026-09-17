@@ -58,6 +58,12 @@ if ! declare -F jsh_error > /dev/null; then
   jsh_blank() { printf '\n'; }
 fi
 
+if ! declare -F jsh_interrupt_handler > /dev/null; then
+  trap 'trap - HUP INT TERM; exit 129' HUP
+  trap 'trap - HUP INT TERM; printf "\nInterrupted.\n" >&2; exit 130' INT
+  trap 'trap - HUP INT TERM; exit 143' TERM
+fi
+
 jsh_banner() {
   local banner
   banner=$(
@@ -229,6 +235,8 @@ install_prerequisites() {
   command -v zsh > /dev/null 2>&1 || packages+=(zsh)
   if [[ ${install_mode} == install ]]; then
     command -v make > /dev/null 2>&1 || packages+=(make)
+    command -v jq > /dev/null 2>&1 || packages+=(jq)
+    command -v curl > /dev/null 2>&1 || packages+=(curl)
     if ! command -v bash > /dev/null 2>&1 || ! bash -c '((BASH_VERSINFO[0] >= 5))' 2> /dev/null; then
       packages+=(bash)
     fi
@@ -342,9 +350,9 @@ setup_system() {
 run_make_target() {
   local target=$1
   if command -v make > /dev/null 2>&1; then
-    make --no-print-directory -C "${JSH_DIR}" "${target}" < "${TTY}"
+    JSH_INTERRUPT_REPORT=0 make --no-print-directory -C "${JSH_DIR}" "${target}" < "${TTY}"
   elif command -v gmake > /dev/null 2>&1; then
-    gmake --no-print-directory -C "${JSH_DIR}" "${target}" < "${TTY}"
+    JSH_INTERRUPT_REPORT=0 gmake --no-print-directory -C "${JSH_DIR}" "${target}" < "${TTY}"
   else
     jsh_error "Make is required to update Jsh."
     return 1
