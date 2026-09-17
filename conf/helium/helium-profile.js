@@ -41,6 +41,12 @@ const localStateValues = [
   [['hardware_acceleration_mode', 'enabled'], true],
 ];
 
+const managedContentSettingTypes = new Set(
+  preferenceValues
+    .filter(([keys]) => keys[0] === 'profile' && keys[1] === 'default_content_setting_values')
+    .map(([keys]) => keys[2]),
+);
+
 function readJSON(file, optional) {
   if (!isJXA) {
     if (!fs.existsSync(file)) {
@@ -119,13 +125,11 @@ function verify(argv) {
   const exceptions = getValue(preferences, ['profile', 'content_settings', 'exceptions']);
   if (exceptions === undefined) return;
   Object.entries(exceptions).forEach(([type, values]) => {
-    if (type === 'has_migrated_local_network_access' && values === true) return;
+    if (!managedContentSettingTypes.has(type)) return;
     if (!values || typeof values !== 'object' || Array.isArray(values)) {
       throw new Error(`invalid content-setting exception category: ${type}`);
     }
     const origins = Object.keys(values);
-    if (type === 'site_engagement' && origins.every((origin) => origin.startsWith('chrome://')))
-      return;
     if (origins.length) throw new Error(`content-setting exceptions remain: ${type}`);
   });
 }
