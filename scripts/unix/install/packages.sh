@@ -15,6 +15,10 @@ unset library_file
 
 declare -A PACKAGE_OWNERS=()
 
+manifest() {
+  jsh_manifest_main "$@"
+}
+
 load_brew() {
   if command -v brew > /dev/null 2>&1; then
     return
@@ -105,33 +109,25 @@ register_native_packages() {
 }
 
 register_brew_packages() {
-  local scope brewfile package
+  local brewfile=$1 package
 
-  for scope in "$@"; do
-    brewfile="${JSH_ROOT}/conf/brew/${scope}/Brewfile"
-    [[ -f "${brewfile}" ]] || continue
-    while IFS= read -r package; do
-      [[ -n "${package}" ]] || continue
-      [[ -n "${PACKAGE_OWNERS[${package}]:-}" ]] || PACKAGE_OWNERS[${package}]=brew
-      [[ ${package} != fd ]] || PACKAGE_OWNERS[fd-find]=${PACKAGE_OWNERS[fd]}
-    done < <(sed -nE 's/^[[:space:]]*(brew|cask) "([^"]+)".*/\2/p' "${brewfile}")
-  done
+  while IFS= read -r package; do
+    [[ -n "${package}" ]] || continue
+    [[ -n "${PACKAGE_OWNERS[${package}]:-}" ]] || PACKAGE_OWNERS[${package}]=brew
+    [[ ${package} != fd ]] || PACKAGE_OWNERS[fd-find]=${PACKAGE_OWNERS[fd]}
+  done < <(sed -nE 's/^[[:space:]]*(brew|cask) "([^"]+)".*/\2/p' "${brewfile}")
 }
 
 trust_declared_formulae() {
-  local scope brewfile formula existing trusted_json
+  local brewfile=$1 formula existing trusted_json
   local -a formulae=() untrusted=()
 
-  for scope in "$@"; do
-    brewfile="${JSH_ROOT}/conf/brew/${scope}/Brewfile"
-    [[ -f "${brewfile}" ]] || continue
-    while IFS= read -r formula; do
-      for existing in "${formulae[@]}"; do
-        [[ "${existing}" != "${formula}" ]] || continue 2
-      done
-      formulae+=("${formula}")
-    done < <(sed -nE 's/^[[:space:]]*brew "([^"/]+\/[^"/]+\/[^"/]+)".*/\1/p' "${brewfile}")
-  done
+  while IFS= read -r formula; do
+    for existing in "${formulae[@]}"; do
+      [[ "${existing}" != "${formula}" ]] || continue 2
+    done
+    formulae+=("${formula}")
+  done < <(sed -nE 's/^[[:space:]]*brew "([^"/]+\/[^"/]+\/[^"/]+)".*/\1/p' "${brewfile}")
 
   trusted_json=$(brew trust --json=v1)
   for formula in "${formulae[@]}"; do
@@ -179,15 +175,9 @@ migrate_legacy_npm_packages() {
   migrate_legacy_npm_package markdownlint-cli markdownlint
 }
 
-install_scope() {
-  local scope=$1
-  local brewfile="${JSH_ROOT}/conf/brew/${scope}/Brewfile"
-  local line package temporary
+filter_native_brew_packages() {
+  local brewfile=$1 temporary=$2 line package
 
-  [[ -f "${brewfile}" ]] || return 0
-  [[ "${scope}" != contrib ]] || migrate_legacy_npm_packages
-  mkdir -p "${JSH_ROOT}/tmp"
-  temporary=$(mktemp "${JSH_ROOT}/tmp/Brewfile.${scope}.XXXXXX")
   while IFS= read -r line || [[ -n "${line}" ]]; do
     package=$(sed -nE 's/^[[:space:]]*(brew|cask) "([^"]+)".*/\2/p' <<< "${line}")
     if [[ -n "${package}" && "${PACKAGE_OWNERS[${package}]:-}" == os ]]; then
@@ -195,38 +185,44 @@ install_scope() {
     fi
     printf '%s\n' "${line}" >> "${temporary}"
   done < "${brewfile}"
-  if [[ ${JSH_UPDATE:-0} != 1 ]] && HOMEBREW_NO_AUTO_UPDATE=1 brew bundle check --no-upgrade --file="${temporary}" > /dev/null 2>&1; then
-    jsh_note "${scope} packages are current."
-    rm -f "${temporary}"
+}
+
+install_brew_manifest() {
+  local brewfile=$1
+
+  if [[ ${JSH_UPDATE:-0} != 1 ]] && HOMEBREW_NO_AUTO_UPDATE=1 brew bundle check --no-upgrade --file="${brewfile}" > /dev/null 2>&1; then
+    jsh_note "Homebrew packages are current."
     return
   fi
-  jsh_info "Installing ${scope} packages..."
+  jsh_info "Installing Homebrew packages..."
   if [[ ${JSH_UPDATE:-0} == 1 ]]; then
-    brew bundle --file="${temporary}"
+    brew bundle --file="${brewfile}"
   else
-    HOMEBREW_NO_AUTO_UPDATE=1 brew bundle check --no-upgrade --file="${temporary}" > /dev/null 2>&1 ||
-      HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade --file="${temporary}"
+    HOMEBREW_NO_AUTO_UPDATE=1 brew bundle check --no-upgrade --file="${brewfile}" > /dev/null 2>&1 ||
+      HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade --file="${brewfile}"
   fi
-  brew bundle check --no-upgrade --file="${temporary}"
-  rm -f "${temporary}"
+  brew bundle check --no-upgrade --file="${brewfile}"
 }
 
 install_brew_packages() {
-  local scope
-  local -i has_brewfile=0
+  local declared filtered
 
-  for scope in "$@"; do
-    if [[ -f "${JSH_ROOT}/conf/brew/${scope}/Brewfile" ]]; then
-      has_brewfile=1
-      break
-    fi
-  done
-  ((has_brewfile)) || return 0
+  mkdir -p "${JSH_ROOT}/tmp"
+  declared=$(mktemp "${JSH_ROOT}/tmp/Brewfile.declared.XXXXXX")
+  filtered=$(mktemp "${JSH_ROOT}/tmp/Brewfile.resolved.XXXXXX")
+  jsh_interrupt_cleanup_path "${declared}"
+  jsh_interrupt_cleanup_path "${filtered}"
+  manifest brewfile > "${declared}"
+  if [[ ! -s "${declared}" ]]; then
+    rm -f "${declared}" "${filtered}"
+    return 0
+  fi
 
   # Native packages cover the base system; Homebrew supplies declared CLI gaps.
   load_brew
   confirm "Install Homebrew packages?" || {
     jsh_note "Skipping Homebrew packages."
+    rm -f "${declared}" "${filtered}"
     return 0
   }
 
@@ -238,13 +234,19 @@ install_brew_packages() {
     brew update
   fi
 
-  register_brew_packages "$@"
-  trust_declared_formulae "$@"
-  for scope in "$@"; do
-    install_scope "${scope}"
-  done
+  register_brew_packages "${declared}"
+  trust_declared_formulae "${declared}"
+  migrate_legacy_npm_packages
+  filter_native_brew_packages "${declared}" "${filtered}"
+  install_brew_manifest "${filtered}"
+  rm -f "${declared}" "${filtered}"
 
   if [[ ${JSH_UPDATE:-0} == 1 ]]; then
+    if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then
+      brew upgrade --formula --yes
+    else
+      brew upgrade --formula
+    fi
     jsh_success "Declared Homebrew packages are up to date."
   fi
 }
@@ -254,24 +256,16 @@ cargo_package_installed() {
 }
 
 install_cargo_packages() {
-  local manifest=${JSH_ROOT}/conf/Cargo.toml
-  local metadata package name
+  local package name output
   local -i installing=0
   local -a packages=()
 
-  [[ -f "${manifest}" ]] || return 0
   if ! command -v cargo > /dev/null 2>&1; then
     jsh_note "cargo is not installed; skipping Cargo packages."
     return 0
   fi
-  command -v jq > /dev/null 2>&1 || {
-    jsh_error "jq is required to read ${manifest}."
-    return 1
-  }
-  metadata=$(cargo metadata --no-deps --format-version 1 --manifest-path "${manifest}")
-  while IFS= read -r package; do
-    [[ -n "${package}" ]] && packages+=("${package}")
-  done < <(jq -r '.metadata.jsh.packages[]?' <<< "${metadata}")
+  output=$(manifest list cargo) || return
+  if [[ -n "${output}" ]]; then mapfile -t packages <<< "${output}"; fi
 
   ((${#packages[@]} > 0)) || return 0
   confirm "Install Cargo packages?" || {
@@ -289,6 +283,10 @@ install_cargo_packages() {
       installing=1
     fi
     cargo install --locked "${package}"
+    cargo_package_installed "${name}" || {
+      jsh_error "Cargo package verification failed: ${name}"
+      return 1
+    }
   done
   if ((installing)); then jsh_success "Cargo packages are installed."; else jsh_note "Cargo packages are current."; fi
 }
@@ -298,15 +296,12 @@ uv_tool_installed() {
 }
 
 install_uv_tools() {
-  local manifest=${JSH_ROOT}/conf/uv-tools.txt
-  local package
+  local package output
   local -i installing=0
   local -a packages=()
 
-  [[ -f "${manifest}" ]] || return 0
-  while IFS= read -r package || [[ -n "${package}" ]]; do
-    [[ -n "${package}" ]] && packages+=("${package}")
-  done < "${manifest}"
+  output=$(manifest list uv) || return
+  if [[ -n "${output}" ]]; then mapfile -t packages <<< "${output}"; fi
 
   ((${#packages[@]} > 0)) || return 0
   confirm "Install uv tools?" || {
@@ -314,7 +309,7 @@ install_uv_tools() {
     return 0
   }
   command -v uv > /dev/null 2>&1 || {
-    jsh_error "uv is required by ${manifest}."
+    jsh_error "uv is required by conf/packages.json."
     return 1
   }
 
@@ -328,27 +323,29 @@ install_uv_tools() {
       installing=1
     fi
     uv tool install --upgrade "${package}"
+    uv_tool_installed "${package}" || {
+      jsh_error "uv tool verification failed: ${package}"
+      return 1
+    }
   done
   if ((installing)); then jsh_success "uv tools are installed."; else jsh_note "uv tools are current."; fi
 }
 
 npm_package_installed() {
-  npm list --global --depth=0 "$1" > /dev/null 2>&1
+  npm list --global --depth=0 "$1@$2" > /dev/null 2>&1
 }
 
 install_npm_packages() {
-  local manifest=${JSH_ROOT}/conf/package.json
-  local package version specification
+  local package version specification output
   local -i installing=0
   local -a packages=() versions=()
 
-  [[ -f "${manifest}" ]] || return 0
-  command -v jq > /dev/null 2>&1 || return 0
+  output=$(manifest list npm) || return
   while IFS=$'\t' read -r package version; do
     [[ -n "${package}" ]] || continue
     packages+=("${package}")
     versions+=("${version}")
-  done < <(jq -r '(.dependencies // {}) | to_entries[] | [.key, .value] | @tsv' "${manifest}")
+  done <<< "${output}"
 
   ((${#packages[@]} > 0)) || return 0
   confirm "Install npm packages?" || {
@@ -364,7 +361,7 @@ install_npm_packages() {
     package=${packages[index]}
     version=${versions[index]}
     claim_package npm "${package}" || continue
-    if [[ ${JSH_UPDATE:-0} != 1 ]] && npm_package_installed "${package}"; then
+    if [[ ${JSH_UPDATE:-0} != 1 ]] && npm_package_installed "${package}" "${version}"; then
       continue
     fi
     if ((!installing)); then
@@ -373,12 +370,16 @@ install_npm_packages() {
     fi
     specification="${package}@${version}"
     npm install --global "${specification}"
+    npm_package_installed "${package}" "${version}" || {
+      jsh_error "npm package verification failed: ${specification}"
+      return 1
+    }
   done
+  if ((installing)); then jsh_success "npm packages are installed."; else jsh_note "npm packages are current."; fi
 }
 
 main() {
-  local platform machine
-  local -a package_scopes=(core common contrib)
+  local platform
   platform=$(uname -s)
   case "${platform}" in
     Darwin | Linux) ;;
@@ -388,17 +389,8 @@ main() {
       ;;
   esac
 
-  if [[ "${platform}" == Darwin ]]; then
-    package_scopes+=(macos)
-  else
-    package_scopes+=(linux)
-  fi
-  machine=$(hostname -s 2> /dev/null || hostname)
-  machine=$(printf '%s' "${machine}" | tr '[:upper:]' '[:lower:]')
-  package_scopes+=("${machine}")
-
   register_native_packages
-  install_brew_packages "${package_scopes[@]}"
+  install_brew_packages
   install_cargo_packages
   install_uv_tools
   install_npm_packages

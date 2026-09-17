@@ -15,52 +15,15 @@ unset library_file
 
 DRY_RUN=${JSH_INSTALL_DRY_RUN:-${JSH_CONFIGURE_DRY_RUN:-0}}
 PACKAGE_MANAGER=
+MANIFEST_MANAGER=
 DISTRO_FAMILY=
 NATIVE_PACKAGES=()
+FLATPAK_APPLICATIONS=()
+NATIVE_PREPARED=0
 
-ARCH_PACKAGES=(
-  base-devel bash bats bzip2 ca-certificates cargo cifs-utils curl desktop-file-utils dconf
-  dkms earlyoom eza fd flatpak git gnome-keyring gnupg jq libarchive libnotify make
-  net-tools nfs-utils ntfs-3g nvme-cli openssh pipewire-pulse podman procps-ng
-  python python-yaml readline ripgrep rsync tar unzip wireplumber xbindkeys xclip xdg-utils
-  xorg-xrandr xz yq zram-generator zsh
-)
-FEDORA_PACKAGES=(
-  bash bats bzip2 ca-certificates cargo cifs-utils curl desktop-file-utils dconf dkms
-  earlyoom eza fd-find flatpak gcc gcc-c++ git gnome-keyring gnupg2 jq libarchive libnotify
-  make net-tools nfs-utils ntfs-3g nvme-cli openssh-clients openssh-server
-  pipewire-pulseaudio podman procps-ng python3 python3-pyyaml readline ripgrep rsync tar unzip
-  wireplumber xbindkeys xclip xdg-utils xrandr xz yq zram-generator zsh
-)
-DEBIAN_PACKAGES=(
-  age ansible bat btop direnv fzf gh git-lfs golang-go grc hugo mpv ncdu netcat-openbsd nmap parallel python3-poetry sshpass stow syncthing tmux yamllint zoxide
-  bash bats build-essential bzip2 ca-certificates cargo cifs-utils curl desktop-file-utils
-  dconf-cli dkms earlyoom eza fd-find flatpak git gnome-keyring gnupg jq libarchive-tools
-  libnotify-bin make net-tools nfs-common ntfs-3g nvme-cli openssh-client
-  openssh-server pipewire-pulse podman procps python3 python3-yaml ripgrep rsync tar unzip wireplumber
-  xbindkeys xclip xdg-utils x11-xserver-utils xz-utils yq systemd-zram-generator zsh
-)
-ARCH_XFCE_PACKAGES=(
-  fontconfig xfce4-appfinder pavucontrol xfce4-clipman-plugin xfce4-cpugraph-plugin xfce4-docklike-plugin
-  xfce4-fsguard-plugin xfce4-genmon-plugin xfce4-netload-plugin xfce4-pulseaudio-plugin xfce4-screensaver
-  xfce4-systemload-plugin xfce4-taskmanager xfce4-terminal
-)
-FEDORA_XFCE_PACKAGES=(
-  fontconfig xfce4-appfinder arc-theme papirus-icon-theme pavucontrol xfce4-clipman-plugin xfce4-cpugraph-plugin
-  xfce4-docklike-plugin xfce4-fsguard-plugin xfce4-genmon-plugin xfce4-netload-plugin
-  xfce4-pulseaudio-plugin xfce4-screensaver xfce4-systemload-plugin
-  xfce4-taskmanager xfce4-terminal
-)
-DEBIAN_XFCE_PACKAGES=(
-  fontconfig xfce4-appfinder arc-theme papirus-icon-theme pavucontrol xfce4-clipman-plugin xfce4-cpugraph-plugin
-  xfce4-docklike-plugin xfce4-fsguard-plugin xfce4-genmon-plugin xfce4-netload-plugin
-  xfce4-pulseaudio-plugin xfce4-screensaver xfce4-systemload-plugin
-  xfce4-taskmanager xfce4-terminal
-)
-FLATPAK_APPLICATIONS=(
-  com.spotify.Client com.todoist.Todoist com.visualstudio.code dev.zed.Zed
-  net.waterfox.waterfox
-)
+manifest_list() {
+  jsh_manifest_list "$1"
+}
 
 confirm() {
   local answer
@@ -77,12 +40,13 @@ confirm() {
 }
 
 select_native_packages() {
+  local native_output flatpak_output
+
   DISTRO_FAMILY=$(jsh_linux_family)
   case "${DISTRO_FAMILY}" in
     arch)
       PACKAGE_MANAGER=pacman
-      NATIVE_PACKAGES=("${ARCH_PACKAGES[@]}")
-      [[ "$(jsh_linux_desktop)" != xfce ]] || NATIVE_PACKAGES+=("${ARCH_XFCE_PACKAGES[@]}")
+      MANIFEST_MANAGER=pacman
       ;;
     fedora)
       if command -v dnf5 > /dev/null 2>&1; then
@@ -90,17 +54,19 @@ select_native_packages() {
       else
         PACKAGE_MANAGER=dnf
       fi
-      NATIVE_PACKAGES=("${FEDORA_PACKAGES[@]}")
-      [[ "$(jsh_linux_desktop)" != xfce ]] || NATIVE_PACKAGES+=("${FEDORA_XFCE_PACKAGES[@]}")
+      MANIFEST_MANAGER=dnf
       ;;
     debian)
       PACKAGE_MANAGER=apt-get
-      NATIVE_PACKAGES=("${DEBIAN_PACKAGES[@]}")
-      [[ "$(jsh_linux_desktop)" != xfce ]] || NATIVE_PACKAGES+=("${DEBIAN_XFCE_PACKAGES[@]}")
+      MANIFEST_MANAGER=apt
       ;;
     unknown) return 1 ;;
     *) return 1 ;;
   esac
+  native_output=$(manifest_list "${MANIFEST_MANAGER}") || return
+  flatpak_output=$(manifest_list flatpak) || return
+  if [[ -n "${native_output}" ]]; then mapfile -t NATIVE_PACKAGES <<< "${native_output}"; fi
+  if [[ -n "${flatpak_output}" ]]; then mapfile -t FLATPAK_APPLICATIONS <<< "${flatpak_output}"; fi
 }
 
 package_installed() {
@@ -124,9 +90,15 @@ package_available() {
 
 install_native_packages() {
   local package
-  local -a missing=() unavailable=()
+  local -a candidates=() missing=() unavailable=()
 
   for package in "${NATIVE_PACKAGES[@]}"; do
+    package_installed "${package}" || candidates+=("${package}")
+  done
+  if ((${#candidates[@]} > 0)); then
+    prepare_native_packages
+  fi
+  for package in "${candidates[@]}"; do
     package_installed "${package}" && continue
     if package_available "${package}"; then
       missing+=("${package}")
@@ -193,10 +165,9 @@ update_native_packages() {
 }
 
 prepare_native_packages() {
-  if [[ "${DISTRO_FAMILY}" == arch || ${JSH_UPDATE:-0} == 1 ]]; then
-    if [[ ${JSH_UPGRADE_SYSTEM:-0} == 1 || "${DISTRO_FAMILY}" == arch ]]; then
-      update_native_packages
-    fi
+  [[ ${NATIVE_PREPARED} == 0 ]] || return
+  if [[ ${JSH_UPGRADE_SYSTEM:-0} == 1 || "${DISTRO_FAMILY}" == arch ]]; then
+    update_native_packages
   elif [[ "${DISTRO_FAMILY}" == debian ]]; then
     if [[ "${DRY_RUN}" == 1 ]]; then
       jsh_detail "Would refresh Debian package metadata."
@@ -204,27 +175,35 @@ prepare_native_packages() {
       jsh_run_root apt-get update
     fi
   fi
+  NATIVE_PREPARED=1
 }
 
 install_flatpaks() {
-  local application changed=0
+  local application
+  local -a missing=()
 
+  for application in "${FLATPAK_APPLICATIONS[@]}"; do
+    flatpak info --user "${application}" > /dev/null 2>&1 || missing+=("${application}")
+  done
+  if ((${#missing[@]} == 0)); then
+    jsh_note "Flatpak applications are current."
+    return
+  fi
   if [[ "${DRY_RUN}" == 1 ]]; then
-    jsh_detail "Would configure Flathub and install: ${FLATPAK_APPLICATIONS[*]}"
+    jsh_detail "Would configure Flathub and install: ${missing[*]}"
     return
   fi
   flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-  for application in "${FLATPAK_APPLICATIONS[@]}"; do
-    if ! flatpak info --user "${application}" > /dev/null 2>&1; then
-      flatpak install --user --noninteractive flathub "${application}"
-      changed=1
-    fi
+  for application in "${missing[@]}"; do
+    flatpak install --user --noninteractive flathub "${application}"
   done
-  if ((changed)); then
-    jsh_success "Flatpak applications are installed."
-  else
-    jsh_note "Flatpak applications are current."
-  fi
+  for application in "${FLATPAK_APPLICATIONS[@]}"; do
+    flatpak info --user "${application}" > /dev/null 2>&1 || {
+      jsh_error "Flatpak verification failed: ${application}"
+      return 1
+    }
+  done
+  jsh_success "Flatpak applications are installed."
 }
 
 update_flatpaks() {
@@ -235,6 +214,29 @@ update_flatpaks() {
   fi
   flatpak update --user --noninteractive
   jsh_success "Flatpak applications are up to date."
+}
+
+configure_native_aliases() {
+  local name native executable temporary ensure_status
+  for name in fd bat; do
+    case ${name} in
+      fd) native=fdfind ;;
+      bat) native=batcat ;;
+    esac
+    executable=$(command -v "${native}" 2>/dev/null || true)
+    [[ -n ${executable} ]] || continue
+    command -v "${name}" >/dev/null 2>&1 && continue
+    mkdir -p "${JSH_ROOT}/tmp"
+    temporary=$(mktemp "${JSH_ROOT}/tmp/${name}.XXXXXXXXXX")
+    jsh_interrupt_cleanup_path "${temporary}"
+    printf '#!/bin/sh\nexec "%s" "$@"\n' "${executable}" > "${temporary}"
+    jsh_ensure_file "${HOME}/.local/bin/${name}" "${temporary}" 0755 || {
+      ensure_status=$?
+      rm -f -- "${temporary}"
+      [[ ${ensure_status} == 1 ]] || return "${ensure_status}"
+    }
+    rm -f -- "${temporary}"
+  done
 }
 
 main() {
@@ -265,12 +267,10 @@ main() {
     jsh_note "Skipping native packages."
     return 0
   }
-  prepare_native_packages
+  if [[ ${JSH_UPGRADE_SYSTEM:-0} == 1 ]]; then prepare_native_packages; fi
   install_native_packages
-  if [[ "${DISTRO_FAMILY}" == debian ]]; then
-    FLATPAK_APPLICATIONS=(com.spotify.Client com.todoist.Todoist dev.zed.Zed)
-  fi
   install_flatpaks
+  configure_native_aliases
   if [[ ${JSH_UPDATE:-0} == 1 ]]; then
     update_flatpaks
   fi

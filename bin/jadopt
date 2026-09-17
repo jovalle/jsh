@@ -6,7 +6,12 @@ set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 readonly SCRIPT_DIR
-readonly JSH_ROOT=${JSH_DIR:-$(cd -- "${SCRIPT_DIR}/.." && pwd -P)}
+if [[ -n "${JSH_DIR:-}" ]]; then
+  JSH_ROOT=$(cd -- "${JSH_DIR}" && pwd -P)
+else
+  JSH_ROOT=$(cd -- "${SCRIPT_DIR}/.." && pwd -P)
+fi
+readonly JSH_ROOT
 readonly DOTFILES_DIR=${JSH_ROOT}/dotfiles
 readonly LINK_COMMAND=${JADOPT_LINK_COMMAND:-ln}
 
