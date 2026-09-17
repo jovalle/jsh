@@ -1,0 +1,16 @@
+{
+  "profiles": {
+    "personal": {
+      "name": "Your Name",
+      "email": "you@example.net",
+      "user": "yourusername",
+      "ssh_key": "id_ed25519_personal"
+    },
+    "work": {
+      "name": "Your Name",
+      "email": "you@example.org",
+      "user": "workusername",
+      "ssh_key": "id_ed25519_work"
+    }
+  }
+}
