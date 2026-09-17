@@ -20,7 +20,7 @@ readonly PROFILE_HELPER="${JSH_ROOT}/conf/helium/helium-profile.js"
 readonly EXPECTED_BUNDLE_ID="net.imput.helium"
 readonly EXPECTED_TEAM_ID="S4Q33XPHB4"
 readonly MIN_CHROMIUM_MILESTONE="152"
-PLATFORM="$(uname -s)"
+PLATFORM="${HELIUM_PLATFORM:-${PLATFORM:-$(uname -s)}}"
 readonly PLATFORM
 case ${PLATFORM} in
   Darwin)
@@ -45,7 +45,7 @@ case ${PLATFORM} in
 esac
 
 die() {
-  printf 'helium: %s\n' "$2" >&2
+  jsh_error "Helium: $2"
   exit "$1"
 }
 
@@ -77,6 +77,19 @@ EOF
 
 require_command() {
   command -v "$1" >/dev/null 2>&1 || die 1 "$1 is required."
+}
+
+load_brew() {
+  command -v brew >/dev/null 2>&1 && return
+
+  local brew_path
+  for brew_path in "${HELIUM_BREW:-}" /opt/homebrew/bin/brew /usr/local/bin/brew /home/linuxbrew/.linuxbrew/bin/brew; do
+    [[ -n ${brew_path} ]] || continue
+    if [[ -x ${brew_path} ]]; then
+      eval "$("${brew_path}" shellenv)"
+      return
+    fi
+  done
 }
 
 plist_value() {
@@ -128,10 +141,14 @@ stop_for_apply() {
   local authorized="${1:-false}" answer attempt
   browser_is_running || return 0
 
+  if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then
+    authorized=true
+  fi
+
   if [[ "${authorized}" != true ]]; then
     [[ -t 0 ]] || die 1 "Helium is running. Rerun apply with --quit."
     printf 'Helium is running. Quit it now? [y/N] ' >&2
-    IFS= read -r answer
+    IFS= read -r answer || die 1 "Cannot confirm quitting Helium."
     [[ "${answer}" == [yY] || "${answer}" == [yY][eE][sS] ]] || die 1 "Apply cancelled."
   fi
 
@@ -152,12 +169,16 @@ upgrade_app() {
   local brew_command milestone
   if [[ ${PLATFORM} == Linux ]]; then
     require_command python3
-    /usr/bin/env python3 "${JSH_ROOT}/lib/apps.py" apply --only helium --yes ||
+    PYTHONPATH="${JSH_ROOT}/lib${PYTHONPATH:+:${PYTHONPATH}}" /usr/bin/env python3 -m jsh.apps apply --only helium --yes ||
       die 1 "The native application installer could not install or update Helium."
     return
   fi
   brew_command="$(command -v brew || true)"
   [[ -n "${brew_command}" ]] || die 1 "Homebrew is required to install or update Helium."
+
+  if [[ ${JSH_UPDATE:-0} != 1 ]] && verify_app >/dev/null 2>&1; then
+    return 0
+  fi
 
   "${brew_command}" update || die 1 "Homebrew could not update package metadata."
   if "${brew_command}" list --cask helium-browser >/dev/null 2>&1; then
@@ -184,7 +205,7 @@ verify_app() {
     /usr/sbin/spctl -a -t exec "${APP_PATH}" >/dev/null 2>&1 || die 1 "Gatekeeper rejected Helium."
   else
     app_executable >/dev/null || die 1 "Helium is not installed. Run apply first."
-    /usr/bin/env python3 "${JSH_ROOT}/lib/apps.py" check --only helium --json >/dev/null ||
+    PYTHONPATH="${JSH_ROOT}/lib${PYTHONPATH:+:${PYTHONPATH}}" /usr/bin/env python3 -m jsh.apps check --only helium --json >/dev/null ||
       die 1 "The installed Helium package does not match the managed version."
   fi
   milestone="$(chromium_milestone)"
@@ -216,8 +237,10 @@ install_extension_policy() {
   local staged_policy id _name managed attempt
   local -a extension_ids=()
   local -a force_ids=()
-  jsh_info "Administrator approval is required to manage Helium extensions."
-  /usr/bin/sudo -v || die 1 "Administrator approval is required to manage Helium extensions."
+  jsh_warn "Helium's extension policy is missing or inactive."
+  jsh_note "Administrator approval is required to install the managed policy at ${POLICY_PATH}."
+  /usr/bin/sudo -v || die 1 \
+    "Could not obtain administrator approval. The Helium extension policy was not changed; rerun setup and approve the password prompt."
   /bin/mkdir -p "${JSH_ROOT}/tmp"
   staged_policy="$(/usr/bin/mktemp "${JSH_ROOT}/tmp/helium-policy.XXXXXX")"
   if [[ ${PLATFORM} == Darwin ]]; then
@@ -240,6 +263,7 @@ install_extension_policy() {
     done < <(managed_extensions)
     /usr/bin/plutil -lint "${staged_policy}" >/dev/null || die 1 "Cannot prepare the Helium extension policy."
     /usr/bin/sudo /usr/bin/install -d -o root -g wheel -m 755 \
+      "/Library/Managed Preferences" \
       "$(/usr/bin/dirname "${POLICY_PATH}")"
     /usr/bin/sudo /usr/bin/install -o root -g wheel -m 644 \
       "${staged_policy}" "${POLICY_PATH}" || die 1 "Cannot install the Helium extension policy."
@@ -258,7 +282,8 @@ install_extension_policy() {
   fi
   /bin/rm -f "${staged_policy}"
   if [[ ${PLATFORM} == Linux ]]; then
-    verify_extension_policy || die 1 "Linux did not activate the Helium extension policy."
+    verify_extension_policy || die 1 \
+      "The policy was written to ${POLICY_PATH}, but Helium did not activate it. Quit Helium, rerun setup, and check that the managed policy directory is readable."
     return
   fi
   /usr/bin/killall cfprefsd >/dev/null 2>&1 || true
@@ -266,7 +291,8 @@ install_extension_policy() {
     verify_extension_policy >/dev/null 2>&1 && return 0
     /bin/sleep 0.1
   done
-  die 1 "macOS did not activate the Helium extension policy."
+  die 1 \
+    "The policy was written to ${POLICY_PATH}, but macOS did not activate it. Quit Helium, rerun setup, and check that the managed preferences path is readable by ${POLICY_USER}."
 }
 
 configure_extensions() {
@@ -512,6 +538,12 @@ apply() {
   if [[ ${PLATFORM} == Darwin ]]; then
     require_command osascript
   fi
+
+  if [[ ${JSH_UPDATE:-0} != 1 ]] && is_patched; then
+    jsh_note "Helium is already configured and hardened."
+    return 0
+  fi
+
   stop_for_apply "${quit}"
   upgrade_app
   verify_app
@@ -520,6 +552,23 @@ apply() {
   configure_extensions
   verify_profile
   jsh_success "Helium is updated, hardened, and ready."
+}
+
+profile_root_is_safe() {
+  local canonical_home canonical_profile parent expected_leaf
+  canonical_home=$(cd -- "${HOME}" && pwd -P) || return 1
+  if [[ -d ${PROFILE_ROOT} ]]; then
+    canonical_profile=$(cd -- "${PROFILE_ROOT}" && pwd -P) || return 1
+  else
+    parent=$(cd -- "$(/usr/bin/dirname "${PROFILE_ROOT}")" && pwd -P) || return 1
+    canonical_profile="${parent}/${PROFILE_ROOT##*/}"
+  fi
+  case ${PLATFORM} in
+    Darwin) expected_leaf=${EXPECTED_BUNDLE_ID} ;;
+    Linux) expected_leaf=helium ;;
+    *) return 1 ;;
+  esac
+  [[ ${canonical_profile} == "${canonical_home}"/* && ${canonical_profile##*/} == "${expected_leaf}" ]]
 }
 
 reset_profile() {
@@ -532,7 +581,7 @@ reset_profile() {
     esac
   done
   require_stopped
-  [[ -n "${PROFILE_ROOT}" && "${PROFILE_ROOT}" != / ]] || die 1 "Refusing to reset an unsafe profile path."
+  profile_root_is_safe || die 1 "Refusing to reset an unsafe profile path: ${PROFILE_ROOT}"
 
   if [[ "${force}" != true ]]; then
     [[ -t 0 ]] || die 1 "reset requires --force when input is not interactive."
@@ -541,7 +590,7 @@ reset_profile() {
     else
       printf 'Reset the Helium profile at %s while preserving extension data? [y/N] ' "${PROFILE_ROOT}" >&2
     fi
-    IFS= read -r answer
+    IFS= read -r answer || die 1 "Cannot confirm resetting the Helium profile."
     [[ "${answer}" == [yY] || "${answer}" == [yY][eE][sS] ]] || die 1 "Reset cancelled."
   fi
 
@@ -565,11 +614,14 @@ reset_profile() {
 }
 
 launch() {
+  local executable
   local -a browser_arguments=("$@")
   if [[ "${1:-}" == "--" ]]; then
     browser_arguments=("${@:2}")
   fi
+  load_brew
   require_command node
+  require_command sqlite3
   verify_app
   verify_profile
   if [[ ${PLATFORM} == Darwin ]]; then
@@ -586,7 +638,8 @@ launch() {
     if ((${#browser_arguments[@]} == 0)); then
       browser_arguments=(about:blank)
     fi
-    nohup "$(app_executable)" \
+    executable=$(app_executable)
+    exec "${executable}" \
       --user-data-dir="${PROFILE_ROOT}" \
       --profile-directory=Default \
       --no-first-run \
@@ -595,7 +648,7 @@ launch() {
       --disable-notifications \
       --disable-breakpad \
       --new-window \
-      "${browser_arguments[@]}" >/dev/null 2>&1 &
+      "${browser_arguments[@]}" >/dev/null 2>&1
   fi
 }
 

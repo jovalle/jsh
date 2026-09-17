@@ -19,13 +19,6 @@ confirm() {
   [[ "${answer}" =~ ^[Yy]$ ]]
 }
 
-pin_dock_app() {
-  local app_path=$1
-  [[ -d ${app_path} ]] || return
-  defaults write com.apple.dock persistent-apps -array-add \
-    "<dict><key>tile-data</key><dict><key>file-data</key><dict><key>_CFURLString</key><string>${app_path}/</string><key>_CFURLStringType</key><integer>15</integer></dict></dict><key>tile-type</key><string>file-tile</string></dict>"
-}
-
 configure_appearance() {
   local appearance_dir="${HOME}/Library/Application Support/jsh"
   local wallpaper candidate
@@ -40,7 +33,6 @@ configure_appearance() {
   defaults write NSGlobalDomain AppleInterfaceStyle -string Dark
   defaults write NSGlobalDomain AppleInterfaceStyleSwitchesAutomatically -bool false
   defaults write com.apple.dock persistent-apps -array
-  pin_dock_app /Applications/Helium.app
   defaults write com.apple.dock persistent-others -array
   defaults write com.apple.dock launchanim -bool false
   defaults write com.apple.dock expose-animation-duration -float 0.1

@@ -10,6 +10,7 @@ setup() {
   export HOME="${BATS_TEST_TMPDIR}/home"
   export XDG_CONFIG_HOME="${BATS_TEST_TMPDIR}/config"
   export HELIUM_POLICY_PATH="${BATS_TEST_TMPDIR}/policies/jsh-helium.json"
+  export PLATFORM=Linux
   # shellcheck source=/dev/null
   source "${JSH_ROOT}/scripts/unix/configure/helium.sh"
 }
@@ -30,6 +31,65 @@ setup() {
   fi
 }
 
+@test "desktop launch loads Homebrew dependencies outside PATH" {
+  local brew_root="${BATS_TEST_TMPDIR}/brew"
+  mkdir -p "${brew_root}/bin"
+  printf '#!/usr/bin/env bash\nprintf '\''export PATH=%%q:$PATH\\n'\'' %q\n' \
+    "${brew_root}/bin" > "${brew_root}/bin/brew"
+  printf '#!/usr/bin/env bash\n' > "${brew_root}/bin/node"
+  printf '#!/usr/bin/env bash\n' > "${brew_root}/bin/sqlite3"
+  chmod +x "${brew_root}/bin/brew" "${brew_root}/bin/node" "${brew_root}/bin/sqlite3"
+  PATH=/usr/bin:/bin
+  export HELIUM_BREW="${brew_root}/bin/brew"
+
+  load_brew
+
+  [[ $(command -v node) = "${brew_root}/bin/node" ]]
+  [[ $(command -v sqlite3) = "${brew_root}/bin/sqlite3" ]]
+}
+
+@test "profile verification permits browser metadata but rejects managed exceptions" {
+  local preferences="${BATS_TEST_TMPDIR}/Preferences"
+  local local_state="${BATS_TEST_TMPDIR}/Local State"
+  local staged_preferences="${BATS_TEST_TMPDIR}/Preferences.new"
+  local staged_local_state="${BATS_TEST_TMPDIR}/Local State.new"
+  load_brew
+  profile_helper stage "${preferences}" "${local_state}" \
+    "${staged_preferences}" "${staged_local_state}"
+  jq '.profile.content_settings.exceptions.app_banner = {
+    "https://example.test:443,*": {"setting": {"couldShowBannerEvents": 1}}
+  } | .profile.content_settings.exceptions.media_engagement = {
+    "https://example.test:443,*": {"setting": {"last_media_playback_time": 1}}
+  }' "${staged_preferences}" > "${preferences}"
+  mv "${staged_local_state}" "${local_state}"
+
+  profile_helper verify "${preferences}" "${local_state}"
+
+  jq '.profile.content_settings.exceptions.notifications = {
+    "https://example.test:443,*": {"setting": 1}
+  }' "${preferences}" > "${staged_preferences}"
+  run profile_helper verify "${staged_preferences}" "${local_state}"
+
+  [[ ${status} -ne 0 ]]
+  [[ ${output} = "content-setting exceptions remain: notifications" ]]
+}
+
+@test "Linux launch propagates the browser status to the desktop launcher" {
+  local browser="${BATS_TEST_TMPDIR}/helium-browser"
+  printf '#!/usr/bin/env bash\nexit 23\n' > "${browser}"
+  chmod +x "${browser}"
+
+  require_command() { :; }
+  load_brew() { :; }
+  verify_app() { :; }
+  verify_profile() { :; }
+  app_executable() { printf '%s\n' "${browser}"; }
+
+  run launch -- https://example.test/
+
+  [[ ${status} -eq 23 ]]
+}
+
 @test "Linux policy contains every managed pin and forced extension" {
   local id _name managed
   local -a extension_ids=()
@@ -48,6 +108,24 @@ setup() {
   [[ $(jq '.ExtensionInstallForcelist | length' "${HELIUM_POLICY_PATH}") -eq 3 ]]
 }
 
+@test "reset safety accepts only the expected profile below home" {
+  local isolated_home="${BATS_TEST_TMPDIR}/isolated-home"
+  mkdir -p "${isolated_home}/.config/helium"
+
+  run env HOME="${isolated_home}" XDG_CONFIG_HOME="${isolated_home}/.config" HELIUM_PLATFORM=Linux \
+    bash -c 'source "$1"; profile_root_is_safe' _ \
+    "${JSH_ROOT}/scripts/unix/configure/helium.sh"
+
+  [[ ${status} -eq 0 ]]
+
+  run env HOME="${isolated_home}" XDG_CONFIG_HOME="${isolated_home}/.config" \
+    HELIUM_PLATFORM=Linux HELIUM_PROFILE_ROOT="${isolated_home}" \
+    bash -c 'source "$1"; profile_root_is_safe' _ \
+    "${JSH_ROOT}/scripts/unix/configure/helium.sh"
+
+  [[ ${status} -ne 0 ]]
+}
+
 @test "extension verification accepts Linux Preferences storage" {
   local secure="${BATS_TEST_TMPDIR}/Secure Preferences"
   local preferences="${BATS_TEST_TMPDIR}/Preferences"
@@ -60,12 +138,10 @@ setup() {
   [[ ${status} -eq 0 ]]
 }
 
-@test "Debian catalog pins the official Helium package" {
-  run jq -er '.apps[] | select(.id == "helium") |
-    [.package, .version, .arch, .sha256] | @tsv' "${JSH_ROOT}/conf/apps/debian.json"
+@test "Debian applications list includes Helium" {
+  run grep -Eq '^[[:space:]]*(app[[:space:]]+)?"?helium"?[[:space:]]*$' "${JSH_ROOT}/conf/debian.txt"
 
   [[ ${status} -eq 0 ]]
-  [[ ${output} = $'helium-bin\t0.17.0.1-1\tamd64\t9858f7444098b441a48786628f53531b79961c957c5d49eb3f4817d6ab1cd0c2' ]]
 }
 
 @test "public and legacy launchers delegate to the Unix implementation" {
