@@ -12,6 +12,13 @@ for library_file in "${JSH_ROOT}"/lib/*; do
   . "${library_file}"
 done
 unset library_file
+
+for arg in "$@"; do
+  case "${arg}" in
+    -y | --yes) JSH_ASSUME_YES=1 ;;
+  esac
+done
+
 SETTINGS_SRC="${JSH_ROOT}/dotfiles/.config/windows-terminal/settings.json"
 if [[ ! -f "${SETTINGS_SRC}" ]]; then
   jsh_note "Skipping Windows Terminal configuration: source file not found"
@@ -41,8 +48,12 @@ fi
 
 jsh_info "Creating symlink: ${SETTINGS_DEST_WIN} -> ${SETTINGS_SRC_WIN}"
 jsh_warn "The existing settings file may be replaced."
-jsh_prompt "Configure Windows Terminal? [y/N]: "
-if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then CONFIRM=y; else read -r CONFIRM || CONFIRM=; fi
+if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then
+  CONFIRM=y
+else
+  jsh_prompt "Configure Windows Terminal? [y/N]: "
+  read -r CONFIRM || CONFIRM=
+fi
 if [[ ! "${CONFIRM}" =~ ^[Yy]$ ]]; then
   jsh_note "Skipping Windows Terminal configuration."
   exit 0

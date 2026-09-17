@@ -93,6 +93,7 @@ ${BLOCK_START}
   ${BINDING}
 ${BLOCK_END}"
       temporary=$(mktemp "${bindings}.XXXXXX")
+      jsh_interrupt_cleanup_path "${temporary}"
       printf '%s\n' "${content}" > "${temporary}"
       install -m 0644 "${temporary}" "${bindings}"
       rm -f "${temporary}"
@@ -103,10 +104,11 @@ ${BLOCK_END}"
 
 configure_audio() {
   local policy="${HOME}/.config/wireplumber/wireplumber.conf.d/51-jsh-audio-policy.conf"
+  local answer
   jsh_detail "This will disable selected HDMI, onboard, and Elgato audio nodes."
   if [[ ${JSH_ASSUME_YES:-0} != 1 ]]; then
     jsh_prompt "Configure the audio policy? [y/N]: "
-    if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then answer=y; else read -r answer || answer=; fi
+    read -r answer || answer=
     [[ "${answer}" =~ ^[Yy]$ ]] || {
       jsh_note "Skipping audio policy."
       return
@@ -119,6 +121,7 @@ configure_audio() {
     return 0
   fi
   temporary=$(mktemp)
+  jsh_interrupt_cleanup_path "${temporary}"
   local source=${JSH_AUDIO_POLICY:-${JSH_ROOT}/conf/hosts/$(hostname -s)/audio.conf}
   if [[ ! -r ${source} ]]; then
     rm -f "${temporary}"
@@ -128,14 +131,7 @@ configure_audio() {
   fi
   cat "${source}" > "${temporary}"
   if ! cmp -s "${temporary}" "${policy}"; then
-    mkdir -p "$(dirname -- "${policy}")"
-    python3 - "${JSH_ROOT}" "${temporary}" "${policy}" <<'PYCODE'
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(sys.argv[1]) / "lib"))
-from application_config import ensure_file
-ensure_file(Path(sys.argv[3]), Path(sys.argv[2]).read_bytes())
-PYCODE
+    jsh_ensure_file "${policy}" "${temporary}" 0644
     changed=1
   fi
   rm -f "${temporary}"
@@ -149,14 +145,26 @@ PYCODE
   jsh_success "Audio policy configured."
 }
 
-case ${1:-configure} in
-  configure)
-    [[ "$(uname -s)" == Linux ]] || exit 0
-    configure_audio
-    ;;
-  cycle) cycle_output ;;
-  *)
-    jsh_error "Usage: $0 [configure|cycle]"
-    exit 2
-    ;;
-esac
+main() {
+  local action=configure arg
+  for arg in "$@"; do
+    case "${arg}" in
+      -y | --yes) JSH_ASSUME_YES=1 ;;
+      configure | cycle) action=${arg} ;;
+      *)
+        jsh_error "Usage: $0 [--yes] [configure|cycle]"
+        exit 2
+        ;;
+    esac
+  done
+
+  case "${action}" in
+    configure)
+      [[ "$(uname -s)" == Linux ]] || exit 0
+      configure_audio
+      ;;
+    cycle) cycle_output ;;
+  esac
+}
+
+main "$@"

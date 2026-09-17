@@ -192,6 +192,9 @@ command -v fzf &>/dev/null && source <(command fzf --zsh 2>/dev/null)
 command -v kubectl &>/dev/null && source <(kubectl completion zsh)
 # shellcheck disable=SC1090  # Dynamic source from task
 command -v task &>/dev/null && source <(task --completion zsh)
+# shellcheck disable=SC1090  # Technis task arguments
+[[ -r "${GIT_BASE}/technis/scripts/completions/task.zsh" ]] && \
+  source "${GIT_BASE}/technis/scripts/completions/task.zsh"
 command -v zoxide &>/dev/null && eval "$(zoxide init zsh)"
 
 # ============================================================================

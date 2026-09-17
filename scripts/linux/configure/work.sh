@@ -24,15 +24,42 @@ aur_helper() {
 }
 
 install_citrix_debian() {
-  local action=apply
-  if [[ ${JSH_CONFIGURE_DRY_RUN:-0} == 1 || ${JSH_INSTALL_DRY_RUN:-0} == 1 ]]; then action=plan; fi
-  python3 "${JSH_ROOT}/lib/apps.py" "${action}" --only citrix --yes
+  local page download_path version url installed
+  [[ $(uname -m) == x86_64 ]] || {
+    jsh_note "Citrix Workspace is unavailable for architecture $(uname -m)."
+    return
+  }
+  page=$(curl -fsSL 'https://www.citrix.com/downloads/workspace-app/linux/workspace-app-for-linux-latest.html')
+  download_path=$(grep -Eo 'rel="//downloads[.]citrix[.]com/[^"?]*icaclient-gcc-8_[0-9A-Za-z.+:~-]+_amd64[.]deb[^"]*"' <<< "${page}" |
+    head -n 1 | cut -d'"' -f2)
+  [[ -n ${download_path} ]] || {
+    jsh_error 'Unable to locate the Citrix Workspace Debian package.'
+    return 1
+  }
+  version=$(sed -nE 's#.+icaclient-gcc-8_([^_]+)_amd64[.]deb.*#\1#p' <<< "${download_path}")
+  url=https:${download_path}
+  installed=$(jsh_debian_installed_version icaclient || true)
+  if { [[ -z ${installed} ]] || ! dpkg --compare-versions "${installed}" ge "${version}"; } &&
+    [[ ${JSH_CONFIGURE_DRY_RUN:-0} != 1 && ${JSH_INSTALL_DRY_RUN:-0} != 1 ]]; then
+    printf 'icaclient app_protection/install_app_protection select no\n' |
+      jsh_run_root debconf-set-selections
+  fi
+  jsh_debian_install_package citrix icaclient "${version}" "${url}" '' wfica ctxwebhelper
 }
 
 install_zoom_debian() {
-  local action=apply
-  if [[ ${JSH_CONFIGURE_DRY_RUN:-0} == 1 || ${JSH_INSTALL_DRY_RUN:-0} == 1 ]]; then action=plan; fi
-  python3 "${JSH_ROOT}/lib/apps.py" "${action}" --only zoom --yes
+  local url version
+  [[ $(uname -m) == x86_64 ]] || {
+    jsh_note "Zoom is unavailable for architecture $(uname -m)."
+    return
+  }
+  url=$(curl -fsSIL -o /dev/null -w '%{url_effective}' 'https://zoom.us/client/latest/zoom_amd64.deb')
+  version=$(sed -nE 's#.+/prod/([^/]+)/.+#\1#p' <<< "${url}")
+  [[ -n ${version} ]] || {
+    jsh_error 'Unable to resolve the latest Zoom Debian package.'
+    return 1
+  }
+  jsh_debian_install_package zoom zoom "${version}" "${url}" '' zoom
 }
 
 install_citrix_fedora() {
@@ -71,6 +98,7 @@ install_citrix_fedora() {
   url="https:${download_path}"
   mkdir -p "${JSH_ROOT}/tmp"
   temporary_dir=$(mktemp -d "${JSH_ROOT}/tmp/citrix.XXXXXX")
+  jsh_interrupt_cleanup_path "${temporary_dir}"
   package="${temporary_dir}/ICAClient.rpm"
 
   if ! curl --fail --location --retry 2 --output "${package}" "${url}"; then
@@ -113,6 +141,7 @@ install_zoom_fedora() {
   jsh_info "Downloading Zoom for Fedora..."
   mkdir -p "${JSH_ROOT}/tmp"
   temporary_dir=$(mktemp -d "${JSH_ROOT}/tmp/zoom.XXXXXX")
+  jsh_interrupt_cleanup_path "${temporary_dir}"
   package="${temporary_dir}/zoom.rpm"
 
   if ! curl --fail --location --retry 2 --output "${package}" "${url}"; then
@@ -165,7 +194,74 @@ citrix_healthy() {
 }
 
 configure_citrix() {
-  python3 "${JSH_ROOT}/lib/citrix_config.py" "${CITRIX_ROOT}"
+  local applications=${XDG_DATA_HOME:-${HOME}/.local/share}/applications
+  local temporary filename name executable argument mime current changed=0 ensure_status
+  mkdir -p "${JSH_ROOT}/tmp"
+  temporary=$(mktemp -d "${JSH_ROOT}/tmp/citrix-config.XXXXXXXXXX")
+  jsh_interrupt_cleanup_path "${temporary}"
+
+  while IFS=$'\t' read -r filename name executable argument mime; do
+    {
+      printf '[Desktop Entry]\nType=Application\nName=%s\nNoDisplay=true\n' "${name}"
+      printf 'TryExec=%s\n' "${CITRIX_ROOT}/${executable}"
+      printf 'Exec=%s %s\n' "$(jsh_desktop_executable "${CITRIX_ROOT}/${executable}")" "${argument}"
+      printf 'Icon=%s\nMimeType=%s;\n' "${CITRIX_ROOT}/icons/receiver.png" "${mime}"
+    } > "${temporary}/${filename}"
+    if jsh_ensure_file "${applications}/${filename}" "${temporary}/${filename}" 0644; then
+      changed=1
+    else
+      ensure_status=$?
+      [[ ${ensure_status} == 1 ]] || { rm -rf -- "${temporary}"; return "${ensure_status}"; }
+    fi
+    current=$(xdg-mime query default "${mime}")
+    if [[ ${current} != "${filename}" ]]; then
+      xdg-mime default "${filename}" "${mime}"
+      [[ $(xdg-mime query default "${mime}") == "${filename}" ]] || {
+        jsh_error "MIME association did not take effect: ${mime}"
+        rm -rf -- "${temporary}"
+        return 1
+      }
+    fi
+  done <<'EOF'
+jsh-citrix-ica.desktop	Citrix Workspace ICA Launcher	wfica.sh	%f	application/x-ica
+jsh-citrix-receiver.desktop	Citrix Workspace Receiver Launcher	util/ctxwebhelper	%u	x-scheme-handler/receiver
+EOF
+
+  configure_citrix_preferences "${temporary}"
+  ((changed == 0)) || update-desktop-database "${applications}"
+  rm -rf -- "${temporary}"
+}
+
+configure_citrix_preferences() {
+  local temporary_dir=$1 settings=${HOME}/.ICAClient/wfclient.ini source candidate ensure_status
+  source=${settings}
+  if [[ ! -f ${source} ]]; then
+    source=${temporary_dir}/wfclient.default.ini
+    printf '[WFClient]\nVersion = 2\n' > "${source}"
+  fi
+  candidate=${temporary_dir}/wfclient.ini
+  awk '
+    function emit_key() { if (inside && !found_key) { print "MouseSendsControlV=False"; found_key=1 } }
+    /^[[:space:]]*\[/ {
+      emit_key()
+      inside=(tolower($0) == "[wfclient]")
+      if (inside) found_section=1
+    }
+    inside && /^[[:space:]]*MouseSendsControlV[[:space:]]*=/ {
+      if (!found_key) { print "MouseSendsControlV=False"; found_key=1 }
+      next
+    }
+    { print }
+    END {
+      emit_key()
+      if (!found_section) print "\n[WFClient]"
+      if (!found_key) print "MouseSendsControlV=False"
+    }
+  ' "${source}" > "${candidate}"
+  jsh_ensure_file "${settings}" "${candidate}" 0600 || {
+    ensure_status=$?
+    [[ ${ensure_status} == 1 ]] || return "${ensure_status}"
+  }
 }
 
 zoom_vdi_healthy() {
@@ -180,6 +276,7 @@ register_zoom_vdi() {
   local module="${CITRIX_ROOT}/config/module.ini" temporary replacement backup
   jsh_run_root ln -sfn "${ZOOM_VDI_LIBRARY}" "${CITRIX_ROOT}/ZoomMedia.so"
   temporary=$(mktemp "${JSH_ROOT}/tmp/module.ini.XXXXXX")
+  jsh_interrupt_cleanup_path "${temporary}"
   cp "${module}" "${temporary}"
   if ! grep -Eq '^VirtualDriver[[:space:]]*=([[:space:]]*|.*[,[:space:]])ZoomMedia([,[:space:]]|$)' "${temporary}"; then
     sed -i.bak '/^VirtualDriver[[:space:]]*=/ s/$/, ZoomMedia/' "${temporary}"
@@ -190,6 +287,7 @@ register_zoom_vdi() {
   elif ! awk '/^\[ZoomMedia\]$/ { section=1; next } section && /^\[/ { section=0 }
     section && /^DriverName=ZoomMedia\.so$/ { found=1 } END { exit !found }' "${temporary}"; then
     replacement=$(mktemp "${JSH_ROOT}/tmp/module.ini.XXXXXX")
+    jsh_interrupt_cleanup_path "${replacement}"
     awk '/^\[ZoomMedia\]$/ { print; print "DriverName=ZoomMedia.so"; section=1; next }
       section && /^\[/ { section=0 } section && /^DriverName=/ { next } { print }' \
       "${temporary}" > "${replacement}"
@@ -225,6 +323,7 @@ install_zoom_vdi() {
       jsh_info "Installing Zoom VDI for Debian..."
       mkdir -p "${JSH_ROOT}/tmp"
       temporary_dir=$(mktemp -d "${JSH_ROOT}/tmp/zoom-vdi.XXXXXX")
+      jsh_interrupt_cleanup_path "${temporary_dir}"
       trap 'rm -rf -- "${temporary_dir}"' RETURN
       package="${temporary_dir}/zoomvdi.deb"
       url="https://zoom.us/download/vdi/${ZOOM_VDI_VERSION}/zoomvdi-universal-plugin-ubuntu_${ZOOM_VDI_RELEASE}.deb"
@@ -244,6 +343,7 @@ install_zoom_vdi() {
       }
       mkdir -p "${JSH_ROOT}/tmp"
       temporary_dir=$(mktemp -d "${JSH_ROOT}/tmp/zoom-vdi.XXXXXX")
+      jsh_interrupt_cleanup_path "${temporary_dir}"
       trap 'rm -rf -- "${temporary_dir}"' RETURN
       package="${temporary_dir}/zoomvdi.deb"
       url="https://zoom.us/download/vdi/${ZOOM_VDI_VERSION}/zoomvdi-universal-plugin-ubuntu_${ZOOM_VDI_RELEASE}.deb"
@@ -293,11 +393,18 @@ EOF
 }
 
 main() {
+  local arg answer
+  for arg in "$@"; do
+    case "${arg}" in
+      -y | --yes) JSH_ASSUME_YES=1 ;;
+    esac
+  done
+
   [[ "$(uname -s)" == Linux ]] || return
   jsh_detail "This configures Citrix Workspace, Zoom, and the checksum-pinned Zoom VDI integration."
   if [[ ${JSH_ASSUME_YES:-0} != 1 ]]; then
     jsh_prompt "Configure the Linux work environment? [y/N]: "
-    if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then answer=y; else read -r answer || answer=; fi
+    read -r answer || answer=
     [[ "${answer}" =~ ^[Yy]$ ]] || {
       jsh_note "Skipping Linux work environment."
       return

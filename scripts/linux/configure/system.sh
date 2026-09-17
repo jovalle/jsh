@@ -37,6 +37,7 @@ root_text_matches() {
   [[ -e "${destination}" ]] || return 1
   mkdir -p "${JSH_ROOT}/tmp"
   temporary=$(mktemp "${JSH_ROOT}/tmp/system-check.XXXXXX")
+  jsh_interrupt_cleanup_path "${temporary}"
   printf '%s\n' "${content}" > "${temporary}"
   if [[ -r "${destination}" ]] && cmp -s "${temporary}" "${destination}"; then
     matches=0
@@ -60,6 +61,7 @@ install_root_text() {
   fi
   mkdir -p "${JSH_ROOT}/tmp"
   temporary=$(mktemp "${JSH_ROOT}/tmp/system-config.XXXXXX")
+  jsh_interrupt_cleanup_path "${temporary}"
   printf '%s\n' "${content}" > "${temporary}"
   backup_root_file "${destination}"
   jsh_run_root install -D -o root -g root -m 0644 "${temporary}" "${destination}"
@@ -149,7 +151,13 @@ configure_timezone() {
 }
 
 main() {
-  local command
+  local command arg answer
+  for arg in "$@"; do
+    case "${arg}" in
+      -y | --yes) JSH_ASSUME_YES=1 ;;
+    esac
+  done
+
   [[ "$(uname -s)" == Linux ]] || return
   export PATH="${PATH}:/usr/sbin:/sbin"
   for command in systemctl sysctl timedatectl; do
@@ -162,7 +170,7 @@ main() {
   jsh_detail "This will change memory policy, disable coredump storage, enable earlyoom and zram, and configure USB wakeup and power management."
   if [[ ${JSH_ASSUME_YES:-0} != 1 ]]; then
     jsh_prompt "Configure Linux system policy? [y/N]: "
-    if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then answer=y; else read -r answer || answer=; fi
+    read -r answer || answer=
     [[ "${answer}" =~ ^[Yy]$ ]] || {
       jsh_note "Skipping Linux system policy."
       return

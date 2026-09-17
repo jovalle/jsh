@@ -14,9 +14,10 @@ done
 unset library_file
 
 confirm() {
+  [[ ${JSH_ASSUME_YES:-0} == 1 ]] && return 0
   jsh_detail "This will apply the managed macOS privacy, input, Finder, and application preferences."
   jsh_prompt "Configure macOS preferences? [y/N]: "
-  if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then answer=y; else read -r answer || answer=; fi
+  read -r answer || answer=
   [[ "${answer}" =~ ^[Yy]$ ]]
 }
 
@@ -203,6 +204,13 @@ PREFERENCES
 }
 
 main() {
+  local arg
+  for arg in "$@"; do
+    case "${arg}" in
+      -y | --yes) JSH_ASSUME_YES=1 ;;
+    esac
+  done
+
   [[ "$(uname -s)" == Darwin ]] || {
     jsh_note "Skipping macOS preferences: macOS not detected."
     return

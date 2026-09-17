@@ -103,11 +103,11 @@ configure_shortcut() {
   local xfce_binding='/commands/custom/<Primary><Alt><Super>m'
   local desktop
   local bindings="${HOME}/.xbindkeysrc" autostart="${HOME}/.config/autostart/jsh-keybindings.desktop"
-  local existing='' cleaned content temporary
+  local existing='' cleaned content temporary answer
   jsh_detail "This will bind Ctrl+Alt+Super+M to toggle an ultrawide display split."
   if [[ ${JSH_ASSUME_YES:-0} != 1 ]]; then
     jsh_prompt "Configure the display shortcut? [y/N]: "
-    if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then answer=y; else read -r answer || answer=; fi
+    read -r answer || answer=
     [[ "${answer}" =~ ^[Yy]$ ]] || {
       jsh_note "Skipping display shortcut."
       return
@@ -122,6 +122,10 @@ configure_shortcut() {
         return 1
       }
       if xfconf-query -c xfce4-keyboard-shortcuts -p "${xfce_binding}" > /dev/null 2>&1; then
+        if [[ $(xfconf-query -c xfce4-keyboard-shortcuts -p "${xfce_binding}" 2> /dev/null || true) == "${command_path}" ]]; then
+          jsh_note "Display shortcut is already configured."
+          return 0
+        fi
         xfconf-query -c xfce4-keyboard-shortcuts -p "${xfce_binding}" -s "${command_path}"
       else
         xfconf-query -c xfce4-keyboard-shortcuts -p "${xfce_binding}" -n -t string -s "${command_path}"
@@ -151,6 +155,7 @@ ${BLOCK_START}
   ${BINDING}
 ${BLOCK_END}"
       temporary=$(mktemp "${bindings}.XXXXXX")
+      jsh_interrupt_cleanup_path "${temporary}"
       printf '%s\n' "${content}" > "${temporary}"
       install -m 0644 "${temporary}" "${bindings}"
       rm -f "${temporary}"
@@ -163,22 +168,34 @@ ${BLOCK_END}"
   jsh_success "Display shortcut configured."
 }
 
-case ${1:-configure} in
-  configure)
-    [[ "$(uname -s)" == Linux ]] || exit 0
-    [[ "${XDG_SESSION_TYPE:-x11}" != wayland ]] || {
-      jsh_note "Skipping display shortcut: logical monitor splitting requires an X11 session."
-      exit 0
-    }
-    command -v xrandr > /dev/null 2>&1 || {
-      jsh_note "Skipping display shortcut: xrandr is unavailable."
-      exit 0
-    }
-    configure_shortcut
-    ;;
-  toggle) toggle_layout ;;
-  *)
-    jsh_error "Usage: $0 [configure|toggle]"
-    exit 2
-    ;;
-esac
+main() {
+  local action=configure arg
+  for arg in "$@"; do
+    case "${arg}" in
+      -y | --yes) JSH_ASSUME_YES=1 ;;
+      configure | toggle) action=${arg} ;;
+      *)
+        jsh_error "Usage: $0 [--yes] [configure|toggle]"
+        exit 2
+        ;;
+    esac
+  done
+
+  case "${action}" in
+    configure)
+      [[ "$(uname -s)" == Linux ]] || exit 0
+      [[ "${XDG_SESSION_TYPE:-x11}" != wayland ]] || {
+        jsh_note "Skipping display shortcut: logical monitor splitting requires an X11 session."
+        exit 0
+      }
+      command -v xrandr > /dev/null 2>&1 || {
+        jsh_note "Skipping display shortcut: xrandr is unavailable."
+        exit 0
+      }
+      configure_shortcut
+      ;;
+    toggle) toggle_layout ;;
+  esac
+}
+
+main "$@"

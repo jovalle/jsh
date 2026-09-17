@@ -95,7 +95,10 @@ case $(jsh_linux_desktop) in
     ;;
   gnome)
     uri=
-    [[ -z ${wallpaper} ]] || uri=$(python3 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).as_uri())' "${wallpaper}")
+    if [[ -n ${wallpaper} ]]; then
+      uri=$(jq -rn --arg path "$(realpath -- "${wallpaper}")" \
+        '$path | split("/") | map(@uri) | join("/") | "file://" + .')
+    fi
     for key in picture-uri picture-uri-dark primary-color secondary-color picture-options; do
       case ${key} in
         picture-uri*) value="'${uri}'" ;;

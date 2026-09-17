@@ -268,95 +268,15 @@ UpdatePeriod=100
 EOF
 
   # Cafe sleep / screensaver inhibition toggle
-  cat > "${HOME}/.config/xfce4/panel/cafe-status.sh" << 'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-
-pid_file="${XDG_RUNTIME_DIR:-/tmp}/cafe.${USER:-$(id -un)}.pid"
-is_active=0
-
-if [[ -r "${pid_file}" ]]; then
-  pid=$(< "${pid_file}")
-  if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
-    is_active=1
-  fi
-fi
-
-if (( is_active )); then
-  icon=cafe-on.svg
-  tip="Cafe: Active (Sleep disabled - Click to allow sleep)"
-else
-  icon=cafe-off.svg
-  tip="Cafe: Inactive (Normal sleep - Click to disable sleep)"
-fi
-root=${JSH_ROOT:-${HOME}/.jsh}
-printf '<img>%s/assets/icons/%s</img><tool>%s</tool><click>%s/.config/xfce4/panel/cafe-toggle.sh</click>\n' \
-  "${root}" "${icon}" "${tip}" "${HOME}"
-
-EOF
-  chmod +x "${HOME}/.config/xfce4/panel/cafe-status.sh"
-
-  cat > "${HOME}/.config/xfce4/panel/cafe-toggle.sh" << 'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-
-JSH_ROOT="${HOME}/.jsh"
-pid_file="${XDG_RUNTIME_DIR:-/tmp}/cafe.${USER:-$(id -un)}.pid"
-is_active=0
-
-if [[ -r "${pid_file}" ]]; then
-  pid=$(< "${pid_file}")
-  if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
-    is_active=1
-  fi
-fi
-
-if (( is_active )); then
-  rm -f "${pid_file}"
-  if [[ -x "${JSH_ROOT}/bin/cafe" ]]; then
-    "${JSH_ROOT}/bin/cafe" --stop >/dev/null 2>&1 || true
-  elif command -v cafe >/dev/null 2>&1; then
-    cafe --stop >/dev/null 2>&1 || true
-  fi
-
-  xfconf-query -c xfce4-screensaver -p /saver/enabled -s true 2>/dev/null || true
-  xfconf-query -c xfce4-screensaver -p /lock/enabled -s true 2>/dev/null || true
-  xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/dpms-enabled -s true 2>/dev/null || true
-  xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/presentation-mode -s false 2>/dev/null || true
-  DISPLAY="${DISPLAY:-:0}" xset +dpms 2>/dev/null || true
-  DISPLAY="${DISPLAY:-:0}" xset s on 2>/dev/null || true
-else
-  if [[ -x "${JSH_ROOT}/bin/cafe" ]]; then
-    "${JSH_ROOT}/bin/cafe" -b -d -s -i >/dev/null 2>&1 || true
-  elif command -v cafe >/dev/null 2>&1; then
-    cafe -b -d -s -i >/dev/null 2>&1 || true
-  fi
-
-  xfconf-query -c xfce4-screensaver -p /saver/enabled -s false 2>/dev/null || true
-  xfconf-query -c xfce4-screensaver -p /lock/enabled -s false 2>/dev/null || true
-  xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/dpms-enabled -s false 2>/dev/null || true
-  xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/presentation-mode -n -t bool -s true 2>/dev/null || true
-  DISPLAY="${DISPLAY:-:0}" xset -dpms 2>/dev/null || true
-  DISPLAY="${DISPLAY:-:0}" xset s off 2>/dev/null || true
-  DISPLAY="${DISPLAY:-:0}" xfce4-screensaver-command -d 2>/dev/null || true
-fi
-
-for plugin_file in "${HOME}/.config/xfce4/panel"/genmon-*.rc; do
-  [[ -r "${plugin_file}" ]] || continue
-  if grep -q 'cafe-status.sh' "${plugin_file}" 2>/dev/null; then
-    id=$(basename "${plugin_file}" .rc | sed 's/genmon-//')
-    DISPLAY="${DISPLAY:-:0}" xfce4-panel --plugin-event="genmon-${id}:refresh:bool:true" 2>/dev/null || true
-  fi
-done
-EOF
-  chmod +x "${HOME}/.config/xfce4/panel/cafe-toggle.sh"
+  rm -f "${HOME}/.config/xfce4/panel/cafe-status.sh" \
+    "${HOME}/.config/xfce4/panel/cafe-toggle.sh"
 
   cat > "${HOME}/.config/xfce4/panel/genmon-${cafe_id}.rc" << EOF
-Command=${HOME}/.config/xfce4/panel/cafe-status.sh
+Command=${JSH_ROOT}/bin/cafe --xfce-status
 UseLabel=false
 Text=
 UpdatePeriod=500
-Action=${HOME}/.config/xfce4/panel/cafe-toggle.sh
+Action=${JSH_ROOT}/bin/cafe --xfce-toggle
 EOF
 
   # Audio output and input controls
@@ -396,6 +316,7 @@ configure_xfce_screensaver() {
   pkill -x light-locker 2> /dev/null || true
   mkdir -p "$(dirname -- "${autostart}")"
   temporary=$(mktemp "${autostart}.XXXXXX")
+  jsh_interrupt_cleanup_path "${temporary}"
   printf '%s\n' '[Desktop Entry]' 'Type=Application' 'Name=Screen Locker' \
     'Exec=light-locker' 'Hidden=true' > "${temporary}"
   install -m 0644 "${temporary}" "${autostart}"
@@ -425,11 +346,11 @@ configure_xfce_screensaver() {
 }
 
 configure_xfce() {
-  python3 "${JSH_ROOT}/lib/fonts.py"
   xfconf_set xfce4-terminal /font-name string 'JetBrainsMono Nerd Font Mono 11'
   xfconf_set xfce4-terminal /font-use-system bool false
   xfconf_set xsettings /Gtk/MonospaceFontName string 'JetBrainsMono Nerd Font Mono 11'
   xfconf_set xfce4-keyboard-shortcuts '/commands/custom/<Super>space' string xfce4-appfinder
+  xfconf_set xfce4-keyboard-shortcuts '/commands/custom/<Super><Shift>s' string 'xfce4-screenshooter -rc'
   xfconf_set xfce4-appfinder /always-center bool true
   xfconf_set xfce4-appfinder /enable-service bool true
   local distro_id=linux menu_icon=tux menu_id
@@ -480,7 +401,13 @@ configure_gnome() {
 }
 
 main() {
-  local desktop
+  local desktop arg answer
+  for arg in "$@"; do
+    case "${arg}" in
+      -y | --yes) JSH_ASSUME_YES=1 ;;
+    esac
+  done
+
   [[ "$(uname -s)" == Linux ]] || return
   desktop=$(jsh_linux_desktop)
   case "${desktop}" in
@@ -505,7 +432,7 @@ main() {
   jsh_detail "This will replace managed ${desktop^^} appearance and desktop settings."
   if [[ ${JSH_ASSUME_YES:-0} != 1 ]]; then
     jsh_prompt "Configure the ${desktop^^} desktop? [y/N]: "
-    if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then answer=y; else read -r answer || answer=; fi
+    read -r answer || answer=
     [[ "${answer}" =~ ^[Yy]$ ]] || {
       jsh_note "Skipping desktop configuration."
       return

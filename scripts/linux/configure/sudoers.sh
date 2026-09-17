@@ -27,10 +27,17 @@ if sudo -n grep -Fxq "${SUDOERS_LINE}" "${SUDOERS_FILE}" 2>/dev/null; then
   exit 0
 fi
 
+local_arg=
+for local_arg in "$@"; do
+  case "${local_arg}" in
+    -y | --yes) JSH_ASSUME_YES=1 ;;
+  esac
+done
+
 jsh_detail "This will grant ${USERNAME} passwordless sudo access."
 if [[ ${JSH_ASSUME_YES:-0} != 1 ]]; then
   jsh_prompt "Configure sudoers? [y/N]: "
-  if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then CONFIRM=y; else read -r CONFIRM || CONFIRM=; fi
+  read -r CONFIRM || CONFIRM=
   if [[ ! "${CONFIRM}" =~ ^[Yy]$ ]]; then
     jsh_note "Skipping sudoers configuration."
     exit 0
@@ -42,6 +49,7 @@ if [[ ${JSH_CONFIGURE_DRY_RUN:-0} == 1 ]]; then
   exit 0
 fi
 temporary=$(mktemp)
+jsh_interrupt_cleanup_path "${temporary}"
 trap 'rm -f -- "${temporary}"' EXIT
 printf '%s\n' "${SUDOERS_LINE}" > "${temporary}"
 sudo visudo -cf "${temporary}"
@@ -52,7 +60,8 @@ if [[ -e ${SUDOERS_FILE} ]]; then
   (umask 077; sudo cat "${SUDOERS_FILE}" > "${backup}")
 fi
 staging=$(sudo mktemp /etc/sudoers.d/.jsh-XXXXXX)
-trap 'rm -f -- "${temporary}"; sudo rm -f -- "${staging}"' EXIT
+jsh_interrupt_cleanup_root_path "${staging}"
+trap 'rm -f -- "${temporary}"; sudo -n rm -f -- "${staging}" 2>/dev/null || true' EXIT
 sudo install -o root -g root -m 0440 "${temporary}" "${staging}"
 sudo mv -f -- "${staging}" "${SUDOERS_FILE}"
 jsh_success "Sudoers configured for ${USERNAME} with no password prompt."

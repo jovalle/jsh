@@ -12,6 +12,13 @@ for library_file in "${JSH_ROOT}"/lib/*; do
   . "${library_file}"
 done
 unset library_file
+
+for arg in "$@"; do
+  case "${arg}" in
+    -y | --yes) JSH_ASSUME_YES=1 ;;
+  esac
+done
+
 if [[ ! -f "${JSH_ROOT}/dotfiles/.ssh/id_rsa" || ! -f "${JSH_ROOT}/dotfiles/.ssh/config-windows" ]]; then
   jsh_note "Skipping Windows SSH configuration: source files not found"
   exit 0
@@ -41,8 +48,12 @@ jsh_info "Creating symlinks for SSH files from WSL to Windows..."
 jsh_detail "Key source: ${KEY_SOURCE} -> ${KEY_DEST}"
 jsh_detail "Config source: ${CONFIG_SOURCE} -> ${CONFIG_DEST}"
 jsh_warn "Existing destination files will be replaced."
-jsh_prompt "Configure Windows SSH? [y/N]: "
-if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then CONFIRM=y; else read -r CONFIRM || CONFIRM=; fi
+if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then
+  CONFIRM=y
+else
+  jsh_prompt "Configure Windows SSH? [y/N]: "
+  read -r CONFIRM || CONFIRM=
+fi
 if [[ ! "${CONFIRM}" =~ ^[Yy]$ ]]; then
   jsh_note "Skipping Windows SSH configuration."
   exit 0
