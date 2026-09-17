@@ -18,7 +18,6 @@ readonly ZED_DESKTOP=dev.zed.Zed.desktop
 
 configure_macos() {
   local content_type extension
-  local -a failed_extensions=()
   local -a content_types=(
     public.text
     public.plain-text
@@ -53,20 +52,45 @@ configure_macos() {
     return 0
   fi
 
+  local is_current=1 current_handler
   for content_type in "${content_types[@]}"; do
-    duti -s "${ZED_BUNDLE_ID}" "${content_type}" all
+    current_handler=$(duti -d "${content_type}" 2> /dev/null || true)
+    if [[ "${current_handler}" != "${ZED_BUNDLE_ID}" ]]; then
+      is_current=0
+      break
+    fi
   done
-  for extension in "${extensions[@]}"; do
-    duti -s "${ZED_BUNDLE_ID}" ".${extension}" all 2> /dev/null ||
-      failed_extensions+=("${extension}")
-  done
-  ((${#failed_extensions[@]} == 0)) ||
-    jsh_note "LaunchServices skipped ${#failed_extensions[@]} extensions Zed does not declare."
+  if ((is_current)); then
+    for extension in txt md py js ts c rs go toml; do
+      if ! duti -x "${extension}" 2> /dev/null | grep -Fxq "${ZED_BUNDLE_ID}"; then
+        is_current=0
+        break
+      fi
+    done
+  fi
+
+  if ((is_current)); then
+    jsh_note "Zed is already the default macOS text and source editor."
+    return 0
+  fi
+
+  local settings_input
+  settings_input=$(
+    for content_type in "${content_types[@]}"; do
+      printf '%s\t%s\tall\n' "${ZED_BUNDLE_ID}" "${content_type}"
+    done
+    for extension in "${extensions[@]}"; do
+      printf '%s\t.%s\tall\n' "${ZED_BUNDLE_ID}" "${extension}"
+    done
+  )
+
+  duti <<< "${settings_input}" > /dev/null 2>&1 || true
   jsh_success "Zed is the default macOS text and source editor."
 }
 
 configure_linux() {
   local desktop_path='' directory mime_type
+  local -i changed=0
   local -a mime_types=(
     text/plain
     text/markdown
@@ -126,10 +150,19 @@ configure_linux() {
     return 0
   fi
 
+  local current_mime_handler
   for mime_type in "${mime_types[@]}"; do
-    xdg-mime default "${ZED_DESKTOP}" "${mime_type}"
+    current_mime_handler=$(xdg-mime query default "${mime_type}" 2> /dev/null || true)
+    if [[ "${current_mime_handler}" != "${ZED_DESKTOP}" ]]; then
+      xdg-mime default "${ZED_DESKTOP}" "${mime_type}"
+      changed=1
+    fi
   done
-  jsh_success "Zed is the default Linux text and source editor."
+  if ((changed)); then
+    jsh_success "Zed is the default Linux text and source editor."
+  else
+    jsh_note "Zed is already the default Linux text and source editor."
+  fi
 }
 
 case $(uname -s) in

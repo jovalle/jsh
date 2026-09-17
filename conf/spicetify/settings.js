@@ -1,7 +1,7 @@
-(function applyJshSpotifySettings() {
+(function applySpotifySettings() {
   const settings = window.Spicetify?.Platform?.SettingsAPI;
   if (!settings?.quality || !settings?.playback || !settings?.viewportZoom) {
-    setTimeout(applyJshSpotifySettings, 100);
+    setTimeout(applySpotifySettings, 100);
     return;
   }
 
@@ -20,13 +20,13 @@
     desiredSettings.map(async ([setting, desiredValue]) => {
       if ((await setting.getValue()) !== desiredValue) await setting.setValue(desiredValue);
     }),
-  ).catch((error) => console.error('[jsh-settings] Failed to apply Spotify settings', error));
+  ).catch((error) => console.error('[settings] Failed to apply Spotify settings', error));
 
   for (const key of Object.keys(localStorage).filter((key) => key.endsWith(':items-view'))) {
     if (localStorage.getItem(key) === '2') continue;
     localStorage.setItem(key, '2');
-    if (sessionStorage.getItem('jsh-settings:compact-reload') !== '1') {
-      sessionStorage.setItem('jsh-settings:compact-reload', '1');
+    if (sessionStorage.getItem('settings:compact-reload') !== '1') {
+      sessionStorage.setItem('settings:compact-reload', '1');
       location.reload();
     }
   }

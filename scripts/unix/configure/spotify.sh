@@ -14,9 +14,10 @@ done
 unset library_file
 
 readonly SPICETIFY_FORMULA=spicetify-cli
-readonly SPICETIFY_EXTENSION=jsh-settings.js
-readonly SPICETIFY_EXTENSION_SOURCE="${JSH_ROOT}/conf/spicetify/${SPICETIFY_EXTENSION}"
-readonly SPICETIFY_MARKETPLACE_INSTALLER=https://raw.githubusercontent.com/spicetify/marketplace/main/resources/install.sh
+readonly SPICETIFY_EXTENSION_DIR="${JSH_ROOT}/conf/spicetify"
+readonly SPICETIFY_LEGACY_SETTINGS_EXTENSION=jsh-settings.js
+readonly -a SPICETIFY_LEGACY_COMMAND_EXTENSIONS=(spotifi.js spotify.js)
+readonly -a SPICETIFY_EXTENSIONS=(settings.js adder.js spotifix.js)
 
 SPICETIFY_BIN=
 
@@ -28,6 +29,7 @@ spicetify_failure_details() {
 
 spotify_paths() {
   local platform=${JSH_SPOTIFY_PLATFORM:-$(uname -s)} spotify_path='' prefs_path=''
+  local flatpak_deployment=''
 
   if [[ -n ${JSH_SPOTIFY_PATH:-} && -n ${JSH_SPOTIFY_PREFS:-} ]]; then
     printf '%s\n%s\n' "${JSH_SPOTIFY_PATH}" "${JSH_SPOTIFY_PREFS}"
@@ -41,12 +43,20 @@ spotify_paths() {
       prefs_path="${HOME}/Library/Application Support/Spotify/prefs"
       ;;
     Linux)
-      for spotify_path in \
-        "${HOME}/.local/share/flatpak/app/com.spotify.Client/x86_64/stable/active/files/extra/share/spotify" \
-        /var/lib/flatpak/app/com.spotify.Client/x86_64/stable/active/files/extra/share/spotify \
-        /usr/share/spotify; do
-        [[ -d ${spotify_path} ]] && break
-      done
+      if command -v flatpak > /dev/null 2>&1; then
+        flatpak_deployment=$(flatpak info --show-location com.spotify.Client 2> /dev/null || true)
+        if [[ -d ${flatpak_deployment}/files/extra/share/spotify ]]; then
+          spotify_path=${flatpak_deployment}/files/extra/share/spotify
+        fi
+      fi
+      if [[ -z ${spotify_path} ]]; then
+        for spotify_path in \
+          "${HOME}/.local/share/flatpak/app/com.spotify.Client/"*/stable/active/files/extra/share/spotify \
+          /var/lib/flatpak/app/com.spotify.Client/*/stable/active/files/extra/share/spotify \
+          /usr/share/spotify; do
+          [[ -d ${spotify_path} ]] && break
+        done
+      fi
       if [[ -r ${HOME}/.var/app/com.spotify.Client/config/spotify/prefs ]]; then
         prefs_path="${HOME}/.var/app/com.spotify.Client/config/spotify/prefs"
       else
@@ -68,6 +78,17 @@ spotify_paths() {
     return 1
   }
   printf '%s\n%s\n' "${spotify_path}" "${prefs_path}"
+}
+
+ensure_spotify_writable() {
+  local spotify_path=$1 platform=${JSH_SPOTIFY_PLATFORM:-$(uname -s)}
+  [[ ${platform} == Linux ]] || return 0
+  [[ -w ${spotify_path} && -w ${spotify_path}/Apps ]] && return 0
+
+  jsh_error "Spicetify needs write access to the Spotify installation."
+  jsh_detail "sudo chmod a+wr -- $(printf '%q' "${spotify_path}")"
+  jsh_detail "sudo chmod -R a+wr -- $(printf '%q' "${spotify_path}/Apps")"
+  return 1
 }
 
 spicetify_binary() {
@@ -172,103 +193,351 @@ close_spotify_if_running() {
   jsh_success "Spotify closed."
 }
 
-ensure_spicetify_marketplace() {
-  local binary=$1 config_dir=$2 installer output custom_apps wrapper_dir
-  custom_apps=$("${binary}" config custom_apps 2> /dev/null || true)
-  if [[ -r ${config_dir}/CustomApps/marketplace/manifest.json && " ${custom_apps} " == *' marketplace '* ]]; then
-    jsh_note "Spicetify Marketplace is installed."
-    return
-  fi
+reopen_spotify() {
+  local was_flatpak=${1:-0} platform=${JSH_SPOTIFY_PLATFORM:-$(uname -s)}
+  case ${platform} in
+    Darwin)
+      open -a Spotify > /dev/null 2>&1
+      ;;
+    Linux)
+      if ((was_flatpak)); then
+        flatpak run com.spotify.Client > /dev/null 2>&1 &
+      elif command -v spotify > /dev/null 2>&1; then
+        spotify > /dev/null 2>&1 &
+      else
+        jsh_error "Spotify was closed but could not be reopened."
+        return 1
+      fi
+      ;;
+    *) return 1 ;;
+  esac
+}
 
-  jsh_info "Installing Spicetify Marketplace..."
-  mkdir -p "${JSH_ROOT}/tmp"
-  installer=$(mktemp "${JSH_ROOT}/tmp/spicetify-marketplace.XXXXXX")
-  if ! output=$(curl -fsSL --retry 2 --output "${installer}" "${SPICETIFY_MARKETPLACE_INSTALLER}" 2>&1); then
-    rm -f -- "${installer}"
-    jsh_error "Failed to download the Spicetify Marketplace installer."
+spicetify_backup_can_refresh() {
+  [[ $1 == *'run "spicetify backup apply"'* ||
+    $1 == *'Run "spicetify backup apply"'* ]]
+}
+
+spicetify_backup_needs_restore() {
+  [[ $1 == *'run "spicetify restore backup'* ||
+    $1 == *'Run "spicetify restore backup'* ]]
+}
+
+apply_spicetify() {
+  local binary=$1 output
+  shift
+  if output=$("${binary}" --no-restart "$@" 2>&1); then
+    return 0
+  fi
+  # shellcheck disable=SC2310 # Retry only when Spicetify requires a restore first.
+  if spicetify_backup_needs_restore "${output}"; then
+    jsh_info "Restoring Spotify before refreshing Spicetify's backup..."
+    if ! output=$("${binary}" --no-restart restore 2>&1); then
+      jsh_error "Failed to restore Spotify before refreshing Spicetify's backup."
+      spicetify_failure_details "${output}"
+      return 1
+    fi
+    if ! output=$("${binary}" --no-restart backup apply 2>&1); then
+      jsh_error "Failed to restore, refresh, and apply Spicetify."
+      spicetify_failure_details "${output}"
+      return 1
+    fi
+    return 0
+  fi
+  # shellcheck disable=SC2310 # Retry only when Spicetify reports a backupable client.
+  if ! spicetify_backup_can_refresh "${output}"; then
+    jsh_error "Failed to apply Spicetify."
     spicetify_failure_details "${output}"
     return 1
   fi
-  wrapper_dir=$(mktemp -d "${JSH_ROOT}/tmp/spicetify-wrapper.XXXXXX")
-  # shellcheck disable=SC2016 # Variables expand when the generated wrapper runs.
-  printf '#!/bin/sh\nexec "$SPICETIFY_REAL" --no-restart "$@"\n' > "${wrapper_dir}/spicetify"
-  chmod 0700 "${wrapper_dir}/spicetify"
-  if ! output=$(SPICETIFY_CONFIG="${config_dir}" SPICETIFY_REAL="${binary}" \
-    PATH="${wrapper_dir}:${PATH}" sh "${installer}" 2>&1); then
-    rm -rf -- "${installer}" "${wrapper_dir}"
-    jsh_error "Failed to install Spicetify Marketplace."
+  jsh_info "Refreshing Spicetify's backup for the current Spotify version..."
+  if ! output=$("${binary}" --no-restart backup apply 2>&1); then
+    # shellcheck disable=SC2310 # Retry only when backup refresh requires a restore first.
+    if spicetify_backup_needs_restore "${output}"; then
+      jsh_info "Restoring Spotify before refreshing Spicetify's backup..."
+      if ! output=$("${binary}" --no-restart restore 2>&1); then
+        jsh_error "Failed to restore Spotify before refreshing Spicetify's backup."
+        spicetify_failure_details "${output}"
+        return 1
+      fi
+      if output=$("${binary}" --no-restart backup apply 2>&1); then
+        return 0
+      fi
+    fi
+    jsh_error "Failed to refresh and apply Spicetify."
     spicetify_failure_details "${output}"
     return 1
   fi
-  rm -rf -- "${installer}" "${wrapper_dir}"
-  jsh_success "Spicetify Marketplace installed."
+}
+
+spicetify_config_value() {
+  local config_file=$1 key=$2
+  [[ -r ${config_file} ]] || return 1
+  awk -F= -v key="${key}" '
+    $1 ~ "^[[:space:]]*" key "[[:space:]]*$" {
+      val = substr($0, index($0, "=") + 1)
+      sub(/^[[:space:]]+/, "", val)
+      sub(/[[:space:]]+$/, "", val)
+      print val
+      exit
+    }
+  ' "${config_file}"
+}
+
+spicetify_has_extension() {
+  local config_file=$1 extension=$2 current_extensions
+  # shellcheck disable=SC2310 # Failure handled explicitly.
+  current_extensions=$(spicetify_config_value "${config_file}" "extensions") || return 1
+  [[ "|${current_extensions// /}|" == *"|${extension}|"* ]]
+}
+
+spicetify_paths_match() {
+  local config_file=$1 expected_spotify=$2 expected_prefs=$3
+  local current_spotify current_prefs
+  # shellcheck disable=SC2310 # Failure handled explicitly.
+  current_spotify=$(spicetify_config_value "${config_file}" "spotify_path") || return 1
+  # shellcheck disable=SC2310 # Failure handled explicitly.
+  current_prefs=$(spicetify_config_value "${config_file}" "prefs_path") || return 1
+  [[ "${current_spotify%/}" == "${expected_spotify%/}" && "${current_prefs}" == "${expected_prefs}" ]]
+}
+
+spicetify_backup_version() {
+  local target=${1:-}
+  if [[ -n ${target} && -r ${target} ]]; then
+    awk '
+      {
+        line = $0
+        gsub(/\033\[[0-9;]*m/, "", line)
+        sub(/^[[:space:]]+/, "", line)
+        sub(/[[:space:]]+$/, "", line)
+      }
+      line == "[Backup]" || line == "Backup" { in_backup = 1; next }
+      /^\[.*\]$/ { in_backup = 0 }
+      in_backup && $1 == "version" {
+        if (index(line, "=") > 0) {
+          val = substr(line, index(line, "=") + 1)
+        } else {
+          val = $2
+        }
+        sub(/^[[:space:]]+/, "", val)
+        sub(/[[:space:]]+$/, "", val)
+        print val
+        exit
+      }
+    ' "${target}"
+  else
+    awk '
+      {
+        line = $0
+        gsub(/\033\[[0-9;]*m/, "", line)
+        sub(/^[[:space:]]+/, "", line)
+        sub(/[[:space:]]+$/, "", line)
+      }
+      line == "[Backup]" || line == "Backup" { in_backup = 1; next }
+      /^\[.*\]$/ { in_backup = 0 }
+      in_backup && $1 == "version" {
+        if (index(line, "=") > 0) {
+          val = substr(line, index(line, "=") + 1)
+        } else {
+          val = $2
+        }
+        sub(/^[[:space:]]+/, "", val)
+        sub(/[[:space:]]+$/, "", val)
+        print val
+        exit
+      }
+    '
+  fi
+}
+
+spicetify_is_applied() {
+  local spotify_path=$1 backup_version=$2 extension
+  [[ -n ${backup_version} ]] || return 1
+  [[ -r ${spotify_path}/Apps/xpui/index.html ]] || return 1
+  grep -Fq 'spicetifyWrapper.js' "${spotify_path}/Apps/xpui/index.html" || return 1
+  for extension in "${SPICETIFY_EXTENSIONS[@]}"; do
+    [[ -r ${spotify_path}/Apps/xpui/extensions/${extension} ]] || return 1
+    cmp -s -- "${SPICETIFY_EXTENSION_DIR}/${extension}" \
+      "${spotify_path}/Apps/xpui/extensions/${extension}" || return 1
+  done
+}
+
+spotify_configuration_is_current() {
+  local binary=$1 spotify_path=$2 prefs_path=$3
+  local config_file config_dir backup_version extension legacy_extension
+
+  [[ -x ${binary} ]] || return 1
+  config_file=$("${binary}" -c 2> /dev/null) || return 1
+  [[ -r ${config_file} ]] || return 1
+  config_dir=${config_file%/*}
+
+  # shellcheck disable=SC2310 # State queries are used as predicates.
+  spicetify_paths_match "${config_file}" "${spotify_path}" "${prefs_path}" || return 1
+  for extension in "${SPICETIFY_EXTENSIONS[@]}"; do
+    cmp -s -- "${SPICETIFY_EXTENSION_DIR}/${extension}" \
+      "${config_dir}/Extensions/${extension}" || return 1
+    # shellcheck disable=SC2310 # State queries are used as predicates.
+    spicetify_has_extension "${config_file}" "${extension}" || return 1
+  done
+  # shellcheck disable=SC2310 # Legacy state is used as a predicate.
+  spicetify_has_extension "${config_file}" "${SPICETIFY_LEGACY_SETTINGS_EXTENSION}" && return 1
+  [[ ! -e ${config_dir}/Extensions/${SPICETIFY_LEGACY_SETTINGS_EXTENSION} ]] || return 1
+  for legacy_extension in "${SPICETIFY_LEGACY_COMMAND_EXTENSIONS[@]}"; do
+    # shellcheck disable=SC2310 # Legacy state is used as a predicate.
+    spicetify_has_extension "${config_file}" "${legacy_extension}" && return 1
+    [[ ! -e ${config_dir}/Extensions/${legacy_extension} ]] || return 1
+  done
+
+  backup_version=$(spicetify_backup_version "${config_file}")
+  [[ -n ${backup_version} ]] || return 1
+
+  # shellcheck disable=SC2310 # State queries are used as predicates.
+  spicetify_is_applied "${spotify_path}" "${backup_version}" || return 1
+  return 0
 }
 
 configure_spicetify() {
-  local binary=$1 spotify_path=$2 prefs_path=$3 config_file config_dir extension_dir output backup_version
+  local binary=$1 spotify_path=$2 prefs_path=$3
+  local config_file config_dir extension extension_dir output backup_version legacy_extension
+  local needs_apply=0
   local -a apply_command=(backup apply)
 
-  jsh_info "Configuring Spicetify..."
-  if ! output=$("${binary}" config spotify_path "${spotify_path}" prefs_path "${prefs_path}" 2>&1); then
-    jsh_error "Failed to configure Spicetify paths."
-    spicetify_failure_details "${output}"
-    return 1
-  fi
   if ! config_file=$("${binary}" -c 2>&1); then
     jsh_error "Failed to locate the Spicetify configuration."
     spicetify_failure_details "${config_file}"
     return 1
   fi
   config_dir=${config_file%/*}
-  extension_dir="${config_file%/*}/Extensions"
-  install -d -m 0700 -- "${extension_dir}"
-  if cmp -s -- "${SPICETIFY_EXTENSION_SOURCE}" "${extension_dir}/${SPICETIFY_EXTENSION}"; then
-    jsh_note "Spotify settings extension is current."
+  extension_dir="${config_dir}/Extensions"
+
+  # shellcheck disable=SC2310 # State queries are used as predicates.
+  if spicetify_paths_match "${config_file}" "${spotify_path}" "${prefs_path}"; then
+    :
   else
-    install -m 0600 -- "${SPICETIFY_EXTENSION_SOURCE}" "${extension_dir}/${SPICETIFY_EXTENSION}"
-    jsh_success "Spotify settings extension updated."
-  fi
-  if ! output=$("${binary}" config extensions "${SPICETIFY_EXTENSION}" 2>&1); then
-    jsh_error "Failed to enable the Spotify settings extension."
-    spicetify_failure_details "${output}"
-    return 1
+    jsh_info "Configuring Spicetify..."
+    if ! output=$("${binary}" config spotify_path "${spotify_path}" prefs_path "${prefs_path}" 2>&1); then
+      jsh_error "Failed to configure Spicetify paths."
+      spicetify_failure_details "${output}"
+      return 1
+    fi
+    needs_apply=1
   fi
 
-  ensure_spicetify_marketplace "${binary}" "${config_dir}"
-  if output=$(NO_COLOR=1 "${binary}" config 2>&1); then
-    backup_version=$(awk '
-      {
-        line = $0
-        gsub(/\033\[[0-9;]*m/, "", line)
-      }
-      line == "Backup" { in_backup = 1; next }
-      in_backup && $1 == "version" { print $2; exit }
-    ' <<< "${output}")
-    [[ -z ${backup_version} ]] || apply_command=(apply)
+  install -d -m 0700 -- "${extension_dir}"
+  for extension in "${SPICETIFY_EXTENSIONS[@]}"; do
+    if cmp -s -- "${SPICETIFY_EXTENSION_DIR}/${extension}" "${extension_dir}/${extension}"; then
+      jsh_note "Spicetify extension ${extension} is current."
+    else
+      install -m 0600 -- "${SPICETIFY_EXTENSION_DIR}/${extension}" "${extension_dir}/${extension}"
+      jsh_success "Spicetify extension ${extension} updated."
+      needs_apply=1
+    fi
+
+    # shellcheck disable=SC2310 # State queries are used as predicates.
+    if ! spicetify_has_extension "${config_file}" "${extension}"; then
+      if ! output=$("${binary}" config extensions "${extension}" 2>&1); then
+        jsh_error "Failed to enable Spicetify extension ${extension}."
+        spicetify_failure_details "${output}"
+        return 1
+      fi
+      needs_apply=1
+    fi
+  done
+
+  # shellcheck disable=SC2310 # Legacy state is used as a predicate.
+  if spicetify_has_extension "${config_file}" "${SPICETIFY_LEGACY_SETTINGS_EXTENSION}"; then
+    if ! output=$("${binary}" config extensions "${SPICETIFY_LEGACY_SETTINGS_EXTENSION}-" 2>&1); then
+      jsh_error "Failed to disable the renamed Spotify settings extension."
+      spicetify_failure_details "${output}"
+      return 1
+    fi
+    needs_apply=1
+  fi
+  rm -f -- "${extension_dir}/${SPICETIFY_LEGACY_SETTINGS_EXTENSION}"
+
+  for legacy_extension in "${SPICETIFY_LEGACY_COMMAND_EXTENSIONS[@]}"; do
+    # shellcheck disable=SC2310 # Legacy state is used as a predicate.
+    if spicetify_has_extension "${config_file}" "${legacy_extension}"; then
+      if ! output=$("${binary}" config extensions "${legacy_extension}-" 2>&1); then
+        jsh_error "Failed to disable the renamed Spotify command extension ${legacy_extension}."
+        spicetify_failure_details "${output}"
+        return 1
+      fi
+      needs_apply=1
+    fi
+    rm -f -- "${extension_dir}/${legacy_extension}"
+  done
+
+  if [[ -r ${config_file} ]]; then
+    backup_version=$(spicetify_backup_version "${config_file}")
+  fi
+  if [[ -z ${backup_version:-} ]]; then
+    if output=$(NO_COLOR=1 "${binary}" config 2>&1); then
+      backup_version=$(spicetify_backup_version <<< "${output}")
+    fi
+  fi
+  [[ -z ${backup_version:-} ]] || apply_command=(apply)
+
+  # shellcheck disable=SC2310 # State queries are used as predicates.
+  if ((!needs_apply)) && spicetify_is_applied "${spotify_path}" "${backup_version:-}"; then
+    jsh_note "Spicetify is applied."
+    return 0
   fi
 
   jsh_info "Applying Spicetify..."
-  if ! output=$("${binary}" --no-restart "${apply_command[@]}" 2>&1); then
-    jsh_error "Failed to apply Spicetify."
-    spicetify_failure_details "${output}"
-    return 1
-  fi
+  apply_spicetify "${binary}" "${apply_command[@]}" || return 1
   jsh_success "Spicetify applied."
 }
 
 main() {
-  local spotify_path prefs_path locations
+  local spotify_path prefs_path locations spotify_was_running=0 spotify_was_flatpak=0
   local -a spotify_locations=()
+  while (($#)); do
+    case $1 in
+      -y | --yes) JSH_ASSUME_YES=1 ;;
+      *)
+        jsh_error "Unknown option: $1"
+        return 2
+        ;;
+    esac
+    shift
+  done
+
   # shellcheck disable=SC2310 # Missing Spotify state is a supported skip.
   locations=$(spotify_paths) || return 0
   mapfile -t spotify_locations <<< "${locations}"
   spotify_path=${spotify_locations[0]}
   prefs_path=${spotify_locations[1]}
 
-  close_spotify_if_running
+  ensure_spotify_writable "${spotify_path}" || return 1
   ensure_spicetify
+
+  # shellcheck disable=SC2310 # State check is used as a predicate.
+  if spotify_configuration_is_current "${SPICETIFY_BIN}" "${spotify_path}" "${prefs_path}"; then
+    # shellcheck disable=SC2310 # Status check is used as a predicate.
+    if spotify_is_running; then
+      jsh_note "Spotify configuration is current; leaving Spotify open."
+    else
+      jsh_note "Spotify configuration is current."
+    fi
+    return 0
+  fi
+
+  # shellcheck disable=SC2310 # Status checks determine whether Spotify should be restored.
+  if spotify_is_running; then
+    spotify_was_running=1
+    spotify_flatpak_is_running && spotify_was_flatpak=1
+  fi
+
+  # shellcheck disable=SC2310 # Shutdown failure is handled explicitly.
+  close_spotify_if_running || return 1
   configure_spicetify "${SPICETIFY_BIN}" "${spotify_path}" "${prefs_path}"
-  jsh_success "Spotify configuration complete; settings apply on next launch."
+  if ((spotify_was_running)); then
+    reopen_spotify "${spotify_was_flatpak}" || return 1
+    jsh_success "Spotify configuration complete. Spotify reopened."
+  else
+    jsh_success "Spotify configuration complete. Settings apply on next launch."
+  fi
 }
 
 if [[ ${JSH_SPOTIFY_SOURCE_ONLY:-0} != 1 ]]; then

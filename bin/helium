@@ -2,10 +2,14 @@
 ##% helium
 ## status ## Check whether Helium is patched
 ## apply ## Upgrade and patch Helium
+## open ## Verify and open Helium
+## stop ## Close Helium
+## restart ## Close and reopen Helium
 ## launch ## Verify and launch Helium
 ## reset ## Reset the Helium profile
 ## help ## Show help
 ##? apply --quit ## Quit a running Helium instance before applying
+##? open -- ## Pass remaining arguments to Helium
 ##? launch -- ## Pass remaining arguments to Helium
 ##? reset --all ## Delete extension data during reset
 ##? reset --force ## Skip reset confirmation
@@ -33,13 +37,19 @@ Usage:
   ${SCRIPT_NAME}
   ${SCRIPT_NAME} status
   ${SCRIPT_NAME} apply [--quit]
+  ${SCRIPT_NAME} open [--] [BROWSER_ARGS...]
+  ${SCRIPT_NAME} stop
+  ${SCRIPT_NAME} restart [--] [BROWSER_ARGS...]
   ${SCRIPT_NAME} launch [--] [BROWSER_ARGS...]
   ${SCRIPT_NAME} reset [--all] [--force]
 
 Commands:
   status  Check whether Helium is patched.
   apply   Upgrade Helium and apply the patch.
-  launch  Verify the patch and launch Helium.
+  open    Verify the patch and open Helium.
+  stop    Close Helium.
+  restart Close and reopen Helium.
+  launch  Alias for open.
   reset   Reset the profile, preserving extension data unless --all is used.
 
 With no command, apply the patch when needed. If Helium is already patched,
@@ -74,7 +84,7 @@ case ${1:-} in
   -h | --help | help)
     usage
     ;;
-  status | apply | launch | reset)
+  status | apply | open | stop | restart | launch | reset)
     exec "${PATCH_SCRIPT}" "$@"
     ;;
   *)

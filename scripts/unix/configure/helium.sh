@@ -5,9 +5,10 @@ set -euo pipefail
 IFS=$'\n\t'
 umask 077
 
-SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
-JSH_ROOT=$(cd -- "${SCRIPT_DIR}/../../.." && pwd -P)
-readonly SCRIPT_DIR JSH_ROOT
+if [[ -z ${JSH_ROOT:-} ]]; then
+  JSH_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../../.." && pwd -P)
+fi
+readonly JSH_ROOT
 for library_file in "${JSH_ROOT}"/lib/*; do
   [[ -f ${library_file} && -x ${library_file} ]] || continue
   # shellcheck source=/dev/null
@@ -20,6 +21,9 @@ readonly PROFILE_HELPER="${JSH_ROOT}/conf/helium/helium-profile.js"
 readonly EXPECTED_BUNDLE_ID="net.imput.helium"
 readonly EXPECTED_TEAM_ID="S4Q33XPHB4"
 readonly MIN_CHROMIUM_MILESTONE="152"
+HELIUM_LATEST_VERSION=
+HELIUM_LATEST_URL=
+HELIUM_LATEST_SHA256=
 PLATFORM="${HELIUM_PLATFORM:-${PLATFORM:-$(uname -s)}}"
 readonly PLATFORM
 case ${PLATFORM} in
@@ -54,13 +58,19 @@ usage() {
 Usage:
   helium [apply [--quit]]
   helium status
+  helium open [--] [BROWSER_ARGS...]
+  helium stop
+  helium restart [--] [BROWSER_ARGS...]
   helium launch [--] [BROWSER_ARGS...]
   helium reset [--all] [--force]
 
 apply   Upgrade Helium, install and pin extensions, and apply hardened settings.
         --quit authorizes quitting a running Helium instance without prompting.
 status  Check whether Helium is patched.
-launch  Verify the profile and launch Helium in a hardened regular window.
+open    Verify the profile and open Helium in a hardened regular window.
+stop    Close Helium.
+restart Close and reopen Helium.
+launch  Alias for open.
 reset   Reset the Helium profile while preserving extension data.
   --all also deletes extension data; --force skips confirmation.
 EOF
@@ -166,11 +176,23 @@ stop_for_apply() {
 }
 
 upgrade_app() {
-  local brew_command milestone
+  local brew_command milestone installed
   if [[ ${PLATFORM} == Linux ]]; then
-    require_command python3
-    PYTHONPATH="${JSH_ROOT}/lib${PYTHONPATH:+:${PYTHONPATH}}" /usr/bin/env python3 -m jsh.apps apply --only helium --yes ||
-      die 1 "The native application installer could not install or update Helium."
+    helium_latest_release
+    installed=$(helium_installed_version || true)
+    if [[ -n ${installed} ]] && dpkg --compare-versions "${installed}" ge "${HELIUM_LATEST_VERSION}"; then
+      return
+    fi
+    if [[ ${JSH_CONFIGURE_DRY_RUN:-0} == 1 || ${JSH_INSTALL_DRY_RUN:-0} == 1 ]]; then
+      jsh_detail "Would install Helium ${HELIUM_LATEST_VERSION}."
+      return
+    fi
+    jsh_debian_install_package helium helium-bin "${HELIUM_LATEST_VERSION}" \
+      "${HELIUM_LATEST_URL}" "${HELIUM_LATEST_SHA256}" helium ||
+      die 1 "The native application installer could not install Helium."
+    installed=$(helium_installed_version || true)
+    [[ -n ${installed} ]] && dpkg --compare-versions "${installed}" ge "${HELIUM_LATEST_VERSION}" ||
+      die 1 "The installed Helium package did not converge."
     return
   fi
   brew_command="$(command -v brew || true)"
@@ -192,8 +214,57 @@ upgrade_app() {
   fi
 }
 
+helium_latest_release() {
+  local release asset name digest
+  require_command curl
+  require_command jq
+  release=$(curl -fsSL -H 'Accept: application/vnd.github+json' \
+    'https://api.github.com/repos/imputnet/helium-linux/releases/latest') ||
+    die 1 "Cannot resolve the latest Helium release."
+  asset=$(jq -cer '.assets[] | select(.name | test("amd64.*[.]deb$"))' <<< "${release}" | head -n 1) ||
+    die 1 "The latest Helium release has no AMD64 Debian package."
+  name=$(jq -r '.name' <<< "${asset}")
+  HELIUM_LATEST_VERSION=$(sed -nE 's/^helium-bin_([^_]+)_amd64.*[.]deb$/\1/p' <<< "${name}")
+  HELIUM_LATEST_URL=$(jq -r '.browser_download_url' <<< "${asset}")
+  digest=$(jq -r '.digest // empty' <<< "${asset}")
+  HELIUM_LATEST_SHA256=${digest#sha256:}
+  [[ -n ${HELIUM_LATEST_VERSION} && ${HELIUM_LATEST_URL} == https://* ]] ||
+    die 1 "The latest Helium package metadata is invalid."
+  [[ -z ${HELIUM_LATEST_SHA256} || ${HELIUM_LATEST_SHA256} =~ ^[0-9a-f]{64}$ ]] ||
+    die 1 "The latest Helium package checksum is invalid."
+}
+
+helium_installed_version() {
+  local installed
+  installed=$(dpkg-query -W -f='${db:Status-Status}\t${Version}' helium-bin 2>/dev/null) || return 1
+  [[ ${installed%%$'\t'*} == installed ]] || return 1
+  printf '%s\n' "${installed#*$'\t'}"
+}
+
+install_linux_launcher() {
+  local applications=${XDG_DATA_HOME:-${HOME}/.local/share}/applications
+  local temporary ensure_status
+  [[ ${PLATFORM} == Linux ]] || return
+  mkdir -p "${JSH_ROOT}/tmp"
+  temporary=$(mktemp "${JSH_ROOT}/tmp/helium.desktop.XXXXXXXXXX")
+  jsh_interrupt_cleanup_path "${temporary}"
+  {
+    printf '[Desktop Entry]\nType=Application\nName=Helium\n'
+    printf 'Exec=%s open -- %%U\n' "$(jsh_desktop_executable "${JSH_ROOT}/bin/helium")"
+    printf 'Icon=helium\nCategories=Network;WebBrowser;\n'
+    printf 'MimeType=text/html;x-scheme-handler/http;x-scheme-handler/https;\n'
+    printf 'StartupNotify=true\nStartupWMClass=Helium\n'
+  } > "${temporary}"
+  jsh_ensure_file "${applications}/helium.desktop" "${temporary}" 0644 || {
+    ensure_status=$?
+    rm -f -- "${temporary}"
+    [[ ${ensure_status} == 1 ]] || return "${ensure_status}"
+  }
+  rm -f -- "${temporary}"
+}
+
 verify_app() {
-  local milestone
+  local milestone installed
   if [[ ${PLATFORM} == Darwin ]]; then
     [[ -d "${APP_PATH}" ]] || die 1 "Helium is not installed. Run apply first."
     local bundle_id team_id
@@ -205,7 +276,9 @@ verify_app() {
     /usr/sbin/spctl -a -t exec "${APP_PATH}" >/dev/null 2>&1 || die 1 "Gatekeeper rejected Helium."
   else
     app_executable >/dev/null || die 1 "Helium is not installed. Run apply first."
-    PYTHONPATH="${JSH_ROOT}/lib${PYTHONPATH:+:${PYTHONPATH}}" /usr/bin/env python3 -m jsh.apps check --only helium --json >/dev/null ||
+    helium_latest_release
+    installed=$(helium_installed_version || true)
+    [[ -n ${installed} ]] && dpkg --compare-versions "${installed}" ge "${HELIUM_LATEST_VERSION}" ||
       die 1 "The installed Helium package does not match the managed version."
   fi
   milestone="$(chromium_milestone)"
@@ -243,6 +316,7 @@ install_extension_policy() {
     "Could not obtain administrator approval. The Helium extension policy was not changed; rerun setup and approve the password prompt."
   /bin/mkdir -p "${JSH_ROOT}/tmp"
   staged_policy="$(/usr/bin/mktemp "${JSH_ROOT}/tmp/helium-policy.XXXXXX")"
+  jsh_interrupt_cleanup_path "${staged_policy}"
   if [[ ${PLATFORM} == Darwin ]]; then
     if [[ -e "${POLICY_PATH}" ]]; then
       /usr/bin/sudo /bin/cp "${POLICY_PATH}" "${staged_policy}" ||
@@ -533,6 +607,10 @@ apply() {
     *) die 64 "apply accepts only --quit." ;;
   esac
   [[ "$#" -le 1 ]] || die 64 "apply accepts only --quit."
+  if [[ ${JSH_CONFIGURE_DRY_RUN:-0} == 1 ]]; then
+    jsh_detail 'Would inspect, update, and harden Helium.'
+    return
+  fi
   require_command node
   require_command sqlite3
   if [[ ${PLATFORM} == Darwin ]]; then
@@ -547,6 +625,7 @@ apply() {
   stop_for_apply "${quit}"
   upgrade_app
   verify_app
+  install_linux_launcher
   install_extension_policy
   apply_profile
   configure_extensions
@@ -652,12 +731,24 @@ launch() {
   fi
 }
 
+stop() {
+  [[ "$#" -eq 0 ]] || die 64 "stop accepts no arguments."
+  stop_for_apply true
+}
+
+restart() {
+  stop
+  launch "$@"
+}
+
 main() {
   local command="${1:-apply}"
   case "${command}" in
     apply) [[ "$#" -eq 0 ]] || shift; apply "$@" ;;
     status) shift; patch_status "$@" ;;
-    launch) shift; launch "$@" ;;
+    open | launch) shift; launch "$@" ;;
+    stop) shift; stop "$@" ;;
+    restart) shift; restart "$@" ;;
     reset) shift; reset_profile "$@" ;;
     -h|--help) usage ;;
     *) usage >&2; exit 64 ;;

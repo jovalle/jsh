@@ -21,8 +21,17 @@ CAFE_DURATION="${CAFE_DURATION:-0}"
 # Default inhibit reasons
 CAFE_REASON="${CAFE_REASON:-User requested via cafe command}"
 
+# Platform and backend overrides keep behavior deterministic in tests.
+CAFE_PLATFORM="${CAFE_PLATFORM:-$(uname -s)}"
+CAFE_CAFFEINATE_BIN="${CAFE_CAFFEINATE_BIN:-caffeinate}"
+
 # PID file for background mode
 readonly CAFE_PID_FILE="${XDG_RUNTIME_DIR:-/tmp}/cafe.${USER:-$(id -un)}.pid"
+
+CAFE_ACTIVE_PID=
+CAFE_BACKEND_PID=
+CAFE_READY_FILE=
+CAFE_STOP_FILE=
 
 # =============================================================================
 # Output
@@ -111,6 +120,8 @@ Options:
   -r, --reason TEXT    Set the displayed inhibit reason
       --status         Show background status
       --stop           Stop the background instance
+      --xfce-status    Print XFCE Genmon status
+      --xfce-toggle    Toggle Cafe from XFCE Genmon
   -v, --verbose        Show debug output
   -h, --help           Show help
       --version        Show version
@@ -178,6 +189,83 @@ format_duration() {
   fi
 }
 
+render_tui_frame() {
+  local frame=$(( $1 % 12 )) elapsed=$2
+  local lines=${LINES:-24} columns=${COLUMNS:-80}
+  local hours=$((elapsed / 3600)) minutes=$(((elapsed % 3600) / 60)) seconds=$((elapsed % 60))
+  local -a steam=(
+    '•    ' ' •   ' '  •  ' '   • ' '    •' '   • '
+    '  •  ' ' •   ' '•    ' ' •   ' '  •  ' '   • '
+  )
+
+  if ((lines <= 3 || columns <= 12)); then
+    printf 'Cafe'
+    return
+  fi
+
+  if ((lines <= 10 || columns <= 24)); then
+    printf 'Cafe %s\nCtrl+C to stop' "${steam[frame]// /}"
+    return
+  fi
+
+  local rule
+  printf -v rule '%*s' "${columns}" ''
+  rule=${rule// /=}
+  printf '%s\n%s\n   Cafe\n   %02dh %02dm %02ds\n   Method %s\n   Ctrl+C to stop\n%s' \
+    "${rule}" "   ${steam[frame]}" "${hours}" "${minutes}" "${seconds}" \
+    "${CAFE_METHOD:-unknown}" "${rule}"
+}
+
+enter_tui() {
+  printf '\033[?1049h\033[H\033[?25l'
+}
+
+leave_tui() {
+  printf '\033[?25h\033[?1049l'
+}
+
+wait_for_process() {
+  local process_pid=$1 process_status
+  CAFE_ACTIVE_PID=${process_pid}
+  if wait "${process_pid}"; then
+    process_status=0
+  else
+    process_status=$?
+  fi
+  CAFE_ACTIVE_PID=
+  return "${process_status}"
+}
+
+run_tracked() {
+  "$@" &
+  wait_for_process "$!"
+}
+
+cleanup_active_state() {
+  [[ -z "${CAFE_STOP_FILE}" ]] || : >"${CAFE_STOP_FILE}"
+  if [[ -n "${CAFE_ACTIVE_PID}" ]]; then
+    kill "${CAFE_ACTIVE_PID}" 2>/dev/null || true
+    wait "${CAFE_ACTIVE_PID}" 2>/dev/null || true
+    CAFE_ACTIVE_PID=
+  fi
+  if [[ -n "${CAFE_BACKEND_PID}" ]]; then
+    kill "${CAFE_BACKEND_PID}" 2>/dev/null || true
+    wait "${CAFE_BACKEND_PID}" 2>/dev/null || true
+    CAFE_BACKEND_PID=
+  fi
+  [[ -z "${CAFE_READY_FILE}" ]] || rm -f "${CAFE_READY_FILE}"
+  [[ -z "${CAFE_STOP_FILE}" ]] || rm -f "${CAFE_STOP_FILE}"
+}
+
+handle_signal() {
+  local signal=$1 exit_status=130
+  [[ "${signal}" != TERM ]] || exit_status=143
+  cleanup_active_state
+  printf '\n'
+  info "Stopped"
+  exit "${exit_status}"
+}
+
 # Check if background cafe is running
 is_running() {
   if [[ -f "${CAFE_PID_FILE}" ]]; then
@@ -236,6 +324,53 @@ stop_cafe() {
   fi
 }
 
+show_xfce_status() {
+  local icon tip root
+  if is_running; then
+    icon=cafe-on.svg
+    tip="Cafe: Active (Sleep disabled - Click to allow sleep)"
+  else
+    icon=cafe-off.svg
+    tip="Cafe: Inactive (Normal sleep - Click to disable sleep)"
+  fi
+
+  root=${JSH_ROOT:-${HOME}/.jsh}
+  printf '<img>%s/assets/icons/%s</img><tool>%s</tool><click>%s/bin/cafe --xfce-toggle</click>\n' \
+    "${root}" "${icon}" "${tip}" "${root}"
+}
+
+toggle_xfce() {
+  local cafe_command plugin_file id
+  cafe_command=${BASH_SOURCE[0]}
+
+  if is_running; then
+    stop_cafe >/dev/null 2>&1 || true
+    xfconf-query -c xfce4-screensaver -p /saver/enabled -s true 2>/dev/null || true
+    xfconf-query -c xfce4-screensaver -p /lock/enabled -s true 2>/dev/null || true
+    xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/dpms-enabled -s true 2>/dev/null || true
+    xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/presentation-mode -s false 2>/dev/null || true
+    DISPLAY="${DISPLAY:-:0}" xset +dpms 2>/dev/null || true
+    DISPLAY="${DISPLAY:-:0}" xset s on 2>/dev/null || true
+  else
+    "${cafe_command}" -b -d -s -i >/dev/null 2>&1 || true
+    xfconf-query -c xfce4-screensaver -p /saver/enabled -s false 2>/dev/null || true
+    xfconf-query -c xfce4-screensaver -p /lock/enabled -s false 2>/dev/null || true
+    xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/dpms-enabled -s false 2>/dev/null || true
+    xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/presentation-mode -n -t bool -s true 2>/dev/null || true
+    DISPLAY="${DISPLAY:-:0}" xset -dpms 2>/dev/null || true
+    DISPLAY="${DISPLAY:-:0}" xset s off 2>/dev/null || true
+    DISPLAY="${DISPLAY:-:0}" xfce4-screensaver-command -d 2>/dev/null || true
+  fi
+
+  for plugin_file in "${HOME}/.config/xfce4/panel"/genmon-*.rc; do
+    [[ -r "${plugin_file}" ]] || continue
+    if grep -q -- '--xfce-status' "${plugin_file}" 2>/dev/null; then
+      id=$(basename "${plugin_file}" .rc | sed 's/genmon-//')
+      DISPLAY="${DISPLAY:-:0}" xfce4-panel --plugin-event="genmon-${id}:refresh:bool:true" 2>/dev/null || true
+    fi
+  done
+}
+
 # =============================================================================
 # Inhibit Implementations
 # =============================================================================
@@ -259,18 +394,13 @@ run_caffeinate() {
   # -s: prevent system sleep
   [[ "${system}" == "true" ]] && args+=(-s)
 
-  # -t: timeout
-  if [[ "${duration}" -gt 0 ]]; then
-    args+=(-t "${duration}")
-  fi
-
-  # -w: wait for process (when wrapping a command)
   if [[ ${#cmd[@]} -gt 0 ]]; then
     debug "Running: caffeinate ${args[*]} -- ${cmd[*]}"
-    caffeinate "${args[@]}" -- "${cmd[@]}"
+    run_tracked "${CAFE_CAFFEINATE_BIN}" "${args[@]}" -- "${cmd[@]}"
   else
-    debug "Running: caffeinate ${args[*]}"
-    caffeinate "${args[@]}"
+    [[ "${duration}" -gt 0 ]] && cmd=(sleep "${duration}") || cmd=(sleep infinity)
+    debug "Running: caffeinate ${args[*]} -- ${cmd[*]}"
+    run_tracked "${CAFE_CAFFEINATE_BIN}" "${args[@]}" -- "${cmd[@]}"
   fi
 }
 
@@ -284,56 +414,67 @@ run_systemd_inhibit() {
   shift 4
   local cmd=("$@")
 
-  # Build sleep command for when no user command is provided
-  local sleep_cmd
-  if [[ "${duration}" -gt 0 ]]; then
-    sleep_cmd="sleep ${duration}"
-  else
-    sleep_cmd="sleep infinity"
+  local what=idle
+  [[ "${system}" != true ]] || what=idle:sleep:shutdown
+  local args=(
+    --what="${what}"
+    --who="${SCRIPT_NAME}"
+    --why="${reason}"
+    --mode=block
+  )
+
+  if [[ ${#cmd[@]} -eq 0 ]]; then
+    [[ "${duration}" -gt 0 ]] && cmd=(sleep "${duration}") || cmd=(sleep infinity)
   fi
+  debug "Running: systemd-inhibit --what=${what} --mode=block"
+  run_tracked systemd-inhibit "${args[@]}" -- "${cmd[@]}" 2>/dev/null
+}
 
-  # Build list of --what values to try (most to least restrictive)
-  # Different inhibit types have different permission requirements:
-  #   idle  - prevent screensaver (usually allowed for regular users)
-  #   sleep - prevent suspend (often requires elevated permissions)
-  local what_variants=()
-  local base_what="idle:sleep"
-  [[ "${display}" == "true" ]] && base_what="${base_what}:handle-lid-switch"
-  what_variants+=("${base_what}")
-  what_variants+=("idle") # Fallback: just idle (most permissive)
+run_powershell_inhibit() {
+  local duration=$1 display=$2
+  shift 4
+  local cmd=("$@") state=0x80000001 attempt command_status=0
+  [[ "${display}" != true ]] || state=0x80000003
 
-  # Try each --what variant
-  local what
-  for what in "${what_variants[@]}"; do
-    # For each --what, try block mode then delay mode
-    local mode
-    for mode in block delay; do
-      local args=(
-        --what="${what}"
-        --who="${SCRIPT_NAME}"
-        --why="${reason}"
-        --mode="${mode}"
-      )
+  CAFE_READY_FILE="${XDG_RUNTIME_DIR:-/tmp}/cafe.${USER:-$(id -un)}.$$.ready"
+  CAFE_STOP_FILE="${XDG_RUNTIME_DIR:-/tmp}/cafe.${USER:-$(id -un)}.$$.stop"
+  rm -f "${CAFE_READY_FILE}" "${CAFE_STOP_FILE}"
+  WSLENV="${WSLENV:+${WSLENV}:}CAFE_READY_FILE:CAFE_STOP_FILE"
+  export CAFE_READY_FILE CAFE_STOP_FILE WSLENV
 
-      if [[ ${#cmd[@]} -gt 0 ]]; then
-        debug "Trying: systemd-inhibit --what=${what} --mode=${mode}"
-        if systemd-inhibit "${args[@]}" -- "${cmd[@]}" 2>/dev/null; then
-          return 0
-        fi
-      else
-        debug "Trying: systemd-inhibit --what=${what} --mode=${mode}"
-        # shellcheck disable=SC2086
-        if systemd-inhibit "${args[@]}" -- ${sleep_cmd} 2>/dev/null; then
-          return 0
-        fi
-      fi
-    done
-    debug "--what=${what} failed, trying simpler variant..."
+  powershell.exe -NoProfile -NonInteractive -Command \
+    "[void][Cafe.NativeMethods]::SetThreadExecutionState(${state}); SetThreadExecutionState; while (-not (Test-Path \$env:CAFE_STOP_FILE)) { Start-Sleep -Milliseconds 50 }; [void][Cafe.NativeMethods]::SetThreadExecutionState(0x80000000)" &
+  CAFE_BACKEND_PID=$!
+
+  for ((attempt = 0; attempt < 250; attempt++)); do
+    [[ ! -e "${CAFE_READY_FILE}" ]] || break
+    if ! kill -0 "${CAFE_BACKEND_PID}" 2>/dev/null; then
+      wait "${CAFE_BACKEND_PID}" 2>/dev/null || true
+      CAFE_BACKEND_PID=
+      cleanup_active_state
+      return 1
+    fi
+    sleep 0.02
   done
+  [[ -e "${CAFE_READY_FILE}" ]] || {
+    cleanup_active_state
+    return 1
+  }
 
-  # All variants failed - return failure to try next method
-  debug "systemd-inhibit failed (likely no session or permissions)"
-  return 1
+  if [[ ${#cmd[@]} -eq 0 ]]; then
+    [[ "${duration}" -gt 0 ]] && cmd=(sleep "${duration}") || cmd=(sleep infinity)
+  fi
+  if run_tracked "${cmd[@]}"; then
+    command_status=0
+  else
+    command_status=$?
+  fi
+  : >"${CAFE_STOP_FILE}"
+  wait "${CAFE_BACKEND_PID}" 2>/dev/null || true
+  CAFE_BACKEND_PID=
+  rm -f "${CAFE_READY_FILE}" "${CAFE_STOP_FILE}"
+  CAFE_READY_FILE='' CAFE_STOP_FILE=''
+  return "${command_status}"
 }
 
 # Linux gnome-session-inhibit
@@ -358,7 +499,7 @@ run_gnome_inhibit() {
 
   if [[ ${#cmd[@]} -gt 0 ]]; then
     debug "Trying: gnome-session-inhibit ${args[*]} -- ${cmd[*]}"
-    if gnome-session-inhibit "${args[@]}" -- "${cmd[@]}" 2>/dev/null; then
+    if run_tracked gnome-session-inhibit "${args[@]}" -- "${cmd[@]}" 2>/dev/null; then
       return 0
     fi
   else
@@ -366,13 +507,13 @@ run_gnome_inhibit() {
     if [[ "${duration}" -gt 0 ]]; then
       # With duration, use timeout to limit the inhibit
       debug "Trying: gnome-session-inhibit ${args[*]} -- sleep ${duration}"
-      if gnome-session-inhibit "${args[@]}" -- sleep "${duration}" 2>/dev/null; then
+      if run_tracked gnome-session-inhibit "${args[@]}" -- sleep "${duration}" 2>/dev/null; then
         return 0
       fi
     else
       # No duration, use --inhibit-ony for indefinite inhibit
       debug "Trying: gnome-session-inhibit ${args[*]} --inhibit-only"
-      if gnome-session-inhibit "${args[@]}" --inhibit-only 2>/dev/null; then
+      if run_tracked gnome-session-inhibit "${args[@]}" --inhibit-only 2>/dev/null; then
         return 0
       fi
     fi
@@ -462,15 +603,19 @@ run_inhibit() {
 
   local methods=()
   local method
+  local method_status=0
 
   # Build list of available methods based on platform
-  case "$(uname -s)" in
+  case "${CAFE_PLATFORM}" in
     Darwin)
-      command -v caffeinate &>/dev/null && methods+=(caffeinate)
+      command -v "${CAFE_CAFFEINATE_BIN}" &>/dev/null && methods+=(caffeinate)
+      ;;
+    WSL)
+      command -v powershell.exe &>/dev/null && methods+=(powershell)
       ;;
     Linux)
-      command -v gnome-session-inhibit &>/dev/null && methods+=(gnome-session-inhibit)
       command -v systemd-inhibit &>/dev/null && methods+=(systemd-inhibit)
+      command -v gnome-session-inhibit &>/dev/null && methods+=(gnome-session-inhibit)
       command -v xdg-screensaver &>/dev/null && methods+=(xdg-screensaver)
       ;;
   esac
@@ -486,21 +631,36 @@ run_inhibit() {
       caffeinate)
         if run_caffeinate "${duration}" "${display}" "${system}" "${cmd[@]}"; then
           return 0
+        else
+          method_status=$?
+        fi
+        ;;
+      powershell)
+        if run_powershell_inhibit "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"; then
+          return 0
+        else
+          method_status=$?
         fi
         ;;
       systemd-inhibit)
         if run_systemd_inhibit "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"; then
           return 0
+        else
+          method_status=$?
         fi
         ;;
       gnome-session-inhibit)
         if run_gnome_inhibit "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"; then
           return 0
+        else
+          method_status=$?
         fi
         ;;
       xdg-screensaver)
         if run_xdg_inhibit "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"; then
           return 0
+        else
+          method_status=$?
         fi
         ;;
       fallback)
@@ -513,6 +673,10 @@ run_inhibit() {
         ;;
     esac
 
+    if [[ ${#cmd[@]} -gt 0 ]]; then
+      return "${method_status}"
+    fi
+
     debug "${method} failed, trying next method..."
   done
 
@@ -521,20 +685,26 @@ run_inhibit() {
 
 # Get the first available method name (for display purposes)
 get_primary_method() {
-  case "$(uname -s)" in
+  case "${CAFE_PLATFORM}" in
     Darwin)
-      command -v caffeinate &>/dev/null && {
+      command -v "${CAFE_CAFFEINATE_BIN}" &>/dev/null && {
         printf 'caffeinate'
         return
       }
       ;;
-    Linux)
-      command -v gnome-session-inhibit &>/dev/null && {
-        printf 'gnome-session-inhibit'
+    WSL)
+      command -v powershell.exe &>/dev/null && {
+        printf 'powershell.exe'
         return
       }
+      ;;
+    Linux)
       command -v systemd-inhibit &>/dev/null && {
         printf 'systemd-inhibit'
+        return
+      }
+      command -v gnome-session-inhibit &>/dev/null && {
+        printf 'gnome-session-inhibit'
         return
       }
       command -v xdg-screensaver &>/dev/null && {
@@ -575,6 +745,14 @@ main() {
         ;;
       --stop)
         stop_cafe
+        exit 0
+        ;;
+      --xfce-status)
+        show_xfce_status
+        exit 0
+        ;;
+      --xfce-toggle)
+        toggle_xfce
         exit 0
         ;;
       -t | --time)
@@ -628,6 +806,8 @@ main() {
   # Get primary method name (for display - actual method may cascade)
   local method
   method=$(get_primary_method)
+  CAFE_METHOD=${method}
+  export CAFE_METHOD
   debug "Primary inhibit method: ${method} (will cascade on failure)"
 
   # Check for existing background process
@@ -636,6 +816,9 @@ main() {
       warn "Cafe is already running in background"
       show_status
       exit 0
+    fi
+    if [[ "${method}" == fallback && ${#cmd[@]} -eq 0 ]]; then
+      die "No supported system inhibit method is available"
     fi
   fi
 
@@ -656,10 +839,21 @@ main() {
   # Background mode
   if [[ "${background}" == "true" ]]; then
     (
+      cleanup_background() {
+        local owner
+        owner=$(cat "${CAFE_PID_FILE}" 2>/dev/null || true)
+        [[ "${owner}" != "${BASHPID}" ]] || rm -f "${CAFE_PID_FILE}"
+      }
+      trap 'cleanup_active_state; cleanup_background' EXIT
+
       # Daemonize
       cd /
       exec >/dev/null 2>&1
       exec </dev/null
+
+      while [[ ! -e "${CAFE_PID_FILE}" ]]; do
+        sleep 0.01
+      done
 
       # Run inhibit with automatic cascade on failure
       if [[ ${#cmd[@]} -gt 0 ]]; then
@@ -682,9 +876,16 @@ main() {
   else
     run_inhibit "${duration}" "${display}" "${system}" "${reason}"
   fi
+
+  if [[ ${#cmd[@]} -eq 0 && "${duration}" -gt 0 ]]; then
+    success "Cafe stopped"
+  fi
 }
 
 # Handle interrupts gracefully
-trap 'printf "\n"; info "Stopped"; exit 130' INT TERM
+trap 'handle_signal INT' INT
+trap 'handle_signal TERM' TERM
 
-main "$@"
+if [[ "${CAFE_SOURCE_ONLY:-0}" != 1 ]]; then
+  main "$@"
+fi

@@ -121,5 +121,6 @@
   },
   "ui_font_size": 16,
   "vim_mode": false,
+  "window_decorations": "server",
   "wrap_guides": [100]
 }

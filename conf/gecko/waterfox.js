@@ -51,6 +51,7 @@ user_pref('places.history.enabled', false);
 user_pref('browser.formfill.enable', false);
 user_pref('privacy.sanitize.sanitizeOnShutdown', false);
 
+user_pref('dom.storage_access.enabled', false);
 user_pref('privacy.globalprivacycontrol.enabled', false);
 user_pref('privacy.globalprivacycontrol.was_ever_enabled', false);
 user_pref('network.http.sendRefererHeader', 2);

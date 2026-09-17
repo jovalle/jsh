@@ -90,6 +90,39 @@ setup() {
   [[ ${status} -eq 23 ]]
 }
 
+@test "dispatches the shared lifecycle command baseline" {
+  launch() { printf 'open:%s\n' "${1:-}"; }
+  stop() { printf 'stop\n'; }
+
+  run main open https://example.test/
+  [[ ${status} -eq 0 ]]
+  [[ ${output} = 'open:https://example.test/' ]]
+
+  run main stop
+  [[ ${status} -eq 0 ]]
+  [[ ${output} = 'stop' ]]
+
+  run main restart
+  [[ ${status} -eq 0 ]]
+  [[ ${output} = $'stop\nopen:' ]]
+
+  run main launch
+  [[ ${status} -eq 0 ]]
+  [[ ${output} = 'open:' ]]
+}
+
+@test "apply dry run stops before browser or profile mutation" {
+  export JSH_CONFIGURE_DRY_RUN=1
+  stop_for_apply() { return 99; }
+  upgrade_app() { return 99; }
+  apply_profile() { return 99; }
+
+  run apply
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == *'Would inspect, update, and harden Helium.'* ]]
+}
+
 @test "Linux policy contains every managed pin and forced extension" {
   local id _name managed
   local -a extension_ids=()
@@ -138,8 +171,21 @@ setup() {
   [[ ${status} -eq 0 ]]
 }
 
-@test "Debian applications list includes Helium" {
-  run grep -Eq '^[[:space:]]*(app[[:space:]]+)?"?helium"?[[:space:]]*$' "${JSH_ROOT}/conf/debian.txt"
+@test "Linux installer delegates Helium to its component lifecycle" {
+  grep -Fq 'scripts/unix/configure/helium.sh' \
+    "${JSH_ROOT}/scripts/linux/install/helium.sh"
+  grep -Fq 'jsh_debian_install_package helium helium-bin' \
+    "${JSH_ROOT}/scripts/unix/configure/helium.sh"
+}
+
+@test "shared implementation accepts readonly caller paths" {
+  run bash -c '
+    SCRIPT_DIR=$1/scripts/linux/install
+    readonly SCRIPT_DIR
+    JSH_ROOT=$1
+    readonly JSH_ROOT
+    source "$JSH_ROOT/scripts/unix/configure/helium.sh"
+  ' _ "${JSH_ROOT}"
 
   [[ ${status} -eq 0 ]]
 }
