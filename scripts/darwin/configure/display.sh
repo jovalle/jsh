@@ -14,8 +14,9 @@ done
 unset library_file
 
 confirm() {
+  [[ ${JSH_ASSUME_YES:-0} == 1 ]] && return 0
   jsh_prompt "Configure macOS display resolutions? [y/N]: "
-  if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then answer=y; else read -r answer || answer=; fi
+  read -r answer || answer=
   [[ "${answer}" =~ ^[Yy]$ ]]
 }
 
@@ -25,6 +26,13 @@ main() {
   local current_logical current_backing current_scaling current_ppi
   local proposed_logical proposed_backing proposed_scaling proposed_ppi
   local -a display_args=()
+  local arg
+
+  for arg in "$@"; do
+    case "${arg}" in
+      -y | --yes) JSH_ASSUME_YES=1 ;;
+    esac
+  done
 
   [[ "$(uname -s)" == Darwin ]] || {
     jsh_note "Skipping macOS display resolution: macOS not detected."
@@ -47,16 +55,28 @@ main() {
     return
   }
 
-  jsh_info "Planned display resolution changes:"
   while IFS=$'\t' read -r display_arg label physical_size \
     current_logical current_backing current_scaling current_ppi \
     proposed_logical proposed_backing proposed_scaling proposed_ppi; do
     [[ -n "${display_arg}" ]] || continue
+    if [[ "${current_logical}" == "${proposed_logical}" &&
+          "${current_backing}" == "${proposed_backing}" &&
+          "${current_scaling}" == "${proposed_scaling}" ]]; then
+      continue
+    fi
+    if ((${#display_args[@]} == 0)); then
+      jsh_info "Planned display resolution changes:"
+    fi
     display_args+=("${display_arg}")
     jsh_detail "${label} (${physical_size})"
     jsh_detail "  Current: ${current_logical} logical, ${current_backing} backing, scaling:${current_scaling}, ${current_ppi} effective PPI"
     jsh_detail "  Proposed: ${proposed_logical} logical, ${proposed_backing} backing, scaling:${proposed_scaling}, ${proposed_ppi} effective PPI"
   done <<< "${profile}"
+
+  if ((${#display_args[@]} == 0)); then
+    jsh_note "macOS display resolutions are already current."
+    return 0
+  fi
 
   confirm || {
     jsh_note "Skipping macOS display resolution."

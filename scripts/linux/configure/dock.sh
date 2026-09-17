@@ -75,6 +75,7 @@ find_xfce_dock_panel() {
 write_pins() {
   local target=$1 pins=$2 temporary
   temporary=$(mktemp "${target}.XXXXXX")
+  jsh_interrupt_cleanup_path "${temporary}"
   awk -v pins="${pins}" '
     BEGIN { section=0; found=0 }
     /^\[user\]$/ { section=1; print; next }
@@ -203,7 +204,13 @@ configure_xfce_dock() {
 }
 
 main() {
-  local desktop pins
+  local desktop pins arg answer
+  for arg in "$@"; do
+    case "${arg}" in
+      -y | --yes) JSH_ASSUME_YES=1 ;;
+    esac
+  done
+
   [[ "$(uname -s)" == Linux ]] || return
   desktop=$(jsh_linux_desktop)
   case "${desktop}" in
@@ -223,7 +230,7 @@ main() {
   jsh_detail "This will add installed Jsh applications to the ${desktop^^} dock."
   if [[ ${JSH_ASSUME_YES:-0} != 1 ]]; then
     jsh_prompt "Configure the ${desktop^^} application dock? [y/N]: "
-    if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then answer=y; else read -r answer || answer=; fi
+    read -r answer || answer=
     [[ "${answer}" =~ ^[Yy]$ ]] || {
       jsh_note "Skipping application dock."
       return

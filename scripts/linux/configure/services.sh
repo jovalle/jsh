@@ -15,6 +15,8 @@ unset library_file
 
 DRY_RUN=${JSH_CONFIGURE_DRY_RUN:-0}
 USER_UNITS_CHANGED=0
+SSH_AGENT_CHANGED=0
+SSH_AGENT_UNIT=ssh-agent.service
 
 install_user_text() {
   local destination=$1 content=$2 temporary
@@ -28,9 +30,80 @@ install_user_text() {
   USER_UNITS_CHANGED=1
   mkdir -p "$(dirname -- "${destination}")"
   temporary=$(mktemp "${destination}.XXXXXX")
+  jsh_interrupt_cleanup_path "${temporary}"
   printf '%s\n' "${content}" > "${temporary}"
   install -m 0644 "${temporary}" "${destination}"
   rm -f "${temporary}"
+}
+
+remove_managed_text() {
+  local destination=$1 content=$2 unit=${3:-}
+  [[ -e "${destination}" || -L "${destination}" ]] || return 0
+  if [[ ! -r "${destination}" || "$(< "${destination}")" != "${content}" ]]; then
+    jsh_error "Refusing to remove modified managed file: ${destination}"
+    return 1
+  fi
+  if [[ "${DRY_RUN}" == 1 ]]; then
+    jsh_detail "Would remove ${destination}"
+    return
+  fi
+  if [[ -n "${unit}" ]]; then
+    systemctl --user disable --now "${unit}"
+  fi
+  rm -f "${destination}"
+  USER_UNITS_CHANGED=1
+  SSH_AGENT_CHANGED=1
+}
+
+ssh_agent_socket_path() {
+  local listen
+  listen=$(systemctl --user show ssh-agent.socket --property=Listen --value 2> /dev/null || true)
+  printf '%s\n' "${listen%% *}"
+}
+
+ssh_agent_service_socket_path() {
+  local assignment environment
+  local -a assignments=()
+  environment=$(systemctl --user show ssh-agent.service --property=Environment --value 2> /dev/null || true)
+  read -r -a assignments <<< "${environment}"
+  for assignment in "${assignments[@]}"; do
+    case "${assignment}" in
+      SSH_AUTH_SOCK=*) printf '%s\n' "${assignment#SSH_AUTH_SOCK=}"; return ;;
+    esac
+  done
+}
+
+configure_ssh_agent() {
+  local legacy_environment legacy_service service_path socket_path
+  legacy_service='[Unit]
+Description=SSH Agent
+
+[Service]
+Type=simple
+Environment=SSH_AUTH_SOCK=%t/ssh-agent.socket
+ExecStart=/usr/bin/ssh-agent -D -a $SSH_AUTH_SOCK
+
+[Install]
+WantedBy=default.target'
+  legacy_environment='SSH_AUTH_SOCK="${XDG_RUNTIME_DIR}/ssh-agent.socket"'
+
+  if ! systemctl --user cat ssh-agent.socket > /dev/null 2>&1; then
+    install_user_text "${HOME}/.config/systemd/user/ssh-agent.service" "${legacy_service}"
+    install_user_text "${HOME}/.config/environment.d/ssh-agent.conf" "${legacy_environment}"
+    return
+  fi
+
+  socket_path=$(ssh_agent_socket_path)
+  service_path=$(ssh_agent_service_socket_path)
+  if [[ -n "${socket_path}" && -n "${service_path}" && "${socket_path}" != "${service_path}" ]]; then
+    jsh_note "Repairing SSH agent socket mismatch: ${service_path} != ${socket_path}"
+  fi
+
+  remove_managed_text "${HOME}/.config/systemd/user/ssh-agent.service" \
+    "${legacy_service}" ssh-agent.service
+  remove_managed_text "${HOME}/.config/environment.d/ssh-agent.conf" \
+    "${legacy_environment}"
+  SSH_AGENT_UNIT=ssh-agent.socket
 }
 
 enable_user_unit() {
@@ -56,7 +129,23 @@ enable_user_unit() {
   fi
 }
 
+activate_ssh_agent() {
+  if [[ "${DRY_RUN}" == 1 || "${SSH_AGENT_CHANGED}" == 0 ]]; then
+    enable_user_unit "${SSH_AGENT_UNIT}"
+    return
+  fi
+  systemctl --user enable "${SSH_AGENT_UNIT}"
+  systemctl --user restart "${SSH_AGENT_UNIT}"
+}
+
 main() {
+  local arg answer
+  for arg in "$@"; do
+    case "${arg}" in
+      -y | --yes) JSH_ASSUME_YES=1 ;;
+    esac
+  done
+
   [[ "$(uname -s)" == Linux ]] || return
   command -v systemctl > /dev/null 2>&1 || {
     jsh_error "systemctl is required to configure user services."
@@ -66,26 +155,14 @@ main() {
   jsh_detail "This will configure SSH, GPG, and Podman user services."
   if [[ ${JSH_ASSUME_YES:-0} != 1 ]]; then
     jsh_prompt "Configure Linux user services? [y/N]: "
-    if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then answer=y; else read -r answer || answer=; fi
+    read -r answer || answer=
     [[ "${answer}" =~ ^[Yy]$ ]] || {
       jsh_note "Skipping Linux user services."
       return
     }
   fi
 
-  install_user_text "${HOME}/.config/systemd/user/ssh-agent.service" \
-    "[Unit]
-Description=SSH Agent
-
-[Service]
-Type=simple
-Environment=SSH_AUTH_SOCK=%t/ssh-agent.socket
-ExecStart=/usr/bin/ssh-agent -D -a \$SSH_AUTH_SOCK
-
-[Install]
-WantedBy=default.target"
-  install_user_text "${HOME}/.config/environment.d/ssh-agent.conf" \
-    'SSH_AUTH_SOCK="${XDG_RUNTIME_DIR}/ssh-agent.socket"'
+  configure_ssh_agent
   install_user_text "${HOME}/.config/environment.d/podman.conf" \
     'DOCKER_HOST="unix://${XDG_RUNTIME_DIR}/podman/podman.sock"'
 
@@ -94,7 +171,7 @@ WantedBy=default.target"
   elif ((USER_UNITS_CHANGED)); then
     systemctl --user daemon-reload
   fi
-  enable_user_unit ssh-agent.service
+  activate_ssh_agent
   enable_user_unit gpg-agent.socket
   enable_user_unit podman.socket
   jsh_success "Linux user services configured."

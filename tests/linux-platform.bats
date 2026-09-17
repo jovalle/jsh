@@ -32,6 +32,15 @@ prerequisite_path() {
   printf '%s\n' "${directory}"
 }
 
+load_ssh_agent_service_functions() {
+  local script="${JSH_ROOT}/scripts/linux/configure/services.sh"
+  eval "$(sed -n '/^remove_managed_text() {$/,/^}$/p' "${script}")"
+  eval "$(sed -n '/^ssh_agent_socket_path() {$/,/^}$/p' "${script}")"
+  eval "$(sed -n '/^ssh_agent_service_socket_path() {$/,/^}$/p' "${script}")"
+  eval "$(sed -n '/^configure_ssh_agent() {$/,/^}$/p' "${script}")"
+  eval "$(sed -n '/^activate_ssh_agent() {$/,/^}$/p' "${script}")"
+}
+
 @test "requires Python 3 during Debian-family installation" {
   linux_package_manager() { printf '%s\n' apt-get; }
   install_linux_prerequisites() { printf '%s\n' "$*"; }
@@ -41,6 +50,8 @@ prerequisite_path() {
   output=$(PATH="$(prerequisite_path)" install_prerequisites install 0)
 
   [[ " ${output} " = *' python3 '* ]]
+  [[ " ${output} " = *' jq '* ]]
+  [[ " ${output} " = *' curl '* ]]
 }
 
 @test "uses the Python package name during Arch-family installation" {
@@ -52,6 +63,8 @@ prerequisite_path() {
   output=$(PATH="$(prerequisite_path)" install_prerequisites install 0)
 
   [[ " ${output} " = *' python '* ]]
+  [[ " ${output} " = *' jq '* ]]
+  [[ " ${output} " = *' curl '* ]]
 }
 
 @test "does not require Python for the lightweight runtime" {
@@ -104,10 +117,119 @@ prerequisite_path() {
   [[ " ${NATIVE_PACKAGES[*]} " = *' python3-poetry '* ]]
   [[ " ${NATIVE_PACKAGES[*]} " != *' poetry '* ]]
   [[ " ${NATIVE_PACKAGES[*]} " = *' systemd-zram-generator '* ]]
+  [[ " ${NATIVE_PACKAGES[*]} " = *' nodejs '* ]]
+  [[ " ${NATIVE_PACKAGES[*]} " = *' sqlite3 '* ]]
+}
+
+@test "does not refresh package metadata when native packages are current" {
+  local calls="${BATS_TEST_TMPDIR}/native-calls"
+  DISTRO_FAMILY=debian
+  NATIVE_PACKAGES=(curl)
+  DRY_RUN=0
+  NATIVE_PREPARED=0
+  [[ ${NATIVE_PREPARED} == 0 ]]
+  package_installed() { [[ $1 != light-locker ]]; }
+  prepare_native_packages() { printf '%s\n' prepare >> "${calls}"; }
+  jsh_note() { :; }
+  jsh_success() { :; }
+  jsh_error() { :; }
+
+  install_native_packages
+
+  [[ ! -e ${calls} ]]
+}
+
+@test "fails when a Flatpak is still absent after installation" {
+  FLATPAK_APPLICATIONS=(com.example.App)
+  [[ ${FLATPAK_APPLICATIONS[0]} == com.example.App ]]
+  DRY_RUN=0
+  flatpak() {
+    case $1 in
+      info) return 1 ;;
+      remote-add | install) return 0 ;;
+    esac
+  }
+  jsh_success() { :; }
+  jsh_note() { :; }
+  jsh_error() { printf '%s\n' "$*"; }
+
+  run install_flatpaks
+
+  [[ ${status} -ne 0 ]]
+  [[ ${output} == *'Flatpak verification failed: com.example.App'* ]]
+}
+
+@test "installs Syncthing natively on every Linux family" {
+  local release
+
+  for release in arch fedora debian; do
+    write_os_release "ID=${release}"
+    select_native_packages
+    [[ " ${NATIVE_PACKAGES[*]} " = *' syncthing '* ]]
+  done
+}
+
+@test "repairs the managed SSH agent socket mismatch idempotently" {
+  local calls="${BATS_TEST_TMPDIR}/systemctl-calls"
+  export HOME="${BATS_TEST_TMPDIR}/home"
+  mkdir -p "${HOME}/.config/systemd/user" "${HOME}/.config/environment.d"
+  printf '%s\n' '[Unit]
+Description=SSH Agent
+
+[Service]
+Type=simple
+Environment=SSH_AUTH_SOCK=%t/ssh-agent.socket
+ExecStart=/usr/bin/ssh-agent -D -a $SSH_AUTH_SOCK
+
+[Install]
+WantedBy=default.target' > "${HOME}/.config/systemd/user/ssh-agent.service"
+  printf '%s\n' 'SSH_AUTH_SOCK="${XDG_RUNTIME_DIR}/ssh-agent.socket"' \
+    > "${HOME}/.config/environment.d/ssh-agent.conf"
+  systemctl() {
+    printf '%s\n' "$*" >> "${calls}"
+    case "$*" in
+      '--user cat ssh-agent.socket') return 0 ;;
+      '--user show ssh-agent.socket --property=Listen --value')
+        printf '%s\n' '/run/user/1000/openssh_agent (Stream)'
+        ;;
+      '--user show ssh-agent.service --property=Environment --value')
+        printf '%s\n' 'SSH_AUTH_SOCK=/run/user/1000/ssh-agent.socket'
+        ;;
+    esac
+  }
+  jsh_error() { printf '%s\n' "$*"; }
+  jsh_note() { :; }
+  export DRY_RUN=0
+  USER_UNITS_CHANGED=0
+  SSH_AGENT_CHANGED=0
+  SSH_AGENT_UNIT=ssh-agent.service
+  load_ssh_agent_service_functions
+
+  configure_ssh_agent
+
+  [[ ! -e "${HOME}/.config/systemd/user/ssh-agent.service" ]]
+  [[ ! -e "${HOME}/.config/environment.d/ssh-agent.conf" ]]
+  [[ "${SSH_AGENT_UNIT}" = ssh-agent.socket ]]
+  [[ "${USER_UNITS_CHANGED}" = 1 ]]
+  [[ "${SSH_AGENT_CHANGED}" = 1 ]]
+  grep -Fxq -- '--user disable --now ssh-agent.service' "${calls}"
+  activate_ssh_agent
+  grep -Fxq -- '--user enable ssh-agent.socket' "${calls}"
+  grep -Fxq -- '--user restart ssh-agent.socket' "${calls}"
+
+  : > "${calls}"
+  USER_UNITS_CHANGED=0
+  SSH_AGENT_CHANGED=0
+  configure_ssh_agent
+
+  [[ "${USER_UNITS_CHANGED}" = 0 ]]
+  [[ "${SSH_AGENT_CHANGED}" = 0 ]]
+  run grep -Fq -- '--user disable' "${calls}"
+  [[ "${status}" -ne 0 ]]
 }
 
 @test "declares Neovim for the jvim wrapper" {
-  grep -Fxq 'brew "neovim"' "${JSH_ROOT}/conf/brew/common/Brewfile"
+  jsh_manifest_brewfile | grep -Fxq 'brew "neovim"'
 }
 
 @test "loads the shared vimrc in available editors" {
@@ -275,6 +397,59 @@ prerequisite_path() {
   [[ "${status}" -eq 0 ]]
   grep -Fxq 'citrix' "${calls}"
   grep -Fxq 'zoom' "${calls}"
+}
+
+@test "skips AMD64-only Debian work packages on ARM" {
+  run bash -c '
+    export JSH_ROOT="'"${JSH_ROOT}"'"
+    source "${JSH_ROOT}/scripts/linux/configure/work.sh"
+    uname() { printf "aarch64\n"; }
+    curl() { return 99; }
+    install_citrix_debian
+    install_zoom_debian
+  '
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == *'Citrix Workspace is unavailable for architecture aarch64.'* ]]
+  [[ ${output} == *'Zoom is unavailable for architecture aarch64.'* ]]
+}
+
+@test "Citrix preferences preserve unrelated keys and converge" {
+  local home="${BATS_TEST_TMPDIR}/citrix-home" stage="${BATS_TEST_TMPDIR}/citrix-stage"
+  mkdir -p "${home}/.ICAClient" "${stage}"
+  printf '[WFClient]\nOther=True\nMouseSendsControlV=True\n[Other]\nValue=1\n' \
+    > "${home}/.ICAClient/wfclient.ini"
+
+  run env HOME="${home}" XDG_STATE_HOME="${BATS_TEST_TMPDIR}/state" JSH_ROOT="${JSH_ROOT}" \
+    bash -c 'source "$1"; configure_citrix_preferences "$2"; before=$(stat -c "%i:%Y" "$HOME/.ICAClient/wfclient.ini"); configure_citrix_preferences "$2"; [[ $(stat -c "%i:%Y" "$HOME/.ICAClient/wfclient.ini") == "$before" ]]' \
+    _ "${JSH_ROOT}/scripts/linux/configure/work.sh" "${stage}"
+
+  [[ ${status} -eq 0 ]]
+  grep -Fxq Other=True "${home}/.ICAClient/wfclient.ini"
+  [[ $(grep -Fxc MouseSendsControlV=False "${home}/.ICAClient/wfclient.ini") -eq 1 ]]
+}
+
+@test "VS Code configuration preserves personal JSON settings" {
+  local home="${BATS_TEST_TMPDIR}/vscode-home" config="${BATS_TEST_TMPDIR}/vscode-config"
+  mkdir -p "${config}/Code/User"
+  printf '%s\n' '{"editor.fontSize":15,"terminal.integrated.profiles.linux":{"bash":{"path":"/bin/bash"}}}' \
+    > "${config}/Code/User/settings.json"
+  printf '%s\n' '[{"key":"ctrl+x","command":"test.keep"}]' \
+    > "${config}/Code/User/keybindings.json"
+
+  run env HOME="${home}" XDG_CONFIG_HOME="${config}" XDG_DATA_HOME="${BATS_TEST_TMPDIR}/data" \
+    XDG_STATE_HOME="${BATS_TEST_TMPDIR}/state" JSH_ROOT="${JSH_ROOT}" bash -c '
+      source "$1"
+      code() { :; }
+      zsh() { :; }
+      uname() { printf "Linux\n"; }
+      configure_vscode
+    ' _ "${JSH_ROOT}/scripts/unix/configure/vscode.sh"
+
+  [[ ${status} -eq 0 ]]
+  jq -e '."editor.fontSize" == 15 and ."terminal.integrated.profiles.linux".bash.path == "/bin/bash" and ."terminal.integrated.defaultProfile.linux" == "zsh"' \
+    "${config}/Code/User/settings.json" >/dev/null
+  jq -e 'any(.[]; .command == "test.keep")' "${config}/Code/User/keybindings.json" >/dev/null
 }
 
 @test "registers shell and changes default shell via usermod" {

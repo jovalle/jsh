@@ -68,8 +68,11 @@ Network\ Trash\ Folder
 Temporary\ Items
 __pycache__
 bh_unicode_properties.cache
-dotfiles/.config/gh/
 dotfiles/.config/Code/
+dotfiles/.config/colima/
+dotfiles/.config/gh/
+dotfiles/.config/ghostty/config
+dotfiles/.config/spicetify/
 dotfiles/.config/xfce4/desktop/icons.screen*.yaml
 dotfiles/.config/xfce4/panel/*.rc
 dotfiles/.config/xfce4/panel/launcher-*/
@@ -81,7 +84,7 @@ dotfiles/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-keyboard-shortcuts.xml
 dotfiles/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml
 dotfiles/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-screenshooter.xml
 dotfiles/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-taskmanager.xml
-git.yaml
+git.json
 graphify-out/
 node_modules/
 oscrypto-ca-bundle.crt
