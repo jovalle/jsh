@@ -86,7 +86,7 @@
           ]
         },
         "cargo": ["ripgrep", "fd-find", "eza"],
-        "uv": ["tmail-cli"],
+        "uv": ["pre-commit-hooks", "tmail-cli"],
         "npm": {}
       }
     },
