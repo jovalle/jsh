@@ -75,7 +75,7 @@ unset _jsh_brew_bin
 
 # Terminal optimizations
 export LESS="-RXE"                          # No wrapping, no clearing, exit on EOF
-setopt NO_PROMPT_CR                         # Don't add CR before prompt
+setopt PROMPT_CR                            # Required for clean multiline prompt redraws
 
 # ============================================================================
 # 2. PLUGIN SYSTEM

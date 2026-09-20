@@ -14,6 +14,82 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class DesktopPreferenceTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("zsh"), "Zsh required")
+    def test_prompt_leaves_final_terminal_column_clear(self):
+        env = dict(
+            os.environ,
+            COLUMNS="80",
+            JSH_PLAIN_OUTPUT="1",
+            JSH_PROMPT_ASYNC="0",
+            JSH_PROMPT_MODE="ascii",
+        )
+        result = subprocess.run(
+            [
+                "zsh",
+                "-fc",
+                'source "$1"; first=$(_jsh_prompt_expand); '
+                '_jsh_prompt_visible_length "$first"; print -rn -- "$REPLY"',
+                "test",
+                str(ROOT / "lib/zsh/prompt.zsh"),
+            ],
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.stdout, "79")
+
+    @unittest.skipUnless(shutil.which("zsh"), "Zsh required")
+    def test_prompt_redraws_to_new_terminal_width_without_losing_input(self):
+        env = dict(
+            os.environ,
+            COLUMNS="80",
+            JSH_PLAIN_OUTPUT="1",
+            JSH_PROMPT_ASYNC="0",
+            JSH_PROMPT_MODE="ascii",
+        )
+        result = subprocess.run(
+            [
+                "zsh",
+                "-fc",
+                "unsetopt PROMPT_CR; "
+                "zmodload zsh/zle; autoload -Uz add-zle-hook-widget; "
+                "_jsh_prompt_line_pre_redraw() { :; }; "
+                "add-zle-hook-widget line-pre-redraw _jsh_prompt_line_pre_redraw; "
+                "_jsh_prompt_resize() { :; }; "
+                "TRAPWINCH() { _jsh_prompt_resize; }; "
+                "typeset -gi _JSH_PROMPT_TRAPWINCH_INSTALLED=1; "
+                'source "$1"; '
+                "BUFFER='echo preserved'; CURSOR=4; COLUMNS=40; "
+                'marked_prompt="marker:${PROMPT}:marker"; PROMPT=$marked_prompt; '
+                "_jsh_prompt_keymap_select; "
+                "[[ $PROMPT == $marked_prompt ]]; keymap_preserved=$?; "
+                "_JSH_PROMPT_GIT_PWD=$PWD; "
+                "exec {git_fd}< <(print -r -- -); "
+                "_jsh_prompt_git_async_callback $git_fd; "
+                "[[ $PROMPT == $marked_prompt ]]; async_preserved=$?; "
+                "first=$(_jsh_prompt_expand); "
+                '_jsh_prompt_visible_length "$first"; '
+                "zstyle -a zle-line-pre-redraw widgets hooks; "
+                'print -rn -- "$REPLY|$BUFFER|$CURSOR|${options[PROMPTCR]}|$keymap_preserved|$async_preserved|$+functions[TRAPWINCH]|${(j:,:)hooks}"',
+                "test",
+                str(ROOT / "lib/zsh/prompt.zsh"),
+            ],
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        width, buffer, cursor, prompt_cr, keymap, async_git, trap, hooks = result.stdout.split("|")
+        self.assertEqual(width, "39")
+        self.assertEqual(buffer, "echo preserved")
+        self.assertEqual(cursor, "4")
+        self.assertEqual(prompt_cr, "on")
+        self.assertEqual(keymap, "0")
+        self.assertEqual(async_git, "0")
+        self.assertEqual(trap, "0")
+        self.assertNotIn("_jsh_prompt_line_pre_redraw", hooks)
+
     @unittest.skipUnless(sys.platform == "linux" and shutil.which("zsh"), "Linux/Zsh required")
     def test_prompt_uses_debian_logo_and_linux_fallback(self):
         with tempfile.TemporaryDirectory() as directory:

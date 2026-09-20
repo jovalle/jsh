@@ -1,4 +1,4 @@
-setopt PROMPT_SUBST
+setopt PROMPT_SUBST PROMPT_CR
 zmodload zsh/datetime 2>/dev/null || true
 autoload -Uz add-zsh-hook
 
@@ -482,7 +482,6 @@ _jsh_prompt_git_async_callback() {
 	[[ ${directory} == ${PWD} ]] || return
 	_jsh_prompt_git_parse "${data}"
 	_JSH_PROMPT_GIT_VALID=1 _JSH_PROMPT_GIT_DIRTY=0
-	_jsh_prompt_render
 	zle reset-prompt 2>/dev/null || true
 }
 
@@ -579,11 +578,10 @@ _jsh_prompt_precmd() {
 		_jsh_prompt_kube_update
 		_JSH_PROMPT_KUBE_DIRTY=0
 	fi
-	_jsh_prompt_render
 }
 
-_jsh_prompt_render() {
-	local width=${COLUMNS:-80} left right character padding
+_jsh_prompt_expand() {
+	local width=${COLUMNS:-80} left right padding
 	local -i left_length right_length spaces right_budget left_budget
 	[[ ${width} == <-> && ${width} -gt 0 ]] || width=80
 	right_budget=$((width / 2))
@@ -594,11 +592,19 @@ _jsh_prompt_render() {
 	(( left_budget > 0 )) || left_budget=1
 	_jsh_prompt_build_left ${left_budget}; left=${REPLY}
 	_jsh_prompt_visible_length "${left}"; left_length=${REPLY}
-	spaces=$((width - left_length - right_length))
+	spaces=$((width - left_length - right_length - 1))
 	(( spaces > 0 )) || spaces=1
 	printf -v padding '%*s' ${spaces} ''
-	_jsh_prompt_segment_character; character=${REPLY}
-	PROMPT="${left}${padding}${right}"$'\n'"${character}"
+	print -rn -- "${left}${padding}${right}"
+}
+
+_jsh_prompt_character() {
+	_jsh_prompt_segment_character
+	print -rn -- "${REPLY}"
+}
+
+_jsh_prompt_render() {
+	PROMPT='$(_jsh_prompt_expand)'$'\n''$(_jsh_prompt_character)'
 	RPROMPT=''
 }
 
@@ -609,9 +615,24 @@ _jsh_prompt_chpwd() {
 }
 
 _jsh_prompt_keymap_select() {
-	_jsh_prompt_render
 	zle reset-prompt 2>/dev/null || true
 }
+
+if (( $+functions[add-zle-hook-widget] )); then
+	add-zle-hook-widget -d line-pre-redraw _jsh_prompt_line_pre_redraw 2>/dev/null || true
+fi
+unfunction _jsh_prompt_line_pre_redraw 2>/dev/null || true
+
+if (( ${_JSH_PROMPT_TRAPWINCH_INSTALLED:-0} )); then
+	if [[ ${functions[TRAPWINCH]-} == *'_jsh_prompt_resize'* ]]; then
+		unfunction TRAPWINCH
+		if (( $+functions[_jsh_prompt_previous_trapwinch] )); then
+			functions[TRAPWINCH]=${functions[_jsh_prompt_previous_trapwinch]}
+		fi
+	fi
+	unset _JSH_PROMPT_TRAPWINCH_INSTALLED
+fi
+unfunction _jsh_prompt_previous_trapwinch _jsh_prompt_resize 2>/dev/null || true
 
 jsh_prompt_refresh() {
 	_JSH_PROMPT_GIT_DIRTY=1 _JSH_PROMPT_GIT_VALID=0 _JSH_PROMPT_KUBE_DIRTY=1
