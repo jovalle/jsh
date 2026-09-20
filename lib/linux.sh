@@ -28,17 +28,22 @@ jsh_linux_desktop() {
 
 jsh_run_root() {
   if [[ "${JSH_CONFIGURE_DRY_RUN:-0}" == 1 || "${JSH_INSTALL_DRY_RUN:-0}" == 1 ]]; then
-    jsh_detail "Would run as root: $*"
+    jsh::log_detail "Would run as root: $*"
   elif [[ "$(id -u)" -eq 0 ]]; then
     "$@"
   elif [[ -r /proc/self/status ]] && grep -Eq '^NoNewPrivs:[[:space:]]+1$' /proc/self/status; then
-    jsh_error "Cannot run sudo: this process has Linux no-new-privileges enabled."
-    jsh_detail "Rerun Jsh from a regular terminal outside this restricted session."
+    jsh::log_error "Cannot run sudo: this process has Linux no-new-privileges enabled."
+    jsh::log_detail "Rerun Jsh from a regular terminal outside this restricted session."
     return 1
   elif command -v sudo > /dev/null 2>&1; then
-    sudo -- "$@"
+    if typeset -f jsh::sudo_preflight > /dev/null 2>&1; then
+      jsh::sudo_preflight || return
+      sudo -n -- "$@"
+    else
+      sudo -- "$@"
+    fi
   else
-    jsh_error "sudo is required to modify the system."
+    jsh::log_error "sudo is required to modify the system."
     return 1
   fi
 }
@@ -55,7 +60,7 @@ jsh_gnome_custom_shortcut() {
   key=${key#jsh-}
   path="${base}/jsh-${key}/"
   if ! current=$(gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings); then
-    jsh_error "Unable to read existing GNOME custom shortcuts."
+    jsh::log_error "Unable to read existing GNOME custom shortcuts."
     return 1
   fi
   while IFS= read -r existing; do

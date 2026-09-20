@@ -18,7 +18,7 @@ waterfox_config_json() {
 
 validate_waterfox_config() {
   [[ -r ${WATERFOX_CONFIG} ]] || {
-    jsh_error "Missing Waterfox configuration: ${WATERFOX_CONFIG}"
+    jsh::log_error "Missing Waterfox configuration: ${WATERFOX_CONFIG}"
     return 1
   }
   waterfox_config_json | jq -e '
@@ -67,7 +67,7 @@ validate_waterfox_config() {
         and ((has("dataCollection") | not) or (.dataCollection | string_array))
         and ((.enabled // true) or ((.pinned // false) | not)))
   ' > /dev/null || {
-    jsh_error "Invalid Waterfox configuration: ${WATERFOX_CONFIG}"
+    jsh::log_error "Invalid Waterfox configuration: ${WATERFOX_CONFIG}"
     return 1
   }
 }
@@ -130,19 +130,19 @@ validate_configured_addons() {
   while IFS=$'\t' read -r id name private_browsing pinned; do
     extension_path="${profile}/extensions/${id}.xpi"
     if [[ ! -r ${extension_path} || -L ${extension_path} ]]; then
-      jsh_warn "Configured Waterfox add-on is not installed: ${name}"
+      jsh::log_warn "Configured Waterfox add-on is not installed: ${name}"
       continue
     fi
     if [[ ${private_browsing} == true ]] \
       && unzip -p "${extension_path}" manifest.json 2> /dev/null \
         | jq -e '.incognito == "not_allowed"' > /dev/null; then
-      jsh_error "${name} does not support private browsing."
+      jsh::log_error "${name} does not support private browsing."
       failed=1
     fi
     if [[ ${pinned} == true ]] \
       && ! unzip -p "${extension_path}" manifest.json 2> /dev/null \
         | jq -e 'has("action") or has("browser_action")' > /dev/null; then
-      jsh_error "${name} cannot be pinned because it has no toolbar action."
+      jsh::log_error "${name} cannot be pinned because it has no toolbar action."
       failed=1
     fi
   done < <(waterfox_config_json | jq -r \
@@ -178,7 +178,7 @@ reconcile_addon_state() {
   backup_file "${target}" extensions.json
   install -m 0600 -- "${candidate}" "${target}"
   rm -f -- "${profile}/addonStartup.json.lz4" "${profile}/compatibility.ini"
-  jsh_success "Waterfox add-on enablement and updates reconciled."
+  jsh::log_success "Waterfox add-on enablement and updates reconciled."
 }
 
 reconcile_addon_permissions() {
@@ -214,7 +214,7 @@ reconcile_addon_permissions() {
   backup_file "${target}" extension-preferences.json
   install -m 0600 -- "${candidate}" "${target}"
   rm -f -- "${profile}/addonStartup.json.lz4" "${profile}/compatibility.ini"
-  jsh_success "Waterfox add-on permissions reconciled."
+  jsh::log_success "Waterfox add-on permissions reconciled."
 }
 
 macos_url_handler() {
@@ -246,7 +246,7 @@ set_linux_mime_handler() {
   local desktop=$1 mime=$2
   [[ $(xdg-mime query default "${mime}") == "${desktop}" ]] && return
   if [[ ${JSH_CONFIGURE_DRY_RUN:-0} == 1 ]]; then
-    jsh_detail "Would set ${mime} to ${desktop}."
+    jsh::log_detail "Would set ${mime} to ${desktop}."
   else
     xdg-mime default "${desktop}" "${mime}"
   fi
@@ -268,14 +268,14 @@ configure_linux_default_browser() {
     fi
   done
   [[ -n ${launcher} ]] || {
-    jsh_error "Browser launcher is missing: ${data}/applications/${browser}"
+    jsh::log_error "Browser launcher is missing: ${data}/applications/${browser}"
     return 1
   }
 
   if [[ ${XDG_CURRENT_DESKTOP:-${DESKTOP_SESSION:-}} == *[Xx][Ff][Cc][Ee]* ]]; then
     command=$(sed -n 's/^Exec=//p' "${launcher}" | head -n 1)
     [[ -n ${command} ]] || {
-      jsh_error "Browser launcher has no Exec command: ${launcher}"
+      jsh::log_error "Browser launcher has no Exec command: ${launcher}"
       return 1
     }
     bare=$(sed -E 's/[[:space:]]+%[fFuU]//g' <<< "${command}")
@@ -315,7 +315,7 @@ configure_linux_default_browser() {
     current=$(xdg-settings get default-web-browser)
     if [[ ${current} != "${browser}" ]]; then
       if [[ ${JSH_CONFIGURE_DRY_RUN:-0} == 1 ]]; then
-        jsh_detail "Would set the default browser to ${browser}."
+        jsh::log_detail "Would set the default browser to ${browser}."
       else
         xdg-settings set default-web-browser "${browser}"
       fi
@@ -332,12 +332,12 @@ configure_linux_default_browser() {
   done
   [[ ${JSH_CONFIGURE_DRY_RUN:-0} == 1 ]] && return
   [[ $(xdg-settings get default-web-browser) == "${browser}" ]] || {
-    jsh_error "Desktop preferred browser did not change to ${browser}."
+    jsh::log_error "Desktop preferred browser did not change to ${browser}."
     return 1
   }
   for mime in "${mimes[@]}"; do
     [[ $(xdg-mime query default "${mime}") == "${browser}" ]] || {
-      jsh_error "Browser association did not take effect: ${mime}"
+      jsh::log_error "Browser association did not take effect: ${mime}"
       return 1
     }
   done
@@ -356,7 +356,7 @@ configure_associations() {
   config=$(waterfox_config_json)
   if [[ $(uname -s) == Darwin ]]; then
     if ! command -v duti > /dev/null 2>&1; then
-      jsh_note "Skipping macOS file associations: duti is unavailable."
+      jsh::log_note "Skipping macOS file associations: duti is unavailable."
       return
     fi
     citrix_bundle=$(jq -r '.associations.macos.citrixBundleId' <<< "${config}")
@@ -371,12 +371,12 @@ configure_associations() {
     if [[ -d ${JSH_CITRIX_APP:-/Applications/Citrix Workspace.app} ]]; then
       set_macos_content_handler "${citrix_bundle}" "${ica_type}"
     fi
-    jsh_success "macOS Waterfox and Citrix associations configured."
+    jsh::log_success "macOS Waterfox and Citrix associations configured."
     return
   fi
 
   if ! command -v xdg-mime > /dev/null 2>&1; then
-    jsh_note "Skipping Linux file associations: xdg-mime is unavailable."
+    jsh::log_note "Skipping Linux file associations: xdg-mime is unavailable."
     return
   fi
   application_dir="${XDG_DATA_HOME:-${HOME}/.local/share}/applications"
@@ -411,7 +411,7 @@ configure_associations() {
   if [[ ${have_citrix_receiver} == true ]]; then
     set_linux_mime_handler "${citrix_receiver}" x-scheme-handler/receiver
   fi
-  jsh_success "Linux Waterfox and Citrix associations configured."
+  jsh::log_success "Linux Waterfox and Citrix associations configured."
 }
 
 # Compare active Waterfox state with repository-managed configuration.
@@ -693,7 +693,7 @@ show_waterfox_review() {
     "${prefs_from}" "${prefs_to}" > "${prefs_diff}" || diff_status=$?
   [[ ${diff_status} -le 1 ]] || return "${diff_status}"
   if [[ ! -s ${config_diff} && ! -s ${prefs_diff} ]]; then
-    jsh_note "Waterfox managed state already matches."
+    jsh::log_note "Waterfox managed state already matches."
     return
   fi
   WATERFOX_SETTINGS_DIFFER=1
@@ -716,9 +716,7 @@ confirm_waterfox_review() {
     apply) prompt='Apply this configuration to Waterfox?' ;;
     backup) prompt='Replace the managed Waterfox configuration with active values?' ;;
   esac
-  jsh_prompt "${prompt} [y/N]: "
-  read -r answer || answer=
-  [[ ${answer} =~ ^[Yy]$ ]]
+  JSH_NON_INTERACTIVE=0 JSH_INTERACTIVE=1 jsh::confirm "${prompt}" --default no
 }
 
 backup_waterfox_configuration() {
@@ -730,7 +728,7 @@ backup_waterfox_configuration() {
   binary=$(waterfox_binary 2> /dev/null || true)
   root=$(waterfox_root)
   if [[ -z ${binary} && ! -d ${root} ]]; then
-    jsh_note "Skipping Waterfox backup: Waterfox is not installed."
+    jsh::log_note "Skipping Waterfox backup: Waterfox is not installed."
     return
   fi
 
@@ -741,11 +739,11 @@ backup_waterfox_configuration() {
   else
     profile_status=$?
     ((profile_status == 1)) || return "${profile_status}"
-    jsh_error "No initialized Waterfox profile is available to back up."
+    jsh::log_error "No initialized Waterfox profile is available to back up."
     return 1
   fi
   if profile_is_locked "${profile}"; then
-    jsh_error "Close Waterfox before backing up profile ${profile##*/}."
+    jsh::log_error "Close Waterfox before backing up profile ${profile##*/}."
     return 1
   fi
 
@@ -754,7 +752,7 @@ backup_waterfox_configuration() {
   show_waterfox_review backup
   ((WATERFOX_SETTINGS_DIFFER)) || return 0
   confirm_waterfox_review backup || {
-    jsh_warn "Keeping the managed Waterfox configuration."
+    jsh::log_warn "Keeping the managed Waterfox configuration."
     return
   }
 
@@ -766,5 +764,5 @@ backup_waterfox_configuration() {
   grep -q '^user_pref' "${preferences_candidate}"
   mv -f -- "${config_candidate}" "${WATERFOX_CONFIG}"
   mv -f -- "${preferences_candidate}" "${WATERFOX_OVERRIDES}"
-  jsh_success "Backed up active Waterfox managed state."
+  jsh::log_success "Backed up active Waterfox managed state."
 }

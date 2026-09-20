@@ -14,6 +14,22 @@ set -euo pipefail
 # =============================================================================
 
 readonly SCRIPT_NAME="${0##*/}"
+case $0 in
+  /*) launcher=$0 ;;
+  *) launcher=${PWD}/$0 ;;
+esac
+if [[ -z ${JSH_ROOT:-} ]]; then
+  if [[ -n ${JSH_DIR:-} ]]; then
+    JSH_ROOT=${JSH_DIR}
+  elif [[ -f ${launcher%/*}/../lib/ui.sh ]]; then
+    JSH_ROOT=$(CDPATH='' cd -P "${launcher%/*}/.." && pwd -P)
+  else
+    JSH_ROOT=${HOME}/.jsh
+  fi
+fi
+# shellcheck source=../lib/ui.sh
+. "${JSH_ROOT}/lib/ui.sh"
+jsh::init
 
 # Default duration (seconds) - 0 means indefinite
 CAFE_DURATION="${CAFE_DURATION:-0}"
@@ -40,71 +56,22 @@ CAFE_STOP_FILE=
 if [[ "${JSH_PLAIN_OUTPUT:-0}" != 1 && "${TERM:-dumb}" != dumb &&
   -z ${NO_COLOR+x} && "${JSH_COLOR:-auto}" != never ]] \
   && { [[ -t 1 ]] || [[ "${JSH_COLOR:-auto}" == always ]]; }; then
-  C_RESET=$'\033[0m' C_DIM=$'\033[2m'
-  C_RED=$'\033[31m' C_GREEN=$'\033[32m' C_YELLOW=$'\033[33m' C_CYAN=$'\033[36m'
+  C_RESET=$'\033[0m' C_DIM=$'\033[2m' C_CYAN=$'\033[36m'
 else
   C_RESET='' C_DIM=''
-  C_RED='' C_GREEN='' C_YELLOW='' C_CYAN=''
+  C_CYAN=''
 fi
 
-_jsh_status_style() {
-  case "$1" in
-    current | ok | success)
-      REPLY_COLOR=${C_GREEN}
-      [[ -n "${C_RESET}" ]] && REPLY_MARK='✔' || REPLY_MARK='[ok]'
-      ;;
-    plan)
-      REPLY_COLOR=${C_CYAN}
-      [[ -n "${C_RESET}" ]] && REPLY_MARK='➜' || REPLY_MARK='[plan]'
-      ;;
-    changed | warn | warning)
-      REPLY_COLOR=${C_YELLOW}
-      [[ -n "${C_RESET}" ]] && REPLY_MARK='▲' || REPLY_MARK='[warn]'
-      ;;
-    error | failed | missing)
-      REPLY_COLOR=${C_RED}
-      [[ -n "${C_RESET}" ]] && REPLY_MARK='✖' || REPLY_MARK='[error]'
-      ;;
-    *)
-      REPLY_COLOR=${C_CYAN}
-      [[ -n "${C_RESET}" ]] && REPLY_MARK='›' || REPLY_MARK='[note]'
-      ;;
-  esac
-}
-_jsh_message() {
-  local state="$1" output_fd=1 color mark reset
-  [[ "${state}" != warn && "${state}" != warning && "${state}" != error && "${state}" != failed ]] || output_fd=2
-  _jsh_status_style "${state}"
-  color=${REPLY_COLOR} mark=${REPLY_MARK} reset=${C_RESET}
-  if [[ ${output_fd} -eq 2 && -z "${reset}" && "${JSH_PLAIN_OUTPUT:-0}" != 1 &&
-    "${TERM:-dumb}" != dumb && -z ${NO_COLOR+x} && "${JSH_COLOR:-auto}" != never ]] \
-    && { [[ -t 2 ]] || [[ "${JSH_COLOR:-auto}" == always ]]; }; then
-    reset=$'\033[0m'
-    [[ "${state}" == error || "${state}" == failed ]] && color=$'\033[31m' && mark='✖' \
-      || {
-        color=$'\033[33m'
-        mark='▲'
-      }
-  fi
-  shift
-  printf '%s%s%s %s\n' "${color}" "${mark}" "${reset}" "$*" >&"${output_fd}"
-}
 die() {
   local message=$1
   shift
-  _jsh_message error "${message}" >&2
+  jsh::log_error "${message}"
   for message in "$@"; do
-    jsh_detail "${message}" >&2
+    jsh::log_detail "  ${message}" >&2
   done
   exit 1
 }
 _debug() { printf '%sdebug:%s %s\n' "${C_DIM}" "${C_RESET}" "$*" >&2; }
-info() { _jsh_message note "$@"; }
-success() { _jsh_message success "$@"; }
-warn() { _jsh_message warn "$@" >&2; }
-jsh_status() { _jsh_message "${3:-note}" "$1${2:+ $2}"; }
-jsh_child() { jsh_status "$@"; }
-jsh_detail() { printf '  %s%s%s\n' "${C_DIM}" "$*" "${C_RESET}"; }
 jsh_command_preview() { printf '  %s$%s %s\n' "${C_CYAN}" "${C_RESET}" "$*"; }
 cli_version() { printf 'cafe 1.0.1\n'; }
 cli_help() {
@@ -262,7 +229,7 @@ handle_signal() {
   [[ "${signal}" != TERM ]] || exit_status=143
   cleanup_active_state
   printf '\n'
-  info "Stopped"
+  jsh::log_note "Stopped"
   exit "${exit_status}"
 }
 
@@ -285,7 +252,7 @@ show_status() {
   if is_running; then
     local pid
     pid=$(cat "${CAFE_PID_FILE}")
-    jsh_status "Cafe" "running, PID ${pid}" ok
+    jsh::status ok "Cafe running, PID ${pid}"
 
     # Try to show remaining time on macOS
     if [[ "$(uname -s)" == "Darwin" ]]; then
@@ -293,12 +260,12 @@ show_status() {
       if stat -f %m "${CAFE_PID_FILE}" &>/dev/null; then
         start=$(stat -f %m "${CAFE_PID_FILE}")
         elapsed=$(($(date +%s) - start))
-        jsh_detail "Running for $(format_duration "${elapsed}")"
+        jsh::log_detail "  Running for $(format_duration "${elapsed}")"
       fi
     fi
     return 0
   else
-    jsh_status "Cafe" "not running" skip
+    jsh::status skip "Cafe not running"
     return 1
   fi
 }
@@ -315,12 +282,12 @@ stop_cafe() {
         sleep 0.5
         # Force kill if still running
         kill -9 "${pid}" 2>/dev/null || true
-        success "Stopped cafe (PID: ${pid})"
+        jsh::log_success "Stopped cafe (PID: ${pid})"
       fi
     fi
     rm -f "${CAFE_PID_FILE}"
   else
-    info "No background cafe found"
+    jsh::log_note "No background cafe found"
   fi
 }
 
@@ -412,8 +379,8 @@ run_systemd_inhibit() {
   local system="$3"
   local reason="$4"
   shift 4
-  local cmd=("$@")
 
+  local cmd=("$@")
   local what=idle
   [[ "${system}" != true ]] || what=idle:sleep:shutdown
   local args=(
@@ -577,8 +544,8 @@ run_fallback() {
   shift 4 # Skip duration, display, system, reason
   local cmd=("$@")
 
-  warn "No system inhibit method available, using fallback"
-  info "System may still sleep - consider installing systemd-inhibit"
+  jsh::log_warn "No system inhibit method available, using fallback"
+  jsh::log_note "System may still sleep - consider installing systemd-inhibit"
 
   if [[ ${#cmd[@]} -gt 0 ]]; then
     "${cmd[@]}"
@@ -813,7 +780,7 @@ main() {
   # Check for existing background process
   if [[ "${background}" == "true" ]]; then
     if is_running; then
-      warn "Cafe is already running in background"
+      jsh::log_warn "Cafe is already running in background"
       show_status
       exit 0
     fi
@@ -825,15 +792,15 @@ main() {
   # Show what we're doing
   if [[ "${verbose}" == "true" || "${background}" != "true" ]]; then
     if [[ ${#cmd[@]} -gt 0 ]]; then
-      info "Running command with sleep inhibited..."
+      jsh::log_note "Running command with sleep inhibited..."
     elif [[ "${duration}" -gt 0 ]]; then
-      info "Keeping awake for $(format_duration "${duration}")..."
+      jsh::log_note "Keeping awake for $(format_duration "${duration}")..."
     else
-      info "Keeping awake indefinitely (Ctrl+C to stop)..."
+      jsh::log_note "Keeping awake indefinitely (Ctrl+C to stop)..."
     fi
-    jsh_status "Method" "${method}, automatic" plan
-    jsh_child "Display sleep" "${display}" info
-    jsh_child "System sleep" "${system}" info last
+    jsh::status info "Method ${method}, automatic"
+    jsh::status info "Display sleep ${display}"
+    jsh::status info "System sleep ${system}"
   fi
 
   # Background mode
@@ -865,7 +832,7 @@ main() {
 
     local bg_pid=$!
     printf '%s' "${bg_pid}" >"${CAFE_PID_FILE}"
-    success "Started in background (PID: ${bg_pid})"
+    jsh::log_success "Started in background (PID: ${bg_pid})"
     jsh_command_preview "${SCRIPT_NAME} --stop"
     exit 0
   fi
@@ -878,7 +845,7 @@ main() {
   fi
 
   if [[ ${#cmd[@]} -eq 0 && "${duration}" -gt 0 ]]; then
-    success "Cafe stopped"
+    jsh::log_success "Cafe stopped"
   fi
 }
 

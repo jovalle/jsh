@@ -68,7 +68,7 @@ restore_stashed() {
     fi
   done
   if (( failed )); then
-    jsh_error "Deployment recovery is incomplete; moved files remain in Jsh backup storage"
+    jsh::log_error "Deployment recovery is incomplete; moved files remain in Jsh backup storage"
   else
     [[ -z "${recovery_dir}" ]] || rm -rf -- "${recovery_dir}"
     [[ -z "${backup_root}" ]] || rm -rf -- "${backup_root}"
@@ -77,11 +77,11 @@ restore_stashed() {
 trap restore_stashed EXIT
 
 if [[ ! -d "${dotfiles_dir}" ]]; then
-  jsh_error "Dotfiles directory not found: ${dotfiles_dir}"
+  jsh::log_error "Dotfiles directory not found: ${dotfiles_dir}"
   exit 1
 fi
 if [[ ! -d "${commands_dir}" ]]; then
-  jsh_error "Commands directory not found: ${commands_dir}"
+  jsh::log_error "Commands directory not found: ${commands_dir}"
   exit 1
 fi
 
@@ -91,19 +91,13 @@ for arg in "$@"; do
   esac
 done
 
-jsh_detail "This will back up conflicting paths and deploy managed dotfiles into ${HOME}."
-if [[ ${JSH_ASSUME_YES:-0} != 1 && -t 0 ]]; then
-  jsh_prompt "Continue? [Y/n]: "
-  if ! read -r confirm; then
-    confirm=
-  fi
-  if [[ -n "${confirm}" && "${confirm}" != [Yy] ]]; then
-    jsh_note "Skipping dotfile deployment."
-    exit 0
-  fi
+jsh::log_detail "This will back up conflicting paths and deploy managed dotfiles into ${HOME}."
+if ! jsh::confirm "Continue?" --default yes; then
+  jsh::log_note "Skipping dotfile deployment."
+  exit 0
 fi
 
-jsh_info "Checking for legacy Jsh symlinks..."
+jsh::log_info "Checking for legacy Jsh symlinks..."
 typeset -a dotfile_sources
 while IFS= read -r -d $'\0' link; do
   [[ -n "${link}" ]] || continue
@@ -115,7 +109,7 @@ while IFS= read -r -d $'\0' link; do
 
   [[ "${target}" != "${dotfiles_dir}/${home_relative}" ]] || continue
   if [[ "${target}" == "${repo_root}"/* && "${home_relative}" == "${repo_relative}" ]]; then
-    jsh_info "Removing managed symlink: ${link}"
+    jsh::log_info "Removing managed symlink: ${link}"
     stash_path "${link}"
   fi
 done < <(
@@ -162,7 +156,7 @@ for source in "${dotfile_sources[@]}"; do
     [[ "${destination:a}" == "${source:a}" ]] && continue
   fi
   if [[ -e "${target}" || -L "${target}" ]]; then
-    jsh_warn "Backing up unmanaged path: ${target}"
+    jsh::log_warn "Backing up unmanaged path: ${target}"
     backup_path "${target}"
   fi
 done
@@ -176,10 +170,10 @@ if [[ -e "${commands_link}" || -L "${commands_link}" ]]; then
     target=
   fi
   if [[ "${target}" != "${commands_dir}" ]]; then
-    jsh_warn "Preserving unmanaged path: ${commands_link}"
+    jsh::log_warn "Preserving unmanaged path: ${commands_link}"
   fi
 else
-  jsh_info "Linking command directory: ${commands_link}"
+  jsh::log_info "Linking command directory: ${commands_link}"
   ln -s -- "${commands_dir}" "${commands_link}"
   commands_link_created=1
 fi
@@ -190,6 +184,6 @@ if [[ -n "${recovery_dir}" ]]; then
   rm -rf -- "${recovery_dir}"
 fi
 if [[ -n "${backup_root}" ]]; then
-  jsh_detail "Backups: ${backup_root}"
+  jsh::log_detail "Backups: ${backup_root}"
 fi
-jsh_success "Dotfiles deployed successfully"
+jsh::log_success "Dotfiles deployed successfully"

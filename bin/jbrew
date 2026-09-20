@@ -14,6 +14,9 @@ BREW=${JBREW_BREW:-brew}
 readonly SCRIPT_DIR JSH_ROOT BREW
 # shellcheck source=../lib/manifest.sh
 . "${JSH_ROOT}/lib/manifest.sh"
+# shellcheck source=../lib/ui.sh
+. "${JSH_ROOT}/lib/ui.sh"
+jsh::init
 
 RESULT_KINDS=()
 RESULT_NAMES=()
@@ -57,12 +60,8 @@ heading() {
   printf '%s==>%s %s%s%s\n' "${C_BLUE}" "${C_RESET}" "${C_BOLD}" "$*" "${C_RESET}"
 }
 
-error() {
-  printf '%sError:%s %s\n' "${C_RED}" "${C_RESET}" "$*" >&2
-}
-
 die() {
-  error "$*"
+  jsh::log_error "$*"
   exit 1
 }
 
@@ -567,7 +566,7 @@ whatprovides_command() {
     ' <<<"${metadata}" 2>/dev/null || true)
 
     if ((${#RESULT_NAMES[@]} == 0)); then
-      error "No formula or cask provides \"${command_name}\"."
+      jsh::log_error "No formula or cask provides \"${command_name}\"."
       missing=1
       continue
     fi

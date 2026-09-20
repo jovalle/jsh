@@ -42,6 +42,8 @@ set_xfce() {
 
 case $(jsh_linux_desktop) in
   xfce)
+    image_style=5
+    xrandr --listmonitors | grep -Eq '[+*]?jsh-left([[:space:]]|$)' && image_style=6
     properties=$(xfconf-query -c xfce4-desktop -l)
     backdrops=$({
       printf '%s\n' "${properties}" | sed -n 's@\(/backdrop/.*\)/[^/]*$@\1@p'
@@ -55,7 +57,7 @@ case $(jsh_linux_desktop) in
       done < <(xrandr --listmonitors | awk 'NR>1 { sub(/^[+*]+/, "", $2); print $2 }';
                 xrandr --query | awk '$2 == "connected" {print $1}')
     } | sort -u)
-    [[ -n ${backdrops} ]] || { jsh_error 'No active XFCE backdrop settings found.'; exit 1; }
+    [[ -n ${backdrops} ]] || { jsh::log_error 'No active XFCE backdrop settings found.'; exit 1; }
     while IFS= read -r backdrop; do
       set_xfce "${backdrop}/color-style" int 0
       set_xfce "${backdrop}/backdrop-cycle-enable" bool false
@@ -72,7 +74,7 @@ case $(jsh_linux_desktop) in
       done
       if [[ -n ${wallpaper} ]]; then
         set_xfce "${backdrop}/last-image" string "${wallpaper}"
-        set_xfce "${backdrop}/image-style" int 5
+        set_xfce "${backdrop}/image-style" int "${image_style}"
         set_xfce "${backdrop}/image-show" bool true
       else
         set_xfce "${backdrop}/image-style" int 0
@@ -111,11 +113,11 @@ case $(jsh_linux_desktop) in
       changed=$((changed + 1))
     done
     ;;
-  *) jsh_error 'Wallpaper requires an XFCE or GNOME session.'; exit 1 ;;
+  *) jsh::log_error 'Wallpaper requires an XFCE or GNOME session.'; exit 1 ;;
 esac
 if ((changed)); then
   [[ ${JSH_CONFIGURE_DRY_RUN:-0} == 1 ]] || xfdesktop --reload 2>/dev/null || true
-  jsh_success "Wallpaper: ${wallpaper:-solid black} (${changed} settings changed)"
+  jsh::log_success "Wallpaper: ${wallpaper:-solid black} (${changed} settings changed)"
 else
-  jsh_note "Wallpaper is current: ${wallpaper:-solid black}"
+  jsh::log_note "Wallpaper is current: ${wallpaper:-solid black}"
 fi

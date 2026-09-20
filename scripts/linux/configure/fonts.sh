@@ -31,7 +31,7 @@ install_fonts() {
       (.key | test("^[^/]+[.]ttf$"))
       and (.value | test("^[0-9a-f]{64}$")))
   ' "${manifest}" >/dev/null || {
-    jsh_error "Invalid font manifest: ${manifest}"
+    jsh::log_error "Invalid font manifest: ${manifest}"
     return 1
   }
 
@@ -42,11 +42,11 @@ install_fonts() {
     fi
   done < <(jq -r '.files | to_entries[] | [.key, .value] | @tsv' "${manifest}")
   if ((${#missing[@]} == 0)); then
-    jsh_note 'JetBrains Mono Nerd Font is current.'
+    jsh::log_note 'JetBrains Mono Nerd Font is current.'
     return
   fi
   if [[ ${JSH_CONFIGURE_DRY_RUN:-0} == 1 ]]; then
-    jsh_detail "Would install font files: ${missing[*]}"
+    jsh::log_detail "Would install font files: ${missing[*]}"
     return
   fi
 
@@ -67,7 +67,7 @@ install_fonts() {
     fi
     digest=$(jq -r --arg name "${name}" '.files[$name]' "${manifest}")
     [[ $(jsh_sha256_file "${temporary}/${name}") == "${digest}" ]] || {
-      jsh_error "Font checksum mismatch: ${name}"
+      jsh::log_error "Font checksum mismatch: ${name}"
       rm -rf -- "${temporary}"
       return 1
     }
@@ -81,7 +81,7 @@ install_fonts() {
   done
   rm -rf -- "${temporary}"
   fc-cache "${destination}"
-  jsh_success 'JetBrains Mono Nerd Font installed.'
+  jsh::log_success 'JetBrains Mono Nerd Font installed.'
 }
 
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then

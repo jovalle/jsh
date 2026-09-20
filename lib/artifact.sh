@@ -21,7 +21,7 @@ jsh_checksum_file() {
   case $1 in
     sha256) jsh_sha256_file "$2" ;;
     sha512) jsh_sha512_file "$2" ;;
-    *) jsh_error "Unsupported checksum algorithm: $1"; return 2 ;;
+    *) jsh::log_error "Unsupported checksum algorithm: $1"; return 2 ;;
   esac
 }
 
@@ -51,7 +51,7 @@ jsh_download_artifact() {
     actual=$(jsh_checksum_file "${algorithm}" "${temporary}")
     if [[ ${actual} != "${expected}" ]]; then
       rm -f -- "${temporary}"
-      jsh_error "Checksum mismatch for ${id}: expected ${expected}, got ${actual}."
+      jsh::log_error "Checksum mismatch for ${id}: expected ${expected}, got ${actual}."
       return 1
     fi
   fi

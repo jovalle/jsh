@@ -24,7 +24,7 @@ install_user_text() {
     return
   fi
   if [[ "${DRY_RUN}" == 1 ]]; then
-    jsh_detail "Would write ${destination}"
+    jsh::log_detail "Would write ${destination}"
     return
   fi
   USER_UNITS_CHANGED=1
@@ -40,11 +40,11 @@ remove_managed_text() {
   local destination=$1 content=$2 unit=${3:-}
   [[ -e "${destination}" || -L "${destination}" ]] || return 0
   if [[ ! -r "${destination}" || "$(< "${destination}")" != "${content}" ]]; then
-    jsh_error "Refusing to remove modified managed file: ${destination}"
+    jsh::log_error "Refusing to remove modified managed file: ${destination}"
     return 1
   fi
   if [[ "${DRY_RUN}" == 1 ]]; then
-    jsh_detail "Would remove ${destination}"
+    jsh::log_detail "Would remove ${destination}"
     return
   fi
   if [[ -n "${unit}" ]]; then
@@ -96,7 +96,7 @@ WantedBy=default.target'
   socket_path=$(ssh_agent_socket_path)
   service_path=$(ssh_agent_service_socket_path)
   if [[ -n "${socket_path}" && -n "${service_path}" && "${socket_path}" != "${service_path}" ]]; then
-    jsh_note "Repairing SSH agent socket mismatch: ${service_path} != ${socket_path}"
+    jsh::log_note "Repairing SSH agent socket mismatch: ${service_path} != ${socket_path}"
   fi
 
   remove_managed_text "${HOME}/.config/systemd/user/ssh-agent.service" \
@@ -109,7 +109,7 @@ WantedBy=default.target'
 enable_user_unit() {
   local unit=$1 state
   if ! systemctl --user cat "${unit}" > /dev/null 2>&1; then
-    jsh_note "Skipping unavailable user unit: ${unit}"
+    jsh::log_note "Skipping unavailable user unit: ${unit}"
     return
   fi
   state=$(systemctl --user is-enabled "${unit}" 2> /dev/null || true)
@@ -118,9 +118,9 @@ enable_user_unit() {
   fi
   if [[ "${DRY_RUN}" == 1 ]]; then
     if [[ "${state}" == static ]]; then
-      jsh_detail "Would start static user unit ${unit}"
+      jsh::log_detail "Would start static user unit ${unit}"
     else
-      jsh_detail "Would enable and start ${unit}"
+      jsh::log_detail "Would enable and start ${unit}"
     fi
   elif [[ "${state}" == static ]]; then
     systemctl --user start "${unit}"
@@ -139,27 +139,23 @@ activate_ssh_agent() {
 }
 
 main() {
-  local arg answer
+  local arg
   for arg in "$@"; do
     case "${arg}" in
-      -y | --yes) JSH_ASSUME_YES=1 ;;
+      -y | --yes) export JSH_ASSUME_YES=1 ;;
     esac
   done
 
   [[ "$(uname -s)" == Linux ]] || return
   command -v systemctl > /dev/null 2>&1 || {
-    jsh_error "systemctl is required to configure user services."
+    jsh::log_error "systemctl is required to configure user services."
     return 1
   }
 
-  jsh_detail "This will configure SSH, GPG, and Podman user services."
-  if [[ ${JSH_ASSUME_YES:-0} != 1 ]]; then
-    jsh_prompt "Configure Linux user services? [y/N]: "
-    read -r answer || answer=
-    [[ "${answer}" =~ ^[Yy]$ ]] || {
-      jsh_note "Skipping Linux user services."
-      return
-    }
+  jsh::log_detail "This will configure SSH, GPG, and Podman user services."
+  if ! jsh::confirm "Configure Linux user services?" --default no; then
+    jsh::log_note "Skipping Linux user services."
+    return
   fi
 
   configure_ssh_agent
@@ -167,15 +163,15 @@ main() {
     'DOCKER_HOST="unix://${XDG_RUNTIME_DIR}/podman/podman.sock"'
 
   if [[ "${DRY_RUN}" == 1 ]]; then
-    jsh_detail "Would reload the user systemd manager."
+    jsh::log_detail "Would reload the user systemd manager."
   elif ((USER_UNITS_CHANGED)); then
     systemctl --user daemon-reload
   fi
   activate_ssh_agent
   enable_user_unit gpg-agent.socket
   enable_user_unit podman.socket
-  jsh_success "Linux user services configured."
-  jsh_detail "Log out and back in to load the environment files."
+  jsh::log_success "Linux user services configured."
+  jsh::log_detail "Log out and back in to load the environment files."
 }
 
 main "$@"

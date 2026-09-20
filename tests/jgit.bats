@@ -75,8 +75,12 @@ run_jgit() {
   init_repo "${repository}"
   cd "${repository}"
 
-  for command in 'identity list' identities 'profile list' profiles; do
-    run run_jgit "${command}"
+  for command in identity identities profile profiles; do
+    if [[ ${command} == identity || ${command} == profile ]]; then
+      run run_jgit "${command}" list
+    else
+      run run_jgit "${command}"
+    fi
     [[ ${status} -eq 0 ]]
     [[ ${output} == *personal* ]]
     [[ ${output} == *'Test User'* ]]
@@ -90,6 +94,24 @@ run_jgit() {
   run run_jgit profile personal
   [[ ${status} -eq 0 ]]
   [[ $(git config --local user.name) == 'Test User' ]]
+}
+
+@test "interactive identity selection uses the shared Gum chooser" {
+  local repository="${BATS_TEST_TMPDIR}/repository" gum="${BATS_TEST_TMPDIR}/gum"
+  init_repo "${repository}"
+  cat > "${gum}" <<'EOF'
+#!/bin/sh
+[ "$1" = choose ] || exit 1
+printf '%s\n' personal
+EOF
+  chmod +x "${gum}"
+  cd "${repository}"
+
+  run env JSH_INTERACTIVE=1 JSH_REMOTE=0 JSH_UI_BACKEND=gum JSH_GUM="${gum}" \
+    "${JSH_ROOT}/bin/jgit" identity
+
+  [[ ${status} -eq 0 ]]
+  [[ $(git config --local jsh.profile) == personal ]]
 }
 
 @test "create initializes a project and applies the selected profile" {

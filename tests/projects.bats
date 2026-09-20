@@ -34,3 +34,20 @@ setup() {
   [[ ${status} -eq 0 ]]
   [[ ${output} == "${TEST_HOME}/Projects/example" ]]
 }
+
+@test "j directory selection uses stable IDs from the shared chooser" {
+  run env HOME="${TEST_HOME}" JSH_LOAD_CONFIG=0 JSH_RUNTIME_DIR="${TEST_RUNTIME}" \
+    zsh -f -c '
+      source "$1/dotfiles/.zshrc" >/dev/null 2>&1
+      _j_query() { printf "%s\n" "2|/projects/one" "1|/projects/two"; }
+      _j_get_projects() { return 0; }
+      jsh::choose_one() {
+        [[ $1 == Directory && $2 == /projects/one && $4 == /projects/two ]] || return 2
+        print -rn -- "$4"
+      }
+      _j_interactive
+    ' _ "${JSH_ROOT}"
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == /projects/two ]]
+}

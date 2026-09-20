@@ -13,14 +13,6 @@ for library_file in "${JSH_ROOT}"/lib/*; do
 done
 unset library_file
 
-confirm() {
-  [[ ${JSH_ASSUME_YES:-0} == 1 ]] && return 0
-  jsh_detail "This will apply the managed macOS privacy, input, Finder, and application preferences."
-  jsh_prompt "Configure macOS preferences? [y/N]: "
-  read -r answer || answer=
-  [[ "${answer}" =~ ^[Yy]$ ]]
-}
-
 apply_preferences() {
   local line description='' action domain key type value current current_type expected expected_type previous
   local changed=0 unchanged=0 failed=0 has_current
@@ -33,7 +25,7 @@ apply_preferences() {
       '') ;;
       *)
         if [[ -z ${description} ]]; then
-          jsh_error "Failed: managed preference has no comment: ${line}"
+          jsh::log_error "Failed: managed preference has no comment: ${line}"
           ((failed += 1))
           continue
         fi
@@ -67,10 +59,10 @@ apply_preferences() {
           ((unchanged += 1))
         elif defaults "${scope_args[@]}" "${action}" "${domain}" "${key}" "${type}" "${value}"; then
           previous=${current:-unset}
-          jsh_success "${description} (${previous} -> ${expected})"
+          jsh::log_success "${description} (${previous} -> ${expected})"
           ((changed += 1))
         else
-          jsh_error "${description}"
+          jsh::log_error "${description}"
           ((failed += 1))
         fi
         description=
@@ -196,31 +188,32 @@ defaults write com.apple.screencapture disable-shadow -bool true
 PREFERENCES
 
   if ((failed)); then
-    jsh_error "macOS preferences: ${changed} changed, ${unchanged} unchanged, ${failed} failed."
+    jsh::log_error "macOS preferences: ${changed} changed, ${unchanged} unchanged, ${failed} failed."
     PREFERENCE_STATUS=1
     return
   fi
-  jsh_success "macOS preferences: ${changed} changed, ${unchanged} unchanged."
+  jsh::log_success "macOS preferences: ${changed} changed, ${unchanged} unchanged."
 }
 
 main() {
   local arg
   for arg in "$@"; do
     case "${arg}" in
-      -y | --yes) JSH_ASSUME_YES=1 ;;
+      -y | --yes) export JSH_ASSUME_YES=1 ;;
     esac
   done
 
   [[ "$(uname -s)" == Darwin ]] || {
-    jsh_note "Skipping macOS preferences: macOS not detected."
+    jsh::log_note "Skipping macOS preferences: macOS not detected."
     return
   }
   command -v defaults > /dev/null 2>&1 || {
-    jsh_error "defaults is required to configure macOS."
+    jsh::log_error "defaults is required to configure macOS."
     return 1
   }
-  confirm || {
-    jsh_note "Skipping macOS preferences."
+  jsh::log_detail "This will apply the managed macOS privacy, input, Finder, and application preferences."
+  jsh::confirm "Configure macOS preferences?" --default no || {
+    jsh::log_note "Skipping macOS preferences."
     return
   }
 

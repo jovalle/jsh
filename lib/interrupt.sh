@@ -21,8 +21,12 @@ ${JSH_INTERRUPT_ROOT_PATHS}"
   jsh_interrupt_cleanup() {
     local cleanup_target
     trap - HUP INT TERM
-    if typeset -f jsh_spinner_stop >/dev/null 2>&1; then
+    if typeset -f jsh::cleanup >/dev/null 2>&1; then
+      jsh::cleanup
+    elif typeset -f jsh_spinner_stop >/dev/null 2>&1; then
       jsh_spinner_stop
+    elif typeset -f jsh::sudo_keepalive_stop >/dev/null 2>&1; then
+      jsh::sudo_keepalive_stop
     fi
     while IFS= read -r cleanup_target; do
       [[ -n ${cleanup_target} ]] && rm -rf -- "${cleanup_target}" 2>/dev/null || true

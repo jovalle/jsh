@@ -24,7 +24,7 @@ backup_root_file() {
   fi
   backup="${BACKUP_ROOT}${source}"
   if [[ "${DRY_RUN}" == 1 ]]; then
-    jsh_detail "Would back up ${source} to ${backup}"
+    jsh::log_detail "Would back up ${source} to ${backup}"
     return
   fi
   mkdir -p "$(dirname -- "${backup}")"
@@ -56,7 +56,7 @@ install_root_text() {
     return 0
   fi
   if [[ "${DRY_RUN}" == 1 ]]; then
-    jsh_detail "Would write configuration to ${destination}"
+    jsh::log_detail "Would write configuration to ${destination}"
     return 0
   fi
   mkdir -p "${JSH_ROOT}/tmp"
@@ -71,7 +71,7 @@ install_root_text() {
 enable_system_unit() {
   local unit=$1 action=$2
   if ! jsh_run_root systemctl cat "${unit}" > /dev/null 2>&1; then
-    jsh_note "Skipping unavailable system unit: ${unit}"
+    jsh::log_note "Skipping unavailable system unit: ${unit}"
     return
   fi
   case "${action}" in
@@ -123,7 +123,7 @@ vm.page-cluster = 0"
   done
 
   if ((conf_needs_update == 0 && ${#missing_tweaks[@]} == 0)); then
-    jsh_note "Kernel tweaks are already set."
+    jsh::log_note "Kernel tweaks are already set."
     return 0
   fi
 
@@ -133,7 +133,7 @@ vm.page-cluster = 0"
 
   if ((${#missing_tweaks[@]} > 0)); then
     for tweak in "${missing_tweaks[@]}"; do
-      jsh_detail "Applying kernel tweak: ${tweak}"
+      jsh::log_detail "Applying kernel tweak: ${tweak}"
       jsh_run_root sysctl -w "${tweak}"
     done
   fi
@@ -144,17 +144,17 @@ configure_timezone() {
   local current_tz
   current_tz=$(timedatectl show -p Timezone --value 2> /dev/null || true)
   if [[ -n "${current_tz}" && "${current_tz}" == "${target_tz}" ]]; then
-    jsh_note "Timezone is already ${target_tz}."
+    jsh::log_note "Timezone is already ${target_tz}."
     return 0
   fi
   jsh_run_root timedatectl set-timezone "${target_tz}"
 }
 
 main() {
-  local command arg answer
+  local command arg
   for arg in "$@"; do
     case "${arg}" in
-      -y | --yes) JSH_ASSUME_YES=1 ;;
+      -y | --yes) export JSH_ASSUME_YES=1 ;;
     esac
   done
 
@@ -162,19 +162,15 @@ main() {
   export PATH="${PATH}:/usr/sbin:/sbin"
   for command in systemctl sysctl timedatectl; do
     command -v "${command}" > /dev/null 2>&1 || {
-      jsh_error "${command} is required to configure Linux system policy."
+      jsh::log_error "${command} is required to configure Linux system policy."
       return 1
     }
   done
 
-  jsh_detail "This will change memory policy, disable coredump storage, enable earlyoom and zram, and configure USB wakeup and power management."
-  if [[ ${JSH_ASSUME_YES:-0} != 1 ]]; then
-    jsh_prompt "Configure Linux system policy? [y/N]: "
-    read -r answer || answer=
-    [[ "${answer}" =~ ^[Yy]$ ]] || {
-      jsh_note "Skipping Linux system policy."
-      return
-    }
+  jsh::log_detail "This will change memory policy, disable coredump storage, enable earlyoom and zram, and configure USB wakeup and power management."
+  if ! jsh::confirm "Configure Linux system policy?" --default no; then
+    jsh::log_note "Skipping Linux system policy."
+    return
   fi
 
   local earlyoom_conf="# Managed by jsh
@@ -244,8 +240,8 @@ ACTION==\"add|change\", SUBSYSTEM==\"usb\", TEST==\"power/wakeup\", ATTR{power/w
 
   enable_system_unit earlyoom.service enable
   enable_system_unit systemd-zram-setup@zram0.service start
-  [[ -z "${BACKUP_ROOT}" ]] || jsh_detail "Backups: ${BACKUP_ROOT}"
-  jsh_success "Linux system policy configured."
+  [[ -z "${BACKUP_ROOT}" ]] || jsh::log_detail "Backups: ${BACKUP_ROOT}"
+  jsh::log_success "Linux system policy configured."
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

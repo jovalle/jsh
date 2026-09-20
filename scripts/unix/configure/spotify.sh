@@ -24,7 +24,7 @@ SPICETIFY_BIN=
 spicetify_failure_details() {
   local output=$1 cleaned
   cleaned=$(printf '%s\n' "${output}" | sed -E $'s/\033\[[0-9;]*m//g; s/^[[:space:]]*(success|info|warning|error)[[:space:]]+//')
-  [[ -z ${cleaned} ]] || jsh_detail "${cleaned}"
+  [[ -z ${cleaned} ]] || jsh::log_detail "${cleaned}"
 }
 
 spotify_paths() {
@@ -64,17 +64,17 @@ spotify_paths() {
       fi
       ;;
     *)
-      jsh_note "Skipping Spotify configuration: unsupported platform ${platform}."
+      jsh::log_note "Skipping Spotify configuration: unsupported platform ${platform}."
       return 1
       ;;
   esac
 
   [[ -d ${spotify_path} ]] || {
-    jsh_note "Skipping Spotify configuration: Spotify is not installed."
+    jsh::log_note "Skipping Spotify configuration: Spotify is not installed."
     return 1
   }
   [[ -r ${prefs_path} ]] || {
-    jsh_note "Skipping Spotify configuration: open Spotify and sign in first."
+    jsh::log_note "Skipping Spotify configuration: open Spotify and sign in first."
     return 1
   }
   printf '%s\n%s\n' "${spotify_path}" "${prefs_path}"
@@ -85,9 +85,9 @@ ensure_spotify_writable() {
   [[ ${platform} == Linux ]] || return 0
   [[ -w ${spotify_path} && -w ${spotify_path}/Apps ]] && return 0
 
-  jsh_error "Spicetify needs write access to the Spotify installation."
-  jsh_detail "sudo chmod a+wr -- $(printf '%q' "${spotify_path}")"
-  jsh_detail "sudo chmod -R a+wr -- $(printf '%q' "${spotify_path}/Apps")"
+  jsh::log_error "Spicetify needs write access to the Spotify installation."
+  jsh::log_detail "sudo chmod a+wr -- $(printf '%q' "${spotify_path}")"
+  jsh::log_detail "sudo chmod -R a+wr -- $(printf '%q' "${spotify_path}/Apps")"
   return 1
 }
 
@@ -105,26 +105,26 @@ ensure_spicetify() {
   local output
   # shellcheck disable=SC2310 # spicetify_binary is intentionally used as a predicate.
   if SPICETIFY_BIN=$(spicetify_binary); then
-    jsh_note "Spicetify is installed."
+    jsh::log_note "Spicetify is installed."
     return
   fi
 
   command -v brew > /dev/null 2>&1 || {
-    jsh_error "Homebrew is required to install ${SPICETIFY_FORMULA}."
+    jsh::log_error "Homebrew is required to install ${SPICETIFY_FORMULA}."
     return 1
   }
-  jsh_info "Installing Spicetify..."
+  jsh::log_info "Installing Spicetify..."
   if ! output=$(brew install "${SPICETIFY_FORMULA}" 2>&1); then
-    jsh_error "Failed to install Spicetify."
+    jsh::log_error "Failed to install Spicetify."
     spicetify_failure_details "${output}"
     return 1
   fi
   # shellcheck disable=SC2310 # Failure is converted to a targeted error below.
   SPICETIFY_BIN=$(spicetify_binary) || {
-    jsh_error "Spicetify installation did not provide an executable."
+    jsh::log_error "Spicetify installation did not provide an executable."
     return 1
   }
-  jsh_success "Spicetify installed."
+  jsh::log_success "Spicetify installed."
 }
 
 spotify_is_running() {
@@ -136,20 +136,24 @@ spotify_flatpak_is_running() {
 }
 
 confirm_spotify_close() {
-  local tty=${JSH_SPOTIFY_TTY:-/dev/tty} answer
+  local tty=${JSH_SPOTIFY_TTY:-/dev/tty} input_fd previous_input_fd=${JSH_UI_INPUT_FD:-0}
+  local previous_interactive=${JSH_INTERACTIVE:-0} confirm_status=0
   [[ ${JSH_ASSUME_YES:-0} == 1 ]] && return 0
-  while :; do
-    jsh_prompt "Spotify is running. Close it now? [Y/n]: "
-    if ! IFS= read -r answer < "${tty}"; then
-      jsh_error "Could not confirm closing Spotify: no interactive input is available."
-      return 1
-    fi
-    case ${answer} in
-      '' | y | Y | yes | YES) return 0 ;;
-      n | N | no | NO) return 1 ;;
-      *) jsh_warn "Please answer yes or no." ;;
-    esac
-  done
+  [[ ! -f ${tty} || -s ${tty} ]] || {
+    jsh::log_error "Could not confirm closing Spotify: no interactive input is available."
+    return 1
+  }
+  exec {input_fd}< "${tty}" || {
+    jsh::log_error "Could not confirm closing Spotify: no interactive input is available."
+    return 1
+  }
+  JSH_UI_INPUT_FD=${input_fd}
+  JSH_INTERACTIVE=1
+  jsh::confirm "Spotify is running. Close it now?" --default yes || confirm_status=$?
+  exec {input_fd}<&-
+  JSH_UI_INPUT_FD=${previous_input_fd}
+  JSH_INTERACTIVE=${previous_interactive}
+  return "${confirm_status}"
 }
 
 close_spotify() {
@@ -182,15 +186,15 @@ close_spotify_if_running() {
   spotify_is_running || return 0
   # shellcheck disable=SC2310 # Confirmation failure is handled explicitly.
   if ! confirm_spotify_close; then
-    jsh_note "Skipping Spotify configuration while Spotify is running."
+    jsh::log_note "Skipping Spotify configuration while Spotify is running."
     return 1
   fi
   # shellcheck disable=SC2310 # Shutdown failure is handled explicitly.
   if ! close_spotify; then
-    jsh_error "Spotify did not close; configuration was not changed."
+    jsh::log_error "Spotify did not close; configuration was not changed."
     return 1
   fi
-  jsh_success "Spotify closed."
+  jsh::log_success "Spotify closed."
 }
 
 reopen_spotify() {
@@ -205,7 +209,7 @@ reopen_spotify() {
       elif command -v spotify > /dev/null 2>&1; then
         spotify > /dev/null 2>&1 &
       else
-        jsh_error "Spotify was closed but could not be reopened."
+        jsh::log_error "Spotify was closed but could not be reopened."
         return 1
       fi
       ;;
@@ -231,14 +235,14 @@ apply_spicetify() {
   fi
   # shellcheck disable=SC2310 # Retry only when Spicetify requires a restore first.
   if spicetify_backup_needs_restore "${output}"; then
-    jsh_info "Restoring Spotify before refreshing Spicetify's backup..."
+    jsh::log_info "Restoring Spotify before refreshing Spicetify's backup..."
     if ! output=$("${binary}" --no-restart restore 2>&1); then
-      jsh_error "Failed to restore Spotify before refreshing Spicetify's backup."
+      jsh::log_error "Failed to restore Spotify before refreshing Spicetify's backup."
       spicetify_failure_details "${output}"
       return 1
     fi
     if ! output=$("${binary}" --no-restart backup apply 2>&1); then
-      jsh_error "Failed to restore, refresh, and apply Spicetify."
+      jsh::log_error "Failed to restore, refresh, and apply Spicetify."
       spicetify_failure_details "${output}"
       return 1
     fi
@@ -246,17 +250,17 @@ apply_spicetify() {
   fi
   # shellcheck disable=SC2310 # Retry only when Spicetify reports a backupable client.
   if ! spicetify_backup_can_refresh "${output}"; then
-    jsh_error "Failed to apply Spicetify."
+    jsh::log_error "Failed to apply Spicetify."
     spicetify_failure_details "${output}"
     return 1
   fi
-  jsh_info "Refreshing Spicetify's backup for the current Spotify version..."
+  jsh::log_info "Refreshing Spicetify's backup for the current Spotify version..."
   if ! output=$("${binary}" --no-restart backup apply 2>&1); then
     # shellcheck disable=SC2310 # Retry only when backup refresh requires a restore first.
     if spicetify_backup_needs_restore "${output}"; then
-      jsh_info "Restoring Spotify before refreshing Spicetify's backup..."
+      jsh::log_info "Restoring Spotify before refreshing Spicetify's backup..."
       if ! output=$("${binary}" --no-restart restore 2>&1); then
-        jsh_error "Failed to restore Spotify before refreshing Spicetify's backup."
+        jsh::log_error "Failed to restore Spotify before refreshing Spicetify's backup."
         spicetify_failure_details "${output}"
         return 1
       fi
@@ -264,7 +268,7 @@ apply_spicetify() {
         return 0
       fi
     fi
-    jsh_error "Failed to refresh and apply Spicetify."
+    jsh::log_error "Failed to refresh and apply Spicetify."
     spicetify_failure_details "${output}"
     return 1
   fi
@@ -403,7 +407,7 @@ configure_spicetify() {
   local -a apply_command=(backup apply)
 
   if ! config_file=$("${binary}" -c 2>&1); then
-    jsh_error "Failed to locate the Spicetify configuration."
+    jsh::log_error "Failed to locate the Spicetify configuration."
     spicetify_failure_details "${config_file}"
     return 1
   fi
@@ -414,9 +418,9 @@ configure_spicetify() {
   if spicetify_paths_match "${config_file}" "${spotify_path}" "${prefs_path}"; then
     :
   else
-    jsh_info "Configuring Spicetify..."
+    jsh::log_info "Configuring Spicetify..."
     if ! output=$("${binary}" config spotify_path "${spotify_path}" prefs_path "${prefs_path}" 2>&1); then
-      jsh_error "Failed to configure Spicetify paths."
+      jsh::log_error "Failed to configure Spicetify paths."
       spicetify_failure_details "${output}"
       return 1
     fi
@@ -426,17 +430,17 @@ configure_spicetify() {
   install -d -m 0700 -- "${extension_dir}"
   for extension in "${SPICETIFY_EXTENSIONS[@]}"; do
     if cmp -s -- "${SPICETIFY_EXTENSION_DIR}/${extension}" "${extension_dir}/${extension}"; then
-      jsh_note "Spicetify extension ${extension} is current."
+      jsh::log_note "Spicetify extension ${extension} is current."
     else
       install -m 0600 -- "${SPICETIFY_EXTENSION_DIR}/${extension}" "${extension_dir}/${extension}"
-      jsh_success "Spicetify extension ${extension} updated."
+      jsh::log_success "Spicetify extension ${extension} updated."
       needs_apply=1
     fi
 
     # shellcheck disable=SC2310 # State queries are used as predicates.
     if ! spicetify_has_extension "${config_file}" "${extension}"; then
       if ! output=$("${binary}" config extensions "${extension}" 2>&1); then
-        jsh_error "Failed to enable Spicetify extension ${extension}."
+        jsh::log_error "Failed to enable Spicetify extension ${extension}."
         spicetify_failure_details "${output}"
         return 1
       fi
@@ -447,7 +451,7 @@ configure_spicetify() {
   # shellcheck disable=SC2310 # Legacy state is used as a predicate.
   if spicetify_has_extension "${config_file}" "${SPICETIFY_LEGACY_SETTINGS_EXTENSION}"; then
     if ! output=$("${binary}" config extensions "${SPICETIFY_LEGACY_SETTINGS_EXTENSION}-" 2>&1); then
-      jsh_error "Failed to disable the renamed Spotify settings extension."
+      jsh::log_error "Failed to disable the renamed Spotify settings extension."
       spicetify_failure_details "${output}"
       return 1
     fi
@@ -459,7 +463,7 @@ configure_spicetify() {
     # shellcheck disable=SC2310 # Legacy state is used as a predicate.
     if spicetify_has_extension "${config_file}" "${legacy_extension}"; then
       if ! output=$("${binary}" config extensions "${legacy_extension}-" 2>&1); then
-        jsh_error "Failed to disable the renamed Spotify command extension ${legacy_extension}."
+        jsh::log_error "Failed to disable the renamed Spotify command extension ${legacy_extension}."
         spicetify_failure_details "${output}"
         return 1
       fi
@@ -480,13 +484,13 @@ configure_spicetify() {
 
   # shellcheck disable=SC2310 # State queries are used as predicates.
   if ((!needs_apply)) && spicetify_is_applied "${spotify_path}" "${backup_version:-}"; then
-    jsh_note "Spicetify is applied."
+    jsh::log_note "Spicetify is applied."
     return 0
   fi
 
-  jsh_info "Applying Spicetify..."
+  jsh::log_info "Applying Spicetify..."
   apply_spicetify "${binary}" "${apply_command[@]}" || return 1
-  jsh_success "Spicetify applied."
+  jsh::log_success "Spicetify applied."
 }
 
 main() {
@@ -496,7 +500,7 @@ main() {
     case $1 in
       -y | --yes) JSH_ASSUME_YES=1 ;;
       *)
-        jsh_error "Unknown option: $1"
+        jsh::log_error "Unknown option: $1"
         return 2
         ;;
     esac
@@ -516,9 +520,9 @@ main() {
   if spotify_configuration_is_current "${SPICETIFY_BIN}" "${spotify_path}" "${prefs_path}"; then
     # shellcheck disable=SC2310 # Status check is used as a predicate.
     if spotify_is_running; then
-      jsh_note "Spotify configuration is current; leaving Spotify open."
+      jsh::log_note "Spotify configuration is current; leaving Spotify open."
     else
-      jsh_note "Spotify configuration is current."
+      jsh::log_note "Spotify configuration is current."
     fi
     return 0
   fi
@@ -534,9 +538,9 @@ main() {
   configure_spicetify "${SPICETIFY_BIN}" "${spotify_path}" "${prefs_path}"
   if ((spotify_was_running)); then
     reopen_spotify "${spotify_was_flatpak}" || return 1
-    jsh_success "Spotify configuration complete. Spotify reopened."
+    jsh::log_success "Spotify configuration complete. Spotify reopened."
   else
-    jsh_success "Spotify configuration complete. Settings apply on next launch."
+    jsh::log_success "Spotify configuration complete. Settings apply on next launch."
   fi
 }
 

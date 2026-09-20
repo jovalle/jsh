@@ -17,25 +17,25 @@ DRY_RUN=${JSH_INSTALL_DRY_RUN:-${JSH_CONFIGURE_DRY_RUN:-0}}
 
 enable_linux_syncthing() {
   command -v systemctl > /dev/null 2>&1 || {
-    jsh_error "systemctl is required to enable Syncthing."
+    jsh::log_error "systemctl is required to enable Syncthing."
     return 1
   }
   systemctl --user daemon-reload
   systemctl --user cat syncthing.service > /dev/null 2>&1 || {
-    jsh_error "Syncthing user service is unavailable."
+    jsh::log_error "Syncthing user service is unavailable."
     return 1
   }
   if systemctl --user is-enabled --quiet syncthing.service &&
     systemctl --user is-active --quiet syncthing.service; then
-    jsh_note "Syncthing user service is already running."
+    jsh::log_note "Syncthing user service is already running."
     return 0
   fi
   if [[ ${DRY_RUN} == 1 ]]; then
-    jsh_detail "Would enable and start syncthing.service."
+    jsh::log_detail "Would enable and start syncthing.service."
   else
     systemctl --user enable --now syncthing.service
   fi
-  jsh_success "Syncthing user service is enabled and running."
+  jsh::log_success "Syncthing user service is enabled and running."
 }
 
 enable_macos_syncthing() {
@@ -47,19 +47,19 @@ enable_macos_syncthing() {
   elif [[ -x /usr/local/bin/brew ]]; then
     brew_command=/usr/local/bin/brew
   else
-    jsh_error "Homebrew is required to enable Syncthing."
+    jsh::log_error "Homebrew is required to enable Syncthing."
     return 1
   fi
   if "${brew_command}" services info syncthing 2> /dev/null | grep -Eiq '^(Running:[[:space:]]*true|status:[[:space:]]*"?started"?)$'; then
-    jsh_note "Syncthing user service is already running."
+    jsh::log_note "Syncthing user service is already running."
     return 0
   fi
   if [[ ${DRY_RUN} == 1 ]]; then
-    jsh_detail "Would start Syncthing with Homebrew services."
+    jsh::log_detail "Would start Syncthing with Homebrew services."
   else
     "${brew_command}" services start syncthing
   fi
-  jsh_success "Syncthing user service is enabled and running."
+  jsh::log_success "Syncthing user service is enabled and running."
 }
 
 main() {

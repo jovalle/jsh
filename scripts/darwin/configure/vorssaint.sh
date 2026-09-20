@@ -30,25 +30,13 @@ cleanup() {
 }
 
 confirm_import() {
-  if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then
-    IMPORT_CONFIRMED=1
-    return
-  fi
-  jsh_prompt "Apply this backup to Vorssaint? [y/N]: "
-  read -r answer || answer=
-  if [[ "${answer}" =~ ^[Yy]$ ]]; then
+  if jsh::confirm "Apply this backup to Vorssaint?" --default no; then
     IMPORT_CONFIRMED=1
   fi
 }
 
 confirm_backup() {
-  if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then
-    BACKUP_CONFIRMED=1
-    return
-  fi
-  jsh_prompt "Replace the managed backup with these active settings? [y/N]: "
-  read -r answer || answer=
-  if [[ "${answer}" =~ ^[Yy]$ ]]; then
+  if jsh::confirm "Replace the managed backup with these active settings?" --default no; then
     BACKUP_CONFIRMED=1
   fi
 }
@@ -252,7 +240,7 @@ show_backup_diff() {
     diff_status=$?
   fi
   if [[ "${diff_status}" -ne 1 ]]; then
-    jsh_error "Unable to compare active settings with the managed Vorssaint backup."
+    jsh::log_error "Unable to compare active settings with the managed Vorssaint backup."
     return "${diff_status}"
   fi
 
@@ -316,16 +304,16 @@ backup_settings() {
   create_backup_candidate "${managed_active_plist}" "${candidate_settings}" "${candidate_backup}"
   show_backup_diff "${candidate_backup}"
   if [[ "${SETTINGS_DIFFER}" -eq 0 ]]; then
-    jsh_note "The managed Vorssaint backup already matches active settings."
+    jsh::log_note "The managed Vorssaint backup already matches active settings."
     return
   fi
 
   confirm_backup
   if [[ "${BACKUP_CONFIRMED}" -eq 1 ]]; then
     mv -f "${candidate_backup}" "${BACKUP_PATH}"
-    jsh_success "Backed up active Vorssaint settings to ${BACKUP_PATH#"${JSH_ROOT}/"}."
+    jsh::log_success "Backed up active Vorssaint settings to ${BACKUP_PATH#"${JSH_ROOT}/"}."
   else
-    jsh_warn "Keeping the managed Vorssaint backup."
+    jsh::log_warn "Keeping the managed Vorssaint backup."
   fi
 }
 
@@ -351,7 +339,7 @@ show_settings_diff() {
     diff_status=$?
   fi
   if [[ "${diff_status}" -ne 1 ]]; then
-    jsh_error "Unable to compare active and managed Vorssaint settings."
+    jsh::log_error "Unable to compare active and managed Vorssaint settings."
     return "${diff_status}"
   fi
 
@@ -421,7 +409,7 @@ import_settings() {
     killall Vorssaint > /dev/null 2>&1 || true
   fi
   defaults import "${BUNDLE_ID}" "${backup_plist}"
-  jsh_success "Imported managed Vorssaint settings."
+  jsh::log_success "Imported managed Vorssaint settings."
 }
 
 configure_onboarding() {
@@ -431,14 +419,14 @@ configure_onboarding() {
   if [[ $(defaults read "${BUNDLE_ID}" hasOnboarded 2> /dev/null || true) == "1" && \
         $(defaults read "${BUNDLE_ID}" onboardingStep 2> /dev/null || true) == "0" && \
         $(defaults read "${BUNDLE_ID}" featuresOnboardingVersion 2> /dev/null || true) == "${onboarding_version}" ]]; then
-    jsh_note "Vorssaint onboarding is already marked complete."
+    jsh::log_note "Vorssaint onboarding is already marked complete."
     return 0
   fi
 
   defaults write "${BUNDLE_ID}" hasOnboarded -bool true
   defaults write "${BUNDLE_ID}" onboardingStep -int 0
   defaults write "${BUNDLE_ID}" featuresOnboardingVersion -int "${onboarding_version}"
-  jsh_success "Vorssaint onboarding is marked complete."
+  jsh::log_success "Vorssaint onboarding is marked complete."
 }
 
 configure_login_item() {
@@ -458,9 +446,9 @@ on run arguments
   end tell
 end run
 APPLESCRIPT
-    jsh_success "Vorssaint will start at login."
+    jsh::log_success "Vorssaint will start at login."
   else
-    jsh_note "Vorssaint is already configured to start at login."
+    jsh::log_note "Vorssaint is already configured to start at login."
   fi
 }
 
@@ -472,10 +460,10 @@ main() {
 
   for arg in "$@"; do
     case ${arg} in
-      -y | --yes) JSH_ASSUME_YES=1 ;;
+      -y | --yes) export JSH_ASSUME_YES=1 ;;
       apply | backup) action=${arg} ;;
       *)
-        jsh_error "Usage: $0 [--yes] [apply|backup]"
+        jsh::log_error "Usage: $0 [--yes] [apply|backup]"
         return 1
         ;;
     esac
@@ -483,23 +471,23 @@ main() {
 
   operating_system=$(uname -s)
   [[ "${operating_system}" == Darwin ]] || {
-    jsh_note "Skipping Vorssaint configuration: macOS not detected."
+    jsh::log_note "Skipping Vorssaint configuration: macOS not detected."
     return
   }
   [[ -d "${APP_PATH}" ]] || {
-    jsh_note "Skipping Vorssaint configuration: ${APP_PATH} is not installed."
+    jsh::log_note "Skipping Vorssaint configuration: ${APP_PATH} is not installed."
     return
   }
   [[ -r "${BACKUP_PATH}" ]] || {
-    jsh_error "Vorssaint backup is unavailable: ${BACKUP_PATH}"
+    jsh::log_error "Vorssaint backup is unavailable: ${BACKUP_PATH}"
     return 1
   }
   command -v defaults > /dev/null 2>&1 || {
-    jsh_error "defaults is required to configure Vorssaint."
+    jsh::log_error "defaults is required to configure Vorssaint."
     return 1
   }
   [[ "${action}" != apply ]] || command -v osascript > /dev/null 2>&1 || {
-    jsh_error "osascript is required to configure Vorssaint login startup."
+    jsh::log_error "osascript is required to configure Vorssaint login startup."
     return 1
   }
   plutil -lint "${BACKUP_PATH}" > /dev/null
@@ -525,10 +513,10 @@ main() {
     if [[ "${IMPORT_CONFIRMED}" -eq 1 ]]; then
       import_settings "${merged_plist}"
     else
-      jsh_warn "Keeping the active Vorssaint settings."
+      jsh::log_warn "Keeping the active Vorssaint settings."
     fi
   else
-    jsh_note "Vorssaint settings already match the managed backup."
+    jsh::log_note "Vorssaint settings already match the managed backup."
   fi
 
   configure_onboarding "${managed_backup_plist}"

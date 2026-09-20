@@ -13,60 +13,49 @@ for library_file in "${JSH_ROOT}"/lib/*; do
 done
 unset library_file
 
-confirm() {
-  local answer
-  [[ ${JSH_ASSUME_YES:-0} == 1 ]] && return 0
-  jsh_prompt "Install repository hooks? [y/N]: "
-  if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then answer=y; else read -r answer || answer=; fi
-  case "${answer}" in
-    y | Y | yes | YES) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
 main() {
   local platform arg
   platform=$(uname -s)
   case "${platform}" in
     Darwin | Linux) ;;
     *)
-      jsh_error "Unsupported platform: ${platform}"
+      jsh::log_error "Unsupported platform: ${platform}"
       exit 1
       ;;
   esac
 
   for arg in "$@"; do
     case "${arg}" in
-      -y | --yes) JSH_ASSUME_YES=1 ;;
+      -y | --yes) export JSH_ASSUME_YES=1 ;;
     esac
   done
 
   if ! command -v pre-commit >/dev/null 2>&1; then
-    jsh_note "pre-commit is not installed; skipping repository hooks."
+    jsh::log_note "pre-commit is not installed; skipping repository hooks."
     return 0
   fi
 
   if [[ ! -d "${JSH_ROOT}/.git" ]]; then
-    jsh_note "Not a git repository; skipping repository hooks."
+    jsh::log_note "Not a git repository; skipping repository hooks."
     return 0
   fi
 
   if [[ -f "${JSH_ROOT}/.git/hooks/pre-commit" ]] && grep -Fq "pre-commit" "${JSH_ROOT}/.git/hooks/pre-commit" 2> /dev/null; then
     if [[ ${JSH_UPDATE:-0} != 1 ]]; then
-      jsh_note "Repository hooks are already installed."
+      jsh::log_note "Repository hooks are already installed."
       return 0
     fi
   fi
 
-  confirm || {
-    jsh_note "Skipping repository hooks."
+  jsh::confirm "Install repository hooks?" --default no || {
+    jsh::log_note "Skipping repository hooks."
     return
   }
-  jsh_info "Installing repository hooks..."
+  jsh::log_info "Installing repository hooks..."
   if (cd "${JSH_ROOT}" && pre-commit install --install-hooks); then
-    jsh_success "Repository hooks installed."
+    jsh::log_success "Repository hooks installed."
   else
-    jsh_warn "Pre-commit hook setup failed."
+    jsh::log_warn "Pre-commit hook setup failed."
   fi
 }
 

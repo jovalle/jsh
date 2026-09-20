@@ -9,10 +9,24 @@ setup() {
   export WATERFOX_CONFIG="${JSH_ROOT}/conf/gecko/waterfox.json"
   # shellcheck source=/dev/null
   source "${JSH_ROOT}/lib/output.sh"
+  jsh::log_info() { jsh_info "$@"; }
+  jsh::log_note() { jsh_note "$@"; }
+  jsh::log_success() { jsh_success "$@"; }
+  jsh::log_warn() { jsh_warn "$@"; }
+  jsh::log_error() { jsh_error "$@"; }
+  jsh::log_detail() { jsh_detail "$@"; }
   # shellcheck source=/dev/null
   source "${JSH_ROOT}/lib/files.sh"
   # shellcheck source=/dev/null
   source "${JSH_ROOT}/lib/unix/waterfox.sh"
+}
+
+file_identity() {
+  if stat -c '%i:%Y' "$1" > /dev/null 2>&1; then
+    stat -c '%i:%Y' "$1"
+  else
+    stat -f '%i:%m' "$1"
+  fi
 }
 
 @test "waterfox command provides Waterfox repair" {
@@ -50,7 +64,14 @@ setup() {
   ln -s ../../escape "${fixture}/waterfox/link"
   tar -cjf "${BATS_TEST_TMPDIR}/waterfox.tar.bz2" -C "${fixture}" waterfox
 
-  run bash -c 'source "$1"; extract_waterfox_archive "$2" "$3"' _ \
+  run bash -c '
+    realpath() {
+      [[ $1 == -m ]] && shift
+      python3 -c "import os, sys; print(os.path.realpath(sys.argv[1]))" "$1"
+    }
+    source "$1"
+    extract_waterfox_archive "$2" "$3"
+  ' _ \
     "${JSH_ROOT}/scripts/linux/install/waterfox.sh" \
     "${BATS_TEST_TMPDIR}/waterfox.tar.bz2" "${output}"
 
@@ -71,7 +92,7 @@ setup() {
 }
 
 @test "Waterfox configuration dry run stops before profile mutation" {
-  run env JSH_CONFIGURE_DRY_RUN=1 JSH_WATERFOX_BIN=/bin/true \
+  run env JSH_CONFIGURE_DRY_RUN=1 JSH_WATERFOX_BIN=/usr/bin/true \
     JSH_WATERFOX_ROOT="${BATS_TEST_TMPDIR}/profile" bash -c '
       source "$1"
       validate_manifest() { :; }
@@ -87,21 +108,32 @@ setup() {
 }
 
 @test "Waterfox launcher resolves a symlinked binary for its icon" {
-  local home="${BATS_TEST_TMPDIR}/home" install="${BATS_TEST_TMPDIR}/waterfox-1"
+  local home="${BATS_TEST_TMPDIR}/home" install="${BATS_TEST_TMPDIR}/waterfox-1" resolved_install
   mkdir -p "${home}/bin" "${install}/browser/chrome/icons/default"
   printf '#!/bin/sh\n' > "${install}/waterfox"
   printf 'icon\n' > "${install}/browser/chrome/icons/default/default128.png"
   chmod +x "${install}/waterfox"
   ln -s "${install}/waterfox" "${home}/bin/waterfox"
+  resolved_install=$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "${install}")
 
   run env HOME="${home}" XDG_DATA_HOME="${home}/share" \
     JSH_WATERFOX_SYSTEM_BIN="${home}/bin/waterfox" bash -c '
     source "$1"
+    uname() { printf "Linux\n"; }
+    readlink() {
+      if [[ $1 == -f ]]; then
+        shift
+        [[ ${1:-} == -- ]] && shift
+        python3 -c "import os, sys; print(os.path.realpath(sys.argv[1]))" "$1"
+      else
+        command readlink "$@"
+      fi
+    }
     configure_linux_entry_points "$(waterfox_binary)"
   ' _ "${JSH_ROOT}/scripts/unix/configure/waterfox.sh"
 
   [[ ${status} -eq 0 ]]
-  grep -Fxq "Icon=${install}/browser/chrome/icons/default/default128.png" \
+  grep -Fxq "Icon=${resolved_install}/browser/chrome/icons/default/default128.png" \
     "${home}/share/applications/waterfox.desktop"
 }
 
@@ -110,7 +142,8 @@ setup() {
 
   run env HOME="${home}" XDG_DATA_HOME="${home}/share" bash -c '
     source "$1"
-    configure_linux_entry_points /bin/true
+    uname() { printf "Linux\n"; }
+    configure_linux_entry_points /usr/bin/true
   ' _ "${JSH_ROOT}/scripts/unix/configure/waterfox.sh"
 
   [[ ${status} -eq 0 ]]
@@ -131,10 +164,10 @@ setup() {
 
   configure_linux_default_browser waterfox.desktop
   local before
-  before=$(stat -c '%i:%Y' "${XDG_CONFIG_HOME}/xfce4/helpers.rc")
+  before=$(file_identity "${XDG_CONFIG_HOME}/xfce4/helpers.rc")
   configure_linux_default_browser waterfox.desktop
 
   grep -Fxq WebBrowser=waterfox "${XDG_CONFIG_HOME}/xfce4/helpers.rc"
   grep -Fxq TerminalEmulator=custom-terminal "${XDG_CONFIG_HOME}/xfce4/helpers.rc"
-  [[ $(stat -c '%i:%Y' "${XDG_CONFIG_HOME}/xfce4/helpers.rc") == "${before}" ]]
+  [[ $(file_identity "${XDG_CONFIG_HOME}/xfce4/helpers.rc") == "${before}" ]]
 }

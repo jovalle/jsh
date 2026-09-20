@@ -37,6 +37,7 @@ from pathlib import Path
 
 VERSION = "1.1.0"
 USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+JSH_UI = Path(__file__).resolve().parents[1] / "lib/ui/cli.sh"
 
 
 # ANSI Terminal Colors
@@ -66,6 +67,16 @@ class Colors:
 
 
 Colors.strip_if_not_tty()
+
+
+def ui_confirm(prompt, default="no"):
+    """Confirm through the shared tiered UI while preserving a boolean contract."""
+    result = subprocess.run(
+        [str(JSH_UI), "confirm", "--default", default, "--", prompt], check=False
+    )
+    if result.returncode in (0, 1):
+        return result.returncode == 0
+    raise RuntimeError(f"Jsh confirmation failed with status {result.returncode}")
 
 
 def fetch_url(url, timeout=15):
@@ -913,8 +924,8 @@ def run_reconcile(target, selected_distros, args):
         return
 
     if not args.yes:
-        ans = input(f"\nProceed with downloading {len(to_download)} ISO(s)? [Y/n] ").strip().lower()
-        if ans and ans not in ["y", "yes"]:
+        print()
+        if not ui_confirm(f"Proceed with downloading {len(to_download)} ISO(s)?", "yes"):
             print("Aborted by user.")
             return
 

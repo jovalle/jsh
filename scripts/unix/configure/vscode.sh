@@ -53,7 +53,7 @@ configure_vscode() {
     | .[$default] = "zsh"
   ' "${current}" > "${temporary}"; then
     rm -f -- "${temporary}" "${temporary}.input"
-    jsh_error "Invalid VS Code settings JSON: ${settings}"
+    jsh::log_error "Invalid VS Code settings JSON: ${settings}"
     return 1
   fi
   rm -f -- "${temporary}.input"
@@ -81,7 +81,7 @@ configure_vscode() {
       + $desired
   ' "${current}" "${desired}" > "${temporary}"; then
     rm -f -- "${temporary}" "${temporary}.input"
-    jsh_error "Invalid VS Code keybindings JSON: ${bindings}"
+    jsh::log_error "Invalid VS Code keybindings JSON: ${bindings}"
     return 1
   fi
   rm -f -- "${temporary}.input"

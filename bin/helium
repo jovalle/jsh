@@ -30,13 +30,16 @@ if [[ -z ${JSH_ROOT:-} ]]; then
 fi
 readonly JSH_ROOT
 readonly PATCH_SCRIPT="${JSH_ROOT}/scripts/unix/configure/helium.sh"
+# shellcheck source=../lib/ui.sh
+. "${JSH_ROOT}/lib/ui.sh"
+jsh::init
 
 usage() {
   cat << EOF
 Usage:
   ${SCRIPT_NAME}
   ${SCRIPT_NAME} status
-  ${SCRIPT_NAME} apply [--quit]
+  ${SCRIPT_NAME} apply [--quit] [-y|--yes]
   ${SCRIPT_NAME} open [--] [BROWSER_ARGS...]
   ${SCRIPT_NAME} stop
   ${SCRIPT_NAME} restart [--] [BROWSER_ARGS...]
@@ -58,18 +61,13 @@ EOF
 }
 
 prompt_to_launch() {
-  local answer
   [[ -t 0 ]] || return 0
-  printf 'Launch Helium? [y/N] ' >&2
-  IFS= read -r answer || answer=
-  case ${answer} in
-    [yY] | [yY][eE][sS]) exec "${PATCH_SCRIPT}" launch ;;
-    *) return 0 ;;
-  esac
+  jsh::confirm 'Launch Helium?' --default no || return 0
+  exec "${PATCH_SCRIPT}" launch
 }
 
 [[ -x ${PATCH_SCRIPT} ]] || {
-  printf '%s: patch script is unavailable: %s\n' "${SCRIPT_NAME}" "${PATCH_SCRIPT}" >&2
+  jsh::log_error "${SCRIPT_NAME}: patch script is unavailable: ${PATCH_SCRIPT}"
   exit 1
 }
 

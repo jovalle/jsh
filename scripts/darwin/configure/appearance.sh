@@ -13,13 +13,6 @@ for library_file in "${JSH_ROOT}"/lib/*; do
 done
 unset library_file
 
-confirm() {
-  [[ ${JSH_ASSUME_YES:-0} == 1 ]] && return 0
-  jsh_prompt "$1 [y/N]: "
-  read -r answer || answer=
-  [[ "${answer}" =~ ^[Yy]$ ]]
-}
-
 pin_dock_app() {
   local app_path=$1
   [[ -d ${app_path} ]] || return 0
@@ -56,9 +49,9 @@ configure_appearance() {
   defaults write com.apple.dock wvous-br-corner -int 0
 
   if ! command -v osascript > /dev/null 2>&1; then
-    jsh_note "Skipping wallpaper: osascript is unavailable."
+    jsh::log_note "Skipping wallpaper: osascript is unavailable."
   elif [[ -z "${wallpaper}" ]] && ! command -v magick > /dev/null 2>&1; then
-    jsh_note "Skipping wallpaper: no local wallpaper was found and magick is unavailable."
+    jsh::log_note "Skipping wallpaper: no local wallpaper was found and magick is unavailable."
   else
     if [[ -z "${wallpaper}" ]]; then
       wallpaper="${appearance_dir}/jsh-solid-black.png"
@@ -78,31 +71,31 @@ APPLESCRIPT
 
   killall Dock > /dev/null 2>&1 || true
   killall Finder > /dev/null 2>&1 || true
-  jsh_success "macOS appearance and Dock configured."
+  jsh::log_success "macOS appearance and Dock configured."
 }
 
 main() {
   [[ "$(uname -s)" == Darwin ]] || {
-    jsh_note "Skipping macOS appearance: macOS not detected."
+    jsh::log_note "Skipping macOS appearance: macOS not detected."
     return
   }
   command -v defaults > /dev/null 2>&1 || {
-    jsh_error "defaults is required to configure macOS."
+    jsh::log_error "defaults is required to configure macOS."
     return 1
   }
 
   local arg
   for arg in "$@"; do
     case "${arg}" in
-      -y | --yes) JSH_ASSUME_YES=1 ;;
+      -y | --yes) export JSH_ASSUME_YES=1 ;;
     esac
   done
 
-  jsh_warn "Appearance setup clears pinned Dock items and replaces the desktop wallpaper."
-  if confirm "Configure macOS appearance and Dock?"; then
+  jsh::log_warn "Appearance setup clears pinned Dock items and replaces the desktop wallpaper."
+  if jsh::confirm "Configure macOS appearance and Dock?" --default no; then
     configure_appearance
   else
-    jsh_note "Skipping macOS appearance and Dock."
+    jsh::log_note "Skipping macOS appearance and Dock."
   fi
 }
 

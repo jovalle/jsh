@@ -15,12 +15,12 @@ unset library_file
 
 for arg in "$@"; do
   case "${arg}" in
-    -y | --yes) JSH_ASSUME_YES=1 ;;
+    -y | --yes) export JSH_ASSUME_YES=1 ;;
   esac
 done
 
 if [[ ! -f "${JSH_ROOT}/dotfiles/.ssh/id_rsa" || ! -f "${JSH_ROOT}/dotfiles/.ssh/config-windows" ]]; then
-  jsh_note "Skipping Windows SSH configuration: source files not found"
+  jsh::log_note "Skipping Windows SSH configuration: source files not found"
   exit 0
 fi
 
@@ -40,38 +40,32 @@ windows_link_matches() {
 
 if windows_link_matches "${KEY_DEST}" "${KEY_SOURCE}" &&
   windows_link_matches "${CONFIG_DEST}" "${CONFIG_SOURCE}"; then
-  jsh_note "Windows SSH is already configured."
+  jsh::log_note "Windows SSH is already configured."
   exit 0
 fi
 
-jsh_info "Creating symlinks for SSH files from WSL to Windows..."
-jsh_detail "Key source: ${KEY_SOURCE} -> ${KEY_DEST}"
-jsh_detail "Config source: ${CONFIG_SOURCE} -> ${CONFIG_DEST}"
-jsh_warn "Existing destination files will be replaced."
-if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then
-  CONFIRM=y
-else
-  jsh_prompt "Configure Windows SSH? [y/N]: "
-  read -r CONFIRM || CONFIRM=
-fi
-if [[ ! "${CONFIRM}" =~ ^[Yy]$ ]]; then
-  jsh_note "Skipping Windows SSH configuration."
+jsh::log_info "Creating symlinks for SSH files from WSL to Windows..."
+jsh::log_detail "Key source: ${KEY_SOURCE} -> ${KEY_DEST}"
+jsh::log_detail "Config source: ${CONFIG_SOURCE} -> ${CONFIG_DEST}"
+jsh::log_warn "Existing destination files will be replaced."
+if ! jsh::confirm "Configure Windows SSH?" --default no; then
+  jsh::log_note "Skipping Windows SSH configuration."
   exit 0
 fi
 
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Start-Process powershell -ArgumentList '-NoProfile -ExecutionPolicy Bypass -Command \"if (!(Test-Path ''${DEST_DIR}'')) { New-Item -ItemType Directory -Path ''${DEST_DIR}'' -Force | Out-Null }; if (Test-Path ''${KEY_DEST}'') { Remove-Item ''${KEY_DEST}'' -Force }; if (Test-Path ''${CONFIG_DEST}'') { Remove-Item ''${CONFIG_DEST}'' -Force }; New-Item -ItemType SymbolicLink -Path ''${KEY_DEST}'' -Target ''${KEY_SOURCE}'' -Force | Out-Null; New-Item -ItemType SymbolicLink -Path ''${CONFIG_DEST}'' -Target ''${CONFIG_SOURCE}'' -Force | Out-Null\"' -Verb RunAs -Wait"
 
 jsh_blank
-jsh_info "Validating symlinks..."
+jsh::log_info "Validating symlinks..."
 KEY_LINK_INFO=$(powershell.exe -NoProfile -Command "Get-Item '${KEY_DEST}' | Select-Object LinkType, Target | Format-List" 2>&1)
 CONFIG_LINK_INFO=$(powershell.exe -NoProfile -Command "Get-Item '${CONFIG_DEST}' | Select-Object LinkType, Target | Format-List" 2>&1)
 
 if echo "${KEY_LINK_INFO}" | grep -q "SymbolicLink" && echo "${CONFIG_LINK_INFO}" | grep -q "SymbolicLink"; then
-  jsh_success "SSH key symlink created successfully"
+  jsh::log_success "SSH key symlink created successfully"
   echo "${KEY_LINK_INFO}"
-  jsh_success "SSH config symlink created successfully"
+  jsh::log_success "SSH config symlink created successfully"
   echo "${CONFIG_LINK_INFO}"
 else
-  jsh_error "Symlink validation failed"
+  jsh::log_error "Symlink validation failed"
   exit 1
 fi

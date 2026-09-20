@@ -47,7 +47,7 @@ trap cleanup EXIT
 
 require_command() {
   command -v "$1" > /dev/null 2>&1 || {
-    jsh_error "$1 is required to configure Waterfox."
+    jsh::log_error "$1 is required to configure Waterfox."
     return 1
   }
 }
@@ -71,11 +71,11 @@ validate_manifest() {
     and (.revision | type == "string" and test("^[0-9a-f]{40}$"))
     and (.sha256 | type == "string" and test("^[0-9a-f]{64}$"))
   ' "${BETTERFOX_MANIFEST}" > /dev/null || {
-    jsh_error "Invalid Betterfox manifest: ${BETTERFOX_MANIFEST}"
+    jsh::log_error "Invalid Betterfox manifest: ${BETTERFOX_MANIFEST}"
     return 1
   }
   [[ -r ${WATERFOX_OVERRIDES} ]] || {
-    jsh_error "Missing Waterfox preferences: ${WATERFOX_OVERRIDES}"
+    jsh::log_error "Missing Waterfox preferences: ${WATERFOX_OVERRIDES}"
     return 1
   }
 }
@@ -94,16 +94,16 @@ stage_betterfox() {
   downloaded="${TEMP_DIR}/betterfox.js"
   if ! curl -fsSL --retry 2 --output "${downloaded}" \
     "${BETTERFOX_RAW_BASE}/${revision}/user.js"; then
-    jsh_error "Could not download pinned Betterfox revision ${revision}."
+    jsh::log_error "Could not download pinned Betterfox revision ${revision}."
     return 1
   fi
   actual=$(sha256_file "${downloaded}")
   [[ ${actual} == "${expected}" ]] || {
-    jsh_error "Betterfox checksum mismatch: expected ${expected}, got ${actual}."
+    jsh::log_error "Betterfox checksum mismatch: expected ${expected}, got ${actual}."
     return 1
   }
   grep -q 'user_pref' "${downloaded}" || {
-    jsh_error "Downloaded Betterfox file contains no preferences."
+    jsh::log_error "Downloaded Betterfox file contains no preferences."
     return 1
   }
 
@@ -162,9 +162,9 @@ configure_linux_entry_points() {
 
   if [[ ! -e ${HOME}/.waterfox && -d ${flatpak_profile} ]]; then
     if [[ ${JSH_CONFIGURE_DRY_RUN:-0} == 1 ]]; then
-      jsh_detail 'Would copy the existing Flatpak Waterfox profile to the native location.'
+      jsh::log_detail 'Would copy the existing Flatpak Waterfox profile to the native location.'
     else
-      jsh_info 'Copying existing Flatpak Waterfox profile to the native location...'
+      jsh::log_info 'Copying existing Flatpak Waterfox profile to the native location...'
       mkdir -p "${HOME}/.waterfox"
       tar -C "${flatpak_profile}" \
         --exclude=lock --exclude=.parentlock --exclude=parent.lock -cf - . |
@@ -206,7 +206,7 @@ validate_profile_path() {
   case ${canonical_profile} in
     "${canonical_root%/}"/*) printf '%s\n' "${canonical_profile}" ;;
     *)
-      jsh_error "Selected Waterfox profile escapes its profile root: ${profile}"
+      jsh::log_error "Selected Waterfox profile escapes its profile root: ${profile}"
       return 2
       ;;
   esac
@@ -288,16 +288,16 @@ selected_profile() {
 bootstrap_profile() {
   local root=$1 binary=$2
   [[ ! -e ${root}/profiles.ini && ! -e ${root}/installs.ini ]] || {
-    jsh_error "Waterfox has a profile registry but no usable default profile."
+    jsh::log_error "Waterfox has a profile registry but no usable default profile."
     return 1
   }
   install -d -m 0700 -- "${root}"
   "${binary}" -CreateProfile "jsh-default ${root}/Profiles/jsh-default" > /dev/null
   selected_profile "${root}" > /dev/null || {
-    jsh_error "Waterfox did not create a usable default profile."
+    jsh::log_error "Waterfox did not create a usable default profile."
     return 1
   }
-  jsh_success "Created the jsh-default Waterfox profile."
+  jsh::log_success "Created the jsh-default Waterfox profile."
 }
 
 profile_is_locked() {
@@ -356,17 +356,17 @@ backup_file() {
   backup="${STATE_DIR}/${stamp}-${label}-$$"
   install -d -m 0700 -- "${STATE_DIR}"
   install -m 0600 -- "${source}" "${backup}"
-  jsh_detail "Backup: ${backup}"
+  jsh::log_detail "Backup: ${backup}"
 }
 
 install_preferences() {
   local profile=$1 source=$2 target="${1}/user.js" temporary
   [[ ! -L ${target} ]] || {
-    jsh_error "Refusing to replace symlinked Waterfox preferences: ${target}"
+    jsh::log_error "Refusing to replace symlinked Waterfox preferences: ${target}"
     return 1
   }
   if cmp -s -- "${source}" "${target}"; then
-    jsh_note "Waterfox preferences current."
+    jsh::log_note "Waterfox preferences current."
     return
   fi
   backup_file "${target}" user.js
@@ -374,7 +374,7 @@ install_preferences() {
   jsh_interrupt_cleanup_path "${temporary}"
   install -m 0600 -- "${source}" "${temporary}"
   mv -f -- "${temporary}" "${target}"
-  jsh_success "Waterfox preferences updated."
+  jsh::log_success "Waterfox preferences updated."
 }
 
 policy_target() {
@@ -397,27 +397,27 @@ prepare_policy() {
   local existing managed merged current
   POLICY_CHANGED=0
   POLICY_TARGET=$(policy_target) || {
-    jsh_note "Skipping Waterfox policy: browser executable not found."
+    jsh::log_note "Skipping Waterfox policy: browser executable not found."
     return
   }
   existing='{}'
   if [[ -L ${POLICY_TARGET} ]]; then
-    jsh_error "Refusing to replace symlinked Waterfox policy: ${POLICY_TARGET}"
+    jsh::log_error "Refusing to replace symlinked Waterfox policy: ${POLICY_TARGET}"
     return 1
   fi
   if [[ -e ${POLICY_TARGET} ]]; then
     [[ -r ${POLICY_TARGET} ]] || {
-      jsh_error "Waterfox policy is not readable: ${POLICY_TARGET}"
+      jsh::log_error "Waterfox policy is not readable: ${POLICY_TARGET}"
       return 1
     }
     if [[ $(uname -s) == Darwin ]]; then
       if ! existing=$(plutil -convert json -o - -- "${POLICY_TARGET}"); then
-        jsh_error "Waterfox policy is not a valid plist: ${POLICY_TARGET}"
+        jsh::log_error "Waterfox policy is not a valid plist: ${POLICY_TARGET}"
         return 1
       fi
     else
       if ! existing=$(jq -c . "${POLICY_TARGET}"); then
-        jsh_error "Waterfox policy is not valid JSON: ${POLICY_TARGET}"
+        jsh::log_error "Waterfox policy is not valid JSON: ${POLICY_TARGET}"
         return 1
       fi
     fi
@@ -489,7 +489,7 @@ run_root() {
 install_policy() {
   local target_dir
   ((POLICY_CHANGED)) || {
-    [[ -z ${POLICY_TARGET} ]] || jsh_note "Waterfox policy current."
+    [[ -z ${POLICY_TARGET} ]] || jsh::log_note "Waterfox policy current."
     return
   }
   backup_file "${POLICY_TARGET}" policy
@@ -503,7 +503,7 @@ install_policy() {
     run_root install -d -- "${target_dir}"
     run_root install -m 0644 -- "${POLICY_SOURCE}" "${POLICY_TARGET}"
   fi
-  jsh_success "Waterfox policy updated."
+  jsh::log_success "Waterfox policy updated."
 }
 
 check_update() {
@@ -513,22 +513,19 @@ check_update() {
   validate_manifest
   current=$(manifest_value version)
   latest=$(curl -fsSL --retry 2 "${BETTERFOX_API_URL}" | jq -er '.tag_name') || {
-    jsh_error "Could not determine the latest Betterfox release."
+    jsh::log_error "Could not determine the latest Betterfox release."
     return 1
   }
   if [[ ${latest} == "${current}" ]]; then
-    jsh_note "Betterfox ${current} is the latest release."
+    jsh::log_note "Betterfox ${current} is the latest release."
   else
-    jsh_warn "Betterfox ${latest} is available; reviewed pin is ${current}."
+    jsh::log_warn "Betterfox ${latest} is available; reviewed pin is ${current}."
   fi
 }
 
 confirm_betterfox_update() {
-  local answer
   [[ ${JSH_UPDATE_ASSUME_YES:-${JSH_ASSUME_YES:-0}} != 1 ]] || return 0
-  jsh_prompt "Update the reviewed Betterfox pin? [Y/n]: "
-  read -r answer || answer=
-  [[ -z ${answer} || ${answer} =~ ^[Yy]$ ]]
+  jsh::confirm "Update the reviewed Betterfox pin?" --default yes
 }
 
 update_betterfox() {
@@ -538,29 +535,29 @@ update_betterfox() {
   validate_manifest
   current=$(manifest_value version)
   release=$(curl -fsSL --retry 2 "${BETTERFOX_API_URL}") || {
-    jsh_error "Could not determine the latest Betterfox release."
+    jsh::log_error "Could not determine the latest Betterfox release."
     return 1
   }
   latest=$(jq -er '.tag_name' <<< "${release}")
   revision=$(jq -er '.target_commitish' <<< "${release}")
   [[ ${latest} =~ ^[0-9]+([.][0-9]+)*$ && ${revision} =~ ^[0-9a-f]{40}$ ]] || {
-    jsh_error "The latest Betterfox release metadata is invalid."
+    jsh::log_error "The latest Betterfox release metadata is invalid."
     return 1
   }
   if ! jq -en --arg current "${current}" --arg latest "${latest}" '
     ($latest | split(".") | map(tonumber)) > ($current | split(".") | map(tonumber))
   ' > /dev/null; then
     if [[ ${latest} == "${current}" ]]; then
-      jsh_note "Betterfox ${current} is the latest release."
+      jsh::log_note "Betterfox ${current} is the latest release."
     else
-      jsh_warn "Reviewed Betterfox pin ${current} is newer than latest release ${latest}; keeping it."
+      jsh::log_warn "Reviewed Betterfox pin ${current} is newer than latest release ${latest}; keeping it."
     fi
     return
   fi
 
-  jsh_warn "Betterfox ${latest} is available; reviewed pin is ${current}."
+  jsh::log_warn "Betterfox ${latest} is available; reviewed pin is ${current}."
   if ! confirm_betterfox_update; then
-    jsh_warn "Keeping Betterfox ${current}."
+    jsh::log_warn "Keeping Betterfox ${current}."
     return
   fi
 
@@ -570,11 +567,11 @@ update_betterfox() {
   downloaded="${TEMP_DIR}/user.js"
   if ! curl -fsSL --retry 2 --output "${downloaded}" \
     "${BETTERFOX_RAW_BASE}/${revision}/user.js"; then
-    jsh_error "Could not download Betterfox ${latest}."
+    jsh::log_error "Could not download Betterfox ${latest}."
     return 1
   fi
   grep -q 'user_pref' "${downloaded}" || {
-    jsh_error "Downloaded Betterfox file contains no preferences."
+    jsh::log_error "Downloaded Betterfox file contains no preferences."
     return 1
   }
   checksum=$(sha256_file "${downloaded}")
@@ -582,7 +579,7 @@ update_betterfox() {
   jq -n --arg version "${latest}" --arg revision "${revision}" --arg sha256 "${checksum}" \
     '{version: $version, revision: $revision, sha256: $sha256}' > "${candidate}"
   mv -f -- "${candidate}" "${BETTERFOX_MANIFEST}"
-  jsh_success "Updated Betterfox pin to ${latest}."
+  jsh::log_success "Updated Betterfox pin to ${latest}."
 }
 
 apply_configuration() {
@@ -595,11 +592,11 @@ apply_configuration() {
   binary=$(waterfox_binary 2> /dev/null || true)
   root=$(waterfox_root)
   if [[ -z ${binary} && ! -d ${root} ]]; then
-    jsh_note "Skipping Waterfox configuration: Waterfox is not installed."
+    jsh::log_note "Skipping Waterfox configuration: Waterfox is not installed."
     return
   fi
   if [[ ${JSH_CONFIGURE_DRY_RUN:-0} == 1 ]]; then
-    jsh_detail 'Would reconcile the Waterfox profile, policy, launcher, and associations.'
+    jsh::log_detail 'Would reconcile the Waterfox profile, policy, launcher, and associations.'
     return
   fi
   [[ -z ${binary} ]] || configure_linux_entry_points "${binary}"
@@ -613,7 +610,7 @@ apply_configuration() {
     profile_status=$?
     ((profile_status == 1)) || return "${profile_status}"
     [[ -n ${binary} ]] || {
-      jsh_error "No Waterfox default profile or executable is available."
+      jsh::log_error "No Waterfox default profile or executable is available."
       return 1
     }
     bootstrap_profile "${root}" "${binary}"
@@ -628,29 +625,23 @@ apply_configuration() {
   compose_preferences "${profile}" "${composed}"
   if ((!WATERFOX_SETTINGS_DIFFER && !POLICY_CHANGED)) && cmp -s -- "${composed}" "${profile}/user.js"; then
     configure_associations
-    jsh_note "Waterfox configuration is current; leaving the browser open."
+    jsh::log_note "Waterfox configuration is current; leaving the browser open."
     return
   fi
   if ! confirm_waterfox_review apply; then
-    jsh_warn "Keeping the active Waterfox configuration."
+    jsh::log_warn "Keeping the active Waterfox configuration."
     return
   fi
   if profile_is_locked "${profile}"; then
-    jsh_warn "Waterfox is open on profile ${profile##*/}."
-    if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then
-      answer=y
-    else
-      jsh_prompt "Close Waterfox and continue? [y/N]: "
-      read -r answer || answer=
-    fi
-    if [[ ! ${answer} =~ ^[Yy]$ ]]; then
-      jsh_note "Skipping Waterfox configuration."
-      jsh_detail "Run later: ${JSH_ROOT}/scripts/unix/configure/waterfox.sh apply"
+    jsh::log_warn "Waterfox is open on profile ${profile##*/}."
+    if ! jsh::confirm "Close Waterfox and continue?" --default no; then
+      jsh::log_note "Skipping Waterfox configuration."
+      jsh::log_detail "Run later: ${JSH_ROOT}/scripts/unix/configure/waterfox.sh apply"
       return 10
     fi
     if ! close_waterfox "${profile}"; then
-      jsh_note "Waterfox did not close; skipping configuration."
-      jsh_detail "Run later: ${JSH_ROOT}/scripts/unix/configure/waterfox.sh apply"
+      jsh::log_note "Waterfox did not close; skipping configuration."
+      jsh::log_detail "Run later: ${JSH_ROOT}/scripts/unix/configure/waterfox.sh apply"
       return 10
     fi
   fi
@@ -662,7 +653,7 @@ apply_configuration() {
   install_preferences "${profile}" "${composed}"
   install_policy
   configure_associations
-  jsh_success "Waterfox configuration complete; changes apply on next launch."
+  jsh::log_success "Waterfox configuration complete; changes apply on next launch."
 }
 
 main() {
@@ -672,7 +663,7 @@ main() {
     check-update) check_update ;;
     update) update_betterfox ;;
     *)
-      jsh_error "Usage: ${0##*/} [apply|backup|check-update|update]"
+      jsh::log_error "Usage: ${0##*/} [apply|backup|check-update|update]"
       return 2
       ;;
   esac

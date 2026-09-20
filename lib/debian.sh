@@ -11,15 +11,15 @@ jsh_debian_installed_version() {
 jsh_debian_install_package() {
   local id=$1 package_name=$2 version=$3 url=$4 expected=$5
   shift 5
-  local installed artifact field actual process answer running=0 attempt
+  local installed artifact field actual process running=0 attempt
 
   installed=$(jsh_debian_installed_version "${package_name}" || true)
   if [[ -n ${installed} ]] && dpkg --compare-versions "${installed}" ge "${version}"; then
-    jsh_note "${id} is current (${installed})."
+    jsh::log_note "${id} is current (${installed})."
     return
   fi
   if [[ ${JSH_CONFIGURE_DRY_RUN:-0} == 1 || ${JSH_INSTALL_DRY_RUN:-0} == 1 ]]; then
-    jsh_detail "Would install ${id} ${version}."
+    jsh::log_detail "Would install ${id} ${version}."
     return
   fi
 
@@ -32,13 +32,12 @@ jsh_debian_install_package() {
   if ((running)); then
     if [[ ${JSH_ASSUME_YES:-0} != 1 ]]; then
       if [[ ! -t 0 ]]; then
-        jsh_warn "Skipping update for running app: ${id} (noninteractive)."
+        jsh::log_warn "Skipping update for running app: ${id} (noninteractive)."
         return
       fi
-      jsh_prompt "Close ${id} before updating? [y/N]: "
-      read -r answer || answer=
-      if [[ ${answer,,} != y && ${answer,,} != yes ]]; then
-        jsh_note "Skipped update for ${id}."
+      if ! JSH_NON_INTERACTIVE=0 JSH_INTERACTIVE=1 \
+        jsh::confirm "Close ${id} before updating?" --default no; then
+        jsh::log_note "Skipped update for ${id}."
         return
       fi
     fi
@@ -54,7 +53,7 @@ jsh_debian_install_package() {
       sleep 0.1
     done
     ((running == 0)) || {
-      jsh_error "${id} did not stop; package update cancelled."
+      jsh::log_error "${id} did not stop; package update cancelled."
       return 1
     }
   fi
@@ -66,15 +65,15 @@ jsh_debian_install_package() {
       Architecture) [[ ${actual} == amd64 ]] ;;
       Version) [[ ${actual} == "${version}" ]] ;;
     esac || {
-      jsh_error "Unexpected ${id} package ${field}: ${actual}"
+      jsh::log_error "Unexpected ${id} package ${field}: ${actual}"
       return 1
     }
   done
   jsh_run_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -- "${artifact}"
   installed=$(jsh_debian_installed_version "${package_name}" || true)
   [[ -n ${installed} ]] && dpkg --compare-versions "${installed}" ge "${version}" || {
-    jsh_error "${id} package verification failed."
+    jsh::log_error "${id} package verification failed."
     return 1
   }
-  jsh_success "Installed ${id} ${installed}."
+  jsh::log_success "Installed ${id} ${installed}."
 }

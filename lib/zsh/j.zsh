@@ -279,10 +279,9 @@ _j_list() {
 }
 
 _j_interactive() {
-  local line entry_path selected choice project_path absolute_path sorted_path
+  local line entry_path selected project_path absolute_path sorted_path
   local preferred_project=${_J_INTERACTIVE_PROJECT_PATH:-} exact_query=""
-  local -a paths extra_paths
-  local -i index=1
+  local -a paths extra_paths choices
 
   [[ ${_J_INTERACTIVE_EXACT_ONLY:-} != true || $# != 1 ]] || exact_query=$(_j_lowercase "$1")
 
@@ -322,33 +321,11 @@ _j_interactive() {
     return 1
   fi
 
-  if (( $+commands[fzf] || $+functions[fzf] )); then
-    {
-      for entry_path in "${paths[@]}"; do
-        _j_display_path "${entry_path}"
-        printf '\n'
-      done
-    } | fzf --height=40% --reverse --no-sort --prompt='j> ' | {
-      IFS= read -r selected
-      if [[ ${selected} == '~'* ]]; then
-        print -rn -- "${HOME}${selected#\~}"
-      else
-        print -rn -- "${selected}"
-      fi
-    }
-    return ${pipestatus[2]}
-  fi
-
-  print -u2 -- 'Select directory:'
   for entry_path in "${paths[@]}"; do
-    (( index <= 10 )) || break
-    printf '[%d] %s\n' ${index} "$(_j_display_path "${entry_path}")" >&2
-    (( ++index ))
+    choices+=("${entry_path}" "$(_j_display_path "${entry_path}")")
   done
-  printf 'Enter number (1-%d): ' $(( index - 1 )) >&2
-  read -r choice
-  [[ ${choice} == <-> ]] && (( choice >= 1 && choice < index )) || return 1
-  print -rn -- "${paths[choice]}"
+  selected=$(jsh::choose_one 'Directory' "${choices[@]}") || return
+  print -rn -- "${selected}"
 }
 
 _j_resolve_path() {

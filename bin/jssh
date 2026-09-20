@@ -28,6 +28,7 @@ for library_file in "${JSH_ROOT}"/lib/*; do
   . "${library_file}"
 done
 unset library_file
+jsh::init
 
 JSSH_CACHE_DIR=${JSSH_CACHE_DIR:-${XDG_CACHE_HOME:-${HOME}/.cache}/jssh}
 JSSH_REMOTE_TMPDIR=${JSSH_REMOTE_TMPDIR:-/tmp}
@@ -58,8 +59,8 @@ EOF
 }
 
 _jssh_die() {
-  jsh_spinner_stop
-  jsh_error "$*"
+  jsh::spinner_stop
+  jsh::log_error "$*"
   exit 1
 }
 
@@ -344,7 +345,8 @@ _jssh_cleanup() {
 _jssh_on_exit() {
   local exit_code=$?
   trap - EXIT
-  jsh_spinner_stop
+  jsh::spinner_stop
+  jsh::cleanup
   _jssh_cleanup
   exit "${exit_code}"
 }
@@ -354,16 +356,16 @@ _jssh_check() {
   _jssh_secure_cache_dir
   for tool in awk cat chmod cp find id mkdir mktemp mv rm sed sort ssh stat tar; do
     if command -v "${tool}" > /dev/null 2>&1; then
-      jsh_success "${tool}"
+      jsh::log_success "${tool}"
     else
-      jsh_error "${tool} is required"
+      jsh::log_error "${tool} is required"
       errors=$((errors + 1))
     fi
   done
   if command -v shasum > /dev/null 2>&1 || command -v sha256sum > /dev/null 2>&1; then
-    jsh_success 'SHA-256 tool'
+    jsh::log_success 'SHA-256 tool'
   else
-    jsh_error 'shasum or sha256sum is required'
+    jsh::log_error 'shasum or sha256sum is required'
     errors=$((errors + 1))
   fi
   _jssh_check_sources || errors=$((errors + 1))
@@ -406,7 +408,7 @@ _jssh_validate_ssh_options() {
 }
 
 _jssh_connect() {
-  local preflight kernel payload receive_script launch_script quoted session_status=0
+  local preflight kernel payload receive_script launch_script quoted remote_term session_status=0
   declare -a control_options
 
   [[ $# -gt 0 ]] || _jssh_die 'missing SSH host'
@@ -430,21 +432,21 @@ _jssh_connect() {
   trap 'exit 130' INT
   trap 'exit 143' TERM
 
-  jsh_spinner_static "Checking ${JSSH_TARGET}"
+  jsh::spinner_static "Checking ${JSSH_TARGET}"
   preflight=$(_jssh_remote_preflight_script)
   read -r kernel JSSH_REMOTE_SHELL < <(
     printf '%s\n' "${preflight}" | ssh "${control_options[@]}" \
       "${JSSH_SSH_OPTIONS[@]}" -T "${JSSH_TARGET}" sh -s
   ) || _jssh_die 'remote preflight failed'
   _jssh_validate_platform "${kernel}"
-  jsh_spinner_stop
+  jsh::spinner_stop
   case ${JSSH_REMOTE_SHELL} in
     zsh) ;;
-    bash) jsh_warn "Remote Zsh not found; using limited Bash runtime" ;;
+    bash) jsh::log_warn "Remote Zsh not found; using limited Bash runtime" ;;
     *) _jssh_die 'remote preflight returned an invalid shell' ;;
   esac
 
-  jsh_spinner_start "Preparing Jsh runtime"
+  jsh::spinner_start "Preparing Jsh runtime"
   payload=$(_jssh_build_payload)
   receive_script=$(_jssh_remote_receive_script)
   quoted=$(_jssh_quote "${receive_script}")
@@ -456,17 +458,20 @@ _jssh_connect() {
   [[ ${JSSH_REMOTE_DIR} != *[!A-Za-z0-9._/-]* && ${JSSH_REMOTE_DIR} != *..* ]] || \
     _jssh_die 'remote returned an unsafe session path'
 
-  jsh_spinner_stop
-  jsh_success "Jsh runtime deployed to ${JSSH_TARGET}"
+  jsh::spinner_stop
+  jsh::log_success "Jsh runtime deployed to ${JSSH_TARGET}"
   launch_script=$(_jssh_remote_launch_script)
   quoted=$(_jssh_quote "${launch_script}")
-  ssh "${control_options[@]}" "${JSSH_SSH_OPTIONS[@]}" -t \
+  remote_term=${TERM:-xterm-256color}
+  [[ ${remote_term} != xterm-ghostty ]] || remote_term=xterm-256color
+  TERM=${remote_term} ssh "${control_options[@]}" "${JSSH_SSH_OPTIONS[@]}" -t \
     "${JSSH_TARGET}" "sh -c '${quoted}'" || session_status=$?
 
   _jssh_cleanup
+  jsh::cleanup
   trap - EXIT INT TERM
   ((session_status == 0)) || return "${session_status}"
-  jsh_success "Disconnected from ${JSSH_TARGET}"
+  jsh::log_success "Disconnected from ${JSSH_TARGET}"
 }
 
 _jssh_main() {
@@ -493,7 +498,7 @@ _jssh_main() {
     --rebuild)
       _jssh_secure_cache_dir
       rm -f "${JSSH_CACHE_DIR}"/payload-linux-*.tar
-      jsh_success 'Generated jssh payloads cleared'
+      jsh::log_success 'Generated jssh payloads cleared'
       ;;
     '')
       _jssh_usage >&2

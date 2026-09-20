@@ -21,7 +21,22 @@
 set -eou pipefail
 IFS=$'\n\t'
 
-SELF_CMD=$0
+case $0 in
+  /*) launcher=$0 ;;
+  *) launcher=${PWD}/$0 ;;
+esac
+if [[ -z ${JSH_ROOT:-} ]]; then
+  if [[ -n ${JSH_DIR:-} ]]; then
+    JSH_ROOT=${JSH_DIR}
+  elif [[ -f ${launcher%/*}/../lib/ui.sh ]]; then
+    JSH_ROOT=$(CDPATH='' cd -P "${launcher%/*}/.." && pwd -P)
+  else
+    JSH_ROOT=${HOME}/.jsh
+  fi
+fi
+# shellcheck source=../lib/ui.sh
+. "${JSH_ROOT}/lib/ui.sh"
+jsh::init
 
 KUBENS_DIR="${XDG_CACHE_HOME:-${HOME}/.kube}/kubens"
 
@@ -111,9 +126,9 @@ choose_namespace_interactive() {
   fi
 
   local choice
-  choice="$(_KUBECTX_FORCE_COLOR=1 \
-    FZF_DEFAULT_COMMAND="${SELF_CMD}" \
-    fzf --ansi --no-preview || true)"
+  local -a namespaces=()
+  mapfile -t namespaces < <(get_namespaces)
+  choice=$(jsh::choose 'Namespace' "${namespaces[@]}" || true)
   if [[ -z "${choice}" ]]; then
     echo 2>&1 "error: you did not choose any of the options"
     exit 1
@@ -197,7 +212,7 @@ main() {
   fi
 
   if [[ "$#" -eq 0 ]]; then
-    if [[ -t 1 && -z ${KUBECTX_IGNORE_FZF:-} && "$(type fzf &>/dev/null; echo $?)" -eq 0 ]]; then
+    if [[ ${JSH_INTERACTIVE:-0} == 1 && -z ${KUBECTX_IGNORE_FZF:-} ]]; then
       choose_namespace_interactive
     else
       list_namespaces

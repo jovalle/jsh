@@ -12,6 +12,8 @@ setup() {
   export JSH_UNAME=Linux
   export JSH_OS_RELEASE="${BATS_TEST_TMPDIR}/os-release"
   export JSH_DESKTOP=GNOME
+  jsh::log_error() { jsh_error "$@"; }
+  jsh::log_detail() { jsh_detail "$@"; }
   # shellcheck source=/dev/null
   source "${JSH_ROOT}/lib/linux.sh"
   # shellcheck source=/dev/null
@@ -130,9 +132,9 @@ load_ssh_agent_service_functions() {
   [[ ${NATIVE_PREPARED} == 0 ]]
   package_installed() { [[ $1 != light-locker ]]; }
   prepare_native_packages() { printf '%s\n' prepare >> "${calls}"; }
-  jsh_note() { :; }
-  jsh_success() { :; }
-  jsh_error() { :; }
+  jsh::log_note() { :; }
+  jsh::log_success() { :; }
+  jsh::log_error() { :; }
 
   install_native_packages
 
@@ -149,9 +151,9 @@ load_ssh_agent_service_functions() {
       remote-add | install) return 0 ;;
     esac
   }
-  jsh_success() { :; }
-  jsh_note() { :; }
-  jsh_error() { printf '%s\n' "$*"; }
+  jsh::log_success() { :; }
+  jsh::log_note() { :; }
+  jsh::log_error() { printf '%s\n' "$*"; }
 
   run install_flatpaks
 
@@ -197,8 +199,8 @@ WantedBy=default.target' > "${HOME}/.config/systemd/user/ssh-agent.service"
         ;;
     esac
   }
-  jsh_error() { printf '%s\n' "$*"; }
-  jsh_note() { :; }
+  jsh::log_error() { printf '%s\n' "$*"; }
+  jsh::log_note() { :; }
   export DRY_RUN=0
   USER_UNITS_CHANGED=0
   SSH_AGENT_CHANGED=0
@@ -490,7 +492,7 @@ WantedBy=default.target' > "${HOME}/.config/systemd/user/ssh-agent.service"
     source "${JSH_ROOT}/scripts/unix/configure/shell.sh"
     get_current_shell() { printf "/bin/bash\n"; }
     find_target_shell() { printf "/usr/bin/zsh\n"; }
-    confirm() { return 0; }
+    jsh::confirm() { return 0; }
     change_shell() { return 0; }
     main
   '
@@ -503,7 +505,10 @@ prepare_adopt_fixture() {
   ADOPT_HOME="${BATS_TEST_TMPDIR}/adopt-home"
   mkdir -p "${ADOPT_ROOT}/bin" "${ADOPT_ROOT}/lib" "${ADOPT_ROOT}/dotfiles" "${ADOPT_HOME}"
   cp "${JSH_ROOT}/bin/jstow" "${ADOPT_ROOT}/bin/jstow"
+  cp "${JSH_ROOT}/lib/env.sh" "${ADOPT_ROOT}/lib/env.sh"
   cp "${JSH_ROOT}/lib/output.sh" "${ADOPT_ROOT}/lib/output.sh"
+  cp "${JSH_ROOT}/lib/ui.sh" "${ADOPT_ROOT}/lib/ui.sh"
+  cp -R "${JSH_ROOT}/lib/ui" "${ADOPT_ROOT}/lib/"
   chmod +x "${ADOPT_ROOT}/bin/jstow"
 }
 

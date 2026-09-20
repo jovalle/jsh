@@ -30,9 +30,9 @@ main() {
 # JSH_SKIP_HEALTH_CHECK=1
 EOF
   then
-    jsh_success "Created sample configuration: ${destination}"
+    jsh::log_success "Created sample configuration: ${destination}"
   else
-    jsh_warn "Could not create sample configuration: ${destination}"
+    jsh::log_warn "Could not create sample configuration: ${destination}"
   fi
 }
 
