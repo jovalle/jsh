@@ -14,76 +14,97 @@ repos:
         pass_filenames: false
         files: ^(?:README\.md|bin/)
 
-  # Conventional commits (keep existing hook)
-  - repo: https://github.com/compilerla/conventional-pre-commit
-    rev: v3.6.0
-    hooks:
-      - id: conventional-pre-commit
-        stages: [commit-msg]
-        args:
-          - feat
-          - fix
-          - docs
-          - style
-          - refactor
-          - perf
-          - test
-          - build
-          - ci
-          - chore
-          - revert
-
-  # General file checks
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.5.0
-    hooks:
       - id: trailing-whitespace
+        name: trim trailing whitespace
+        entry: trailing-whitespace-fixer
+        language: system
+        types: [text]
         exclude: '\.md$'
       - id: end-of-file-fixer
+        name: fix end of files
+        entry: end-of-file-fixer
+        language: system
+        types: [text]
+        stages: [pre-commit, pre-push, manual]
       - id: check-yaml
+        name: check yaml
+        entry: check-yaml
+        language: system
+        types: [yaml]
         args: [--allow-multiple-documents]
       - id: check-json
+        name: check json
+        entry: check-json
+        language: system
+        types: [json]
         exclude: '^\.vscode/extensions\.json$'
       - id: check-added-large-files
+        name: check for added large files
+        entry: check-added-large-files
+        language: system
+        stages: [pre-commit, pre-push, manual]
         args: [--maxkb=1000]
       - id: check-case-conflict
+        name: check for case conflicts
+        entry: check-case-conflict
+        language: system
       - id: check-merge-conflict
+        name: check for merge conflicts
+        entry: check-merge-conflict
+        language: system
+        types: [text]
       - id: check-executables-have-shebangs
+        name: check that executables have shebangs
+        entry: check-executables-have-shebangs
+        language: system
+        types: [text, executable]
+        stages: [pre-commit, pre-push, manual]
       - id: check-shebang-scripts-are-executable
+        name: check that scripts with shebangs are executable
+        entry: check-shebang-scripts-are-executable
+        language: system
+        types: [text]
+        stages: [pre-commit, pre-push, manual]
         exclude: '^tests/.*\.bats$'
       - id: mixed-line-ending
+        name: mixed line ending
+        entry: mixed-line-ending
+        language: system
+        types: [text]
         args: [--fix=lf]
 
-  # Shell scripts
-  - repo: https://github.com/shellcheck-py/shellcheck-py
-    rev: v0.9.0.6
-    hooks:
       - id: shellcheck
+        name: shellcheck
+        entry: shellcheck
+        language: system
         args: [--severity=warning]
         types: [shell]
         exclude: '(^|/)(\.zshrc|.*\.zsh)$|^(dotfiles/\.zsh/|lib/zsh/)'
 
-  # YAML linting
-  - repo: https://github.com/adrienverge/yamllint
-    rev: v1.33.0
-    hooks:
       - id: yamllint
+        name: yamllint
+        entry: yamllint
+        language: system
         args: [--config-file=.yamllint]
         types: [yaml]
 
-  # Markdown linting
-  - repo: https://github.com/igorshubovych/markdownlint-cli
-    rev: v0.38.0
-    hooks:
       - id: markdownlint
+        name: markdownlint
+        entry: markdownlint
+        language: system
         args: [--config=.markdownlint.json, --fix]
         types: [markdown]
 
-  # Prettier for JS/JSON/Markdown formatting
-  - repo: https://github.com/pre-commit/mirrors-prettier
-    rev: v3.1.0
-    hooks:
       - id: prettier
+        name: prettier
+        entry: prettier --write --ignore-unknown
+        language: system
         types_or: [javascript, json, markdown]
         exclude: 'package-lock\.json'
-        # Prettier handles JSONC (JSON with Comments) in .vscode files
+
+      - id: commitlint
+        name: commitlint
+        entry: commitlint --edit
+        language: system
+        always_run: true
+        stages: [commit-msg]
