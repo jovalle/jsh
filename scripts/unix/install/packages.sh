@@ -35,36 +35,22 @@ load_brew() {
 
 install_brew() {
   if ! command -v curl > /dev/null 2>&1; then
-    jsh_error "curl is required to install Homebrew."
+    jsh::log_error "curl is required to install Homebrew."
     exit 1
   fi
 
-  jsh_info "Installing Homebrew..."
+  jsh::log_info "Installing Homebrew..."
   NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
   load_brew
 
   if ! command -v brew > /dev/null 2>&1; then
-    jsh_error "Homebrew installed but could not be added to PATH."
+    jsh::log_error "Homebrew installed but could not be added to PATH."
     exit 1
   fi
 }
 
-confirm() {
-  local answer
-  [[ ${JSH_ASSUME_YES:-0} == 1 ]] && return 0
-  while :; do
-    jsh_prompt "$1 [Y/n]: "
-    if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then answer=y; else read -r answer || answer=; fi
-    case "${answer}" in
-      '' | y | Y | yes | YES) return 0 ;;
-      n | N | no | NO) return 1 ;;
-      *) jsh_warn "Please answer yes or no." ;;
-    esac
-  done
-}
-
 claim_package() {
-  local manager=$1 package=$2 owner answer
+  local manager=$1 package=$2 owner
   owner=${PACKAGE_OWNERS[${package}]:-}
   if [[ -z "${owner}" || "${owner}" == "${manager}" ]]; then
     PACKAGE_OWNERS[${package}]=${manager}
@@ -72,21 +58,15 @@ claim_package() {
   fi
 
   if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then
-    jsh_note "Keeping ${package} with ${owner}; skipping ${manager}."
+    jsh::log_note "Keeping ${package} with ${owner}; skipping ${manager}."
     return 1
   fi
 
-  jsh_prompt "${package} is already declared for ${owner}. Install it with ${manager} instead? [y/N]: "
-  read -r answer || answer=
-  case "${answer}" in
-    y | Y | yes | YES)
-      PACKAGE_OWNERS[${package}]=${manager}
-      ;;
-    *)
-      jsh_note "Keeping ${package} with ${owner}; skipping ${manager}."
-      return 1
-      ;;
-  esac
+  if ! jsh::confirm "${package} is already declared for ${owner}. Install it with ${manager} instead?" --default no; then
+    jsh::log_note "Keeping ${package} with ${owner}; skipping ${manager}."
+    return 1
+  fi
+  PACKAGE_OWNERS[${package}]=${manager}
 }
 
 register_native_packages() {
@@ -136,10 +116,10 @@ trust_declared_formulae() {
   done
   ((${#untrusted[@]} > 0)) || return 0
 
-  jsh_warn "Homebrew requires trust for these third-party formulas:"
+  jsh::log_warn "Homebrew requires trust for these third-party formulas:"
   printf '  %s\n' "${untrusted[@]}"
-  if ! confirm "Trust these formulas?"; then
-    jsh_error "Cannot install untrusted third-party formulas."
+  if ! jsh::confirm "Trust these formulas?" --default yes; then
+    jsh::log_error "Cannot install untrusted third-party formulas."
     return 1
   fi
   brew trust --formula "${untrusted[@]}"
@@ -157,7 +137,7 @@ migrate_legacy_npm_package() {
     target=$(readlink "${link}")
     case "${target}" in
       "../lib/node_modules/${package}/"* | "${brew_prefix}/lib/node_modules/${package}/"*)
-        jsh_info "Migrating ${package} from npm to Homebrew..."
+        jsh::log_info "Migrating ${package} from npm to Homebrew..."
         npm uninstall --global --prefix "${brew_prefix}" "${package}"
         return
         ;;
@@ -191,10 +171,10 @@ install_brew_manifest() {
   local brewfile=$1
 
   if [[ ${JSH_UPDATE:-0} != 1 ]] && HOMEBREW_NO_AUTO_UPDATE=1 brew bundle check --no-upgrade --file="${brewfile}" > /dev/null 2>&1; then
-    jsh_note "Homebrew packages are current."
+    jsh::log_note "Homebrew packages are current."
     return
   fi
-  jsh_info "Installing Homebrew packages..."
+  jsh::log_info "Installing Homebrew packages..."
   if [[ ${JSH_UPDATE:-0} == 1 ]]; then
     brew bundle --file="${brewfile}"
   else
@@ -220,8 +200,8 @@ install_brew_packages() {
 
   # Native packages cover the base system; Homebrew supplies declared CLI gaps.
   load_brew
-  confirm "Install Homebrew packages?" || {
-    jsh_note "Skipping Homebrew packages."
+  jsh::confirm "Install Homebrew packages?" --default yes || {
+    jsh::log_note "Skipping Homebrew packages."
     rm -f "${declared}" "${filtered}"
     return 0
   }
@@ -230,7 +210,7 @@ install_brew_packages() {
   command -v brew > /dev/null 2>&1 || install_brew
 
   if [[ ${JSH_UPDATE:-0} == 1 ]]; then
-    jsh_info "Updating Homebrew packages..."
+    jsh::log_info "Updating Homebrew packages..."
     brew update
   fi
 
@@ -247,7 +227,7 @@ install_brew_packages() {
     else
       brew upgrade --formula
     fi
-    jsh_success "Declared Homebrew packages are up to date."
+    jsh::log_success "Declared Homebrew packages are up to date."
   fi
 }
 
@@ -261,15 +241,15 @@ install_cargo_packages() {
   local -a packages=()
 
   if ! command -v cargo > /dev/null 2>&1; then
-    jsh_note "cargo is not installed; skipping Cargo packages."
+    jsh::log_note "cargo is not installed; skipping Cargo packages."
     return 0
   fi
   output=$(manifest list cargo) || return
   if [[ -n "${output}" ]]; then mapfile -t packages <<< "${output}"; fi
 
   ((${#packages[@]} > 0)) || return 0
-  confirm "Install Cargo packages?" || {
-    jsh_note "Skipping Cargo packages."
+  jsh::confirm "Install Cargo packages?" --default yes || {
+    jsh::log_note "Skipping Cargo packages."
     return 0
   }
   for package in "${packages[@]}"; do
@@ -279,16 +259,16 @@ install_cargo_packages() {
       continue
     fi
     if ((!installing)); then
-      jsh_info "Installing Cargo packages..."
+      jsh::log_info "Installing Cargo packages..."
       installing=1
     fi
     cargo install --locked "${package}"
     cargo_package_installed "${name}" || {
-      jsh_error "Cargo package verification failed: ${name}"
+      jsh::log_error "Cargo package verification failed: ${name}"
       return 1
     }
   done
-  if ((installing)); then jsh_success "Cargo packages are installed."; else jsh_note "Cargo packages are current."; fi
+  if ((installing)); then jsh::log_success "Cargo packages are installed."; else jsh::log_note "Cargo packages are current."; fi
 }
 
 uv_tool_installed() {
@@ -304,12 +284,12 @@ install_uv_tools() {
   if [[ -n "${output}" ]]; then mapfile -t packages <<< "${output}"; fi
 
   ((${#packages[@]} > 0)) || return 0
-  confirm "Install uv tools?" || {
-    jsh_note "Skipping uv tools."
+  jsh::confirm "Install uv tools?" --default yes || {
+    jsh::log_note "Skipping uv tools."
     return 0
   }
   command -v uv > /dev/null 2>&1 || {
-    jsh_error "uv is required by conf/packages.json."
+    jsh::log_error "uv is required by conf/packages.json."
     return 1
   }
 
@@ -319,16 +299,16 @@ install_uv_tools() {
       continue
     fi
     if ((!installing)); then
-      jsh_info "Installing uv tools..."
+      jsh::log_info "Installing uv tools..."
       installing=1
     fi
     uv tool install --upgrade "${package}"
     uv_tool_installed "${package}" || {
-      jsh_error "uv tool verification failed: ${package}"
+      jsh::log_error "uv tool verification failed: ${package}"
       return 1
     }
   done
-  if ((installing)); then jsh_success "uv tools are installed."; else jsh_note "uv tools are current."; fi
+  if ((installing)); then jsh::log_success "uv tools are installed."; else jsh::log_note "uv tools are current."; fi
 }
 
 npm_package_installed() {
@@ -348,12 +328,12 @@ install_npm_packages() {
   done <<< "${output}"
 
   ((${#packages[@]} > 0)) || return 0
-  confirm "Install npm packages?" || {
-    jsh_note "Skipping npm packages."
+  jsh::confirm "Install npm packages?" --default yes || {
+    jsh::log_note "Skipping npm packages."
     return 0
   }
   if ! command -v npm > /dev/null 2>&1; then
-    jsh_note "npm is not installed; skipping npm packages."
+    jsh::log_note "npm is not installed; skipping npm packages."
     return 0
   fi
 
@@ -365,17 +345,17 @@ install_npm_packages() {
       continue
     fi
     if ((!installing)); then
-      jsh_info "Installing npm packages..."
+      jsh::log_info "Installing npm packages..."
       installing=1
     fi
     specification="${package}@${version}"
     npm install --global "${specification}"
     npm_package_installed "${package}" "${version}" || {
-      jsh_error "npm package verification failed: ${specification}"
+      jsh::log_error "npm package verification failed: ${specification}"
       return 1
     }
   done
-  if ((installing)); then jsh_success "npm packages are installed."; else jsh_note "npm packages are current."; fi
+  if ((installing)); then jsh::log_success "npm packages are installed."; else jsh::log_note "npm packages are current."; fi
 }
 
 main() {
@@ -384,7 +364,7 @@ main() {
   case "${platform}" in
     Darwin | Linux) ;;
     *)
-      jsh_error "Unsupported platform: ${platform}"
+      jsh::log_error "Unsupported platform: ${platform}"
       exit 1
       ;;
   esac

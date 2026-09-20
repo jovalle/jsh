@@ -27,7 +27,7 @@ cycle_output() {
   local current target description index sink_input
   local -a sinks=()
   command -v pactl > /dev/null 2>&1 || {
-    jsh_error "pactl is required to cycle audio outputs."
+    jsh::log_error "pactl is required to cycle audio outputs."
     return 1
   }
   while IFS=$'\t' read -r _ target _; do
@@ -35,7 +35,7 @@ cycle_output() {
     output_is_excluded "${target}" || sinks+=("${target}")
   done < <(pactl list short sinks)
   ((${#sinks[@]} > 0)) || {
-    jsh_error "No enabled audio output is available."
+    jsh::log_error "No enabled audio output is available."
     return 1
   }
   current=$(pactl get-default-sink 2> /dev/null || true)
@@ -104,20 +104,15 @@ ${BLOCK_END}"
 
 configure_audio() {
   local policy="${HOME}/.config/wireplumber/wireplumber.conf.d/51-jsh-audio-policy.conf"
-  local answer
-  jsh_detail "This will disable selected HDMI, onboard, and Elgato audio nodes."
-  if [[ ${JSH_ASSUME_YES:-0} != 1 ]]; then
-    jsh_prompt "Configure the audio policy? [y/N]: "
-    read -r answer || answer=
-    [[ "${answer}" =~ ^[Yy]$ ]] || {
-      jsh_note "Skipping audio policy."
-      return
-    }
+  jsh::log_detail "This will disable selected HDMI, onboard, and Elgato audio nodes."
+  if ! jsh::confirm "Configure the audio policy?" --default no; then
+    jsh::log_note "Skipping audio policy."
+    return
   fi
 
   local temporary changed=0
   if [[ ${JSH_CONFIGURE_DRY_RUN:-0} == 1 ]]; then
-    jsh_detail "Would compare the personal audio policy and shortcut."
+    jsh::log_detail "Would compare the personal audio policy and shortcut."
     return 0
   fi
   temporary=$(mktemp)
@@ -125,7 +120,7 @@ configure_audio() {
   local source=${JSH_AUDIO_POLICY:-${JSH_ROOT}/conf/hosts/$(hostname -s)/audio.conf}
   if [[ ! -r ${source} ]]; then
     rm -f "${temporary}"
-    jsh_note "No audio device policy for this host; keeping existing devices."
+    jsh::log_note "No audio device policy for this host; keeping existing devices."
     configure_audio_shortcut
     return 0
   fi
@@ -136,23 +131,23 @@ configure_audio() {
   fi
   rm -f "${temporary}"
   configure_audio_shortcut
-  ((changed)) || { jsh_note "Audio policy is current."; return 0; }
+  ((changed)) || { jsh::log_note "Audio policy is current."; return 0; }
   if command -v systemctl > /dev/null 2>&1; then
     systemctl --user restart wireplumber.service
   else
-    jsh_note "Restart WirePlumber or log out to load the audio policy."
+    jsh::log_note "Restart WirePlumber or log out to load the audio policy."
   fi
-  jsh_success "Audio policy configured."
+  jsh::log_success "Audio policy configured."
 }
 
 main() {
   local action=configure arg
   for arg in "$@"; do
     case "${arg}" in
-      -y | --yes) JSH_ASSUME_YES=1 ;;
+      -y | --yes) export JSH_ASSUME_YES=1 ;;
       configure | cycle) action=${arg} ;;
       *)
-        jsh_error "Usage: $0 [--yes] [configure|cycle]"
+        jsh::log_error "Usage: $0 [--yes] [configure|cycle]"
         exit 2
         ;;
     esac

@@ -53,6 +53,7 @@ unset library_file
 
 JGIT_CONFIG=${JGIT_CONFIG:-${JSH_ROOT}/conf/git.json}
 JGIT_VERSION=1.0.0
+jsh::init
 JGIT_COLOR=0
 jsh_color_enabled 1 && JGIT_COLOR=1
 
@@ -108,7 +109,7 @@ EOF
 }
 
 _jgit_die() {
-  jsh_error "$*"
+  jsh::log_error "$*"
   exit 1
 }
 
@@ -179,22 +180,21 @@ _jgit_ssh_key_type() {
 }
 
 _jgit_generate_ssh_key() {
-  local configured=$1 key_path expanded_key key_type answer key_directory
+  local configured=$1 key_path expanded_key key_type key_directory
   key_path=$(_jgit_ssh_key_path "${configured}")
   expanded_key=$(_jgit_expand_home "${key_path}")
   [[ -e ${expanded_key} ]] && return 0
 
-  jsh_prompt "Generate missing SSH key ${key_path}? [Y/n]: "
-  read -r answer || answer=
-  case ${answer} in
-    [Nn]*) return 0 ;;
-    *) ;;
-  esac
+  jsh::confirm "Generate missing SSH key ${key_path}?" --default yes || return 0
 
   key_type=$(_jgit_ssh_key_type "${key_path}")
   if [[ -z ${key_type} ]]; then
-    jsh_prompt 'SSH key type: '
-    read -r key_type || _jgit_die 'SSH key type is required'
+    if [[ ${JSH_INTERACTIVE:-0} == 1 ]]; then
+      key_type=$(jsh::input 'SSH key type') || _jgit_die 'SSH key type is required'
+    else
+      jsh_prompt 'SSH key type: '
+      read -r key_type || _jgit_die 'SSH key type is required'
+    fi
     [[ -n ${key_type} ]] || _jgit_die 'SSH key type is required'
   fi
 
@@ -202,7 +202,7 @@ _jgit_generate_ssh_key() {
   key_directory=${expanded_key%/*}
   [[ ${key_directory} == "${expanded_key}" ]] || mkdir -p "${key_directory}"
   command ssh-keygen -t "${key_type}" -f "${expanded_key}" -C ''
-  jsh_success "Generated SSH key ${key_path}"
+  jsh::log_success "Generated SSH key ${key_path}"
 }
 
 _jgit_profile_names() {
@@ -250,7 +250,7 @@ _jgit_profile_validate() {
   for field in name email user ssh_key; do
     value=$(_jgit_profile_field "${profile}" "${field}")
     [[ -n ${value} ]] || {
-      jsh_error "profile '${profile}' is missing ${field}"
+      jsh::log_error "profile '${profile}' is missing ${field}"
       return 1
     }
   done
@@ -449,15 +449,17 @@ _jgit_profile_choices() {
 }
 
 _jgit_profile_select() {
-  local preferred=${1:-} selected answer
+  local preferred=${1:-} profile label selected answer
+  local -a choices=()
   [[ -r ${JGIT_CONFIG} ]] || _jgit_die "profile config not found: ${JGIT_CONFIG}"
   _jgit_profile_names | grep -q . || _jgit_die "no profiles found in ${JGIT_CONFIG}"
 
-  if command -v fzf > /dev/null 2>&1 && [[ -t 0 ]]; then
-    selected=$(_jgit_profile_choices "${preferred}" | fzf --height=40% --reverse --no-sort \
-      --prompt='profile> ' --header='PROFILE          NAME                     EMAIL                                USER' \
-      --delimiter=$'\t' --with-nth=2) || return 1
-    printf '%s\n' "${selected%%$'\t'*}"
+  if [[ ${JSH_INTERACTIVE:-0} == 1 ]]; then
+    while IFS=$'\t' read -r profile label; do
+      choices+=("${profile}" "${label}")
+    done < <(_jgit_profile_choices "${preferred}")
+    jsh::choose_one 'PROFILE          NAME                     EMAIL                                USER' \
+      "${choices[@]}" || return
     return
   fi
 
@@ -479,7 +481,7 @@ _jgit_profile_select_apply() {
   local profile
   git rev-parse --git-dir > /dev/null 2>&1 || _jgit_die 'not in a Git repository'
   profile=$(_jgit_profile_select "$(_jgit_active_profile)") || {
-    jsh_warn 'Profile selection cancelled'
+    jsh::log_warn 'Profile selection cancelled'
     return 1
   }
   _jgit_profile_apply "${profile}"
@@ -505,7 +507,7 @@ _jgit_profile_apply() {
   git config --local user.name "${name}"
   git config --local user.email "${email}"
   git config --local core.sshCommand "${ssh_command}"
-  jsh_success "Applied Git profile '${profile}'"
+  jsh::log_success "Applied Git profile '${profile}'"
   if ((show_status)); then
     _jgit_profile_status
   fi
@@ -560,14 +562,14 @@ _jgit_create() {
   git -C "${project_path}" init
 
   profile=$(_jgit_profile_select "${preferred}") || {
-    jsh_warn "Profile selection cancelled; repository kept at ${project_path}"
+    jsh::log_warn "Profile selection cancelled; repository kept at ${project_path}"
     return 1
   }
   (
     cd "${project_path}"
     _jgit_profile_apply "${profile}" 0
   )
-  jsh_success "Created Git project ${project_path}"
+  jsh::log_success "Created Git project ${project_path}"
 }
 
 _jgit_is_gnu_date() {
@@ -935,11 +937,10 @@ _jgit_amend() {
     return 0
   fi
 
-  jsh_warn 'This rewrites commit IDs and may require a force push.'
-  if ((assume_yes == 0)); then
-    jsh_prompt 'Continue? [y/N]: '
-    read -r answer || answer=
-    [[ ${answer} == [Yy]* ]] || { jsh_warn 'Amend cancelled'; return; }
+  jsh::log_warn 'This rewrites commit IDs and may require a force push.'
+  if ((assume_yes == 0)) && ! jsh::confirm 'Continue?' --default no; then
+    jsh::log_warn 'Amend cancelled'
+    return
   fi
 
   JGIT_AMEND_TEMP=$(mktemp -d "$(git rev-parse --git-path jgit-amend.XXXXXX)") ||
@@ -991,7 +992,7 @@ _jgit_amend() {
   _jgit_amend_cleanup
   trap - EXIT HUP INT TERM
   unset JGIT_AMEND_TEMP
-  jsh_success "Moved ${#AMEND_OLD_COMMITS[@]} commit$([[ ${#AMEND_OLD_COMMITS[@]} == 1 ]] || printf s)"
+  jsh::log_success "Moved ${#AMEND_OLD_COMMITS[@]} commit$([[ ${#AMEND_OLD_COMMITS[@]} == 1 ]] || printf s)"
   printf 'Rollback: git update-ref %q %q %q\n' "${branch}" "${old_tip}" "${new_commit}"
 }
 
@@ -1153,17 +1154,15 @@ _jgit_rewrite() {
 
   _jgit_rewrite_sort_commits
 
-  jsh_warn 'Rewriting published commits requires a force push.'
+  jsh::log_warn 'Rewriting published commits requires a force push.'
   printf 'Selected commits (edited oldest first):\n'
   for commit in "${REWRITE_COMMITS[@]}"; do
     git show -s --format='  %h  %s  (%ad)' --date=short "${commit}"
   done
-  jsh_prompt 'Continue? [y/N]: '
-  read -r answer || answer=
-  case ${answer} in
-    [Yy]*) ;;
-    *) jsh_warn 'Rewrite cancelled'; return ;;
-  esac
+  if ! jsh::confirm 'Continue?' --default no; then
+    jsh::log_warn 'Rewrite cancelled'
+    return
+  fi
 
   JGIT_REWRITE_SELECTED=$(git rev-parse --path-format=absolute --git-path "jgit-rewrite-selected.$$")
   JGIT_REWRITE_MARKER=$(git rev-parse --path-format=absolute --git-path "jgit-rewrite-current.$$")
@@ -1217,11 +1216,18 @@ _jgit_rewrite() {
     original=$(< "${JGIT_REWRITE_MARKER}")
     printf '\n'
     git show -s --format='%h  %s%nAuthor: %an <%ae>%nAuthor date: %aI%nCommit date: %cI' "${original}"
-    jsh_prompt 'Timestamp [keep]: '
-    read -r timestamp || {
-      _jgit_rewrite_abort
-      _jgit_die 'rewrite aborted'
-    }
+    if [[ ${JSH_INTERACTIVE:-0} == 1 ]]; then
+      timestamp=$(jsh::input 'Timestamp' --placeholder keep) || {
+        _jgit_rewrite_abort
+        _jgit_die 'rewrite aborted'
+      }
+    else
+      jsh_prompt 'Timestamp [keep]: '
+      read -r timestamp || {
+        _jgit_rewrite_abort
+        _jgit_die 'rewrite aborted'
+      }
+    fi
     if [[ -n ${timestamp} ]]; then
       epoch=$(_jgit_resolve_timestamp_from "${timestamp}" "$(git show -s --format='%at' "${original}")") || {
         _jgit_rewrite_abort
@@ -1258,22 +1264,22 @@ _jgit_rewrite() {
   _jgit_rewrite_restore_worktree ||
     _jgit_die 'rewrite completed, but local changes could not be restored'
   unset JGIT_REWRITE_SELECTED JGIT_REWRITE_MARKER JGIT_REWRITE_LAUNCHER JGIT_REWRITE_ACTIVE
-  jsh_success "Rewrote ${count} commit$([[ ${count} == 1 ]] || printf s)"
+  jsh::log_success "Rewrote ${count} commit$([[ ${count} == 1 ]] || printf s)"
 }
 
 _jgit_update_restore_stash() {
   local repo=$1 stash_oid=$2 stash_ref
   stash_ref=$(git -C "${repo}" stash list --format='%gd %H' |
     awk -v wanted="${stash_oid}" '$2 == wanted { print $1; exit }') || {
-    jsh_error "Could not inspect stashes in ${repo}"
+    jsh::log_error "Could not inspect stashes in ${repo}"
     return 1
   }
   if [[ -z ${stash_ref} ]]; then
-    jsh_error "Created stash not found for ${repo}: ${stash_oid}"
+    jsh::log_error "Created stash not found for ${repo}: ${stash_oid}"
     return 1
   fi
   if ! git -C "${repo}" stash pop --index --quiet "${stash_ref}"; then
-    jsh_error "Could not restore local changes in ${repo}; stash retained as ${stash_ref}"
+    jsh::log_error "Could not restore local changes in ${repo}; stash retained as ${stash_ref}"
     return 1
   fi
 }
@@ -1302,59 +1308,59 @@ _jgit_rewrite_stash_worktree() {
     _jgit_update_restore_stash "${JGIT_REWRITE_REPO}" "${JGIT_REWRITE_STASH_OID}" || true
     _jgit_die 'could not stash all local changes'
   fi
-  jsh_info 'Temporarily stashed local changes'
+  jsh::log_info 'Temporarily stashed local changes'
 }
 
 _jgit_rewrite_restore_worktree() {
   [[ -n ${JGIT_REWRITE_STASH_OID:-} ]] || return
   _jgit_update_restore_stash "${JGIT_REWRITE_REPO}" "${JGIT_REWRITE_STASH_OID}" || return 1
   JGIT_REWRITE_STASH_OID=
-  jsh_success 'Restored local changes'
+  jsh::log_success 'Restored local changes'
 }
 
 _jgit_update_repository() {
   local repo=$1 use_stash=$2 status previous_stash='' stash_oid='' pull_status=0
   if ! git -C "${repo}" symbolic-ref --quiet HEAD > /dev/null; then
-    jsh_error "Detached HEAD, skipped ${repo}"
+    jsh::log_error "Detached HEAD, skipped ${repo}"
     return 1
   fi
   if ! git -C "${repo}" rev-parse --verify '@{upstream}' > /dev/null 2>&1; then
-    jsh_error "No upstream configured, skipped ${repo}"
+    jsh::log_error "No upstream configured, skipped ${repo}"
     return 1
   fi
   if [[ -n $(git -C "${repo}" diff --name-only --diff-filter=U) ]]; then
-    jsh_error "Unresolved conflicts, skipped ${repo}"
+    jsh::log_error "Unresolved conflicts, skipped ${repo}"
     return 1
   fi
 
   status=$(git -C "${repo}" status --porcelain) || {
-    jsh_error "Could not inspect working tree in ${repo}"
+    jsh::log_error "Could not inspect working tree in ${repo}"
     return 1
   }
   if [[ -n ${status} && ${use_stash} == 0 ]]; then
-    jsh_warn "Dirty worktree, skipped ${repo}; use --stash to update"
+    jsh::log_warn "Dirty worktree, skipped ${repo}; use --stash to update"
     return 1
   fi
   if [[ -n ${status} ]]; then
     previous_stash=$(git -C "${repo}" rev-parse --verify refs/stash 2> /dev/null || true)
     if ! git -C "${repo}" stash push --include-untracked --quiet \
       --message "jgit update $(date +%Y-%m-%dT%H:%M:%S)"; then
-      jsh_error "Could not stash local changes in ${repo}"
+      jsh::log_error "Could not stash local changes in ${repo}"
       return 1
     fi
     stash_oid=$(git -C "${repo}" rev-parse --verify refs/stash 2> /dev/null || true)
     if [[ -z ${stash_oid} || ${stash_oid} == "${previous_stash}" ]]; then
-      jsh_error "Could not stash all local changes in ${repo}"
+      jsh::log_error "Could not stash all local changes in ${repo}"
       return 1
     fi
     status=$(git -C "${repo}" status --porcelain) || {
       _jgit_update_restore_stash "${repo}" "${stash_oid}" || true
-      jsh_error "Could not inspect working tree in ${repo}"
+      jsh::log_error "Could not inspect working tree in ${repo}"
       return 1
     }
     if [[ -n ${status} ]]; then
       _jgit_update_restore_stash "${repo}" "${stash_oid}" || return 1
-      jsh_error "Could not stash all local changes in ${repo}"
+      jsh::log_error "Could not stash all local changes in ${repo}"
       return 1
     fi
   fi
@@ -1364,10 +1370,10 @@ _jgit_update_repository() {
     return 1
   fi
   if ((pull_status != 0)); then
-    jsh_error "Update failed for ${repo}; local changes restored"
+    jsh::log_error "Update failed for ${repo}; local changes restored"
     return 1
   fi
-  jsh_success "Updated ${repo}"
+  jsh::log_success "Updated ${repo}"
 }
 
 _jgit_find_update_repositories() {

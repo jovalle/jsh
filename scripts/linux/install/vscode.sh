@@ -23,11 +23,11 @@ install_vscode() {
   version=$(sed -nE 's#.+/code_([^_]+)_amd64[.]deb.*#\1#p' <<< "${url}")
   [[ -n ${version} ]] || version=$(jq -r '.name // empty' <<< "${metadata}")
   [[ -n ${version} && ${url} == https://* ]] || {
-    jsh_error 'Could not resolve the latest Visual Studio Code release.'
+    jsh::log_error 'Could not resolve the latest Visual Studio Code release.'
     return 1
   }
   [[ -z ${checksum} || ${checksum} =~ ^[0-9a-f]{64}$ ]] || {
-    jsh_error 'Visual Studio Code returned an invalid checksum.'
+    jsh::log_error 'Visual Studio Code returned an invalid checksum.'
     return 1
   }
   jsh_debian_install_package vscode code "${version}" "${url}" "${checksum}" code

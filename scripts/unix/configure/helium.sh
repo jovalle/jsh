@@ -49,7 +49,7 @@ case ${PLATFORM} in
 esac
 
 die() {
-  jsh_error "Helium: $2"
+  jsh::log_error "Helium: $2"
   exit "$1"
 }
 
@@ -148,7 +148,7 @@ require_stopped() {
 }
 
 stop_for_apply() {
-  local authorized="${1:-false}" answer attempt
+  local authorized="${1:-false}" attempt
   browser_is_running || return 0
 
   if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then
@@ -157,9 +157,7 @@ stop_for_apply() {
 
   if [[ "${authorized}" != true ]]; then
     [[ -t 0 ]] || die 1 "Helium is running. Rerun apply with --quit."
-    printf 'Helium is running. Quit it now? [y/N] ' >&2
-    IFS= read -r answer || die 1 "Cannot confirm quitting Helium."
-    [[ "${answer}" == [yY] || "${answer}" == [yY][eE][sS] ]] || die 1 "Apply cancelled."
+    jsh::confirm 'Helium is running. Quit it now?' --default no || die 1 "Apply cancelled."
   fi
 
   if [[ ${PLATFORM} == Darwin ]]; then
@@ -184,7 +182,7 @@ upgrade_app() {
       return
     fi
     if [[ ${JSH_CONFIGURE_DRY_RUN:-0} == 1 || ${JSH_INSTALL_DRY_RUN:-0} == 1 ]]; then
-      jsh_detail "Would install Helium ${HELIUM_LATEST_VERSION}."
+      jsh::log_detail "Would install Helium ${HELIUM_LATEST_VERSION}."
       return
     fi
     jsh_debian_install_package helium helium-bin "${HELIUM_LATEST_VERSION}" \
@@ -310,8 +308,8 @@ install_extension_policy() {
   local staged_policy id _name managed attempt
   local -a extension_ids=()
   local -a force_ids=()
-  jsh_warn "Helium's extension policy is missing or inactive."
-  jsh_note "Administrator approval is required to install the managed policy at ${POLICY_PATH}."
+  jsh::log_warn "Helium's extension policy is missing or inactive."
+  jsh::log_note "Administrator approval is required to install the managed policy at ${POLICY_PATH}."
   /usr/bin/sudo -v || die 1 \
     "Could not obtain administrator approval. The Helium extension policy was not changed; rerun setup and approve the password prompt."
   /bin/mkdir -p "${JSH_ROOT}/tmp"
@@ -568,9 +566,9 @@ is_patched() {
 patch_status() {
   [[ "$#" -eq 0 ]] || die 64 "status accepts no arguments."
   if is_patched; then
-    jsh_success "Helium is patched."
+    jsh::log_success "Helium is patched."
   else
-    jsh_warn "Helium needs patching."
+    jsh::log_warn "Helium needs patching."
     return 1
   fi
 }
@@ -608,7 +606,7 @@ apply() {
   esac
   [[ "$#" -le 1 ]] || die 64 "apply accepts only --quit."
   if [[ ${JSH_CONFIGURE_DRY_RUN:-0} == 1 ]]; then
-    jsh_detail 'Would inspect, update, and harden Helium.'
+    jsh::log_detail 'Would inspect, update, and harden Helium.'
     return
   fi
   require_command node
@@ -618,7 +616,7 @@ apply() {
   fi
 
   if [[ ${JSH_UPDATE:-0} != 1 ]] && is_patched; then
-    jsh_note "Helium is already configured and hardened."
+    jsh::log_note "Helium is already configured and hardened."
     return 0
   fi
 
@@ -630,7 +628,7 @@ apply() {
   apply_profile
   configure_extensions
   verify_profile
-  jsh_success "Helium is updated, hardened, and ready."
+  jsh::log_success "Helium is updated, hardened, and ready."
 }
 
 profile_root_is_safe() {
@@ -651,7 +649,7 @@ profile_root_is_safe() {
 }
 
 reset_profile() {
-  local force=false delete_all=false answer argument backup_root
+  local force=false delete_all=false argument backup_root prompt
   for argument in "$@"; do
     case "${argument}" in
       --all) delete_all=true ;;
@@ -665,12 +663,11 @@ reset_profile() {
   if [[ "${force}" != true ]]; then
     [[ -t 0 ]] || die 1 "reset requires --force when input is not interactive."
     if [[ "${delete_all}" == true ]]; then
-      printf 'Delete the Helium profile and all extension data at %s? [y/N] ' "${PROFILE_ROOT}" >&2
+      prompt="Delete the Helium profile and all extension data at ${PROFILE_ROOT}?"
     else
-      printf 'Reset the Helium profile at %s while preserving extension data? [y/N] ' "${PROFILE_ROOT}" >&2
+      prompt="Reset the Helium profile at ${PROFILE_ROOT} while preserving extension data?"
     fi
-    IFS= read -r answer || die 1 "Cannot confirm resetting the Helium profile."
-    [[ "${answer}" == [yY] || "${answer}" == [yY][eE][sS] ]] || die 1 "Reset cancelled."
+    jsh::confirm "${prompt}" --default no || die 1 "Reset cancelled."
   fi
 
   if [[ "${delete_all}" != true ]]; then
@@ -681,7 +678,7 @@ reset_profile() {
   fi
   /bin/rm -rf -- "${PROFILE_ROOT:?}"
   if [[ "${delete_all}" == true ]]; then
-    jsh_success "Helium profile and extension data reset."
+    jsh::log_success "Helium profile and extension data reset."
     return 0
   fi
 
@@ -689,7 +686,7 @@ reset_profile() {
   /bin/cp -R -p "${backup_root}/." "${PROFILE_ROOT}/" ||
     die 1 "Cannot restore extension data. Backup retained at ${backup_root}."
   /bin/rm -rf -- "${backup_root}"
-  jsh_success "Helium profile reset; extension data preserved."
+  jsh::log_success "Helium profile reset; extension data preserved."
 }
 
 launch() {

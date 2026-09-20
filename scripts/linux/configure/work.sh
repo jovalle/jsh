@@ -26,14 +26,14 @@ aur_helper() {
 install_citrix_debian() {
   local page download_path version url installed
   [[ $(uname -m) == x86_64 ]] || {
-    jsh_note "Citrix Workspace is unavailable for architecture $(uname -m)."
+    jsh::log_note "Citrix Workspace is unavailable for architecture $(uname -m)."
     return
   }
   page=$(curl -fsSL 'https://www.citrix.com/downloads/workspace-app/linux/workspace-app-for-linux-latest.html')
   download_path=$(grep -Eo 'rel="//downloads[.]citrix[.]com/[^"?]*icaclient-gcc-8_[0-9A-Za-z.+:~-]+_amd64[.]deb[^"]*"' <<< "${page}" |
     head -n 1 | cut -d'"' -f2)
   [[ -n ${download_path} ]] || {
-    jsh_error 'Unable to locate the Citrix Workspace Debian package.'
+    jsh::log_error 'Unable to locate the Citrix Workspace Debian package.'
     return 1
   }
   version=$(sed -nE 's#.+icaclient-gcc-8_([^_]+)_amd64[.]deb.*#\1#p' <<< "${download_path}")
@@ -50,13 +50,13 @@ install_citrix_debian() {
 install_zoom_debian() {
   local url version
   [[ $(uname -m) == x86_64 ]] || {
-    jsh_note "Zoom is unavailable for architecture $(uname -m)."
+    jsh::log_note "Zoom is unavailable for architecture $(uname -m)."
     return
   }
   url=$(curl -fsSIL -o /dev/null -w '%{url_effective}' 'https://zoom.us/client/latest/zoom_amd64.deb')
   version=$(sed -nE 's#.+/prod/([^/]+)/.+#\1#p' <<< "${url}")
   [[ -n ${version} ]] || {
-    jsh_error 'Unable to resolve the latest Zoom Debian package.'
+    jsh::log_error 'Unable to resolve the latest Zoom Debian package.'
     return 1
   }
   jsh_debian_install_package zoom zoom "${version}" "${url}" '' zoom
@@ -75,23 +75,23 @@ install_citrix_fedora() {
     x86_64) arch_pattern='x86_64\.rpm' ;;
     aarch64 | arm64) arch_pattern='aarch64\.rpm' ;;
     *)
-      jsh_note "Citrix Workspace is unavailable for architecture ${arch}."
+      jsh::log_note "Citrix Workspace is unavailable for architecture ${arch}."
       return 0
       ;;
   esac
 
   if [[ "${JSH_CONFIGURE_DRY_RUN:-0}" == 1 || "${JSH_INSTALL_DRY_RUN:-0}" == 1 ]]; then
-    jsh_detail "Would download and install Citrix Workspace for Fedora (${arch})"
+    jsh::log_detail "Would download and install Citrix Workspace for Fedora (${arch})"
     return 0
   fi
 
-  jsh_info "Downloading Citrix Workspace for Fedora..."
+  jsh::log_info "Downloading Citrix Workspace for Fedora..."
   page_content=$(curl -sL 'https://www.citrix.com/downloads/workspace-app/linux/workspace-app-for-linux-latest.html')
   download_path=$(printf '%s\n' "${page_content}" | \
     grep -o "rel=\"//downloads\.citrix\.com/[^\"]*${arch_pattern}[^\"]*\"" | \
     grep -E 'ICAClient-rhel' | head -n 1 | cut -d'"' -f2)
   if [[ -z "${download_path}" ]]; then
-    jsh_error "Unable to locate Citrix Workspace RPM package download URL."
+    jsh::log_error "Unable to locate Citrix Workspace RPM package download URL."
     return 1
   fi
 
@@ -103,17 +103,17 @@ install_citrix_fedora() {
 
   if ! curl --fail --location --retry 2 --output "${package}" "${url}"; then
     rm -rf -- "${temporary_dir}"
-    jsh_error "Failed to download Citrix Workspace package from ${url}."
+    jsh::log_error "Failed to download Citrix Workspace package from ${url}."
     return 1
   fi
 
   mgr="dnf"
   command -v dnf5 > /dev/null 2>&1 && mgr="dnf5"
 
-  jsh_info "Installing Citrix Workspace..."
+  jsh::log_info "Installing Citrix Workspace..."
   jsh_run_root "${mgr}" install -y -- "${package}"
   rm -rf -- "${temporary_dir}"
-  jsh_success "Citrix Workspace installed."
+  jsh::log_success "Citrix Workspace installed."
 }
 
 install_zoom_fedora() {
@@ -128,17 +128,17 @@ install_zoom_fedora() {
     x86_64) url="https://zoom.us/client/latest/zoom_x86_64.rpm" ;;
     aarch64 | arm64) url="https://zoom.us/client/latest/zoom_aarch64.rpm" ;;
     *)
-      jsh_note "Zoom is unavailable for architecture ${arch}."
+      jsh::log_note "Zoom is unavailable for architecture ${arch}."
       return 0
       ;;
   esac
 
   if [[ "${JSH_CONFIGURE_DRY_RUN:-0}" == 1 || "${JSH_INSTALL_DRY_RUN:-0}" == 1 ]]; then
-    jsh_detail "Would download and install Zoom for Fedora (${arch})"
+    jsh::log_detail "Would download and install Zoom for Fedora (${arch})"
     return 0
   fi
 
-  jsh_info "Downloading Zoom for Fedora..."
+  jsh::log_info "Downloading Zoom for Fedora..."
   mkdir -p "${JSH_ROOT}/tmp"
   temporary_dir=$(mktemp -d "${JSH_ROOT}/tmp/zoom.XXXXXX")
   jsh_interrupt_cleanup_path "${temporary_dir}"
@@ -146,17 +146,17 @@ install_zoom_fedora() {
 
   if ! curl --fail --location --retry 2 --output "${package}" "${url}"; then
     rm -rf -- "${temporary_dir}"
-    jsh_error "Failed to download Zoom package from ${url}."
+    jsh::log_error "Failed to download Zoom package from ${url}."
     return 1
   fi
 
   mgr="dnf"
   command -v dnf5 > /dev/null 2>&1 && mgr="dnf5"
 
-  jsh_info "Installing Zoom..."
+  jsh::log_info "Installing Zoom..."
   jsh_run_root "${mgr}" install -y -- "${package}"
   rm -rf -- "${temporary_dir}"
-  jsh_success "Zoom installed."
+  jsh::log_success "Zoom installed."
 }
 
 install_work_packages() {
@@ -166,7 +166,7 @@ install_work_packages() {
   case "${family}" in
     arch)
       helper=$(aur_helper) || {
-        jsh_error "yay or paru is required; run make install first."
+        jsh::log_error "yay or paru is required; run make install first."
         return 1
       }
       for package in icaclient zoom; do
@@ -183,7 +183,7 @@ install_work_packages() {
       install_zoom_fedora
       ;;
     *)
-      jsh_note "Automatic Citrix and Zoom package installation is unavailable for ${family}; using existing installations."
+      jsh::log_note "Automatic Citrix and Zoom package installation is unavailable for ${family}; using existing installations."
       ;;
   esac
 }
@@ -217,7 +217,7 @@ configure_citrix() {
     if [[ ${current} != "${filename}" ]]; then
       xdg-mime default "${filename}" "${mime}"
       [[ $(xdg-mime query default "${mime}") == "${filename}" ]] || {
-        jsh_error "MIME association did not take effect: ${mime}"
+        jsh::log_error "MIME association did not take effect: ${mime}"
         rm -rf -- "${temporary}"
         return 1
       }
@@ -299,7 +299,7 @@ register_zoom_vdi() {
   chmod 0600 "${backup}"
   jsh_run_root install -m 0644 "${temporary}" "${module}"
   rm -f "${temporary}"
-  jsh_detail "Backup: ${backup}"
+  jsh::log_detail "Backup: ${backup}"
 }
 
 install_zoom_vdi() {
@@ -308,19 +308,19 @@ install_zoom_vdi() {
     if [[ $(jsh_linux_family) != debian ]]; then return 0; fi
     installed_version=$(dpkg-query -W -f='${Version}' zoomvdi-universal-plugin)
     [[ ${installed_version} == "${ZOOM_VDI_VERSION}"-* ]] && return 0
-    jsh_error "Zoom VDI version differs from the approved version: ${installed_version} (expected ${ZOOM_VDI_VERSION})."
+    jsh::log_error "Zoom VDI version differs from the approved version: ${installed_version} (expected ${ZOOM_VDI_VERSION})."
     return 1
   fi
   [[ "${ZOOM_VDI_VERSION}" =~ ^[0-9]+(\.[0-9]+)*$ &&
     "${ZOOM_VDI_RELEASE}" =~ ^[0-9]+(\.[0-9]+)*$ &&
     "${ZOOM_VDI_SHA256}" =~ ^[0-9a-f]{64}$ ]] || {
-    jsh_error "Invalid Zoom VDI version or checksum."
+    jsh::log_error "Invalid Zoom VDI version or checksum."
     return 1
   }
   if [[ ! -r "${ZOOM_VDI_LIBRARY}" ]]; then
     family=$(jsh_linux_family)
     if [[ "${family}" == debian ]]; then
-      jsh_info "Installing Zoom VDI for Debian..."
+      jsh::log_info "Installing Zoom VDI for Debian..."
       mkdir -p "${JSH_ROOT}/tmp"
       temporary_dir=$(mktemp -d "${JSH_ROOT}/tmp/zoom-vdi.XXXXXX")
       jsh_interrupt_cleanup_path "${temporary_dir}"
@@ -330,7 +330,7 @@ install_zoom_vdi() {
       curl --fail --location --retry 2 --output "${package}" "${url}"
       actual=$(sha256sum "${package}" | awk '{ print $1 }')
       if [[ "${actual}" != "${ZOOM_VDI_SHA256}" ]]; then
-        jsh_error "Zoom VDI package checksum verification failed."
+        jsh::log_error "Zoom VDI package checksum verification failed."
         return 1
       fi
       jsh_run_root apt-get install -y -- "${package}"
@@ -338,7 +338,7 @@ install_zoom_vdi() {
       trap - RETURN
     elif [[ "${family}" == arch ]]; then
       [[ "$(id -u)" -ne 0 ]] || {
-        jsh_error "Zoom VDI must be built as a regular user."
+        jsh::log_error "Zoom VDI must be built as a regular user."
         return 1
       }
       mkdir -p "${JSH_ROOT}/tmp"
@@ -350,7 +350,7 @@ install_zoom_vdi() {
       curl --fail --location --retry 2 --output "${package}" "${url}"
       actual=$(sha256sum "${package}" | awk '{ print $1 }')
       [[ "${actual}" == "${ZOOM_VDI_SHA256}" ]] || {
-        jsh_error "Zoom VDI package checksum verification failed."
+        jsh::log_error "Zoom VDI package checksum verification failed."
         return 1
       }
       build_dir="${temporary_dir}/build"
@@ -377,14 +377,14 @@ EOF
       (cd "${build_dir}" && makepkg --force --noconfirm)
       package_file=$(find "${build_dir}" -maxdepth 1 -name 'zoomvdi-universal-plugin-*.pkg.tar.*' -print -quit)
       [[ -r "${package_file}" ]] || {
-        jsh_error "Zoom VDI package build failed."
+        jsh::log_error "Zoom VDI package build failed."
         return 1
       }
       jsh_run_root pacman -U --noconfirm -- "${package_file}"
       rm -rf -- "${temporary_dir}"
       trap - RETURN
     else
-      jsh_note "Skipping Zoom VDI installation on ${family}; install the vendor plugin before rerunning this setup."
+      jsh::log_note "Skipping Zoom VDI installation on ${family}; install the vendor plugin before rerunning this setup."
       return
     fi
   fi
@@ -393,36 +393,32 @@ EOF
 }
 
 main() {
-  local arg answer
+  local arg
   for arg in "$@"; do
     case "${arg}" in
-      -y | --yes) JSH_ASSUME_YES=1 ;;
+      -y | --yes) export JSH_ASSUME_YES=1 ;;
     esac
   done
 
   [[ "$(uname -s)" == Linux ]] || return
-  jsh_detail "This configures Citrix Workspace, Zoom, and the checksum-pinned Zoom VDI integration."
-  if [[ ${JSH_ASSUME_YES:-0} != 1 ]]; then
-    jsh_prompt "Configure the Linux work environment? [y/N]: "
-    read -r answer || answer=
-    [[ "${answer}" =~ ^[Yy]$ ]] || {
-      jsh_note "Skipping Linux work environment."
-      return
-    }
+  jsh::log_detail "This configures Citrix Workspace, Zoom, and the checksum-pinned Zoom VDI integration."
+  if ! jsh::confirm "Configure the Linux work environment?" --default no; then
+    jsh::log_note "Skipping Linux work environment."
+    return
   fi
 
   if [[ ${JSH_CONFIGURE_DRY_RUN:-0} == 1 || ${JSH_INSTALL_DRY_RUN:-0} == 1 ]]; then
-    jsh_detail "Would inspect/install Citrix, Zoom and VDI, then reconcile their integration."
+    jsh::log_detail "Would inspect/install Citrix, Zoom and VDI, then reconcile their integration."
     return 0
   fi
   install_work_packages
   if ! citrix_healthy; then
-    jsh_error "Citrix Workspace is missing or incomplete under ${CITRIX_ROOT}."
+    jsh::log_error "Citrix Workspace is missing or incomplete under ${CITRIX_ROOT}."
     return 1
   fi
   configure_citrix
   install_zoom_vdi
-  jsh_success "Linux work environment configured."
+  jsh::log_success "Linux work environment configured."
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

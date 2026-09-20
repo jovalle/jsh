@@ -15,7 +15,7 @@ unset library_file
 
 USERNAME=$(whoami)
 if [[ "${USERNAME}" = "root" ]]; then
-  jsh_error "Running as root is not supported/applicable."
+  jsh::log_error "Running as root is not supported/applicable."
   exit 1
 fi
 
@@ -23,29 +23,25 @@ SUDOERS_LINE="${USERNAME} ALL=(ALL) NOPASSWD:ALL"
 SUDOERS_FILE="/etc/sudoers.d/${USERNAME}"
 
 if sudo -n grep -Fxq "${SUDOERS_LINE}" "${SUDOERS_FILE}" 2>/dev/null; then
-  jsh_note "Sudoers already configured for ${USERNAME}."
+  jsh::log_note "Sudoers already configured for ${USERNAME}."
   exit 0
 fi
 
 local_arg=
 for local_arg in "$@"; do
   case "${local_arg}" in
-    -y | --yes) JSH_ASSUME_YES=1 ;;
+    -y | --yes) export JSH_ASSUME_YES=1 ;;
   esac
 done
 
-jsh_detail "This will grant ${USERNAME} passwordless sudo access."
-if [[ ${JSH_ASSUME_YES:-0} != 1 ]]; then
-  jsh_prompt "Configure sudoers? [y/N]: "
-  read -r CONFIRM || CONFIRM=
-  if [[ ! "${CONFIRM}" =~ ^[Yy]$ ]]; then
-    jsh_note "Skipping sudoers configuration."
-    exit 0
-  fi
+jsh::log_detail "This will grant ${USERNAME} passwordless sudo access."
+if ! jsh::confirm "Configure sudoers?" --default no; then
+  jsh::log_note "Skipping sudoers configuration."
+  exit 0
 fi
 
 if [[ ${JSH_CONFIGURE_DRY_RUN:-0} == 1 ]]; then
-  jsh_detail "Would validate and install ${SUDOERS_FILE}"
+  jsh::log_detail "Would validate and install ${SUDOERS_FILE}"
   exit 0
 fi
 temporary=$(mktemp)
@@ -64,4 +60,4 @@ jsh_interrupt_cleanup_root_path "${staging}"
 trap 'rm -f -- "${temporary}"; sudo -n rm -f -- "${staging}" 2>/dev/null || true' EXIT
 sudo install -o root -g root -m 0440 "${temporary}" "${staging}"
 sudo mv -f -- "${staging}" "${SUDOERS_FILE}"
-jsh_success "Sudoers configured for ${USERNAME} with no password prompt."
+jsh::log_success "Sudoers configured for ${USERNAME} with no password prompt."

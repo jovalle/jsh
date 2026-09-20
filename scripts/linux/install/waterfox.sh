@@ -20,7 +20,7 @@ waterfox_latest_release() {
   WATERFOX_VERSION=${location##*/}
   WATERFOX_VERSION=${WATERFOX_VERSION#v}
   [[ ${WATERFOX_VERSION} =~ ^[0-9][0-9A-Za-z.+~-]*$ ]] || {
-    jsh_error 'Could not resolve the latest Waterfox release.'
+    jsh::log_error 'Could not resolve the latest Waterfox release.'
     return 1
   }
   WATERFOX_URL="https://cdn.waterfox.com/waterfox/releases/${WATERFOX_VERSION}/Linux_x86_64/waterfox-${WATERFOX_VERSION}.tar.bz2"
@@ -36,13 +36,13 @@ waterfox_installed_version() {
 validate_waterfox_archive() {
   local archive=$1 entry listing
   if ! listing=$(bsdtar -tf "${archive}"); then
-    jsh_error 'Could not read the Waterfox archive.'
+    jsh::log_error 'Could not read the Waterfox archive.'
     return 1
   fi
   while IFS= read -r entry; do
     [[ -n ${entry} && ${entry} != /* && ${entry} != *'../'* && ${entry} != '..' &&
       (${entry} == waterfox || ${entry} == waterfox/*) ]] || {
-      jsh_error "Unsafe Waterfox archive path: ${entry}"
+      jsh::log_error "Unsafe Waterfox archive path: ${entry}"
       return 1
     }
   done <<< "${listing}"
@@ -52,40 +52,36 @@ extract_waterfox_archive() {
   local archive=$1 directory=$2 link target resolved root
   validate_waterfox_archive "${archive}"
   if ! bsdtar -xjf "${archive}" -C "${directory}" --no-same-owner --no-same-permissions; then
-    jsh_error 'Could not extract the Waterfox archive.'
+    jsh::log_error 'Could not extract the Waterfox archive.'
     return 1
   fi
   root=$(realpath -m "${directory}/waterfox")
   [[ -x ${root}/waterfox ]] || {
-    jsh_error 'Waterfox archive does not contain the expected executable.'
+    jsh::log_error 'Waterfox archive does not contain the expected executable.'
     return 1
   }
   while IFS= read -r -d '' link; do
     target=$(readlink "${link}")
     [[ ${target} != /* ]] || {
-      jsh_error "Unsafe absolute link in Waterfox archive: ${link}"
+      jsh::log_error "Unsafe absolute link in Waterfox archive: ${link}"
       return 1
     }
     resolved=$(realpath -m "${link%/*}/${target}")
     [[ ${resolved} == "${root}" || ${resolved} == "${root}/"* ]] || {
-      jsh_error "Escaping link in Waterfox archive: ${link}"
+      jsh::log_error "Escaping link in Waterfox archive: ${link}"
       return 1
     }
   done < <(find "${root}" -type l -print0)
 }
 
 confirm_waterfox_shutdown() {
-  local answer process
+  local process
   pgrep -x waterfox >/dev/null 2>&1 || pgrep -x waterfox-bin >/dev/null 2>&1 || return
-  if [[ ${JSH_ASSUME_YES:-0} != 1 ]]; then
-    [[ -t 0 ]] || {
-      jsh_warn 'Skipping Waterfox update while the browser is running.'
-      return 1
-    }
-    jsh_prompt 'Close Waterfox before updating? [y/N]: '
-    read -r answer || answer=
-    [[ ${answer,,} == y || ${answer,,} == yes ]] || return 1
+  if [[ ${JSH_ASSUME_YES:-0} != 1 && ! -t 0 ]]; then
+    jsh::log_warn 'Skipping Waterfox update while the browser is running.'
+    return 1
   fi
+  jsh::confirm 'Close Waterfox before updating?' --default no || return 1
   for process in waterfox waterfox-bin; do
     pkill -TERM -x "${process}" >/dev/null 2>&1 || true
   done
@@ -100,11 +96,11 @@ install_waterfox() {
   installed=$(waterfox_installed_version || true)
   if [[ ${installed} == "${WATERFOX_VERSION}" && -x ${destination}/waterfox &&
     -L ${launcher} && $(readlink -f "${launcher}") == "${destination}/waterfox" ]]; then
-    jsh_note "Waterfox is current (${installed})."
+    jsh::log_note "Waterfox is current (${installed})."
     return
   fi
   if [[ ${JSH_INSTALL_DRY_RUN:-${JSH_CONFIGURE_DRY_RUN:-0}} == 1 ]]; then
-    jsh_detail "Would install Waterfox ${WATERFOX_VERSION}."
+    jsh::log_detail "Would install Waterfox ${WATERFOX_VERSION}."
     return
   fi
   if ! confirm_waterfox_shutdown; then
@@ -112,7 +108,7 @@ install_waterfox() {
   fi
   checksum=$(curl -fsSL "${WATERFOX_URL}.sha512" | awk 'NR == 1 {print $1}')
   [[ ${checksum} =~ ^[0-9a-f]{128}$ ]] || {
-    jsh_error 'Waterfox returned an invalid SHA-512 checksum.'
+    jsh::log_error 'Waterfox returned an invalid SHA-512 checksum.'
     return 1
   }
   artifact=$(jsh_download_artifact waterfox "${WATERFOX_VERSION}" "${WATERFOX_URL}" \
@@ -126,7 +122,7 @@ install_waterfox() {
   fi
   [[ ! -e ${launcher} || -L ${launcher} ]] || {
     rm -rf -- "${temporary}"
-    jsh_error "Unmanaged Waterfox launcher exists: ${launcher}"
+    jsh::log_error "Unmanaged Waterfox launcher exists: ${launcher}"
     return 1
   }
   jsh_run_root install -d -m 0755 /opt/jsh /usr/local/bin
@@ -141,10 +137,10 @@ install_waterfox() {
   rm -rf -- "${temporary}"
   actual=$(waterfox_installed_version || true)
   [[ ${actual} == "${WATERFOX_VERSION}" ]] || {
-    jsh_error "Waterfox verification failed: expected ${WATERFOX_VERSION}, got ${actual:-missing}."
+    jsh::log_error "Waterfox verification failed: expected ${WATERFOX_VERSION}, got ${actual:-missing}."
     return 1
   }
-  jsh_success "Installed Waterfox ${actual}."
+  jsh::log_success "Installed Waterfox ${actual}."
 }
 
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then

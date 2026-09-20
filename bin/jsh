@@ -83,6 +83,45 @@ if ! JSH_ROOT=$(CDPATH='' cd -P "${launcher%/*}/.." 2> /dev/null && pwd -P); the
   printf 'jsh: cannot locate the repository root\n' >&2
   exit 1
 fi
+. "${JSH_ROOT}/lib/output.sh"
+
+jsh_health_spinner_stop() {
+  if [ -n "${JSH_HEALTH_SPINNER_PID:-}" ]; then
+    kill "${JSH_HEALTH_SPINNER_PID}" 2> /dev/null || :
+    wait "${JSH_HEALTH_SPINNER_PID}" 2> /dev/null || :
+  fi
+  if [ "${JSH_HEALTH_SPINNER_VISIBLE:-0}" -eq 1 ]; then
+    printf '\r\033[2K\033[?25h' >&2
+  fi
+  JSH_HEALTH_SPINNER_PID=
+  JSH_HEALTH_SPINNER_VISIBLE=0
+}
+
+jsh_health_stage() {
+  [ "${JSH_HEALTH_PROGRESS:-0}" -eq 1 ] || return 0
+  jsh_health_spinner_stop
+  JSH_HEALTH_SPINNER_VISIBLE=1
+  printf '\033[?25l' >&2
+  if jsh_color_enabled 2; then
+    printf '\r\033[36m|\033[0m %s' "$*" >&2
+  else
+    printf '\r| %s' "$*" >&2
+  fi
+  (
+    trap 'printf "\033[?25h" >&2; exit 0' HUP INT TERM
+    while :; do
+      for health_frame in '/' '-' '\\' '|'; do
+        sleep 0.1
+        if jsh_color_enabled 2; then
+          printf '\r\033[36m%s\033[0m %s' "${health_frame}" "$*" >&2
+        else
+          printf '\r%s %s' "${health_frame}" "$*" >&2
+        fi
+      done
+    done
+  ) &
+  JSH_HEALTH_SPINNER_PID=$!
+}
 
 jsh_health_issue() {
   jsh_health_status fail "$1"
@@ -92,7 +131,13 @@ jsh_health_issue() {
 
 jsh_health_status() {
   [ "${JSH_HEALTH_VERBOSE:-0}" -eq 1 ] || return 0
-  printf '  [%-4s] %s\n' "$1" "$2" >&2
+  [ "${JSH_HEALTH_PROGRESS:-0}" -eq 0 ] || return 0
+  case $1 in
+    ok) jsh_stderr 32 '✓ ' "$2" ;;
+    skip) jsh_stderr '2;37' '' "$2" ;;
+    fail) jsh_stderr 31 '✗ ' "$2" ;;
+    *) return 2 ;;
+  esac
 }
 
 jsh_health_path() {
@@ -124,8 +169,13 @@ jsh_fzf_healthy() {
 jsh_health_check() {
   JSH_HEALTH_ISSUES=
   JSH_HEALTH_VERBOSE=${1:-0}
+  JSH_HEALTH_PROGRESS=0
+  if [ "${JSH_HEALTH_VERBOSE}" -eq 1 ] && [ -t 2 ] &&
+    [ "${TERM:-}" != dumb ] && [ "${JSH_PLAIN_OUTPUT:-0}" != 1 ]; then
+    JSH_HEALTH_PROGRESS=1
+  fi
 
-  [ "${JSH_HEALTH_VERBOSE}" -eq 0 ] || printf 'jsh: checking startup health...\n' >&2
+  jsh_health_stage 'Checking required tools'
 
   if health_command=$(command -v git 2> /dev/null); then
     jsh_health_status ok "Git: ${health_command}"
@@ -138,12 +188,14 @@ jsh_health_check() {
     jsh_health_issue 'Zsh is unavailable.'
   fi
 
+  jsh_health_stage 'Checking bundled plugins'
   jsh_health_path 'fzf submodule' "${JSH_ROOT}/local/vendor/fzf/install" executable
   jsh_health_path 'fzf-tab submodule' "${JSH_ROOT}/local/vendor/fzf-tab/fzf-tab.plugin.zsh" readable
   jsh_health_path 'zsh-autosuggestions submodule' "${JSH_ROOT}/local/vendor/zsh-autosuggestions/zsh-autosuggestions.zsh" readable
   jsh_health_path 'zsh-completions submodule' "${JSH_ROOT}/local/vendor/zsh-completions/src" directory
   jsh_health_path 'zsh-syntax-highlighting submodule' "${JSH_ROOT}/local/vendor/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" readable
 
+  jsh_health_stage 'Checking fzf runtime'
   if health_fzf=$(command -v fzf 2> /dev/null); then
     if health_version=$("${health_fzf}" --version 2> /dev/null); then
       jsh_health_status ok "fzf: ${health_version} (${health_fzf})"
@@ -161,54 +213,56 @@ jsh_health_check() {
     jsh_health_issue "The fzf executable is missing (expected ${JSH_ROOT}/local/vendor/fzf/bin/fzf or fzf in PATH)."
   fi
 
+  jsh_health_stage 'Checking pinned revisions'
   if command -v git > /dev/null 2>&1 && [ -e "${JSH_ROOT}/.git" ]; then
     if submodule_status=$(git -C "${JSH_ROOT}" submodule status --recursive 2> /dev/null); then
       if printf '%s\n' "${submodule_status}" | grep -Eq '^[-+U]'; then
         jsh_health_issue 'One or more Jsh submodules are not at their pinned revisions.'
       else
-        jsh_health_status ok 'Pinned submodule revisions'
+        jsh_health_status ok 'Submodules match their pinned revisions.'
       fi
     else
       jsh_health_issue 'Jsh submodule status could not be read.'
     fi
   else
-    jsh_health_status skip 'Pinned submodule revisions (Git checkout unavailable)'
+    jsh_health_status skip 'Submodule revision check skipped: Git checkout unavailable.'
   fi
+  jsh_health_spinner_stop
 
   if [ -z "${JSH_HEALTH_ISSUES}" ]; then
-    [ "${JSH_HEALTH_VERBOSE}" -eq 0 ] || printf 'jsh: startup health check passed.\n' >&2
     return 0
   fi
-  [ "${JSH_HEALTH_VERBOSE}" -eq 0 ] || printf 'jsh: startup health check failed.\n' >&2
   return 1
 }
 
 jsh_health_report() {
-  printf 'jsh: health check found problems:\n' >&2
-  printf '%s\n' "${JSH_HEALTH_ISSUES}" | while IFS= read -r issue; do
-    printf '  - %s\n' "${issue}" >&2
-  done
-  printf 'Run `jsh repair` to try to fix them, or set JSH_SKIP_HEALTH_CHECK=1 to silence this check.\n' >&2
+  jsh_error 'Jsh needs attention.'
+  if [ "${JSH_HEALTH_PROGRESS:-0}" -eq 1 ] || [ "${JSH_HEALTH_VERBOSE:-0}" -eq 0 ]; then
+    printf '%s\n' "${JSH_HEALTH_ISSUES}" | while IFS= read -r issue; do
+      jsh_stderr 31 '✗ ' "${issue}"
+    done
+  fi
+  jsh_stderr '2;37' '' 'Run `jsh repair` to fix startup dependencies, or set JSH_SKIP_HEALTH_CHECK=1 to skip this check.'
 }
 
 jsh_repair() {
   repair_failed=0
 
   if command -v git > /dev/null 2>&1 && [ -e "${JSH_ROOT}/.git" ]; then
-    printf 'jsh: synchronizing submodules...\n'
+    jsh_info 'Synchronizing Jsh submodules...'
     git -C "${JSH_ROOT}" submodule sync --recursive &&
       git -C "${JSH_ROOT}" submodule update --init --recursive || repair_failed=1
   else
-    printf 'jsh: Git is required to repair submodules. Run `jsh runtime` first.\n' >&2
+    jsh_error 'Git is required to repair Jsh submodules. Run `jsh runtime` first.'
     repair_failed=1
   fi
 
   if ! jsh_fzf_healthy; then
     if [ -x "${JSH_ROOT}/local/vendor/fzf/install" ]; then
-      printf 'jsh: installing the vendored fzf executable...\n'
+      jsh_info 'Installing the vendored fzf executable...'
       "${JSH_ROOT}/local/vendor/fzf/install" --bin || repair_failed=1
     else
-      printf 'jsh: fzf cannot be installed until its submodule is initialized.\n' >&2
+      jsh_error 'fzf cannot be installed until its submodule is initialized.'
       repair_failed=1
     fi
   fi
@@ -329,16 +383,23 @@ else
   done
 fi
 
+jsh_clear_before_shell=0
 if [ "${jsh_interactive}" -eq 1 ] && [ "${jsh_command}" -eq 0 ] &&
-  [ "${JSH_SKIP_HEALTH_CHECK:-0}" != 1 ] && ! jsh_health_check 1; then
-  jsh_health_report
-  if [ -t 0 ] && [ -t 1 ]; then
-    printf 'Try to repair these problems now? [y/N] ' >&2
-    IFS= read -r repair_answer
-    case ${repair_answer} in
-      y | Y | yes | YES) jsh_repair || true ;;
-    esac
+  [ "${JSH_SKIP_HEALTH_CHECK:-0}" != 1 ]; then
+  if jsh_health_check 1; then
+    jsh_clear_before_shell=1
+  else
+    jsh_health_report
+    if [ -t 0 ] && [ -t 1 ]; then
+      if "${JSH_ROOT}/lib/ui/cli.sh" confirm --default no -- 'Try to repair these problems now?'; then
+        jsh_repair && jsh_clear_before_shell=1 || :
+      fi
+    fi
   fi
+fi
+
+if [ "${jsh_clear_before_shell}" -eq 1 ] && [ -t 1 ]; then
+  printf '\033[2J\033[H'
 fi
 
 exec "${JSH_ZSH}" -d "$@"

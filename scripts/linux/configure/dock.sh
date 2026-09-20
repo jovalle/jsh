@@ -101,7 +101,7 @@ configure_gnome_dock() {
   local -a favorites=()
 
   if ! current=$(gsettings get org.gnome.shell favorite-apps); then
-    jsh_error "Unable to read existing GNOME favorites."
+    jsh::log_error "Unable to read existing GNOME favorites."
     return 1
   fi
   while IFS= read -r existing; do
@@ -131,7 +131,7 @@ configure_xfce_dock() {
   mkdir -p "${panel_dir}"
   panel_id=$(find_xfce_dock_panel)
   [[ "${panel_id}" =~ ^[0-9]+$ ]] || {
-    jsh_error "No XFCE panel is available for the application dock."
+    jsh::log_error "No XFCE panel is available for the application dock."
     return 1
   }
 
@@ -204,10 +204,10 @@ configure_xfce_dock() {
 }
 
 main() {
-  local desktop pins arg answer
+  local desktop pins arg
   for arg in "$@"; do
     case "${arg}" in
-      -y | --yes) JSH_ASSUME_YES=1 ;;
+      -y | --yes) export JSH_ASSUME_YES=1 ;;
     esac
   done
 
@@ -217,28 +217,24 @@ main() {
     xfce) command -v xfconf-query > /dev/null 2>&1 || return ;;
     gnome) command -v gsettings > /dev/null 2>&1 || return ;;
     *)
-      jsh_note "Skipping application dock: XFCE or GNOME is not active."
+      jsh::log_note "Skipping application dock: XFCE or GNOME is not active."
       return
       ;;
   esac
 
   pins=$(dock_pins)
   [[ -n "${pins}" ]] || {
-    jsh_note "Skipping application dock: no configured applications are installed."
+    jsh::log_note "Skipping application dock: no configured applications are installed."
     return
   }
-  jsh_detail "This will add installed Jsh applications to the ${desktop^^} dock."
-  if [[ ${JSH_ASSUME_YES:-0} != 1 ]]; then
-    jsh_prompt "Configure the ${desktop^^} application dock? [y/N]: "
-    read -r answer || answer=
-    [[ "${answer}" =~ ^[Yy]$ ]] || {
-      jsh_note "Skipping application dock."
-      return
-    }
+  jsh::log_detail "This will add installed Jsh applications to the ${desktop^^} dock."
+  if ! jsh::confirm "Configure the ${desktop^^} application dock?" --default no; then
+    jsh::log_note "Skipping application dock."
+    return
   fi
 
   "configure_${desktop}_dock" "${pins}"
-  jsh_success "${desktop^^} application dock configured."
+  jsh::log_success "${desktop^^} application dock configured."
 }
 
 main "$@"

@@ -13,13 +13,6 @@ for library_file in "${JSH_ROOT}"/lib/*; do
 done
 unset library_file
 
-confirm() {
-  [[ ${JSH_ASSUME_YES:-0} == 1 ]] && return 0
-  jsh_prompt "Configure macOS display resolutions? [y/N]: "
-  read -r answer || answer=
-  [[ "${answer}" =~ ^[Yy]$ ]]
-}
-
 main() {
   local selector="${JSH_ROOT}/lib/darwin/resolution.swift"
   local profile display_arg label physical_size
@@ -30,28 +23,28 @@ main() {
 
   for arg in "$@"; do
     case "${arg}" in
-      -y | --yes) JSH_ASSUME_YES=1 ;;
+      -y | --yes) export JSH_ASSUME_YES=1 ;;
     esac
   done
 
   [[ "$(uname -s)" == Darwin ]] || {
-    jsh_note "Skipping macOS display resolution: macOS not detected."
+    jsh::log_note "Skipping macOS display resolution: macOS not detected."
     return
   }
   command -v displayplacer > /dev/null 2>&1 || {
-    jsh_note "Skipping display resolution: displayplacer is unavailable."
+    jsh::log_note "Skipping display resolution: displayplacer is unavailable."
     return
   }
   if ! command -v xcrun > /dev/null 2>&1 || ! xcrun --find swift > /dev/null 2>&1; then
-    jsh_note "Skipping display resolution: the Swift toolchain is unavailable."
+    jsh::log_note "Skipping display resolution: the Swift toolchain is unavailable."
     return
   fi
   if ! profile=$(xcrun swift "${selector}"); then
-    jsh_note "Skipping display resolution: unable to calculate display modes."
+    jsh::log_note "Skipping display resolution: unable to calculate display modes."
     return
   fi
   [[ -n "${profile}" ]] || {
-    jsh_note "Skipping display resolution: no configurable displays found."
+    jsh::log_note "Skipping display resolution: no configurable displays found."
     return
   }
 
@@ -65,27 +58,27 @@ main() {
       continue
     fi
     if ((${#display_args[@]} == 0)); then
-      jsh_info "Planned display resolution changes:"
+      jsh::log_info "Planned display resolution changes:"
     fi
     display_args+=("${display_arg}")
-    jsh_detail "${label} (${physical_size})"
-    jsh_detail "  Current: ${current_logical} logical, ${current_backing} backing, scaling:${current_scaling}, ${current_ppi} effective PPI"
-    jsh_detail "  Proposed: ${proposed_logical} logical, ${proposed_backing} backing, scaling:${proposed_scaling}, ${proposed_ppi} effective PPI"
+    jsh::log_detail "${label} (${physical_size})"
+    jsh::log_detail "  Current: ${current_logical} logical, ${current_backing} backing, scaling:${current_scaling}, ${current_ppi} effective PPI"
+    jsh::log_detail "  Proposed: ${proposed_logical} logical, ${proposed_backing} backing, scaling:${proposed_scaling}, ${proposed_ppi} effective PPI"
   done <<< "${profile}"
 
   if ((${#display_args[@]} == 0)); then
-    jsh_note "macOS display resolutions are already current."
+    jsh::log_note "macOS display resolutions are already current."
     return 0
   fi
 
-  confirm || {
-    jsh_note "Skipping macOS display resolution."
+  jsh::confirm "Configure macOS display resolutions?" --default no || {
+    jsh::log_note "Skipping macOS display resolution."
     return
   }
 
-  jsh_info "Configuring display resolutions..."
+  jsh::log_info "Configuring display resolutions..."
   displayplacer "${display_args[@]}"
-  jsh_success "macOS display resolutions configured."
+  jsh::log_success "macOS display resolutions configured."
 }
 
 main "$@"

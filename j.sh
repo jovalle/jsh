@@ -6,12 +6,16 @@ JSH_REPO=${JSH_REPO:-https://github.com/jovalle/jsh.git}
 JSH_DIR=${JSH_DIR:-"${HOME}/.jsh"}
 TTY=${JSH_TTY:-/dev/tty}
 
-for library_file in "${JSH_DIR}"/lib/*; do
-  [[ -f ${library_file} && -x ${library_file} ]] || continue
-  # shellcheck source=/dev/null
-  . "${library_file}"
-done
-unset library_file
+load_jsh_libraries() {
+  local library_file
+  for library_file in "${JSH_DIR}"/lib/*; do
+    [[ -f ${library_file} && -x ${library_file} ]] || continue
+    # shellcheck source=/dev/null
+    . "${library_file}"
+  done
+}
+
+load_jsh_libraries
 
 if ! declare -F jsh_error > /dev/null; then
   # First installs run before the repository and its shared output library exist.
@@ -64,10 +68,11 @@ if ! declare -F jsh_interrupt_handler > /dev/null; then
   trap 'trap - HUP INT TERM; exit 143' TERM
 fi
 
-jsh_banner() {
-  local banner
-  banner=$(
-    cat << 'BANNER'
+if ! declare -F jsh_banner > /dev/null; then
+  jsh_banner() {
+    local banner
+    banner=$(
+      cat << 'BANNER'
    :%@@@@@@@@@#*#@%-              +-:##
   :#    -#%%+=#:@#                :@@%:
    %@@     +@++@@-            *-   @@%:
@@ -82,11 +87,12 @@ jsh_banner() {
  :@@@@@@@@#@-                         +@#:
  =   :-=-:                          -:
 BANNER
-  )
-  jsh_blank
-  jsh_stdout '1;36' '' "${banner}"
-  jsh_blank
-}
+    )
+    jsh_blank
+    jsh_stdout '1;36' '' "${banner}"
+    jsh_blank
+  }
+fi
 
 usage() {
   cat <<'EOF'
@@ -129,6 +135,8 @@ while (($#)); do
   shift
 done
 
+declare -F jsh_env_detect > /dev/null && jsh_env_detect
+
 if ! ( : <> "${TTY}" ) 2>/dev/null; then
   if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then
     TTY=/dev/null
@@ -136,6 +144,11 @@ if ! ( : <> "${TTY}" ) 2>/dev/null; then
     jsh_error "jsh needs an interactive terminal."
     exit 1
   fi
+fi
+
+exec 8<> "${TTY}"
+if declare -F jsh::init > /dev/null; then
+  jsh::init --input-fd 8 --output-fd 8 --owns-fd
 fi
 
 if [[ -r /proc/self/status ]] && grep -Eq '^NoNewPrivs:[[:space:]]+1$' /proc/self/status; then
@@ -146,13 +159,21 @@ if [[ -r /proc/self/status ]] && grep -Eq '^NoNewPrivs:[[:space:]]+1$' /proc/sel
 fi
 
 heading() {
-  jsh_blank
-  jsh_info "[$1] $2"
-  jsh_detail "$3"
+  if declare -F jsh::section > /dev/null; then
+    jsh::section "$@"
+  else
+    jsh_blank
+    jsh_info "[$1] $2"
+    jsh_detail "$3"
+  fi
 }
 
 confirm() {
   local default=${2:-yes} prompt='Y/n'
+  if declare -F jsh::confirm > /dev/null; then
+    jsh::confirm "$1" --default "${default}"
+    return
+  fi
   [[ ${JSH_ASSUME_YES:-0} == 1 ]] && return 0
   [[ ${default} == no ]] && prompt='y/N'
   while :; do
@@ -317,6 +338,29 @@ sync_repository() {
   sync_submodules
 }
 
+load_repository_ui() {
+  load_jsh_libraries
+  declare -F jsh_env_detect > /dev/null || return 0
+  jsh_env_detect
+  if declare -F jsh::init > /dev/null; then
+    jsh::init --input-fd 8 --output-fd 8 --owns-fd
+  fi
+}
+
+promote_workstation_ui() {
+  load_repository_ui
+  [[ ${JSH_INTERACTIVE:-0} == 1 && ${JSH_REMOTE:-0} != 1 ]] || return 0
+  declare -F jsh::bootstrap_gum > /dev/null || return 0
+  if ! jsh::bootstrap_gum; then
+    jsh_warn 'Gum installation failed; continuing with the shell UI.'
+    return 0
+  fi
+  jsh_env_detect
+  if declare -F jsh::init > /dev/null; then
+    jsh::init --input-fd "${JSH_UI_INPUT_FD:-0}" --output-fd "${JSH_UI_OUTPUT_FD:-2}"
+  fi
+}
+
 update_repository() {
   if ! command -v git > /dev/null 2>&1; then
     jsh_error "Git is required to update Jsh."
@@ -469,7 +513,7 @@ if [[ ${mode} == shell ]]; then
 fi
 
 if [[ ${mode} == runtime ]]; then
-  jsh_info "jsh runtime"
+  if declare -F jsh::title > /dev/null; then jsh::title "jsh runtime"; else jsh_info "jsh runtime"; fi
   jsh_detail "Install directory: ${JSH_DIR}"
   jsh_detail "This installs an opt-in J shell without deploying managed dotfiles or configuring the system."
 
@@ -500,14 +544,18 @@ if [[ ${mode} == runtime ]]; then
 
   jsh_blank
   jsh_success "Runtime installation finished."
-  [[ ${JSH_INSTALL_RETURN:-0} == 1 ]] && exit 0
+  if [[ ${JSH_INSTALL_RETURN:-0} == 1 ]]; then
+    declare -F jsh::cleanup > /dev/null && jsh::cleanup
+    exit 0
+  fi
   jsh_blank
+  declare -F jsh::cleanup > /dev/null && jsh::cleanup
   exec "${JSH_DIR}/bin/jsh" < "${TTY}"
 fi
 
 if [[ ${mode} == update ]]; then
   declare -a UPDATE_SUCCEEDED=() UPDATE_WARNINGS=() UPDATE_ERRORS=()
-  jsh_info "jsh update"
+  if declare -F jsh::title > /dev/null; then jsh::title "jsh update"; else jsh_info "jsh update"; fi
   jsh_detail "Install directory: ${JSH_DIR}"
   export JSH_CONTINUE_ON_ERROR=1 JSH_UPDATE=1
   run_update_step "Repository and submodules" update_repository
@@ -518,10 +566,11 @@ if [[ ${mode} == update ]]; then
   run_update_step "Configuration" run_make_target configure
   print_update_summary
   ((${#UPDATE_ERRORS[@]} == 0))
+  declare -F jsh::cleanup > /dev/null && jsh::cleanup
   exit
 fi
 
-jsh_info "jsh install"
+if declare -F jsh::title > /dev/null; then jsh::title "jsh ${mode}"; else jsh_info "jsh ${mode}"; fi
 jsh_detail "Install directory: ${JSH_DIR}"
 jsh_detail "Each phase explains its changes before it runs."
 
@@ -539,6 +588,9 @@ else
   jsh_note "Skipped repository sync."
 fi
 
+load_repository_ui
+promote_workstation_ui
+
 heading "3/3" "System setup" "Deploy dotfiles, install packages, then run the conversational configuration scripts for this platform."
 if confirm "Run this phase?"; then
   jsh_blank
@@ -551,6 +603,10 @@ fi
 
 jsh_blank
 jsh_success "Installation finished."
-[[ ${JSH_INSTALL_RETURN:-0} == 1 || ${TTY} == /dev/null || ${JSH_ASSUME_YES:-0} == 1 ]] && exit 0
+if [[ ${JSH_INSTALL_RETURN:-0} == 1 || ${TTY} == /dev/null || ${JSH_ASSUME_YES:-0} == 1 ]]; then
+  declare -F jsh::cleanup > /dev/null && jsh::cleanup
+  exit 0
+fi
 jsh_blank
+declare -F jsh::cleanup > /dev/null && jsh::cleanup
 exec "${JSH_DIR}/bin/jsh" < "${TTY}"

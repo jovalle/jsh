@@ -9,6 +9,12 @@ setup() {
   export JSH_ROOT=${JSH_DIR}
   # shellcheck source=/dev/null
   source "${JSH_ROOT}/lib/output.sh"
+  jsh::log_info() { jsh_info "$@"; }
+  jsh::log_note() { jsh_note "$@"; }
+  jsh::log_success() { jsh_success "$@"; }
+  jsh::log_warn() { jsh_warn "$@"; }
+  jsh::log_error() { jsh_error "$@"; }
+  jsh::log_detail() { jsh_detail "$@"; }
   # shellcheck source=/dev/null
   source "${JSH_ROOT}/lib/files.sh"
   # shellcheck source=/dev/null
@@ -18,6 +24,14 @@ setup() {
   # shellcheck source=/dev/null
   source "${JSH_ROOT}/lib/manifest.sh"
   eval "$(sed -n '/^setup_system() {$/,/^}$/p' "${JSH_DIR}/j.sh")"
+}
+
+file_identity() {
+  if stat -c '%i:%Y' "$1" > /dev/null 2>&1; then
+    stat -c '%i:%Y' "$1"
+  else
+    stat -f '%i:%m' "$1"
+  fi
 }
 
 @test "CTRL-C cleans registered staging paths and exits 130" {
@@ -139,12 +153,12 @@ JSON
 
   jsh_manifest_adopt brew bash unix "${manifest}"
   jq -e '.layers[0].install.brew.formulae == ["bash", "jq"]' "${manifest}" > /dev/null
-  [[ $(stat -c '%a' "${manifest}") == 640 ]]
-  before=$(stat -c '%i:%Y' "${manifest}")
+  [[ $(jsh_file_mode "${manifest}") == 640 ]]
+  before=$(file_identity "${manifest}")
 
   jsh_manifest_adopt brew bash unix "${manifest}"
 
-  [[ $(stat -c '%i:%Y' "${manifest}") == "${before}" ]]
+  [[ $(file_identity "${manifest}") == "${before}" ]]
 }
 
 @test "managed files back up changes and leave converged files untouched" {
@@ -155,12 +169,12 @@ JSON
   printf after > "${source_file}"
   jsh_ensure_file "${target}" "${source_file}" 0644
   local before_stat
-  before_stat=$(stat -c '%i:%Y' "${target}")
+  before_stat=$(file_identity "${target}")
 
   run jsh_ensure_file "${target}" "${source_file}" 0644
 
   [[ ${status} -eq 1 ]]
-  [[ $(stat -c '%i:%Y' "${target}") == "${before_stat}" ]]
+  [[ $(file_identity "${target}") == "${before_stat}" ]]
   [[ $(find "${XDG_STATE_HOME}/jsh/backups" -type f | wc -l) -eq 1 ]]
   [[ $(find "${XDG_STATE_HOME}/jsh/backups" -type f -exec cat {} \;) == before ]]
 }
@@ -245,6 +259,7 @@ JSON
 
 @test "Debian installer preserves newer installed versions" {
   dpkg-query() { printf 'installed\t2.0'; }
+  dpkg() { [[ $* == '--compare-versions 2.0 ge 1.0' ]]; }
   jsh_download_artifact() { return 99; }
 
   run jsh_debian_install_package example example 1.0 https://example.invalid/example.deb '' example
@@ -256,6 +271,7 @@ JSON
 @test "Debian installer skips a running application noninteractively" {
   run bash -c '
     source "$1/lib/output.sh"
+    source "$1/lib/ui.sh"
     source "$1/lib/debian.sh"
     dpkg-query() { return 1; }
     pgrep() { return 0; }
@@ -265,4 +281,36 @@ JSON
 
   [[ ${status} -eq 0 ]]
   [[ ${output} == *'Skipping update for running app: example (noninteractive).'* ]]
+}
+@test "managed files require consent to replace broken symlinks" {
+  local source_file="${BATS_TEST_TMPDIR}/source" link="${BATS_TEST_TMPDIR}/settings"
+  printf managed > "${source_file}"
+  ln -s "${BATS_TEST_TMPDIR}/missing" "${link}"
+
+  run jsh_ensure_file "${link}" "${source_file}" 0644 < /dev/null
+
+  [[ ${status} -eq 1 ]]
+  [[ -L ${link} ]]
+  [[ ${output} == *'Non-interactive setup cannot replace it without --yes.'* ]]
+
+  export JSH_CONFIGURE_ASSUME_YES=1
+  run jsh_ensure_file "${link}" "${source_file}" 0644
+
+  [[ ${status} -eq 0 ]]
+  [[ ! -L ${link} ]]
+  [[ $(cat "${link}") == managed ]]
+}
+
+@test "managed file replacement uses the shared confirmation default" {
+  run env JSH_INTERACTIVE=1 JSH_UI_BACKEND=plain bash -c '
+    source "$1/lib/output.sh"
+    source "$1/lib/ui.sh"
+    source "$1/lib/files.sh"
+    exec 3<<<$'"'"'\n'"'"'
+    JSH_UI_INPUT_FD=3
+    jsh_approve_broken_symlink /tmp/broken-link
+  ' _ "${JSH_ROOT}"
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == *'Replace it with the managed file? [Y/n]:'* ]]
 }

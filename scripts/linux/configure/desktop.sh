@@ -60,7 +60,7 @@ configure_panel() {
   local -a plugin_ids=() arguments=()
   panel_id=$(xfconf-query -c xfce4-panel -p /panels 2> /dev/null | grep -E '^[0-9]+$' | head -n 1)
   [[ "${panel_id}" =~ ^[0-9]+$ ]] || {
-    jsh_note "Skipping panel monitors: no XFCE panel is available."
+    jsh::log_note "Skipping panel monitors: no XFCE panel is available."
     return
   }
 
@@ -401,10 +401,10 @@ configure_gnome() {
 }
 
 main() {
-  local desktop arg answer
+  local desktop arg
   for arg in "$@"; do
     case "${arg}" in
-      -y | --yes) JSH_ASSUME_YES=1 ;;
+      -y | --yes) export JSH_ASSUME_YES=1 ;;
     esac
   done
 
@@ -413,35 +413,31 @@ main() {
   case "${desktop}" in
     xfce)
       command -v xfconf-query > /dev/null 2>&1 || {
-        jsh_note "Skipping XFCE configuration: xfconf-query is unavailable."
+        jsh::log_note "Skipping XFCE configuration: xfconf-query is unavailable."
         return
       }
       ;;
     gnome)
       command -v gsettings > /dev/null 2>&1 || {
-        jsh_note "Skipping GNOME configuration: gsettings is unavailable."
+        jsh::log_note "Skipping GNOME configuration: gsettings is unavailable."
         return
       }
       ;;
     *)
-      jsh_note "Skipping desktop configuration: XFCE or GNOME is not active."
+      jsh::log_note "Skipping desktop configuration: XFCE or GNOME is not active."
       return
       ;;
   esac
 
-  jsh_detail "This will replace managed ${desktop^^} appearance and desktop settings."
-  if [[ ${JSH_ASSUME_YES:-0} != 1 ]]; then
-    jsh_prompt "Configure the ${desktop^^} desktop? [y/N]: "
-    read -r answer || answer=
-    [[ "${answer}" =~ ^[Yy]$ ]] || {
-      jsh_note "Skipping desktop configuration."
-      return
-    }
+  jsh::log_detail "This will replace managed ${desktop^^} appearance and desktop settings."
+  if ! jsh::confirm "Configure the ${desktop^^} desktop?" --default no; then
+    jsh::log_note "Skipping desktop configuration."
+    return
   fi
 
   "configure_${desktop}"
   configure_identity
-  jsh_success "${desktop^^} desktop configured."
+  jsh::log_success "${desktop^^} desktop configured."
 }
 
 main "$@"

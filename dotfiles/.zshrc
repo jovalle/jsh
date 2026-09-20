@@ -226,6 +226,10 @@ export JSH_OS
 
 has() { whence -p -- "$1" >/dev/null 2>&1; }
 
+# shellcheck source=../lib/ui.sh
+source "${JSH}/lib/ui.sh"
+jsh::init
+
 _j_ui_message() {
   local level="$1" color="" reset="" mark="" output_fd=1
   shift
@@ -740,9 +744,19 @@ fi
 
 # ---- Misc Tools ----
 
+unalias awsp 2>/dev/null || true
 if has aws; then
   alias awsw='aws sts get-caller-identity'
-  alias awsp='export AWS_PROFILE=$(aws configure list-profiles | fzf)'
+  awsp() {
+    local profile
+    local -a profiles=()
+    while IFS= read -r profile; do
+      [[ -z ${profile} ]] || profiles+=("${profile}")
+    done < <(aws configure list-profiles)
+    (( ${#profiles[@]} )) || { _j_ui_message warn 'No AWS profiles found'; return 1; }
+    profile=$(jsh::choose 'AWS profile' "${profiles[@]}") || return
+    export AWS_PROFILE=${profile}
+  }
 fi
 has fabric-ai && alias f='fabric-ai'
 has lazygit && alias lg='lazygit'
@@ -1359,16 +1373,17 @@ _git_confirm() {
   local action="$1"
   local reply
 
-  printf '%s [y/N] ' "${action}"
-  read -r reply || return 1
-
-  case "${reply}" in
-    y|Y|yes|YES) return 0 ;;
-    *)
-      _j_ui_message info "Cancelled"
-      return 1
-      ;;
-  esac
+  if [[ ${JSH_INTERACTIVE:-0} == 1 && -t 0 ]]; then
+    jsh::confirm "${action}" --default no && return 0
+  else
+    printf '%s [y/N] ' "${action}"
+    read -r reply || return 1
+    case "${reply}" in
+      y|Y|yes|YES) return 0 ;;
+    esac
+  fi
+  _j_ui_message info "Cancelled"
+  return 1
 }
 
 function git+ {
@@ -1598,245 +1613,103 @@ note() {
   fi
 }
 
-# ---- FZF Integration ----
+# ---- Interactive Selectors ----
 
-if has fzf; then
-  fcd() {
-    local dir
-    dir=$(find "${1:-.}" -type d 2>/dev/null | fzf --preview 'ls -la {}')
-    [[ -n "${dir}" ]] && cd "${dir}" || return 1
-  }
+fcd() {
+  local root=${1:-.} directory selected
+  local -a choices=()
+  while IFS= read -r directory; do
+    choices+=("${directory}" "${directory}")
+  done < <(find "${root}" -type d 2>/dev/null)
+  (( ${#choices[@]} )) || { _j_ui_message warn 'No directories found'; return 1; }
+  selected=$(jsh::choose_one 'Directory' "${choices[@]}") || return
+  cd "${selected}" || return
+}
 
-  fe() {
-    local file
-    file=$(fzf --preview 'head -100 {}')
-    [[ -n "${file}" ]] && "${EDITOR:-vim}" "${file}"
-  }
-
-  fh() {
-    local cmd
-    cmd=$(history | fzf --tac | sed 's/^[ ]*[0-9]*[ ]*//')
-    [[ -n "${cmd}" ]] && eval "${cmd}"
-  }
-
-  fkill() {
-    local signal=TERM pattern selection pid
-    if [[ "${1:-}" == -9 || "${1:-}" == --force ]]; then
-      signal=KILL
-      shift
-    fi
-    pattern="$*"
-    selection=$(command ps aux | command awk -v pattern="${pattern}" '
-      NR == 1 || pattern == "" || index(tolower($0), tolower(pattern))
-    ' | command fzf --header-lines=1)
-    pid=$(printf '%s\n' "${selection}" | command awk '{print $2}')
-    [[ "${pid}" == <1-> ]] || return 1
-    kill -s "${signal}" "${pid}"
-  }
-
-  fco() {
-    local branch
-    branch=$(git branch -a | fzf | sed 's/^[ *]*//' | sed 's|remotes/origin/||')
-    [[ -n "${branch}" ]] && git checkout "${branch}"
-  }
-
-  fgl() {
-    git log --oneline --graph --color=always | \
-      fzf --ansi --preview 'git show --color=always {1}' | \
-      awk '{print $1}'
-  }
-else
-  _jsh_pick_array_item() {
-    local wanted="$1" item n=1
-    shift
-    REPLY=""
-    for item in "$@"; do
-      if [[ $n -eq $wanted ]]; then REPLY="$item"; return 0; fi
-      n=$((n + 1))
+fe() {
+  local file selected
+  local -a files=() choices=()
+  if [[ -t 0 ]]; then
+    while IFS= read -r file; do
+      files+=("${file}")
+    done < <(find . -maxdepth 2 -type f 2>/dev/null)
+  else
+    while IFS= read -r file; do
+      files+=("${file}")
     done
-    return 1
-  }
+  fi
+  (( ${#files[@]} )) || { _j_ui_message warn 'No files found'; return 1; }
+  if [[ -t 0 ]]; then
+    selected=$(jsh::choose 'File' "${files[@]}") || return
+  else
+    for file in "${files[@]}"; do
+      choices+=("${file}" "${file}")
+    done
+    selected=$("${JSH}/lib/ui/cli.sh" choose-one File "${choices[@]}") || return
+  fi
+  "${EDITOR:-vim}" "${selected}"
+}
 
-  fcd() {
-    local dir="${1:-.}"
-    local dirs=()
-    local i=1 d choice
+fh() {
+  local pattern=${1:-} line command selected
+  local -a commands=()
+  while IFS= read -r line; do
+    command=$(printf '%s\n' "${line}" | sed 's/^[ ]*[0-9]*[ ]*//')
+    [[ -z ${command} ]] && continue
+    [[ -n ${pattern} && ${command} != *${pattern}* ]] && continue
+    commands+=("${command}")
+    (( ${#commands[@]} < 30 )) || break
+  done < <(history | tail -100)
+  (( ${#commands[@]} )) || { _j_ui_message warn 'No matching commands'; return 1; }
+  selected=$(jsh::choose 'Recent command' "${commands[@]}") || return
+  _j_ui_message info "Executing: ${selected}"
+  eval "${selected}"
+}
 
-    echo "Directories in ${dir}:"
-    while IFS= read -r d; do
-      dirs+=("$d")
-      printf "%d) %s\n" "$i" "$d"
-      ((i++))
-      [[ $i -gt 50 ]] && { echo "... (limited to 50)"; break; }
-    done < <(find "${dir}" -maxdepth 3 -type d 2>/dev/null | head -50)
+fkill() {
+  local signal=TERM pattern pattern_lower line selected pid
+  local -a processes=()
+  if [[ ${1:-} == -9 || ${1:-} == --force ]]; then
+    signal=KILL
+    shift
+  fi
+  pattern=$*
+  pattern_lower=${(L)pattern}
+  while IFS= read -r line; do
+    [[ -n ${pattern} && ${(L)line} != *${pattern_lower}* ]] && continue
+    processes+=("${line}")
+    (( ${#processes[@]} < 30 )) || break
+  done < <(command ps ax -o pid=,user=,command=)
+  (( ${#processes[@]} )) || { _j_ui_message warn 'No matching processes'; return 1; }
+  selected=$(jsh::choose 'PID USER COMMAND' "${processes[@]}") || return
+  pid=${${(z)selected}[1]}
+  [[ ${pid} == <1-> ]] || return 1
+  _j_ui_message info "Sending SIG${signal} to PID ${pid}..."
+  kill -s "${signal}" "${pid}"
+}
 
-    [[ ${#dirs[@]} -eq 0 ]] && { _j_ui_message warn "No directories found"; return 1; }
-    printf "\nEnter number (or 'q' to cancel): "
-    read -r choice
-    [[ "${choice}" == "q" ]] && return 0
+fco() {
+  local branch selected
+  local -a branches=()
+  while IFS= read -r branch; do
+    branch=$(printf '%s\n' "${branch}" | sed 's/^[ *]*//; s|^remotes/origin/||')
+    [[ -z ${branch} || ${branch} == HEAD* ]] || branches+=("${branch}")
+  done < <(git branch -a 2>/dev/null)
+  (( ${#branches[@]} )) || { _j_ui_message warn 'No branches found (not a git repo?)'; return 1; }
+  selected=$(jsh::choose 'Git branch' "${branches[@]}") || return
+  git checkout "${selected}"
+}
 
-    if [[ "${choice}" =~ ^[0-9]+$ ]] && [[ "${choice}" -ge 1 ]] && [[ "${choice}" -le ${#dirs[@]} ]]; then
-      _jsh_pick_array_item "$choice" "${dirs[@]}" && cd "$REPLY" || return 1
-    else
-      _j_ui_message error "Invalid selection"
-      return 1
-    fi
-  }
-
-  fe() {
-    local files=()
-    local i=1 f choice
-
-    echo "Files in current directory:"
-    while IFS= read -r f; do
-      files+=("$f")
-      printf "%d) %s\n" "$i" "$f"
-      ((i++))
-      [[ $i -gt 50 ]] && { echo "... (limited to 50)"; break; }
-    done < <(find . -maxdepth 2 -type f 2>/dev/null | head -50)
-
-    [[ ${#files[@]} -eq 0 ]] && { _j_ui_message warn "No files found"; return 1; }
-    printf "\nEnter number (or 'q' to cancel): "
-    read -r choice
-    [[ "${choice}" == "q" ]] && return 0
-
-    if [[ "${choice}" =~ ^[0-9]+$ ]] && [[ "${choice}" -ge 1 ]] && [[ "${choice}" -le ${#files[@]} ]]; then
-      _jsh_pick_array_item "$choice" "${files[@]}" && "${EDITOR:-vim}" "$REPLY"
-    else
-      _j_ui_message error "Invalid selection"
-      return 1
-    fi
-  }
-
-  fh() {
-    local pattern="${1:-}"
-    local cmds=()
-    local i=1 line cmd choice
-
-    echo "Recent commands${pattern:+ matching '$pattern'}:"
-    while IFS= read -r line; do
-      cmd=$(echo "$line" | sed 's/^[ ]*[0-9]*[ ]*//')
-      [[ -z "$cmd" ]] && continue
-      [[ -n "$pattern" ]] && [[ "$cmd" != *"$pattern"* ]] && continue
-      cmds+=("$cmd")
-      printf "%d) %s\n" "$i" "${cmd:0:80}"
-      ((i++))
-      [[ $i -gt 30 ]] && break
-    done < <(history | tail -100)
-
-    [[ ${#cmds[@]} -eq 0 ]] && { _j_ui_message warn "No matching commands"; return 1; }
-    printf "\nEnter number to execute (or 'q' to cancel): "
-    read -r choice
-    [[ "${choice}" == "q" ]] && return 0
-
-    if [[ "${choice}" =~ ^[0-9]+$ ]] && [[ "${choice}" -ge 1 ]] && [[ "${choice}" -le ${#cmds[@]} ]]; then
-      _jsh_pick_array_item "$choice" "${cmds[@]}" || return 1
-      echo "Executing: ${REPLY}"
-      eval "${REPLY}"
-    else
-      _j_ui_message error "Invalid selection"
-      return 1
-    fi
-  }
-
-  fkill() {
-    local signal=TERM pattern pattern_lower
-    if [[ "${1:-}" == -9 || "${1:-}" == --force ]]; then
-      signal=KILL
-      shift
-    fi
-    pattern="$*"
-    pattern_lower="${(L)pattern}"
-    local pids=()
-    local i=1 line pid user cmd choice target_pid
-
-    echo "Running processes${pattern:+ matching '$pattern'}:"
-    echo "PID USER COMMAND"
-    echo "--- ---- -------"
-
-    while IFS= read -r line; do
-      [[ $i -eq 1 ]] && { ((i++)); continue; }
-      pid=$(echo "$line" | awk '{print $2}')
-      user=$(echo "$line" | awk '{print $1}')
-      cmd=$(echo "$line" | awk '{for(i=11;i<=NF;i++) printf $i" "; print ""}')
-
-      [[ -n "$pattern" ]] && [[ "${(L)cmd}" != *"${pattern_lower}"* ]] && continue
-      pids+=("$pid")
-      printf "%d) %-6s %-8s %s\n" "${#pids[@]}" "$pid" "$user" "${cmd:0:60}"
-      [[ ${#pids[@]} -ge 30 ]] && break
-    done < <(command ps aux)
-
-    [[ ${#pids[@]} -eq 0 ]] && { _j_ui_message warn "No matching processes"; return 1; }
-    printf "\nEnter number to kill (or 'q' to cancel): "
-    read -r choice
-    [[ "${choice}" == "q" ]] && return 1
-
-    if [[ "${choice}" =~ ^[0-9]+$ ]] && [[ "${choice}" -ge 1 ]] && [[ "${choice}" -le ${#pids[@]} ]]; then
-      _jsh_pick_array_item "$choice" "${pids[@]}" || return 1
-      target_pid="${REPLY}"
-      echo "Sending SIG${signal} to PID ${target_pid}..."
-      kill -s "${signal}" "${target_pid}"
-    else
-      _j_ui_message error "Invalid selection"
-      return 1
-    fi
-  }
-
-  fco() {
-    local branches=()
-    local i=1 branch choice
-
-    echo "Git branches:"
-    while IFS= read -r branch; do
-      branch=$(echo "$branch" | sed 's/^[ *]*//' | sed 's|remotes/origin/||')
-      [[ -z "$branch" ]] && continue
-      [[ "$branch" == "HEAD"* ]] && continue
-      branches+=("$branch")
-      printf "%d) %s\n" "$i" "$branch"
-      ((i++))
-      [[ $i -gt 30 ]] && { echo "... (limited to 30)"; break; }
-    done < <(git branch -a 2>/dev/null)
-
-    [[ ${#branches[@]} -eq 0 ]] && { _j_ui_message warn "No branches found (not a git repo?)"; return 1; }
-    printf "\nEnter number to checkout (or 'q' to cancel): "
-    read -r choice
-    [[ "${choice}" == "q" ]] && return 0
-
-    if [[ "${choice}" =~ ^[0-9]+$ ]] && [[ "${choice}" -ge 1 ]] && [[ "${choice}" -le ${#branches[@]} ]]; then
-      _jsh_pick_array_item "$choice" "${branches[@]}" && git checkout "$REPLY"
-    else
-      _j_ui_message error "Invalid selection"
-      return 1
-    fi
-  }
-
-  fgl() {
-    local commits=()
-    local i=1 line sha msg choice
-
-    echo "Recent commits:"
-    while IFS= read -r line; do
-      sha=$(echo "$line" | awk '{print $1}')
-      msg=$(echo "$line" | cut -d' ' -f2-)
-      commits+=("$sha")
-      printf "%d) %s %s\n" "$i" "${sha:0:7}" "${msg:0:65}"
-      ((i++))
-      [[ $i -gt 30 ]] && break
-    done < <(git log --oneline -30 2>/dev/null)
-
-    [[ ${#commits[@]} -eq 0 ]] && { _j_ui_message warn "No commits found (not a git repo?)"; return 1; }
-    printf "\nEnter number to show (or 'q' to cancel): "
-    read -r choice
-    [[ "${choice}" == "q" ]] && return 0
-
-    if [[ "${choice}" =~ ^[0-9]+$ ]] && [[ "${choice}" -ge 1 ]] && [[ "${choice}" -le ${#commits[@]} ]]; then
-      _jsh_pick_array_item "$choice" "${commits[@]}" && git show "$REPLY"
-    else
-      _j_ui_message error "Invalid selection"
-      return 1
-    fi
-  }
-fi
+fgl() {
+  local selected
+  local -a commits=()
+  while IFS= read -r selected; do
+    commits+=("${selected}")
+  done < <(git log --oneline -30 2>/dev/null)
+  (( ${#commits[@]} )) || { _j_ui_message warn 'No commits found (not a git repo?)'; return 1; }
+  selected=$(jsh::choose 'Recent commit' "${commits[@]}") || return
+  printf '%s\n' "${${(z)selected}[1]}"
+}
 
 # ============================================================================
 # 8. THEME CUSTOMIZATION

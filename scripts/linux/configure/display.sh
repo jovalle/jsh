@@ -47,7 +47,7 @@ refresh_layout() {
 toggle_layout() {
   local record output width height x y half mm_width mm_height half_mm monitors
   command -v xrandr > /dev/null 2>&1 || {
-    jsh_error "xrandr is required to toggle the display layout."
+    jsh::log_error "xrandr is required to toggle the display layout."
     return 1
   }
   monitors=$(xrandr --listmonitors)
@@ -71,7 +71,7 @@ toggle_layout() {
       }
     }')
   [[ -n "${record}" ]] || {
-    jsh_error "No active display with an aspect ratio of at least 3:1 was found."
+    jsh::log_error "No active display with an aspect ratio of at least 3:1 was found."
     return 1
   }
   IFS='|' read -r output width height x y <<< "${record}"
@@ -103,27 +103,23 @@ configure_shortcut() {
   local xfce_binding='/commands/custom/<Primary><Alt><Super>m'
   local desktop
   local bindings="${HOME}/.xbindkeysrc" autostart="${HOME}/.config/autostart/jsh-keybindings.desktop"
-  local existing='' cleaned content temporary answer
-  jsh_detail "This will bind Ctrl+Alt+Super+M to toggle an ultrawide display split."
-  if [[ ${JSH_ASSUME_YES:-0} != 1 ]]; then
-    jsh_prompt "Configure the display shortcut? [y/N]: "
-    read -r answer || answer=
-    [[ "${answer}" =~ ^[Yy]$ ]] || {
-      jsh_note "Skipping display shortcut."
-      return
-    }
+  local existing='' cleaned content temporary
+  jsh::log_detail "This will bind Ctrl+Alt+Super+M to toggle an ultrawide display split."
+  if ! jsh::confirm "Configure the display shortcut?" --default no; then
+    jsh::log_note "Skipping display shortcut."
+    return
   fi
 
   desktop=$(jsh_linux_desktop)
   case "${desktop}" in
     xfce)
       command -v xfconf-query > /dev/null 2>&1 || {
-        jsh_error "xfconf-query is required to configure the XFCE shortcut."
+        jsh::log_error "xfconf-query is required to configure the XFCE shortcut."
         return 1
       }
       if xfconf-query -c xfce4-keyboard-shortcuts -p "${xfce_binding}" > /dev/null 2>&1; then
         if [[ $(xfconf-query -c xfce4-keyboard-shortcuts -p "${xfce_binding}" 2> /dev/null || true) == "${command_path}" ]]; then
-          jsh_note "Display shortcut is already configured."
+          jsh::log_note "Display shortcut is already configured."
           return 0
         fi
         xfconf-query -c xfce4-keyboard-shortcuts -p "${xfce_binding}" -s "${command_path}"
@@ -133,14 +129,14 @@ configure_shortcut() {
       ;;
     gnome)
       command -v gsettings > /dev/null 2>&1 || {
-        jsh_error "gsettings is required to configure the GNOME shortcut."
+        jsh::log_error "gsettings is required to configure the GNOME shortcut."
         return 1
       }
       jsh_gnome_custom_shortcut 'Jsh display layout' '<Control><Alt><Super>m' "${command_path}"
       ;;
     *)
       command -v xbindkeys > /dev/null 2>&1 || {
-        jsh_error "xbindkeys is required to configure this desktop shortcut."
+        jsh::log_error "xbindkeys is required to configure this desktop shortcut."
         return 1
       }
       [[ ! -r "${bindings}" ]] || existing=$(< "${bindings}")
@@ -165,17 +161,17 @@ ${BLOCK_END}"
       pkill -HUP -u "$(id -u)" -x xbindkeys 2> /dev/null || xbindkeys
       ;;
   esac
-  jsh_success "Display shortcut configured."
+  jsh::log_success "Display shortcut configured."
 }
 
 main() {
   local action=configure arg
   for arg in "$@"; do
     case "${arg}" in
-      -y | --yes) JSH_ASSUME_YES=1 ;;
+      -y | --yes) export JSH_ASSUME_YES=1 ;;
       configure | toggle) action=${arg} ;;
       *)
-        jsh_error "Usage: $0 [--yes] [configure|toggle]"
+        jsh::log_error "Usage: $0 [--yes] [configure|toggle]"
         exit 2
         ;;
     esac
@@ -185,11 +181,11 @@ main() {
     configure)
       [[ "$(uname -s)" == Linux ]] || exit 0
       [[ "${XDG_SESSION_TYPE:-x11}" != wayland ]] || {
-        jsh_note "Skipping display shortcut: logical monitor splitting requires an X11 session."
+        jsh::log_note "Skipping display shortcut: logical monitor splitting requires an X11 session."
         exit 0
       }
       command -v xrandr > /dev/null 2>&1 || {
-        jsh_note "Skipping display shortcut: xrandr is unavailable."
+        jsh::log_note "Skipping display shortcut: xrandr is unavailable."
         exit 0
       }
       configure_shortcut

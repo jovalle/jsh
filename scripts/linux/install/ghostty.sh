@@ -34,7 +34,7 @@ install_ghostty() {
   digest=$(jq -r '.digest // empty' <<< "${asset}")
   checksum=${digest#sha256:}
   [[ -n ${version} && ${url} == https://* ]] || {
-    jsh_error 'Could not resolve the latest Ghostty Debian package.'
+    jsh::log_error 'Could not resolve the latest Ghostty Debian package.'
     return 1
   }
   jsh_debian_install_package ghostty ghostty "${version}" "${url}" "${checksum}" ghostty

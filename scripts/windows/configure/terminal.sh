@@ -15,13 +15,13 @@ unset library_file
 
 for arg in "$@"; do
   case "${arg}" in
-    -y | --yes) JSH_ASSUME_YES=1 ;;
+    -y | --yes) export JSH_ASSUME_YES=1 ;;
   esac
 done
 
 SETTINGS_SRC="${JSH_ROOT}/dotfiles/.config/windows-terminal/settings.json"
 if [[ ! -f "${SETTINGS_SRC}" ]]; then
-  jsh_note "Skipping Windows Terminal configuration: source file not found"
+  jsh::log_note "Skipping Windows Terminal configuration: source file not found"
   exit 0
 fi
 
@@ -31,31 +31,25 @@ TERMINAL_SETTINGS_DIR="${LOCAL_APP_DATA}\\Packages\\Microsoft.WindowsTerminal_8w
 # Check if Windows Terminal is installed
 TERMINAL_DIR_WSL=$(wslpath -u "${TERMINAL_SETTINGS_DIR}")
 if [[ ! -d "${TERMINAL_DIR_WSL}" ]]; then
-  jsh_note "Skipping Windows Terminal configuration: application not found"
+  jsh::log_note "Skipping Windows Terminal configuration: application not found"
   exit 0
 fi
 
-jsh_info "Configuring Windows Terminal settings..."
+jsh::log_info "Configuring Windows Terminal settings..."
 
 # Convert WSL path to Windows path
 SETTINGS_SRC_WIN=$(wslpath -w "${SETTINGS_SRC}")
 SETTINGS_DEST_WIN="${TERMINAL_SETTINGS_DIR}\\settings.json"
 
 if powershell.exe -NoProfile -Command "\$item = Get-Item -LiteralPath '${SETTINGS_DEST_WIN}' -ErrorAction SilentlyContinue; if (\$null -ne \$item -and \$item.LinkType -eq 'SymbolicLink' -and \$item.Target -contains '${SETTINGS_SRC_WIN}') { exit 0 }; exit 1"; then
-  jsh_note "Windows Terminal is already configured."
+  jsh::log_note "Windows Terminal is already configured."
   exit 0
 fi
 
-jsh_info "Creating symlink: ${SETTINGS_DEST_WIN} -> ${SETTINGS_SRC_WIN}"
-jsh_warn "The existing settings file may be replaced."
-if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then
-  CONFIRM=y
-else
-  jsh_prompt "Configure Windows Terminal? [y/N]: "
-  read -r CONFIRM || CONFIRM=
-fi
-if [[ ! "${CONFIRM}" =~ ^[Yy]$ ]]; then
-  jsh_note "Skipping Windows Terminal configuration."
+jsh::log_info "Creating symlink: ${SETTINGS_DEST_WIN} -> ${SETTINGS_SRC_WIN}"
+jsh::log_warn "The existing settings file may be replaced."
+if ! jsh::confirm "Configure Windows Terminal?" --default no; then
+  jsh::log_note "Skipping Windows Terminal configuration."
   exit 0
 fi
 
@@ -63,12 +57,12 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Start-Process powers
 
 # Validate
 jsh_blank
-jsh_info "Validating symlink..."
+jsh::log_info "Validating symlink..."
 LINK_INFO=$(powershell.exe -NoProfile -Command "Get-Item '${SETTINGS_DEST_WIN}' | Select-Object LinkType, Target | Format-List" 2>&1)
 if echo "${LINK_INFO}" | grep -q "SymbolicLink"; then
-  jsh_success "Symlink created successfully"
+  jsh::log_success "Symlink created successfully"
   echo "${LINK_INFO}"
 else
-  jsh_error "Symlink validation failed"
+  jsh::log_error "Symlink validation failed"
   exit 1
 fi

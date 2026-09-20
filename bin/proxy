@@ -11,6 +11,22 @@ set -euo pipefail
 # =============================================================================
 
 readonly SCRIPT_NAME="${0##*/}"
+case $0 in
+  /*) launcher=$0 ;;
+  *) launcher=${PWD}/$0 ;;
+esac
+if [[ -z ${JSH_ROOT:-} ]]; then
+  if [[ -n ${JSH_DIR:-} ]]; then
+    JSH_ROOT=${JSH_DIR}
+  elif [[ -f ${launcher%/*}/../lib/ui.sh ]]; then
+    JSH_ROOT=$(CDPATH='' cd -P "${launcher%/*}/.." && pwd -P)
+  else
+    JSH_ROOT=${HOME}/.jsh
+  fi
+fi
+# shellcheck source=../lib/ui.sh
+. "${JSH_ROOT}/lib/ui.sh"
+jsh::init
 
 # Default proxy settings (override via environment or config)
 PROXY_HTTP="${PROXY_HTTP:-${HTTP_PROXY:-}}"
@@ -57,68 +73,22 @@ complete_values() {
 if [[ "${JSH_PLAIN_OUTPUT:-0}" != 1 && "${TERM:-dumb}" != dumb &&
   -z ${NO_COLOR+x} && "${JSH_COLOR:-auto}" != never ]] \
   && { [[ -t 1 ]] || [[ "${JSH_COLOR:-auto}" == always ]]; }; then
-  C_RESET=$'\033[0m' C_BOLD=$'\033[1m' C_DIM=$'\033[2m'
-  C_RED=$'\033[31m' C_GREEN=$'\033[32m' C_YELLOW=$'\033[33m' C_CYAN=$'\033[36m'
+  C_RESET=$'\033[0m' C_DIM=$'\033[2m' C_CYAN=$'\033[36m'
 else
-  C_RESET='' C_BOLD='' C_DIM=''
-  C_RED='' C_GREEN='' C_YELLOW='' C_CYAN=''
+  C_RESET='' C_DIM='' C_CYAN=''
 fi
 
-_jsh_status_style() {
-  case "$1" in
-    success)
-      REPLY_COLOR=${C_GREEN}
-      [[ -n "${C_RESET}" ]] && REPLY_MARK='✔' || REPLY_MARK='[ok]'
-      ;;
-    warn | warning)
-      REPLY_COLOR=${C_YELLOW}
-      [[ -n "${C_RESET}" ]] && REPLY_MARK='▲' || REPLY_MARK='[warn]'
-      ;;
-    error)
-      REPLY_COLOR=${C_RED}
-      [[ -n "${C_RESET}" ]] && REPLY_MARK='✖' || REPLY_MARK='[error]'
-      ;;
-    *)
-      REPLY_COLOR=${C_CYAN}
-      [[ -n "${C_RESET}" ]] && REPLY_MARK='›' || REPLY_MARK='[note]'
-      ;;
-  esac
-}
-_jsh_message() {
-  local state="$1" output_fd=1 color mark reset
-  [[ "${state}" != warn && "${state}" != warning && "${state}" != error ]] || output_fd=2
-  _jsh_status_style "${state}"
-  color=${REPLY_COLOR} mark=${REPLY_MARK} reset=${C_RESET}
-  if [[ ${output_fd} -eq 2 && -z "${reset}" && "${JSH_PLAIN_OUTPUT:-0}" != 1 &&
-    "${TERM:-dumb}" != dumb && -z ${NO_COLOR+x} && "${JSH_COLOR:-auto}" != never ]] \
-    && { [[ -t 2 ]] || [[ "${JSH_COLOR:-auto}" == always ]]; }; then
-    reset=$'\033[0m'
-    [[ "${state}" == error ]] && color=$'\033[31m' && mark='✖' \
-      || {
-        color=$'\033[33m'
-        mark='▲'
-      }
-  fi
-  shift
-  printf '%s%s%s %s\n' "${color}" "${mark}" "${reset}" "$*" >&"${output_fd}"
-}
 die() {
   local message=$1
   shift
-  _jsh_message error "${message}" >&2
+  jsh::log_error "${message}"
   for message in "$@"; do
-    jsh_detail "${message}" >&2
+    jsh::log_detail "  ${message}" >&2
   done
   exit 1
 }
 _debug() { printf '%sdebug:%s %s\n' "${C_DIM}" "${C_RESET}" "$*" >&2; }
-info() { _jsh_message note "$@"; }
-success() { _jsh_message success "$@"; }
-warn() { _jsh_message warn "$@" >&2; }
-jsh_section() { printf '%s%s%s%s\n' "${C_BOLD}" "${C_CYAN}" "$1" "${C_RESET}"; }
 jsh_field() { printf '  %-*s %s\n' "${3:-20}" "$1" "${2:-}"; }
-jsh_note() { printf '  %s%s%s\n' "${C_DIM}" "$*" "${C_RESET}"; }
-jsh_detail() { printf '  %s%s%s\n' "${C_DIM}" "$*" "${C_RESET}"; }
 jsh_command_preview() { printf '  %s$%s %s\n' "${C_CYAN}" "${C_RESET}" "$*"; }
 cli_version() { printf 'proxy 1.0.1\n'; }
 cli_help() {
@@ -213,7 +183,7 @@ build_proxy_env() {
 test_proxy() {
   local proxy_url="$1"
 
-  info "Testing proxy: ${proxy_url}"
+  jsh::log_note "Testing proxy: ${proxy_url}"
 
   # Extract host and port from URL
   local host port
@@ -232,34 +202,34 @@ test_proxy() {
   # Test TCP connectivity
   if command -v nc &>/dev/null; then
     if nc -z -w 3 "${host}" "${port}" 2>/dev/null; then
-      success "Proxy is reachable at ${host}:${port}"
+      jsh::log_success "Proxy is reachable at ${host}:${port}"
     else
       die "Cannot connect to proxy at ${host}:${port}"
     fi
   elif command -v timeout &>/dev/null; then
     if timeout 3 bash -c "echo >/dev/tcp/${host}/${port}" 2>/dev/null; then
-      success "Proxy is reachable at ${host}:${port}"
+      jsh::log_success "Proxy is reachable at ${host}:${port}"
     else
       die "Cannot connect to proxy at ${host}:${port}"
     fi
   else
-    warn "Cannot test connectivity (nc or timeout not available)"
+    jsh::log_warn "Cannot test connectivity (nc or timeout not available)"
   fi
 
   # Test HTTP if curl is available
   if command -v curl &>/dev/null; then
-    info "Testing HTTP through proxy..."
+    jsh::log_note "Testing HTTP through proxy..."
     local test_url="http://httpbin.org/ip"
 
     if curl -s -m 10 --proxy "${proxy_url}" "${test_url}" &>/dev/null; then
       local result
       result=$(curl -s -m 10 --proxy "${proxy_url}" "${test_url}" 2>/dev/null || true)
-      success "HTTP proxy working"
+      jsh::log_success "HTTP proxy working"
       if [[ -n "${result}" ]]; then
-        jsh_detail "Response: ${result}"
+        jsh::log_detail "  Response: ${result}"
       fi
     else
-      warn "HTTP test failed (proxy may require authentication or only support HTTPS)"
+      jsh::log_warn "HTTP test failed (proxy may require authentication or only support HTTPS)"
     fi
   fi
 }
@@ -401,9 +371,9 @@ main() {
 
   # Show configuration if verbose
   if [[ "${verbose}" == "true" ]]; then
-    jsh_section "Proxy Configuration"
+    jsh::log_info "Proxy Configuration"
     while IFS= read -r line; do
-      jsh_detail "${line}"
+      jsh::log_detail "  ${line}"
     done <<<"${env_lines}"
   fi
 
@@ -416,8 +386,8 @@ main() {
   # Handle shell mode
   if [[ "${shell_mode}" == "true" ]]; then
     local shell_cmd="${SHELL:-/bin/bash}"
-    info "Starting shell with proxy configured..."
-    jsh_note "Exit the child shell to remove proxy settings"
+    jsh::log_note "Starting shell with proxy configured..."
+    jsh::log_note "Exit the child shell to remove proxy settings"
     exec env "${env_array[@]}" "${shell_cmd}"
   fi
 

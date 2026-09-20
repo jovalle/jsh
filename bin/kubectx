@@ -21,7 +21,22 @@
 set -eou pipefail
 IFS=$'\n\t'
 
-SELF_CMD=$0
+case $0 in
+  /*) launcher=$0 ;;
+  *) launcher=${PWD}/$0 ;;
+esac
+if [[ -z ${JSH_ROOT:-} ]]; then
+  if [[ -n ${JSH_DIR:-} ]]; then
+    JSH_ROOT=${JSH_DIR}
+  elif [[ -f ${launcher%/*}/../lib/ui.sh ]]; then
+    JSH_ROOT=$(CDPATH='' cd -P "${launcher%/*}/.." && pwd -P)
+  else
+    JSH_ROOT=${HOME}/.jsh
+  fi
+fi
+# shellcheck source=../lib/ui.sh
+. "${JSH_ROOT}/lib/ui.sh"
+jsh::init
 
 KUBECTX="${XDG_CACHE_HOME:-${HOME}/.kube}/kubectx"
 
@@ -109,9 +124,9 @@ switch_context() {
 
 choose_context_interactive() {
   local choice
-  choice="$(_KUBECTX_FORCE_COLOR=1 \
-    FZF_DEFAULT_COMMAND="${SELF_CMD}" \
-    fzf --ansi --no-preview || true)"
+  local -a contexts=()
+  mapfile -t contexts < <(get_contexts)
+  choice=$(jsh::choose 'Context' "${contexts[@]}" || true)
   if [[ -z "${choice}" ]]; then
     echo 2>&1 "error: you did not choose any of the options"
     exit 1
@@ -167,10 +182,13 @@ rename_context() {
 }
 
 choose_contexts_to_delete_interactive() {
-  local choices
-  choices="$(_KUBECTX_FORCE_COLOR=1 \
-    FZF_DEFAULT_COMMAND="${SELF_CMD}" \
-    fzf --ansi --no-preview --multi --prompt="Select contexts (⇧Tab=multi) to delete: " || true)"
+  local context choices
+  local -a contexts=() selector_choices=()
+  mapfile -t contexts < <(get_contexts)
+  for context in "${contexts[@]}"; do
+    selector_choices+=("${context}" "${context}")
+  done
+  choices=$(jsh::choose_many 'Contexts to delete' "${selector_choices[@]}" || true)
   if [[ -z "${choices}" ]]; then
     echo 2>&1 "error: you did not choose any contexts to delete"
     exit 1
@@ -186,19 +204,14 @@ choose_contexts_to_delete_interactive() {
     for ctx in "${contexts_to_delete[@]}"; do
       echo "  - ${ctx}"
     done
-    echo -n "Are you sure you want to delete these contexts? [y/N]: "
-    read -r confirmation
-    case ${confirmation} in
-      [Yy]|[Yy][Ee][Ss])
-        for ctx in "${contexts_to_delete[@]}"; do
-          delete_context_with_cleanup "${ctx}"
-        done
-        ;;
-      *)
-        echo "Deletion cancelled."
-        exit 0
-        ;;
-    esac
+    if ! JSH_UI_OUTPUT_FD=1 UI_OUTPUT_FD=1 \
+      jsh::confirm 'Are you sure you want to delete these contexts?' --default no; then
+      echo "Deletion cancelled."
+      exit 0
+    fi
+    for ctx in "${contexts_to_delete[@]}"; do
+      delete_context_with_cleanup "${ctx}"
+    done
   fi
 }
 
@@ -209,19 +222,19 @@ unset_context() {
 
 # Helper functions for output messages
 info() {
-  echo -e "\033[0;34m[INFO]\033[0m $*" >&2
+  jsh::log_info "$@" >&2
 }
 
 success() {
-  echo -e "\033[0;32m[SUCCESS]\033[0m $*" >&2
+  jsh::log_success "$@" >&2
 }
 
 error() {
-  echo -e "\033[0;31m[ERROR]\033[0m $*" >&2
+  jsh::log_error "$@"
 }
 
 warn() {
-  echo -e "\033[0;33m[WARN]\033[0m $*" >&2
+  jsh::log_warn "$@"
 }
 
 # Add context from kubeconfig file (kctx+ functionality)
@@ -358,7 +371,7 @@ main() {
   fi
 
   if [[ "$#" -eq 0 ]]; then
-    if [[ -t 1 &&  -z "${KUBECTX_IGNORE_FZF:-}" && "$(type fzf &>/dev/null; echo $?)" -eq 0 ]]; then
+    if [[ ${JSH_INTERACTIVE:-0} == 1 && -z "${KUBECTX_IGNORE_FZF:-}" ]]; then
       choose_context_interactive
     else
       list_contexts
@@ -373,10 +386,10 @@ main() {
   elif [[ "${1}" == "-d" || "${1}" == "--delete" ]]; then
     if [[ "$#" -lt 2 ]]; then
       # No specific contexts provided, use interactive selection
-      if [[ -t 1 && -z "${KUBECTX_IGNORE_FZF:-}" && "$(type fzf &>/dev/null; echo $?)" -eq 0 ]]; then
+      if [[ ${JSH_INTERACTIVE:-0} == 1 && -z "${KUBECTX_IGNORE_FZF:-}" ]]; then
         choose_contexts_to_delete_interactive
       else
-        echo "error: missing context NAME and fzf is not available for interactive selection" >&2
+        echo "error: missing context NAME outside interactive selection" >&2
         usage
         exit 1
       fi

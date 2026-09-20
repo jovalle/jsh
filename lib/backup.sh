@@ -5,14 +5,8 @@ _jgit_backup_require() {
 }
 
 _jgit_backup_confirm() {
-  local prompt=$1 default=${2:-no} answer
-  jsh_prompt "${prompt}"
-  read -r answer || answer=
-  if [[ ${default} == yes ]]; then
-    [[ -z ${answer} || ${answer} == [Yy]* ]]
-  else
-    [[ ${answer} == [Yy]* ]]
-  fi
+  JSH_ASSUME_YES=0 JSH_NON_INTERACTIVE=0 JSH_INTERACTIVE=1 \
+    jsh::confirm "$1" --default "${2:-no}"
 }
 
 _jgit_backup_authenticate() {
@@ -20,7 +14,7 @@ _jgit_backup_authenticate() {
   _jgit_backup_require gh
   auth_status=$(LC_ALL=C gh auth status 2>&1) || {
     printf '%s\n' "${auth_status}" >&2
-    _jgit_backup_confirm 'Authenticate GitHub CLI for secret gist backups? [Y/n]: ' yes ||
+    _jgit_backup_confirm 'Authenticate GitHub CLI for secret gist backups?' yes ||
       _jgit_die 'GitHub CLI authentication is required'
     gh auth login --scopes gist || _jgit_die 'GitHub CLI authentication failed'
     auth_status=$(LC_ALL=C gh auth status 2>&1) || _jgit_die 'GitHub CLI authentication failed'
@@ -28,7 +22,7 @@ _jgit_backup_authenticate() {
 
   if grep -q 'Token scopes:' <<< "${auth_status}" &&
     ! grep -Eq "Token scopes:.*['\", ]gist['\", ]" <<< "${auth_status}"; then
-    _jgit_backup_confirm 'Grant GitHub CLI gist access? [Y/n]: ' yes ||
+    _jgit_backup_confirm 'Grant GitHub CLI gist access?' yes ||
       _jgit_die 'the active GitHub CLI token requires gist access'
     gh auth refresh --scopes gist || _jgit_die 'could not grant GitHub CLI gist access'
   fi
@@ -239,14 +233,14 @@ _jgit_backup_discover_gists() {
 }
 
 _jgit_backup_select_gist() {
-  local index gist_id metadata created head answer
+  local index gist_id metadata created head selected
+  local -a choices=()
   ((${#JGIT_BACKUP_GIST_IDS[@]} > 0)) || return 1
   if ((${#JGIT_BACKUP_GIST_IDS[@]} == 1)); then
     JGIT_BACKUP_SELECTED_GIST=${JGIT_BACKUP_GIST_IDS[0]}
     return
   fi
 
-  printf 'Applicable backups:\n'
   index=0
   for gist_id in "${JGIT_BACKUP_GIST_IDS[@]}"; do
     metadata=${JGIT_BACKUP_WORK_DIR}/metadata-${gist_id}
@@ -255,19 +249,11 @@ _jgit_backup_select_gist() {
     fi
     created=$(_jgit_backup_metadata_field "${metadata}" created)
     head=$(_jgit_backup_metadata_field "${metadata}" head)
-    printf '  %d) %s  %s  %.12s\n' "$((index + 1))" "${created:-${JGIT_BACKUP_GIST_UPDATED[index]}}" \
-      "${gist_id}" "${head:-unknown}"
+    choices+=("${gist_id}" "${created:-${JGIT_BACKUP_GIST_UPDATED[index]}}  ${gist_id}  ${head:-unknown}")
     index=$((index + 1))
   done
-  while :; do
-    jsh_prompt "Select backup [1-${#JGIT_BACKUP_GIST_IDS[@]}]: "
-    read -r answer || return 1
-    if [[ ${answer} =~ ^[0-9]+$ && answer -ge 1 && answer -le ${#JGIT_BACKUP_GIST_IDS[@]} ]]; then
-      JGIT_BACKUP_SELECTED_GIST=${JGIT_BACKUP_GIST_IDS[answer - 1]}
-      return
-    fi
-    jsh_warn 'Invalid selection'
-  done
+  selected=$(jsh::choose_one 'Applicable backups' "${choices[@]}") || return
+  JGIT_BACKUP_SELECTED_GIST=${selected}
 }
 
 _jgit_backup_resolve_save_gist() {
@@ -278,7 +264,7 @@ _jgit_backup_resolve_save_gist() {
     return
   fi
   if [[ -n ${configured} ]]; then
-    jsh_warn "Configured backup gist is unavailable or belongs to another repository: ${configured}"
+    jsh::log_warn "Configured backup gist is unavailable or belongs to another repository: ${configured}"
     git -C "${JGIT_BACKUP_ROOT}" config --local --unset-all jsh.backupGist 2> /dev/null || true
   fi
 
@@ -361,7 +347,7 @@ _jgit_backup_save() {
   done < "${submodule_list}"
 
   if ((JGIT_BACKUP_HAS_CHANGES == 0)); then
-    jsh_note 'No uncommitted changes matched the backup path set'
+    jsh::log_note 'No uncommitted changes matched the backup path set'
     return
   fi
   cat "${snapshot}/summary" >> "${payload}/jgit-backup.txt"
@@ -372,7 +358,7 @@ _jgit_backup_save() {
   base64 < "${archive}" > "${payload}/jgit-backup.snapshot.b64"
 
   _jgit_backup_publish "${payload}"
-  jsh_success "Saved uncommitted changes to secret gist ${JGIT_BACKUP_SELECTED_GIST}"
+  jsh::log_success "Saved uncommitted changes to secret gist ${JGIT_BACKUP_SELECTED_GIST}"
 }
 
 _jgit_backup_discover_valid_gists() {
@@ -536,11 +522,11 @@ _jgit_backup_preflight_repository() {
   _jgit_backup_map_excludes "${repository_path}"
   ((JGIT_BACKUP_SKIP_REPOSITORY == 0)) || return 0
   conflicts=$(git -C "${repository}" ls-files -u) || {
-    jsh_error "Could not inspect ${repository_path:-the main repository} for conflicts"
+    jsh::log_error "Could not inspect ${repository_path:-the main repository} for conflicts"
     return 1
   }
   if [[ -n ${conflicts} ]]; then
-    jsh_error "Unresolved conflicts in ${repository_path:-the main repository}"
+    jsh::log_error "Unresolved conflicts in ${repository_path:-the main repository}"
     return 1
   fi
 }
@@ -551,27 +537,27 @@ _jgit_backup_stash_repository() {
   ((JGIT_BACKUP_SKIP_REPOSITORY == 0)) || return 0
   status=$(git -C "${repository}" status --porcelain --untracked-files=all \
     --ignore-submodules=dirty) || {
-    jsh_error "Could not inspect ${repository_path:-the repository}"
+    jsh::log_error "Could not inspect ${repository_path:-the repository}"
     return 1
   }
   [[ -n ${status} ]] || return 0
 
   staged_patch=${JGIT_BACKUP_WORK_DIR}/recovery-staged-${#JGIT_BACKUP_STASH_OIDS[@]}.patch
   git -C "${repository}" diff --cached --binary --full-index > "${staged_patch}" || {
-    jsh_error "Could not preserve staged changes in ${repository_path:-the repository}"
+    jsh::log_error "Could not preserve staged changes in ${repository_path:-the repository}"
     return 1
   }
   previous_stash=$(git -C "${repository}" rev-parse --verify refs/stash 2> /dev/null || true)
   git -C "${repository}" stash push --include-untracked --quiet \
     --message "jgit load $(date -u '+%Y-%m-%dT%H:%M:%SZ')" ||
     {
-      jsh_error "Could not stash ${repository_path:-repository} changes"
+      jsh::log_error "Could not stash ${repository_path:-repository} changes"
       return 1
     }
   stash_oid=$(git -C "${repository}" rev-parse --verify refs/stash 2> /dev/null || true)
   [[ -n ${stash_oid} && ${stash_oid} != "${previous_stash}" ]] ||
     {
-      jsh_error "Could not identify the ${repository_path:-repository} recovery stash"
+      jsh::log_error "Could not identify the ${repository_path:-repository} recovery stash"
       return 1
     }
   JGIT_BACKUP_STASH_REPOSITORIES+=("${repository}")
@@ -580,12 +566,12 @@ _jgit_backup_stash_repository() {
   JGIT_BACKUP_STAGED_PATCHES+=("${staged_patch}")
   status=$(git -C "${repository}" status --porcelain --untracked-files=all \
     --ignore-submodules=dirty) || {
-    jsh_error "Could not inspect ${repository_path:-the repository} after stashing"
+    jsh::log_error "Could not inspect ${repository_path:-the repository} after stashing"
     return 1
   }
   if [[ -n ${status} ]]; then
-    jsh_error "Recovery stash retained for ${repository_path:-main repository}: ${stash_oid}"
-    jsh_error "Could not stash all ${repository_path:-repository} changes"
+    jsh::log_error "Recovery stash retained for ${repository_path:-main repository}: ${stash_oid}"
+    jsh::log_error "Could not stash all ${repository_path:-repository} changes"
     return 1
   fi
 }
@@ -600,12 +586,12 @@ _jgit_backup_stash_current_changes() {
   ordered_submodules=${JGIT_BACKUP_WORK_DIR}/ordered-submodules.list
   git -C "${JGIT_BACKUP_ROOT}" submodule foreach --quiet --recursive \
     'printf "%s\n" "$displaypath"' > "${submodule_list}" || {
-    jsh_error 'Could not inspect initialized submodules'
+    jsh::log_error 'Could not inspect initialized submodules'
     return 1
   }
   awk -F/ '{ print NF "\t" $0 }' "${submodule_list}" |
     LC_ALL=C sort -k1,1nr -k2,2 | cut -f2- > "${ordered_submodules}" || {
-    jsh_error 'Could not order initialized submodules'
+    jsh::log_error 'Could not order initialized submodules'
     return 1
   }
   while IFS= read -r submodule_path; do
@@ -621,13 +607,13 @@ _jgit_backup_stash_current_changes() {
   done < "${ordered_submodules}"
   _jgit_backup_stash_repository "${JGIT_BACKUP_ROOT}" '' || return 1
   ((${#JGIT_BACKUP_STASH_OIDS[@]} == 0)) ||
-    jsh_info "Created ${#JGIT_BACKUP_STASH_OIDS[@]} recovery stash(es)"
+    jsh::log_info "Created ${#JGIT_BACKUP_STASH_OIDS[@]} recovery stash(es)"
 }
 
 _jgit_backup_report_stashes() {
   local index
   for ((index = 0; index < ${#JGIT_BACKUP_STASH_OIDS[@]}; index++)); do
-    jsh_error "Recovery stash retained for ${JGIT_BACKUP_STASH_PATHS[index]}: ${JGIT_BACKUP_STASH_OIDS[index]}"
+    jsh::log_error "Recovery stash retained for ${JGIT_BACKUP_STASH_PATHS[index]}: ${JGIT_BACKUP_STASH_OIDS[index]}"
   done
 }
 
@@ -641,13 +627,13 @@ _jgit_backup_restore_stashes() {
     stash_ref=$(git -C "${repository}" stash list --format='%gd %H' |
       awk -v wanted="${stash_oid}" '$2 == wanted { print $1; exit }')
     if [[ -z ${stash_ref} ]] || ! git -C "${repository}" stash apply --quiet "${stash_ref}"; then
-      jsh_error "Recovery stash retained for ${stash_path}: ${stash_oid}"
+      jsh::log_error "Recovery stash retained for ${stash_path}: ${stash_oid}"
       failed=1
       continue
     fi
     if [[ -s ${staged_patch} ]] &&
       ! git -C "${repository}" apply --cached --3way "${staged_patch}"; then
-      jsh_error "Recovery stash retained for ${stash_path}: ${stash_oid}"
+      jsh::log_error "Recovery stash retained for ${stash_path}: ${stash_oid}"
       failed=1
       continue
     fi
@@ -714,7 +700,7 @@ _jgit_backup_prepare_submodule() {
   remaining=${full_path}
   while [[ -n ${remaining} ]]; do
     [[ -f ${repository}/.gitmodules ]] || return 1
-    config_list=${JGIT_BACKUP_WORK_DIR}/registered-$RANDOM.list
+    config_list=${JGIT_BACKUP_WORK_DIR}/registered-${RANDOM}.list
     git -C "${repository}" config -f .gitmodules --get-regexp '^submodule\..*\.path$' \
       > "${config_list}" 2> /dev/null || return 1
     match=
@@ -791,29 +777,29 @@ _jgit_backup_load() {
   git -C "${JGIT_BACKUP_ROOT}" config --local jsh.backupGist "${gist_id}"
   _jgit_backup_download "${gist_id}"
   _jgit_backup_preview "${gist_id}"
-  _jgit_backup_confirm 'Apply this backup? [y/N]: ' no || {
-    jsh_note 'Backup load cancelled'
+  _jgit_backup_confirm 'Apply this backup?' no || {
+    jsh::log_note 'Backup load cancelled'
     return
   }
 
   if ! _jgit_backup_stash_current_changes; then
     if ((${#JGIT_BACKUP_STASH_OIDS[@]} > 0)); then
       if _jgit_backup_restore_stashes; then
-        jsh_warn 'Restored changes stashed before backup setup failed'
+        jsh::log_warn 'Restored changes stashed before backup setup failed'
       else
-        jsh_error 'Some recovery stashes could not be restored'
+        jsh::log_error 'Some recovery stashes could not be restored'
       fi
     fi
     _jgit_die 'could not prepare local changes for backup load'
   fi
   if ! _jgit_backup_apply_snapshot; then
     _jgit_backup_report_stashes
-    jsh_error 'Backup could not be applied; any recovery stashes were retained'
+    jsh::log_error 'Backup could not be applied; any recovery stashes were retained'
     return 1
   fi
   if ! _jgit_backup_restore_stashes; then
     _jgit_die 'backup applied, but some prior local changes remain in recovery stashes'
   fi
-  jsh_success "Loaded uncommitted changes from secret gist ${gist_id}"
+  jsh::log_success "Loaded uncommitted changes from secret gist ${gist_id}"
   git -C "${JGIT_BACKUP_ROOT}" status --short
 }

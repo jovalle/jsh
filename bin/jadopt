@@ -15,8 +15,9 @@ readonly JSH_ROOT
 readonly DOTFILES_DIR=${JSH_ROOT}/dotfiles
 readonly LINK_COMMAND=${JADOPT_LINK_COMMAND:-ln}
 
-# shellcheck source=../lib/output.sh
-source "${JSH_ROOT}/lib/output.sh"
+# shellcheck source=../lib/ui.sh
+source "${JSH_ROOT}/lib/ui.sh"
+jsh::init
 
 ASSUME_YES=${JSH_ASSUME_YES:-0}
 DRY_RUN=0
@@ -49,7 +50,7 @@ EOF
 }
 
 die() {
-  jsh_error "$*"
+  jsh::log_error "$*"
   exit 1
 }
 
@@ -170,7 +171,7 @@ consolidate_paths() {
     done
     consolidated+=("${parent}")
     RELATIVE_PATHS=("${consolidated[@]}")
-    jsh_note "Consolidating managed paths at ~/${parent}"
+    jsh::log_note "Consolidating managed paths at ~/${parent}"
   done
 }
 
@@ -222,13 +223,13 @@ rollback() {
   trap - EXIT INT TERM
   ((APPLYING)) || exit "${exit_status}"
 
-  jsh_warn "Adoption failed; restoring moved paths."
+  jsh::log_warn "Adoption failed; restoring moved paths."
   for ((index = ${#CREATED_LINKS[@]} - 1; index >= 0; index--)); do
     source=${CREATED_LINKS[index]}
     if [[ -L ${source} ]]; then
       rm -- "${source}" || failed=1
     elif [[ -e ${source} ]]; then
-      jsh_error "Cannot remove adoption link ${source}: the path was recreated"
+      jsh::log_error "Cannot remove adoption link ${source}: the path was recreated"
       failed=1
     fi
   done
@@ -239,7 +240,7 @@ rollback() {
     source=${MOVED_SOURCES[index]}
     destination=${MOVED_DESTINATIONS[index]}
     if [[ -e ${source} || -L ${source} ]]; then
-      jsh_error "Cannot restore ${source}: the path was recreated during adoption"
+      jsh::log_error "Cannot restore ${source}: the path was recreated during adoption"
       failed=1
       continue
     fi
@@ -249,13 +250,13 @@ rollback() {
     source=${REMOVED_LINK_SOURCES[index]}
     target=${REMOVED_LINK_TARGETS[index]}
     if [[ -e ${source} || -L ${source} ]]; then
-      jsh_error "Cannot restore ${source}: the path was recreated during adoption"
+      jsh::log_error "Cannot restore ${source}: the path was recreated during adoption"
       failed=1
       continue
     fi
     ln -s -- "${target}" "${source}" || failed=1
   done
-  ((failed == 0)) || jsh_error "Adoption recovery is incomplete"
+  ((failed == 0)) || jsh::log_error "Adoption recovery is incomplete"
   exit "${exit_status}"
 }
 
@@ -305,7 +306,7 @@ for argument in "${arguments[@]}"; do
   destination_path=${DOTFILES_DIR}/${relative_path}
 
   if already_adopted "${source_path}" "${destination_path}"; then
-    jsh_note "Already adopted: ${source_path}"
+    jsh::log_note "Already adopted: ${source_path}"
     continue
   fi
   [[ ! -L ${source_path} ]] || die "Symbolic links cannot be adopted: ${argument}"
@@ -322,7 +323,7 @@ for argument in "${arguments[@]}"; do
 done
 
 ((${#RELATIVE_PATHS[@]} > 0)) || {
-  jsh_success "All selected paths are already adopted"
+  jsh::log_success "All selected paths are already adopted"
   exit 0
 }
 
@@ -337,28 +338,21 @@ for relative_path in "${RELATIVE_PATHS[@]}"; do
   LINK_TARGETS+=("$(relative_link_target "${destination_path}" "${source_path%/*}")")
 done
 
-jsh_info "Adoption plan:"
+jsh::log_info "Adoption plan:"
 for ((index = 0; index < ${#SOURCE_PATHS[@]}; index++)); do
-  jsh_detail "  Move: ${SOURCE_PATHS[index]}"
-  jsh_detail "    to: ${DESTINATION_PATHS[index]}"
-  jsh_detail "  Link: ${SOURCE_PATHS[index]} -> ${LINK_TARGETS[index]}"
+  jsh::log_detail "  Move: ${SOURCE_PATHS[index]}"
+  jsh::log_detail "    to: ${DESTINATION_PATHS[index]}"
+  jsh::log_detail "  Link: ${SOURCE_PATHS[index]} -> ${LINK_TARGETS[index]}"
 done
 
 if ((DRY_RUN)); then
-  jsh_success "Dry run complete; no files changed"
+  jsh::log_success "Dry run complete; no files changed"
   exit 0
 fi
 
-if [[ ${ASSUME_YES} != 1 ]]; then
-  jsh_prompt "Adopt these paths? [y/N]: "
-  read -r confirm || confirm=
-  case ${confirm} in
-    y | Y | yes | YES) ;;
-    *)
-      jsh_note "Adoption cancelled."
-      exit 0
-      ;;
-  esac
+if [[ ${ASSUME_YES} != 1 ]] && ! jsh::confirm 'Adopt these paths?' --default no; then
+  jsh::log_note "Adoption cancelled."
+  exit 0
 fi
 
 APPLYING=1
@@ -376,5 +370,5 @@ done
 APPLYING=0
 trap - EXIT INT TERM
 for relative_path in "${RELATIVE_PATHS[@]}"; do
-  jsh_success "Adopted ~/${relative_path}"
+  jsh::log_success "Adopted ~/${relative_path}"
 done

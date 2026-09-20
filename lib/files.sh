@@ -10,22 +10,18 @@ jsh_file_mode() {
 }
 
 jsh_approve_broken_symlink() {
-  local path=$1 answer
+  local path=$1
   printf 'Broken symlink detected: %s\n' "${path}" >&2
   if [[ ${JSH_CONFIGURE_DRY_RUN:-0} == 1 || ${JSH_INSTALL_DRY_RUN:-0} == 1 ||
     ${JSH_CONFIGURE_ASSUME_YES:-${JSH_ASSUME_YES:-0}} == 1 ]]; then
     return 0
   fi
   if [[ ! -t 0 ]]; then
-    printf 'Non-interactive setup will replace it.\n'
-    return 0
-  fi
-  jsh_prompt 'Replace it with the managed file? [Y/n]: '
-  read -r answer || {
-    printf 'No confirmation received; leaving the broken symlink in place.\n' >&2
+    printf 'Non-interactive setup cannot replace it without --yes.\n' >&2
     return 1
-  }
-  [[ -z ${answer} || ${answer,,} == y || ${answer,,} == yes ]]
+  fi
+  JSH_NON_INTERACTIVE=0 JSH_INTERACTIVE=1 \
+    jsh::confirm 'Replace it with the managed file?' --default yes
 }
 
 jsh_backup_managed_file() {
@@ -39,7 +35,7 @@ jsh_backup_managed_file() {
   mkdir -p -- "${backup_dir}/${relative_parent}"
   cp -p -- "${path}" "${backup_dir}/${relative}"
   chmod 0600 "${backup_dir}/${relative}"
-  jsh_detail "Backup: ${backup_dir}/${relative}"
+  jsh::log_detail "Backup: ${backup_dir}/${relative}"
 }
 
 jsh_ensure_file() {
@@ -47,7 +43,7 @@ jsh_ensure_file() {
   local dry_run=${JSH_CONFIGURE_DRY_RUN:-${JSH_INSTALL_DRY_RUN:-0}}
 
   [[ -r ${source} ]] || {
-    jsh_error "Managed file source is unreadable: ${source}"
+    jsh::log_error "Managed file source is unreadable: ${source}"
     return 1
   }
   if [[ -L ${target} ]]; then
@@ -55,15 +51,15 @@ jsh_ensure_file() {
       if cmp -s -- "${source}" "${target}"; then
         return 1
       fi
-      jsh_error "Refusing to replace an unmanaged symlink: ${target}"
+      jsh::log_error "Refusing to replace an unmanaged symlink: ${target}"
       return 2
     fi
     jsh_approve_broken_symlink "${target}" || return 1
     if [[ ${dry_run} == 1 ]]; then
-      jsh_detail "Would replace broken symlink: ${target}"
+      jsh::log_detail "Would replace broken symlink: ${target}"
       return 0
     fi
-    jsh_detail "Replacing broken symlink: ${target}"
+    jsh::log_detail "Replacing broken symlink: ${target}"
     rm -- "${target}"
   fi
   if [[ -f ${target} ]] && cmp -s -- "${source}" "${target}" &&
@@ -71,7 +67,7 @@ jsh_ensure_file() {
     return 1
   fi
   if [[ ${dry_run} == 1 ]]; then
-    jsh_detail "Would write ${target}"
+    jsh::log_detail "Would write ${target}"
     return 0
   fi
 
@@ -84,7 +80,7 @@ jsh_ensure_file() {
     return 1
   fi
   mv -f -- "${temporary}" "${target}"
-  jsh_detail "Writing ${target}"
+  jsh::log_detail "Writing ${target}"
 }
 
 jsh_desktop_executable() {

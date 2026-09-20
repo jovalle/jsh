@@ -12,13 +12,13 @@ setup() {
   # shellcheck source=/dev/null
   source "${JSH_ROOT}/scripts/unix/configure/spotify.sh"
   # shellcheck disable=SC2329 # Called indirectly by sourced functions.
-  jsh_detail() { :; }
+  jsh::log_detail() { :; }
   # shellcheck disable=SC2329 # Called indirectly by sourced functions.
-  jsh_note() { :; }
+  jsh::log_note() { :; }
   # shellcheck disable=SC2329 # Called indirectly by sourced functions.
-  jsh_success() { :; }
+  jsh::log_success() { :; }
   # shellcheck disable=SC2329 # Called indirectly by sourced functions.
-  jsh_info() { :; }
+  jsh::log_info() { :; }
   # shellcheck disable=SC2329 # Called indirectly by sourced functions.
   jsh_prompt() { printf '%s' "$*"; }
 }
@@ -78,8 +78,8 @@ setup() {
   local spotify="${BATS_TEST_TMPDIR}/Spotify Resources"
   mkdir -p "${spotify}/Apps"
   chmod 0555 "${spotify}" "${spotify}/Apps"
-  jsh_error() { printf '%s\n' "$*"; }
-  jsh_detail() { printf '%s\n' "$*"; }
+  jsh::log_error() { printf '%s\n' "$*"; }
+  jsh::log_detail() { printf '%s\n' "$*"; }
 
   run ensure_spotify_writable "${spotify}"
   chmod 0755 "${spotify}" "${spotify}/Apps"
@@ -117,9 +117,8 @@ setup() {
 @test "confirmation closes a running Spotify Flatpak" {
   local running=1
   export JSH_SPOTIFY_PLATFORM=Linux
-  export JSH_SPOTIFY_TTY="${BATS_TEST_TMPDIR}/spotify-input"
-  printf '\n' > "${JSH_SPOTIFY_TTY}"
   export SPOTIFY_CLOSE_CALLS="${BATS_TEST_TMPDIR}/spotify-close-calls"
+  jsh::confirm() { [[ $* == 'Spotify is running. Close it now? --default yes' ]]; }
   # shellcheck disable=SC2329 # Called indirectly by close_spotify_if_running.
   spotify_is_running() { [[ ${running} -eq 1 ]]; }
   # shellcheck disable=SC2329 # Called indirectly by close_spotify.
@@ -132,7 +131,7 @@ setup() {
   run close_spotify_if_running
 
   [[ ${status} -eq 0 ]]
-  [[ ${output} = 'Spotify is running. Close it now? [Y/n]: ' ]]
+  [[ -z ${output} ]]
   grep -Fxq 'kill com.spotify.Client' "${SPOTIFY_CLOSE_CALLS}"
 }
 
@@ -160,9 +159,8 @@ setup() {
 @test "uses AppleScript to close Spotify on macOS" {
   local running=1
   export JSH_SPOTIFY_PLATFORM=Darwin
-  export JSH_SPOTIFY_TTY="${BATS_TEST_TMPDIR}/spotify-input"
-  printf 'y\n' > "${JSH_SPOTIFY_TTY}"
   export SPOTIFY_CLOSE_CALLS="${BATS_TEST_TMPDIR}/spotify-close-calls"
+  jsh::confirm() { return 0; }
   # shellcheck disable=SC2329 # Called indirectly by close_spotify_if_running.
   spotify_is_running() { [[ ${running} -eq 1 ]]; }
   osascript() {
@@ -181,7 +179,7 @@ setup() {
   : > "${JSH_SPOTIFY_TTY}"
   # shellcheck disable=SC2329 # Called indirectly by close_spotify_if_running.
   spotify_is_running() { return 0; }
-  jsh_error() { printf '%s\n' "$*" >&2; }
+  jsh::log_error() { printf '%s\n' "$*" >&2; }
 
   run close_spotify_if_running
 
@@ -441,7 +439,7 @@ printf '%s\n' \
 exit 1
 EOF
   chmod +x "${binary}"
-  jsh_error() { :; }
+  jsh::log_error() { :; }
 
   run apply_spicetify "${binary}" apply
 
@@ -451,7 +449,7 @@ EOF
 }
 
 @test "removes third-party status prefixes from failure details" {
-  jsh_detail() { printf '%s\n' "$*"; }
+  jsh::log_detail() { printf '%s\n' "$*"; }
 
   run spicetify_failure_details $'spicetify v2.45.0\n\033[36m info \033[0m Apply the config\n warning  Restore the backup'
 

@@ -10,10 +10,10 @@ setup() {
   export DRY_RUN=0
   # shellcheck source=/dev/null
   source "${JSH_ROOT}/scripts/unix/install/services.sh"
-  jsh_error() { :; }
-  jsh_detail() { :; }
-  jsh_note() { :; }
-  jsh_success() { :; }
+  jsh::log_error() { :; }
+  jsh::log_detail() { :; }
+  jsh::log_note() { :; }
+  jsh::log_success() { :; }
 }
 
 @test "excludes the complete Git metadata directory from Syncthing" {

@@ -6,7 +6,7 @@
       "match": { "os": ["darwin", "linux"] },
       "install": {
         "brew": {
-          "formulae": ["bash", "jq", "unzip", "zip", "zsh"]
+          "formulae": ["bash", "gum", "jq", "unzip", "zip", "zsh"]
         }
       }
     },

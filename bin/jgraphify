@@ -24,6 +24,7 @@ for library_file in "${JSH_ROOT}"/lib/*; do
   . "${library_file}"
 done
 unset library_file
+jsh::init
 
 usage() {
   cat << EOF
@@ -43,7 +44,7 @@ EOF
 }
 
 die() {
-  jsh_error "$*"
+  jsh::log_error "$*"
   exit 1
 }
 
@@ -103,25 +104,17 @@ if ((backend_explicit == 0 && code_only == 0)); then
   backend_count=$((${#backend_choices[@]} / 2))
   case ${backend_count} in
     0)
-      jsh_warn 'No supported Graphify API key is configured.'
-      jsh_detail "Open an AI agent in ${project} and run: /graphify ." >&2
+      jsh::log_warn 'No supported Graphify API key is configured.'
+      jsh::log_detail "Open an AI agent in ${project} and run: /graphify ." >&2
       exit 1
       ;;
     1) backend=${backend_choices[0]} ;;
     *)
-      command -v fzf > /dev/null 2>&1 ||
-        die 'Multiple Graphify backends are available, but fzf is unavailable. Pass --backend NAME.'
-      [[ -t 0 ]] ||
+      [[ ${JSH_INTERACTIVE:-0} == 1 ]] ||
         die 'Multiple Graphify backends are available. Pass --backend NAME in noninteractive use.'
-      selector_choices=
-      for ((index = 0; index < ${#backend_choices[@]}; index += 2)); do
-        selector_choices+=${backend_choices[index]}$'\t'${backend_choices[index + 1]}$'\n'
-      done
-      if ! backend=$(printf '%s' "${selector_choices}" | fzf --height=40% --reverse --no-sort \
-        --prompt='backend> ' --header='GRAPHIFY BACKEND' --delimiter=$'\t' --with-nth=2); then
+      if ! backend=$(jsh::choose_one 'GRAPHIFY BACKEND' "${backend_choices[@]}"); then
         die 'Graphify backend selection cancelled. Pass --backend NAME to select one explicitly.'
       fi
-      backend=${backend%%$'\t'*}
       ;;
   esac
   set -- "$@" --backend "${backend}"
@@ -134,9 +127,9 @@ before_manifest=
 if [[ -s ${graph_file} ]]; then
   had_graph=1
   [[ ! -s ${manifest_file} ]] || before_manifest=$(cksum < "${manifest_file}")
-  jsh_info "Checking Graphify data for ${project}..."
+  jsh::log_info "Checking Graphify data for ${project}..."
 else
-  jsh_info "Creating Graphify data for ${project}..."
+  jsh::log_info "Creating Graphify data for ${project}..."
 fi
 
 "${graphify_bin}" extract "${project}" "$@"
@@ -146,9 +139,9 @@ fi
 after_manifest=
 [[ ! -s ${manifest_file} ]] || after_manifest=$(cksum < "${manifest_file}")
 if ((had_graph == 0)); then
-  jsh_success "Created ${graph_file}"
+  jsh::log_success "Created ${graph_file}"
 elif [[ -n ${before_manifest} && ${before_manifest} == "${after_manifest}" ]]; then
-  jsh_success "Graphify data is current."
+  jsh::log_success "Graphify data is current."
 else
-  jsh_success "Updated ${graph_file}"
+  jsh::log_success "Updated ${graph_file}"
 fi

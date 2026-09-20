@@ -9,14 +9,14 @@
 jsh_color_enabled() {
   jsh_output_descriptor=$1
 
-  [ "${JSH_PLAIN_OUTPUT:-0}" != 1 ] || return 1
-  [ "${TERM:-}" != dumb ] || return 1
-  [ -z "${NO_COLOR+x}" ] || return 1
+  [[ "${JSH_PLAIN_OUTPUT:-0}" != 1 ]] || return 1
+  [[ "${TERM:-}" != dumb ]] || return 1
+  [[ -z "${NO_COLOR+x}" ]] || return 1
 
   case ${JSH_COLOR:-auto} in
     always) return 0 ;;
     never) return 1 ;;
-    auto | '') [ -t "${jsh_output_descriptor}" ] ;;
+    auto | '') [[ -t "${jsh_output_descriptor}" ]] ;;
     *) return 1 ;;
   esac
 }
@@ -83,4 +83,24 @@ jsh_detail() {
 
 jsh_blank() {
   printf '\n'
+}
+
+jsh_banner() {
+  jsh_banner_text='   :%@@@@@@@@@#*#@%-              +-:##
+  :#    -#%%+=#:@#                :@@%:
+   %@@     +@++@@-            *-   @@%:
+          *@%:%@@:    :%@@@@*%+  *@@@%::*@@#
+     -###%@@+:%@@:  :%@#:--=%:    -@@@#: #@@=
+       :#@@@+:%@@:  :%@#  -#-     -@@%   *@@=
+      *#:#@@+:%@@:  :%@@@@@@@@*   -@@%   *@@=
+       -#@@@+:%@%:     *%  -@@*   -@@%   *@@=
+         :@@+:%@*     -*   -@@*   -@@%   *@@=
+          +@+:%*     *@@@@@%@%-   #@@@+  *@@-
+   :==--::*#:#-     -:   -*:        +   =@@=
+ :@@@@@@@@#@-                         +@#:
+ =   :-=-:                          -:'
+  jsh_blank
+  jsh_stdout '1;36' '' "${jsh_banner_text}"
+  jsh_blank
+  unset jsh_banner_text
 }
