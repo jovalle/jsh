@@ -167,6 +167,33 @@ filter_native_brew_packages() {
   done < "${brewfile}"
 }
 
+update_brew() {
+  local error_file
+
+  error_file=$(mktemp "${JSH_ROOT}/tmp/brew-update.XXXXXX")
+  jsh_interrupt_cleanup_path "${error_file}"
+  if brew update 2> "${error_file}"; then
+    cat "${error_file}" >&2
+    rm -f "${error_file}"
+    return 0
+  fi
+
+  cat "${error_file}" >&2
+  if ! grep -Fq 'You have not agreed to the Xcode license.' "${error_file}"; then
+    rm -f "${error_file}"
+    return 1
+  fi
+  rm -f "${error_file}"
+
+  if ! JSH_ASSUME_YES=0 JSH_NON_INTERACTIVE=0 JSH_INTERACTIVE=1 \
+    jsh::confirm "Accept the Xcode license with sudo?" --default no; then
+    jsh::log_error "Cannot update Homebrew until the Xcode license is accepted."
+    return 1
+  fi
+  sudo xcodebuild -license accept
+  brew update
+}
+
 install_brew_manifest() {
   local brewfile=$1
 
@@ -176,7 +203,7 @@ install_brew_manifest() {
   fi
   jsh::log_info "Installing Homebrew packages..."
   if [[ ${JSH_UPDATE:-0} == 1 ]]; then
-    brew bundle --file="${brewfile}"
+    HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --file="${brewfile}"
   else
     HOMEBREW_NO_AUTO_UPDATE=1 brew bundle check --no-upgrade --file="${brewfile}" > /dev/null 2>&1 ||
       HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade --file="${brewfile}"
@@ -211,21 +238,25 @@ install_brew_packages() {
 
   if [[ ${JSH_UPDATE:-0} == 1 ]]; then
     jsh::log_info "Updating Homebrew packages..."
-    brew update
+    update_brew
   fi
 
   register_brew_packages "${declared}"
   trust_declared_formulae "${declared}"
   migrate_legacy_npm_packages
   filter_native_brew_packages "${declared}" "${filtered}"
+  if grep -Fxq 'cask "helium-browser"' "${filtered}"; then
+    # Close the browser before Homebrew replaces its running application bundle.
+    bash -c 'source "$1"; require_policy_privileges; stop_for_apply' _ "${JSH_ROOT}/scripts/unix/configure/helium.sh"
+  fi
   install_brew_manifest "${filtered}"
   rm -f "${declared}" "${filtered}"
 
   if [[ ${JSH_UPDATE:-0} == 1 ]]; then
     if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then
-      brew upgrade --formula --yes
+      brew upgrade --yes
     else
-      brew upgrade --formula
+      brew upgrade
     fi
     jsh::log_success "Declared Homebrew packages are up to date."
   fi

@@ -1,8 +1,9 @@
 #!/bin/sh
 ##% jsh
-## runtime ## Run an ephemeral J shell without deploying dotfiles
+## runtime ## Open the same minimal, ephemeral J shell as jsh with no arguments
 ## adopt ## Move selected home paths into Jsh dotfiles
-## install ## Install Jsh as the main shell environment
+## install ## Install the launcher, core shell tools, and managed dotfiles
+## setup ## Install and configure the complete managed workstation
 ## update ## Update Jsh, dependencies, packages, and managed configuration
 ## reload ## Reload the active J shell
 ## -r ## Reload the active J shell
@@ -21,34 +22,35 @@ if [ "${JSH_BASH_RUNTIME:-0}" = 1 ]; then
   export JSH="${JSH_ROOT}"
   export HISTFILE="${JSH_RUNTIME_DIR}/history"
   export XDG_CACHE_HOME="${JSH_RUNTIME_DIR}/cache"
+  . "${JSH_ROOT}/lib/output.sh"
+
+  if [ "${JSH_RELOADING:-0}" != 1 ]; then
+    jsh_banner
+  fi
+  unset JSH_RELOADING
 
   jsh() {
     case ${1:-} in
-      runtime | install | update | repair)
+      install | setup | update | repair)
         JSH_INSTALL_RETURN=1 JSH_BASH_RUNTIME=0 command "${JSH_ROOT}/bin/jsh" "$@" || return
-        JSH_BASH_RUNTIME=1 exec "${JSH_BASH}" --noprofile --rcfile "${JSH_ROOT}/bin/jsh" -i
+        JSH_RELOADING=1 JSH_BASH_RUNTIME=1 exec "${JSH_BASH}" --noprofile --rcfile "${JSH_ROOT}/bin/jsh" -i
         ;;
       adopt)
         JSH_BASH_RUNTIME=0 command "${JSH_ROOT}/bin/jsh" "$@"
         ;;
       --yes)
         case ${2:-} in
-          runtime | install | update | repair)
+          install | setup | update | repair)
             JSH_INSTALL_RETURN=1 JSH_BASH_RUNTIME=0 command "${JSH_ROOT}/bin/jsh" "$@" || return
-            JSH_BASH_RUNTIME=1 exec "${JSH_BASH}" --noprofile --rcfile "${JSH_ROOT}/bin/jsh" -i
+            JSH_RELOADING=1 JSH_BASH_RUNTIME=1 exec "${JSH_BASH}" --noprofile --rcfile "${JSH_ROOT}/bin/jsh" -i
             ;;
           *) JSH_BASH_RUNTIME=0 command "${JSH_ROOT}/bin/jsh" "$@" ;;
         esac
         ;;
       -r | reload)
-        JSH_BASH_RUNTIME=1 exec "${JSH_BASH}" --noprofile --rcfile "${JSH_ROOT}/bin/jsh" -i
+        JSH_RELOADING=1 JSH_BASH_RUNTIME=1 exec "${JSH_BASH}" --noprofile --rcfile "${JSH_ROOT}/bin/jsh" -i
         ;;
-      -h | --help)
-        printf '%s\n' \
-          'Usage: jsh reload' \
-          '' \
-          'This host has no Zsh. Jsh is running with limited Bash functionality.'
-        ;;
+      runtime | '' | -h | --help) JSH_BASH_RUNTIME=0 command "${JSH_ROOT}/bin/jsh" "$@" ;;
       *)
         printf 'jsh: %s is unavailable without Zsh\n' "${1:-shell launch}" >&2
         return 2
@@ -276,7 +278,7 @@ jsh_repair() {
 }
 
 assume_yes=
-if [ "${1:-}" = --yes ]; then
+if [ "${1:-}" = --yes ] || [ "${1:-}" = -y ]; then
   assume_yes=$1
   shift
 fi
@@ -289,7 +291,7 @@ if [ "${1:-}" = adopt ]; then
   exec "${JSH_ROOT}/bin/jadopt" "$@"
 fi
 
-if [ "${1:-}" = runtime ] || [ "${1:-}" = install ] || [ "${1:-}" = update ]; then
+if [ "${1:-}" = install ] || [ "${1:-}" = setup ] || [ "${1:-}" = update ]; then
   action=$1
   shift
   JSH_DIR=${JSH_ROOT}
@@ -311,34 +313,72 @@ if [ "${1:-}" = repair ]; then
 fi
 
 usage() {
-  cat <<'EOF'
-Usage: jsh [zsh-options]
-  jsh [--yes] runtime
-  jsh [--yes] install
-  jsh [--yes] update
-  jsh [--yes] adopt [--dry-run] PATH...
-  jsh repair
+  usage_heading=
+  usage_command=
+  usage_reset=
+  if jsh_color_enabled 1; then
+    usage_heading=$(printf '\033[36m')
+    usage_command=$(printf '\033[32m')
+    usage_reset=$(printf '\033[0m')
+  fi
 
-Open an isolated J shell environment.
-Run jsh runtime to install a persistent command without deploying managed dotfiles.
-Run jsh install to install packages, deploy dotfiles, and configure the system.
-Run jsh update to update the repository, dependencies, packages, and configuration.
-Run jsh adopt to move selected home paths into the shared dotfiles package.
-Run jsh repair to initialize submodules and install the vendored fzf executable.
-Use --yes to accept setup workflow prompts.
-Set JSH_SKIP_HEALTH_CHECK=1 to suppress startup health checks.
-Inside an active J shell, run jsh -r after configuration changes.
+  jsh_banner
+  cat <<EOF
+Open an isolated shell environment.
+
+${usage_heading}Usage${usage_reset}
+  ${usage_command}jsh${usage_reset} [zsh-options]
+  ${usage_command}jsh${usage_reset} [OPTIONS] COMMAND [ARGUMENTS...]
+
+${usage_heading}Commands${usage_reset}
+  ${usage_command}runtime${usage_reset}                    Open the minimal, ephemeral shell (default)
+  ${usage_command}install${usage_reset}                    Add the launcher, core tools, and managed dotfiles
+  ${usage_command}setup${usage_reset}                      Install and configure the managed workstation
+  ${usage_command}update${usage_reset}                     Update Jsh, packages, and configuration
+  ${usage_command}adopt${usage_reset} [--dry-run] PATH...  Move home paths into the shared dotfiles package
+  ${usage_command}repair${usage_reset}                     Initialize submodules and install fzf
+
+${usage_heading}Options${usage_reset}
+  -y, --yes                 Accept prompts without interaction
+  -r                        Reload an active J shell after configuration changes
+
+${usage_heading}Environment${usage_reset}
+  JSH_SKIP_HEALTH_CHECK=1   Suppress startup health checks
 EOF
 }
 
-JSH_ZSH=${JSH_ZSH:-zsh}
-if ! command -v "${JSH_ZSH}" > /dev/null 2>&1; then
-  printf 'jsh: zsh is required but was not found in PATH\n' >&2
-  exit 127
+if [ "${1:-}" = runtime ]; then
+  shift
+  if [ "$#" -ne 0 ]; then
+    printf 'jsh: runtime does not accept arguments\n' >&2
+    exit 2
+  fi
+fi
+
+if [ "$#" -eq 0 ] && [ -n "${JSH:-}" ]; then
+  usage
+  exit 0
 fi
 
 JSH_RUNTIME_DIR=${JSH_RUNTIME_DIR:-${JSH_ROOT}/local/runtime}
 ZDOTDIR=${JSH_ZDOTDIR:-${JSH_ROOT}/dotfiles}
+JSH_ZSH=${JSH_ZSH:-zsh}
+if ! command -v "${JSH_ZSH}" > /dev/null 2>&1; then
+  JSH_BASH=${JSH_BASH:-bash}
+  if ! command -v "${JSH_BASH}" > /dev/null 2>&1 ||
+    ! "${JSH_BASH}" -c '((BASH_VERSINFO[0] > 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 1)))' 2> /dev/null; then
+    printf 'jsh: Zsh or Bash 5.1+ is required but neither was found in PATH\n' >&2
+    exit 127
+  fi
+  if [ "$#" -ne 0 ]; then
+    printf 'jsh: Zsh is unavailable; the Bash fallback accepts no shell options\n' >&2
+    exit 2
+  fi
+  export JSH_ROOT JSH_RUNTIME_DIR JSH_BASH ZDOTDIR
+  JSH_BASH_RUNTIME=1
+  export JSH_BASH_RUNTIME
+  exec "${JSH_BASH}" --noprofile --rcfile "${JSH_ROOT}/bin/jsh" -i
+fi
 
 case ${1:-} in
   -r | reload)

@@ -2,60 +2,76 @@
   <img src=".github/assets/terminal.webp" alt="Jsh terminal prompt" />
 </div>
 
-Jsh provides an isolated shell you can try without replacing your dotfiles, plus an installer for adopting the
-environment across a machine. It supports macOS, Linux, and Windows Subsystem for Linux (WSL).
+Jsh provides a portable shell runtime and two opt-in levels of workstation management. It supports macOS, Linux, and
+Windows Subsystem for Linux (WSL).
+
+![Jsh runtime architecture](assets/runtime.svg)
 
 ## Contents
 
-- [Run Jsh](#run-jsh)
-- [Deploy Jsh Runtime](#deploy-jsh-runtime)
-- [Install Jsh](#install-jsh)
+- [Quick Start](#quick-start)
+- [Choose an Experience](#choose-an-experience)
+- [Update Jsh](#update-jsh)
 - [Included Commands](#included-commands)
 
-## Run Jsh
+## Quick Start
 
-Run the bootstrap script from an interactive terminal:
+On a new machine, run the bootstrap from an interactive terminal:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/jovalle/jsh/main/j.sh | bash
 ```
 
-This clones or updates Jsh in `~/.jsh`, initializes its submodules, and opens an isolated Zsh session. It does not link
-dotfiles into your home directory or run the system configuration scripts. If Git or Zsh is missing, the bootstrap asks
-before installing it with pacman, DNF, or APT on supported Linux distributions, or Homebrew elsewhere.
+This opens the **bare** experience: it clones or updates `~/.jsh`, initializes the runtime submodules, and starts an
+isolated shell. It does not install a launcher, edit PATH or shell startup files, deploy managed dotfiles, install the
+broader package set, change the login shell, or configure the system. If Git and either Zsh or Bash 5.1+ are unavailable,
+the bootstrap asks before installing the missing runtime prerequisites.
 
-Leave the runtime with `exit`.
+Leave the runtime with `exit`. From outside Jsh, `~/.jsh/bin/jsh` and `~/.jsh/bin/jsh runtime` both open it again. Inside
+an active Jsh runtime or a shell configured by install or setup, `jsh` and `jsh runtime` show command help instead of
+nesting another shell.
 
-## Deploy Jsh Runtime
+## Choose an Experience
 
-To keep Jsh available as a command without deploying managed dotfiles or configuring the system, run:
+Jsh has three explicit installation boundaries:
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/jovalle/jsh/main/j.sh | bash -s -- runtime
-```
+| Experience | Command       | Includes                                                                                  |
+| ---------- | ------------- | ----------------------------------------------------------------------------------------- |
+| Bare       | `jsh runtime` | Repository, runtime submodules, and an isolated shell                                     |
+| Slim       | `jsh install` | Bare, persistent launcher and PATH, core tools, managed dotfiles, and default-shell offer |
+| Full       | `jsh setup`   | Slim, all matching package and application layers, and detected platform configuration    |
 
-This installs `jsh` at `~/.local/bin/jsh` and offers to add that directory to your Bash and Zsh startup files. You can
-also run `jsh runtime` from an existing checkout. Afterward, `jsh` opens the isolated shell and `jsh install` starts the
-full installation.
+Each command is its own consent boundary. Runtime remains ephemeral, install applies only the slim shell environment,
+and setup applies the full workstation. Each phase is shown before it runs.
 
-## Install Jsh
-
-Run the same bootstrap with the `install` command:
+To select a persistent experience directly from a new machine, pass its command to the bootstrap:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/jovalle/jsh/main/j.sh | bash -s -- install
+curl -fsSL https://raw.githubusercontent.com/jovalle/jsh/main/j.sh | bash -s -- setup
 ```
 
-The installer checks its prerequisites, clones or updates `~/.jsh`, deploys the managed dotfiles, installs packages, and
-offers the configuration and patching steps for the detected platform. It describes each phase and prompts before it
-runs. Some platform scripts make privileged or destructive changes; review their prompts before accepting them. Add
-`--yes` to accept the setup workflow prompts. After installation, run `jsh update` to update the repository,
-dependencies, packages, and managed configuration.
+Without `-y` or `--yes`, prerequisite installation, repository synchronization, PATH changes, shell changes, and
+configuration steps remain interactive. `--yes` accepts prompts only for the selected command; it never widens runtime
+to install or install to setup.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/jovalle/jsh/main/j.sh | bash -s -- --yes setup
+# From an active runtime:
+jsh --yes setup
+```
 
 Package selection is declared in [`conf/packages.json`](conf/packages.json). Its additive layers match the current
 operating system, Linux distribution, desktop, hostname, and architecture, then feed the native package manager,
 Homebrew, Flatpak, Cargo, uv, and npm installers. Applications with custom release or configuration requirements are
 owned by their component scripts. Installers inspect current state before changing it and verify convergence afterward.
+
+## Update Jsh
+
+Run `jsh update` to update the repository and reconcile the installed experience. Bare updates only the runtime; install
+reconciles core packages and dotfiles; setup also updates all selected packages, applications, and managed configuration.
+The persistent scope is stored at `${XDG_STATE_HOME:-$HOME/.local/state}/jsh/install-profile`. When no state exists, Jsh
+defaults to bare unless deployed Jsh dotfiles identify a legacy full installation.
 
 ## Included Commands
 
@@ -70,7 +86,7 @@ The [`bin/`](bin/) directory is added to `PATH` inside Jsh.
 | [`jadopt`](bin/jadopt)       | Moves selected home paths into the shared dotfiles package.                           |
 | [`jbrew`](bin/jbrew)         | J-augmented {home,linux}brew command. Better cross-platform search and easy adoption. |
 | [`jfetch`](bin/jfetch)       | J-augmented fastfetch-inspired command.                                               |
-| [`jgit`](bin/jgit)           | J-augmented git command.                                                              |
+| [`jgit`](bin/jgit)           | Git identity, history, update, backup, and broken-ref workflows.                      |
 | [`jgraphify`](bin/jgraphify) | Creates or incrementally updates Graphify data for a project.                         |
 | [`jmount`](bin/jmount)       | Mounts SMB and NFS shares from URLs or local profiles.                                |
 | [`jsh`](bin/jsh)             | Opens the isolated shell and dispatches setup, repair, and adoption commands.         |
