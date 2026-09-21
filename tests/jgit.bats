@@ -42,6 +42,13 @@ commit_file() {
     git -C "${repository}" commit -q -m "${subject}"
 }
 
+add_broken_codex_ref() {
+  local repository=$1
+  mkdir -p "${repository}/.git/refs/codex/turn-diffs/checkpoints/session"
+  printf '%s\n' ffffffffffffffffffffffffffffffffffffffff > \
+    "${repository}/.git/refs/codex/turn-diffs/checkpoints/session/broken"
+}
+
 run_jgit() {
   "${JSH_ROOT}/bin/jgit" "$@"
 }
@@ -112,6 +119,24 @@ EOF
 
   [[ ${status} -eq 0 ]]
   [[ $(git config --local jsh.profile) == personal ]]
+}
+
+@test "identity rewrites GitHub HTTPS remotes to SSH" {
+  local repository="${BATS_TEST_TMPDIR}/repository"
+  init_repo "${repository}"
+  git -C "${repository}" remote add origin https://github.com/example/repository.git
+  git -C "${repository}" remote set-url --push origin https://github.com/tester/repository.git
+  git -C "${repository}" remote add upstream git@github.com:upstream/repository.git
+  git -C "${repository}" remote add external https://gitlab.com/example/repository.git
+  cd "${repository}"
+
+  run run_jgit identity set personal
+
+  [[ ${status} -eq 0 ]]
+  [[ $(git remote get-url origin) == git@github.com:example/repository.git ]]
+  [[ $(git remote get-url --push origin) == git@github.com:tester/repository.git ]]
+  [[ $(git remote get-url upstream) == git@github.com:upstream/repository.git ]]
+  [[ $(git remote get-url external) == https://gitlab.com/example/repository.git ]]
 }
 
 @test "create initializes a project and applies the selected profile" {
@@ -332,6 +357,53 @@ EOF
   run run_jgit rewrite
   [[ ${status} -ne 0 ]]
   [[ ${output} == *'requires one or more refs'* ]]
+}
+
+@test "heal previews broken Codex refs without changing them" {
+  local repository="${BATS_TEST_TMPDIR}/repository"
+  init_repo "${repository}"
+  commit_file "${repository}" file one Initial '2026-09-15 10:00:00 +0000'
+  add_broken_codex_ref "${repository}"
+  cd "${repository}"
+
+  run run_jgit heal
+
+  [[ ${status} -ne 0 ]]
+  [[ ${output} == *'Would remove refs/codex/turn-diffs/checkpoints/session/broken'* ]]
+  [[ -f .git/refs/codex/turn-diffs/checkpoints/session/broken ]]
+}
+
+@test "heal backs up and removes broken Codex refs" {
+  local repository="${BATS_TEST_TMPDIR}/repository" backup
+  init_repo "${repository}"
+  commit_file "${repository}" file one Initial '2026-09-15 10:00:00 +0000'
+  add_broken_codex_ref "${repository}"
+  cd "${repository}"
+
+  run run_jgit heal --yes
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == *'Removed refs/codex/turn-diffs/checkpoints/session/broken'* ]]
+  [[ ! -e .git/refs/codex/turn-diffs/checkpoints/session/broken ]]
+  backup=$(find .git -maxdepth 1 -name 'jgit-heal-refs.*.txt')
+  [[ -f ${backup} ]]
+  grep -q 'refs/codex/turn-diffs/checkpoints/session/broken' "${backup}"
+  git for-each-ref --format='%(refname)' | grep -q '^refs/heads/main$'
+}
+
+@test "heal never removes a broken branch" {
+  local repository="${BATS_TEST_TMPDIR}/repository"
+  init_repo "${repository}"
+  commit_file "${repository}" file one Initial '2026-09-15 10:00:00 +0000'
+  printf '%s\n' ffffffffffffffffffffffffffffffffffffffff > \
+    "${repository}/.git/refs/heads/broken"
+  cd "${repository}"
+
+  run run_jgit heal --yes
+
+  [[ ${status} -ne 0 ]]
+  [[ ${output} == *'Broken protected ref requires manual recovery: refs/heads/broken'* ]]
+  [[ -f .git/refs/heads/broken ]]
 }
 
 @test "update fast-forwards one repository and discovers repositories with all" {
