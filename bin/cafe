@@ -364,10 +364,12 @@ run_caffeinate() {
   if [[ ${#cmd[@]} -gt 0 ]]; then
     debug "Running: caffeinate ${args[*]} -- ${cmd[*]}"
     run_tracked "${CAFE_CAFFEINATE_BIN}" "${args[@]}" -- "${cmd[@]}"
+  elif [[ ${duration} -gt 0 ]]; then
+    debug "Running: caffeinate ${args[*]} -t ${duration}"
+    run_tracked "${CAFE_CAFFEINATE_BIN}" "${args[@]}" -t "${duration}"
   else
-    [[ "${duration}" -gt 0 ]] && cmd=(sleep "${duration}") || cmd=(sleep infinity)
-    debug "Running: caffeinate ${args[*]} -- ${cmd[*]}"
-    run_tracked "${CAFE_CAFFEINATE_BIN}" "${args[@]}" -- "${cmd[@]}"
+    debug "Running: caffeinate ${args[*]}"
+    run_tracked "${CAFE_CAFFEINATE_BIN}" "${args[@]}"
   fi
 }
 
@@ -380,7 +382,6 @@ run_systemd_inhibit() {
   local reason="$4"
   shift 4
 
-  local cmd=("$@")
   local what=idle
   [[ "${system}" != true ]] || what=idle:sleep:shutdown
   local args=(
@@ -596,43 +597,43 @@ run_inhibit() {
 
     case "${method}" in
       caffeinate)
-        if run_caffeinate "${duration}" "${display}" "${system}" "${cmd[@]}"; then
+        if run_caffeinate "${duration}" "${display}" "${system}" "$@"; then
           return 0
         else
           method_status=$?
         fi
         ;;
       powershell)
-        if run_powershell_inhibit "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"; then
+        if run_powershell_inhibit "${duration}" "${display}" "${system}" "${reason}" "$@"; then
           return 0
         else
           method_status=$?
         fi
         ;;
       systemd-inhibit)
-        if run_systemd_inhibit "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"; then
+        if run_systemd_inhibit "${duration}" "${display}" "${system}" "${reason}" "$@"; then
           return 0
         else
           method_status=$?
         fi
         ;;
       gnome-session-inhibit)
-        if run_gnome_inhibit "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"; then
+        if run_gnome_inhibit "${duration}" "${display}" "${system}" "${reason}" "$@"; then
           return 0
         else
           method_status=$?
         fi
         ;;
       xdg-screensaver)
-        if run_xdg_inhibit "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"; then
+        if run_xdg_inhibit "${duration}" "${display}" "${system}" "${reason}" "$@"; then
           return 0
         else
           method_status=$?
         fi
         ;;
       fallback)
-        if [[ ${#cmd[@]} -gt 0 ]]; then
-          run_fallback "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"
+        if (($# > 0)); then
+          run_fallback "${duration}" "${display}" "${system}" "${reason}" "$@"
         else
           run_fallback "${duration}" "${display}" "${system}" "${reason}"
         fi
@@ -640,7 +641,7 @@ run_inhibit() {
         ;;
     esac
 
-    if [[ ${#cmd[@]} -gt 0 ]]; then
+    if (($# > 0)); then
       return "${method_status}"
     fi
 
