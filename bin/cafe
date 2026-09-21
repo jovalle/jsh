@@ -270,17 +270,35 @@ show_status() {
   fi
 }
 
+collect_descendants() {
+  local parent_pid=$1 child_pid
+  command -v pgrep >/dev/null 2>&1 || return
+  while IFS= read -r child_pid; do
+    [[ -n ${child_pid} ]] || continue
+    collect_descendants "${child_pid}"
+    CAFE_DESCENDANT_PIDS+=("${child_pid}")
+  done < <(pgrep -P "${parent_pid}" 2>/dev/null || true)
+}
+
 # Stop background cafe
 stop_cafe() {
   if [[ -f "${CAFE_PID_FILE}" ]]; then
-    local pid
+    local pid child_pid
     pid=$(cat "${CAFE_PID_FILE}" 2>/dev/null || true)
     if [[ -n "${pid}" ]]; then
       if kill -0 "${pid}" 2>/dev/null; then
+        local -a CAFE_DESCENDANT_PIDS=()
+        collect_descendants "${pid}"
+        for child_pid in "${CAFE_DESCENDANT_PIDS[@]}"; do
+          kill "${child_pid}" 2>/dev/null || true
+        done
         kill "${pid}" 2>/dev/null || true
         # Wait briefly for clean shutdown
         sleep 0.5
         # Force kill if still running
+        for child_pid in "${CAFE_DESCENDANT_PIDS[@]}"; do
+          kill -9 "${child_pid}" 2>/dev/null || true
+        done
         kill -9 "${pid}" 2>/dev/null || true
         jsh::log_success "Stopped cafe (PID: ${pid})"
       fi

@@ -20,6 +20,7 @@ write_wrapper_backend() {
   cat > "${CAFE_TEST_BIN}/${name}" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "${CAFE_TEST_LOG}"
+[[ -z ${CAFE_TEST_BACKEND_PID_FILE:-} ]] || printf '%s' "${BASHPID}" > "${CAFE_TEST_BACKEND_PID_FILE}"
 duration=
 while (($#)) && [[ $1 != -- ]]; do
   if [[ $1 == -t ]]; then duration=$2; shift 2; else shift; fi
@@ -153,12 +154,22 @@ EOF
 
 @test "background status and stop preserve the public PID-file contract" {
   write_wrapper_backend caffeinate
+  local backend_pid backend_pid_file="${BATS_TEST_TMPDIR}/backend.pid"
   local -a cafe_env=(env PATH="${CAFE_TEST_BIN}:${PATH}" CAFE_PLATFORM=Darwin
-    CAFE_CAFFEINATE_BIN="${CAFE_TEST_BIN}/caffeinate" JSH_PLAIN_OUTPUT=1)
+    CAFE_CAFFEINATE_BIN="${CAFE_TEST_BIN}/caffeinate"
+    CAFE_TEST_BACKEND_PID_FILE="${backend_pid_file}" JSH_PLAIN_OUTPUT=1)
 
   run "${cafe_env[@]}" "${JSH_ROOT}/bin/cafe" --background
   [[ ${status} -eq 0 ]]
   [[ -s "${XDG_RUNTIME_DIR}/cafe.${USER}.pid" ]]
+
+  local attempt
+  for ((attempt = 0; attempt < 50; attempt++)); do
+    [[ -s ${backend_pid_file} ]] && break
+    sleep 0.02
+  done
+  [[ -s ${backend_pid_file} ]]
+  backend_pid=$(cat "${backend_pid_file}")
 
   run "${cafe_env[@]}" "${JSH_ROOT}/bin/cafe" --status
   [[ ${status} -eq 0 ]]
@@ -167,6 +178,8 @@ EOF
   run "${cafe_env[@]}" "${JSH_ROOT}/bin/cafe" --stop
   [[ ${status} -eq 0 ]]
   [[ ! -e "${XDG_RUNTIME_DIR}/cafe.${USER}.pid" ]]
+  run kill -0 "${backend_pid}"
+  [[ ${status} -ne 0 ]]
 }
 
 @test "background startup fails when no inhibitor is available" {

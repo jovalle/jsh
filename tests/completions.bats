@@ -24,7 +24,7 @@ setup() {
         }
       done
 
-      for name in cd git fd ls brew curl uv cat rg cp dpkg open vim; do
+      for name in cd git ls curl cat cp dpkg open vim; do
         [[ -n ${_comps[$name]-} ]] || {
           print -u2 -- "$name: missing completion"
           exit 1
