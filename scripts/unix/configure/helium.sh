@@ -56,7 +56,7 @@ die() {
 usage() {
   cat <<'EOF'
 Usage:
-  helium [apply [--quit]]
+  helium [apply [--quit] [-y|--yes]]
   helium status
   helium open [--] [BROWSER_ARGS...]
   helium stop
@@ -174,7 +174,7 @@ stop_for_apply() {
 }
 
 upgrade_app() {
-  local brew_command milestone installed
+  local brew_command installed
   if [[ ${PLATFORM} == Linux ]]; then
     helium_latest_release
     installed=$(helium_installed_version || true)
@@ -196,19 +196,25 @@ upgrade_app() {
   brew_command="$(command -v brew || true)"
   [[ -n "${brew_command}" ]] || die 1 "Homebrew is required to install or update Helium."
 
-  if [[ ${JSH_UPDATE:-0} != 1 ]] && verify_app >/dev/null 2>&1; then
+  if [[ ${JSH_UPDATE:-0} != 1 ]] && (verify_app) >/dev/null 2>&1; then
     return 0
   fi
 
-  "${brew_command}" update || die 1 "Homebrew could not update package metadata."
+  if [[ ${JSH_UPDATE:-0} != 1 ]]; then
+    "${brew_command}" update || die 1 "Homebrew could not update package metadata."
+  fi
+  export HOMEBREW_NO_AUTO_UPDATE=1
   if "${brew_command}" list --cask helium-browser >/dev/null 2>&1; then
     "${brew_command}" upgrade --cask helium-browser || die 1 "Homebrew could not update Helium."
-    milestone="$(chromium_milestone 2>/dev/null || true)"
-    if [[ ! "${milestone}" =~ ^[0-9]+$ ]] || (( milestone < MIN_CHROMIUM_MILESTONE )); then
-      "${brew_command}" reinstall --cask --force helium-browser || die 1 "Homebrew could not replace the outdated Helium application."
-    fi
   else
     "${brew_command}" install --cask --force helium-browser || die 1 "Homebrew could not install Helium."
+  fi
+  repair_app_metadata
+  if ! (verify_app); then
+    jsh::log_warn "Helium failed verification; reinstalling the Homebrew cask once."
+    "${brew_command}" reinstall --cask --force helium-browser || die 1 "Homebrew could not repair Helium."
+    repair_app_metadata
+    verify_app
   fi
 }
 
@@ -242,7 +248,7 @@ helium_installed_version() {
 install_linux_launcher() {
   local applications=${XDG_DATA_HOME:-${HOME}/.local/share}/applications
   local temporary ensure_status
-  [[ ${PLATFORM} == Linux ]] || return
+  [[ ${PLATFORM} == Linux ]] || return 0
   mkdir -p "${JSH_ROOT}/tmp"
   temporary=$(mktemp "${JSH_ROOT}/tmp/helium.desktop.XXXXXXXXXX")
   jsh_interrupt_cleanup_path "${temporary}"
@@ -261,6 +267,19 @@ install_linux_launcher() {
   rm -f -- "${temporary}"
 }
 
+# Finder metadata is not signed content. Preserve quarantine and all other attributes.
+repair_app_metadata() {
+  [[ ${PLATFORM} == Darwin && -d ${APP_PATH} ]] || return 0
+  local diagnostic
+  if diagnostic=$(/usr/bin/codesign --verify --deep --strict "${APP_PATH}" 2>&1); then
+    return 0
+  fi
+  [[ ${diagnostic} == *'resource fork, Finder information, or similar detritus not allowed'* ]] || return 0
+  jsh::log_warn "Removing Finder metadata that prevents Helium signature verification."
+  /usr/bin/xattr -dr com.apple.FinderInfo "${APP_PATH}" || die 1 "Cannot remove Helium Finder metadata."
+  /usr/bin/xattr -dr com.apple.ResourceFork "${APP_PATH}" || die 1 "Cannot remove Helium resource forks."
+}
+
 verify_app() {
   local milestone installed
   if [[ ${PLATFORM} == Darwin ]]; then
@@ -268,10 +287,10 @@ verify_app() {
     local bundle_id team_id
     bundle_id="$(plist_value "${APP_PATH}" CFBundleIdentifier)" || die 1 "Cannot read Helium's bundle identifier."
     [[ "${bundle_id}" == "${EXPECTED_BUNDLE_ID}" ]] || die 1 "The installed app is not the expected Helium bundle."
-    /usr/bin/codesign --verify --deep --strict "${APP_PATH}" >/dev/null 2>&1 || die 1 "Helium's code signature is invalid."
+    /usr/bin/codesign --verify --deep --strict "${APP_PATH}" || die 1 "Helium's code signature is invalid."
     team_id="$(/usr/bin/codesign -dv --verbose=4 "${APP_PATH}" 2>&1 | /usr/bin/sed -n 's/^TeamIdentifier=//p')"
     [[ "${team_id}" == "${EXPECTED_TEAM_ID}" ]] || die 1 "Helium is not signed by the expected developer team."
-    /usr/sbin/spctl -a -t exec "${APP_PATH}" >/dev/null 2>&1 || die 1 "Gatekeeper rejected Helium."
+    /usr/sbin/spctl -a -t exec "${APP_PATH}" || die 1 "Gatekeeper rejected Helium."
   else
     app_executable >/dev/null || die 1 "Helium is not installed. Run apply first."
     helium_latest_release
@@ -300,6 +319,12 @@ verify_extension_policy() {
     profile_helper verify-policy-file \
       "${POLICY_PATH}" "${extension_ids[@]}" -- "${force_ids[@]}"
   fi
+}
+
+require_policy_privileges() {
+  verify_extension_policy >/dev/null 2>&1 && return 0
+  /usr/bin/sudo -v || die 1 \
+    "Administrator authentication is required for ${POLICY_PATH}. Run sudo -v in your terminal, then rerun jsh --yes update."
 }
 
 install_extension_policy() {
@@ -599,16 +624,19 @@ apply_profile() {
 
 apply() {
   local quit=false
-  case "${1:-}" in
-    '') ;;
-    --quit) quit=true ;;
-    *) die 64 "apply accepts only --quit." ;;
-  esac
-  [[ "$#" -le 1 ]] || die 64 "apply accepts only --quit."
+  local argument
+  for argument in "$@"; do
+    case ${argument} in
+      --quit) quit=true ;;
+      -y | --yes) export JSH_ASSUME_YES=1 ;;
+      *) die 64 "apply accepts only --quit and -y/--yes." ;;
+    esac
+  done
   if [[ ${JSH_CONFIGURE_DRY_RUN:-0} == 1 ]]; then
     jsh::log_detail 'Would inspect, update, and harden Helium.'
     return
   fi
+  load_brew
   require_command node
   require_command sqlite3
   if [[ ${PLATFORM} == Darwin ]]; then
@@ -620,6 +648,7 @@ apply() {
     return 0
   fi
 
+  require_policy_privileges
   stop_for_apply "${quit}"
   upgrade_app
   verify_app
