@@ -96,24 +96,26 @@ fi
 
 usage() {
   cat <<'EOF'
-Usage: j.sh [--yes] [runtime|install|update]
+Usage: j.sh [-y|--yes] [runtime|install|setup|update]
 
-With no arguments, install or update Jsh and open an isolated shell environment.
-Run with runtime to install a persistent jsh command without deploying managed dotfiles.
-Run with install to install packages, deploy dotfiles, and configure the system.
+With no arguments, prepare and open the isolated Jsh runtime.
+Run with runtime for the same minimal, ephemeral experience.
+Run with install to add the launcher, core shell tools, and managed dotfiles.
+Run with setup to install and configure the complete managed workstation.
 Run with update to update Jsh and reapply the managed environment.
-Use --yes to accept setup workflow prompts.
+Use -y or --yes to accept prompts for the selected command without interactive input.
 EOF
 }
 
-mode=shell
+mode=runtime
 command_seen=0
 while (($#)); do
   case $1 in
-    --yes)
+    -y | --yes)
       export JSH_ASSUME_YES=1 JSH_CONFIGURE_ASSUME_YES=1 JSH_UPDATE_ASSUME_YES=1
+      export JSH_NON_INTERACTIVE=1
       ;;
-    runtime | install | update)
+    runtime | install | setup | update)
       if ((command_seen)); then
         jsh_error "Too many commands."
         usage >&2
@@ -135,10 +137,16 @@ while (($#)); do
   shift
 done
 
+install_profile=
+case ${mode} in
+  install) install_profile=slim ;;
+  setup) install_profile=full ;;
+esac
+
 declare -F jsh_env_detect > /dev/null && jsh_env_detect
 
 if ! ( : <> "${TTY}" ) 2>/dev/null; then
-  if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then
+  if [[ ${JSH_ASSUME_YES:-0} == 1 || ${JSH_NON_INTERACTIVE:-0} == 1 ]]; then
     TTY=/dev/null
   else
     jsh_error "jsh needs an interactive terminal."
@@ -152,7 +160,7 @@ if declare -F jsh::init > /dev/null; then
 fi
 
 if [[ -r /proc/self/status ]] && grep -Eq '^NoNewPrivs:[[:space:]]+1$' /proc/self/status; then
-  if [[ ${mode} == install || ${mode} == update ]]; then
+  if [[ ${mode} == install || ${mode} == setup || ${mode} == update ]]; then
     jsh_error "This session prohibits privilege elevation. Run Jsh from a regular terminal."
     exit 1
   fi
@@ -175,6 +183,10 @@ confirm() {
     return
   fi
   [[ ${JSH_ASSUME_YES:-0} == 1 ]] && return 0
+  if [[ ${JSH_NON_INTERACTIVE:-0} == 1 ]]; then
+    [[ ${default} == yes ]]
+    return
+  fi
   [[ ${default} == no ]] && prompt='y/N'
   while :; do
     jsh_prompt "$1 [${prompt}] " > "${TTY}"
@@ -253,12 +265,13 @@ install_prerequisites() {
   local install_mode=$1 prompt_for_install=$2 manager package
   local -a packages=()
   command -v git > /dev/null 2>&1 || packages+=(git)
-  command -v zsh > /dev/null 2>&1 || packages+=(zsh)
   if [[ ${install_mode} == install ]]; then
+    command -v zsh > /dev/null 2>&1 || packages+=(zsh)
     command -v make > /dev/null 2>&1 || packages+=(make)
     command -v jq > /dev/null 2>&1 || packages+=(jq)
     command -v curl > /dev/null 2>&1 || packages+=(curl)
-    if ! command -v bash > /dev/null 2>&1 || ! bash -c '((BASH_VERSINFO[0] >= 5))' 2> /dev/null; then
+    if ! command -v bash > /dev/null 2>&1 ||
+      ! bash -c '((BASH_VERSINFO[0] > 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 1)))' 2> /dev/null; then
       packages+=(bash)
     fi
     if ! command -v python3 > /dev/null 2>&1; then
@@ -268,12 +281,16 @@ install_prerequisites() {
       fi
       packages+=("${package}")
     fi
+  elif ! command -v zsh > /dev/null 2>&1 &&
+    { ! command -v bash > /dev/null 2>&1 ||
+      ! bash -c '((BASH_VERSINFO[0] > 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 1)))' 2> /dev/null; }; then
+    packages+=(zsh)
   fi
 
   if ((${#packages[@]} > 0)); then
     jsh_warn "Missing required tools: ${packages[*]}"
     if [[ ${prompt_for_install} == 1 ]] && ! confirm "Install them now?"; then
-      jsh_error "Git and Zsh are required to try Jsh."
+      jsh_error "Git and either Zsh or Bash 5.1+ are required to try Jsh."
       return 1
     fi
     if linux_package_manager > /dev/null; then
@@ -381,14 +398,97 @@ update_repository() {
 }
 
 setup_system() {
+  local profile=${1:-full}
   if [[ ! -f "${JSH_DIR}/Makefile" ]]; then
     jsh_error "Repository is unavailable at ${JSH_DIR}. Run the repository phase first."
     exit 1
   fi
 
-  JSH_UPDATE=1 run_make_target install
-  run_make_target deploy
-  run_make_target configure
+  case ${profile} in
+    slim)
+      install_core_packages
+      run_make_target deploy
+      if [[ -x "${JSH_DIR}/scripts/unix/configure/shell.sh" ]]; then
+        "${JSH_DIR}/scripts/unix/configure/shell.sh" < "${TTY}"
+      fi
+      ;;
+    full)
+      JSH_UPDATE=1 run_make_target install
+      run_make_target deploy
+      run_make_target configure
+      ;;
+    *)
+      jsh_error "Unknown install profile: ${profile}"
+      return 2
+      ;;
+  esac
+}
+
+install_core_packages() {
+  run_make_target essentials
+}
+
+update_full_packages() {
+  (export JSH_UPDATE=1; run_make_target install)
+}
+
+install_profile_state_file() {
+  printf '%s\n' "${JSH_PROFILE_STATE_FILE:-${XDG_STATE_HOME:-${HOME}/.local/state}/jsh/install-profile}"
+}
+
+read_install_profile() {
+  local state_file profile
+  state_file=$(install_profile_state_file)
+  if [[ -r ${state_file} ]]; then
+    IFS= read -r profile < "${state_file}" || true
+    case ${profile} in
+      bare | slim | full) printf '%s\n' "${profile}"; return ;;
+      *) jsh_error "Invalid Jsh install profile in ${state_file}: ${profile}"; return 1 ;;
+    esac
+  fi
+  if [[ -e ${HOME}/.zshrc && ${HOME}/.zshrc -ef ${JSH_DIR}/dotfiles/.zshrc ]]; then
+    printf '%s\n' full
+  else
+    printf '%s\n' bare
+  fi
+}
+
+record_install_profile() {
+  local profile=$1 state_file state_dir temporary
+  case ${profile} in bare | slim | full) ;; *) return 2 ;; esac
+  state_file=$(install_profile_state_file)
+  state_dir=${state_file%/*}
+  mkdir -p -- "${state_dir}"
+  temporary=$(mktemp "${state_dir}/.install-profile.XXXXXX")
+  printf '%s\n' "${profile}" > "${temporary}"
+  chmod 0600 "${temporary}"
+  mv -f -- "${temporary}" "${state_file}"
+}
+
+update_environment() {
+  local profile=$1
+  run_update_step "Repository and submodules" update_repository
+  case ${profile} in
+    bare)
+      run_update_step "Runtime prerequisites" install_prerequisites shell 0
+      ;;
+    slim)
+      run_update_step "Prerequisites" install_prerequisites install 0
+      run_update_step "Core shell packages" install_core_packages
+      run_update_step "Dotfiles" run_make_target deploy
+      ;;
+    full)
+      run_update_step "Prerequisites" install_prerequisites install 0
+      run_update_step "Packages and dependencies" update_full_packages
+      run_update_step "Betterfox" "${JSH_DIR}/scripts/unix/configure/waterfox.sh" update
+      run_update_step "Dotfiles" run_make_target deploy
+      run_update_step "Configuration" run_make_target configure
+      ;;
+    *)
+      jsh_error "Unknown install profile: ${profile}"
+      return 2
+      ;;
+  esac
 }
 
 run_make_target() {
@@ -499,52 +599,28 @@ print_update_summary() {
 }
 
 jsh_banner
-if [[ ${mode} == shell ]]; then
-  jsh_info "jsh"
-  jsh_detail "Install directory: ${JSH_DIR}"
-  jsh_detail "This opens an isolated shell without changing your dotfiles or system configuration."
-  install_prerequisites shell 1
-  sync_repository
-  jsh_blank
-  jsh_success "Jsh is ready."
-  jsh_detail "When you want the full Jsh experience, run: jsh install"
-  jsh_blank
-  exec "${JSH_DIR}/bin/jsh" < "${TTY}"
-fi
-
 if [[ ${mode} == runtime ]]; then
   if declare -F jsh::title > /dev/null; then jsh::title "jsh runtime"; else jsh_info "jsh runtime"; fi
   jsh_detail "Install directory: ${JSH_DIR}"
-  jsh_detail "This installs an opt-in J shell without deploying managed dotfiles or configuring the system."
+  jsh_detail "This opens an isolated J shell without installing a launcher, deploying dotfiles, or configuring the system."
 
-  heading "1/3" "Prerequisites" "Ensure Git and Zsh are available."
+  heading "1/2" "Prerequisites" "Ensure Git and either Zsh or Bash 5.1+ are available."
   if confirm "Run this phase?"; then
     install_prerequisites shell 0
   else
     jsh_note "Skipped prerequisites."
   fi
 
-  heading "2/3" "Repository" "Clone ${JSH_REPO}, or fast-forward an existing clean checkout."
+  heading "2/2" "Repository" "Clone ${JSH_REPO}, or fast-forward an existing clean checkout."
   if confirm "Run this phase?"; then
     sync_repository
   else
     jsh_note "Skipped repository sync."
   fi
 
-  heading "3/3" "Shell runtime" "Install the launcher, configure Bash and Zsh PATH, and optionally change default shell to Zsh."
-  if confirm "Run this phase?"; then
-    install_runtime_launcher
-    configure_runtime_path
-    if [[ -x "${JSH_DIR}/scripts/unix/configure/shell.sh" ]]; then
-      "${JSH_DIR}/scripts/unix/configure/shell.sh" < "${TTY}"
-    fi
-  else
-    jsh_note "Skipped shell runtime installation."
-  fi
-
   jsh_blank
-  jsh_success "Runtime installation finished."
-  if [[ ${JSH_INSTALL_RETURN:-0} == 1 ]]; then
+  jsh_success "Jsh runtime is ready."
+  if [[ ${JSH_INSTALL_RETURN:-0} == 1 || ${TTY} == /dev/null ]]; then
     declare -F jsh::cleanup > /dev/null && jsh::cleanup
     exit 0
   fi
@@ -557,13 +633,10 @@ if [[ ${mode} == update ]]; then
   declare -a UPDATE_SUCCEEDED=() UPDATE_WARNINGS=() UPDATE_ERRORS=()
   if declare -F jsh::title > /dev/null; then jsh::title "jsh update"; else jsh_info "jsh update"; fi
   jsh_detail "Install directory: ${JSH_DIR}"
-  export JSH_CONTINUE_ON_ERROR=1 JSH_UPDATE=1
-  run_update_step "Repository and submodules" update_repository
-  run_update_step "Prerequisites" install_prerequisites install 0
-  run_update_step "Packages and dependencies" run_make_target install
-  run_update_step "Betterfox" "${JSH_DIR}/scripts/unix/configure/waterfox.sh" update
-  run_update_step "Dotfiles" run_make_target deploy
-  run_update_step "Configuration" run_make_target configure
+  install_profile=$(read_install_profile)
+  jsh_detail "Installed experience: ${install_profile}"
+  export JSH_CONTINUE_ON_ERROR=1
+  update_environment "${install_profile}"
   print_update_summary
   ((${#UPDATE_ERRORS[@]} == 0))
   declare -F jsh::cleanup > /dev/null && jsh::cleanup
@@ -572,11 +645,11 @@ fi
 
 if declare -F jsh::title > /dev/null; then jsh::title "jsh ${mode}"; else jsh_info "jsh ${mode}"; fi
 jsh_detail "Install directory: ${JSH_DIR}"
-jsh_detail "Each phase explains its changes before it runs."
+jsh_detail "This command applies the ${install_profile} managed experience."
 
-heading "1/3" "Prerequisites" "Install Homebrew when needed, then ensure Git, Make, Zsh, Bash 5, and Python 3 are available."
+heading "1/3" "Runtime prerequisites" "Ensure Git and either Zsh or Bash 5.1+ are available."
 if confirm "Run this phase?"; then
-  install_prerequisites install 0
+  install_prerequisites shell 0
 else
   jsh_note "Skipped prerequisites."
 fi
@@ -589,20 +662,26 @@ else
 fi
 
 load_repository_ui
-promote_workstation_ui
+if [[ ${install_profile} == full ]]; then
+  promote_workstation_ui
+fi
 
-heading "3/3" "System setup" "Deploy dotfiles, install packages, then run the conversational configuration scripts for this platform."
+heading "3/3" "Apply ${install_profile}" "Install only the components included in this command."
 if confirm "Run this phase?"; then
   jsh_blank
   install_runtime_launcher
   configure_runtime_path
-  setup_system
+  if [[ ${install_profile} == slim || ${install_profile} == full ]]; then
+    install_prerequisites install 0
+    setup_system "${install_profile}"
+  fi
+  record_install_profile "${install_profile}"
 else
-  jsh_note "Skipped system setup."
+  jsh_note "Skipped ${install_profile} setup."
 fi
 
 jsh_blank
-jsh_success "Installation finished."
+jsh_success "Jsh ${mode} finished."
 if [[ ${JSH_INSTALL_RETURN:-0} == 1 || ${TTY} == /dev/null || ${JSH_ASSUME_YES:-0} == 1 ]]; then
   declare -F jsh::cleanup > /dev/null && jsh::cleanup
   exit 0

@@ -5,6 +5,9 @@
       "id": "core",
       "match": { "os": ["darwin", "linux"] },
       "install": {
+        "apt": ["bash", "curl", "git", "jq", "make", "python3", "unzip", "zip", "zsh"],
+        "dnf": ["bash", "curl", "git", "jq", "make", "python3", "unzip", "zip", "zsh"],
+        "pacman": ["bash", "curl", "git", "jq", "make", "python", "unzip", "zip", "zsh"],
         "brew": {
           "formulae": ["bash", "gum", "jq", "unzip", "zip", "zsh"]
         }
@@ -53,7 +56,9 @@
             "just",
             "jq",
             "k9s",
+            "kew",
             "kubernetes-cli",
+            "leaf",
             "make",
             "mpv",
             "ncdu",
@@ -85,7 +90,7 @@
             "xz"
           ]
         },
-        "cargo": ["ripgrep", "fd-find", "eza"],
+        "cargo": ["eza", "fd-find", "leaf", "ripgrep"],
         "uv": ["pre-commit-hooks", "tmail-cli"],
         "npm": {}
       }
@@ -132,14 +137,15 @@
             "fantastical",
             "font-jetbrains-mono-nerd-font",
             "ghostty",
+            "helium-browser",
             "signal",
             "spotify",
+            "sublime-text",
             "tailscale-app",
             "todoist-app",
             "visual-studio-code",
             "vorssaint",
             "waterfox",
-            "zed",
             "zoom"
           ]
         }
@@ -149,7 +155,7 @@
       "id": "linux",
       "match": { "os": ["linux"] },
       "install": {
-        "flatpak": ["com.spotify.Client", "com.todoist.Todoist", "dev.zed.Zed"]
+        "flatpak": ["com.spotify.Client", "com.todoist.Todoist"]
       }
     },
     {

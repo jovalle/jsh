@@ -7,6 +7,80 @@ setup() {
   export JSH_ROOT
   JSH_ROOT=$(cd -- "${BATS_TEST_DIRNAME}/.." && pwd -P)
 }
+
+run_in_pty() {
+  python3 - "$1" <<'PY'
+import errno
+import os
+import pty
+import select
+import signal
+import subprocess
+import sys
+import time
+
+command = sys.argv[1]
+timeout = float(os.environ.get("JSH_TEST_PTY_TIMEOUT", "10"))
+master, slave = pty.openpty()
+process = subprocess.Popen(
+  ["/bin/sh", "-c", command],
+  stdin=slave,
+  stdout=slave,
+  stderr=slave,
+  start_new_session=True,
+)
+os.close(slave)
+deadline = time.monotonic() + timeout
+timed_out = False
+
+while process.poll() is None:
+  remaining = deadline - time.monotonic()
+  if remaining <= 0:
+    timed_out = True
+    os.killpg(process.pid, signal.SIGTERM)
+    try:
+      process.wait(timeout=0.5)
+    except subprocess.TimeoutExpired:
+      os.killpg(process.pid, signal.SIGKILL)
+    break
+  readable, _, _ = select.select([master], [], [], min(0.1, remaining))
+  if readable:
+    try:
+      os.write(sys.stdout.fileno(), os.read(master, 4096))
+    except OSError as error:
+      if error.errno != errno.EIO:
+        raise
+      break
+
+while select.select([master], [], [], 0)[0]:
+  try:
+    data = os.read(master, 4096)
+  except OSError as error:
+    if error.errno == errno.EIO:
+      break
+    raise
+  if not data:
+    break
+  os.write(sys.stdout.fileno(), data)
+os.close(master)
+
+if timed_out:
+  print(f"PTY command timed out after {timeout:g}s", file=sys.stderr)
+  sys.exit(124)
+sys.exit(process.wait())
+PY
+}
+
+parse_bootstrap_command() {
+  env JSH_DIR="${BATS_TEST_TMPDIR}/missing" bash -c '
+    root=$1
+    shift
+    parser=$(sed "/^declare -F jsh_env_detect/,$ d" "$root/j.sh")
+    eval "$parser"
+    printf "%s|%s\n" "$mode" "${install_profile:-none}"
+  ' _ "${JSH_ROOT}" "$@"
+}
+
 @test "non-interactive mode always selects the plain backend" {
   run env JSH_NON_INTERACTIVE=1 JSH_INTERACTIVE=1 JSH_REMOTE=0 \
     JSH_UI_BACKEND=auto bash -c '
@@ -51,6 +125,191 @@ setup() {
 
   [[ ${status} -eq 0 ]]
   [[ ${output} == "${BATS_TEST_TMPDIR}/data/tools/gum/1.9.0/linux-amd64/gum" ]]
+}
+
+@test "bootstrap accepts the short non-interactive flag" {
+  run "${JSH_ROOT}/j.sh" -y --help
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == *'Usage: j.sh [-y|--yes]'* ]]
+  [[ ${output} == *'runtime|install|setup|update'* ]]
+}
+
+@test "assume yes never widens the selected command" {
+  run parse_bootstrap_command --yes
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == 'runtime|none' ]]
+
+  run parse_bootstrap_command --yes install
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == 'install|slim' ]]
+
+  run parse_bootstrap_command --yes setup
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == 'setup|full' ]]
+}
+
+@test "launcher shows help instead of nesting inside an active Jsh shell" {
+  run env JSH="${JSH_ROOT}" JSH_ZSH=missing-zsh "${JSH_ROOT}/bin/jsh"
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == *'jsh [zsh-options]'* ]]
+
+  run env JSH="${JSH_ROOT}" JSH_ZSH=missing-zsh "${JSH_ROOT}/bin/jsh" runtime
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == *'jsh [zsh-options]'* ]]
+}
+
+@test "Bash runtime shows command help for bare jsh invocation" {
+  run bash -c '
+    export JSH_BASH_RUNTIME=1 JSH_ROOT="$1" JSH_RUNTIME_DIR="$2" JSH_BASH="$BASH"
+    source "$JSH_ROOT/bin/jsh"
+    jsh
+  ' _ "${JSH_ROOT}" "${BATS_TEST_TMPDIR}/runtime"
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == *'jsh [zsh-options]'* ]]
+}
+
+@test "launcher help colors headings and commands unless NO_COLOR is set" {
+  run env JSH_COLOR=always "${JSH_ROOT}/bin/jsh" --help
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == *$'\033[1;36m   :%@@@@@@@@@#*#@%-'* ]]
+  [[ ${output} == *$'\033[36mUsage\033[0m'* ]]
+  [[ ${output} == *$'\033[32mruntime\033[0m'* ]]
+
+  run env JSH_COLOR=always NO_COLOR= "${JSH_ROOT}/bin/jsh" --help
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} != *$'\033'* ]]
+  [[ ${output} == *'jsh [OPTIONS] COMMAND [ARGUMENTS...]'* ]]
+}
+
+@test "isolated runtimes show the graffiti banner once on fresh startup" {
+  local banner_marker=':%@@@@@@@@@#*#@%-' banner_tail
+
+  run env JSH_BASH_RUNTIME=1 JSH_ROOT="${JSH_ROOT}" \
+    JSH_RUNTIME_DIR="${BATS_TEST_TMPDIR}/bash-runtime" JSH_BASH="${BASH}" \
+    JSH_COLOR=never bash -c 'source "$JSH_ROOT/bin/jsh"'
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == *':%@@@@@@@@@#*#@%-'* ]]
+
+  run env HOME="${BATS_TEST_TMPDIR}" JSH_LOAD_CONFIG=0 \
+    JSH_RUNTIME_DIR="${BATS_TEST_TMPDIR}/zsh-runtime" JSH_COLOR=never \
+    zsh -d -c 'source "$1/dotfiles/.zshrc"; jsh -r' _ "${JSH_ROOT}"
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == *"${banner_marker}"* ]]
+  banner_tail=${output#*"${banner_marker}"}
+  [[ ${banner_tail} != *"${banner_marker}"* ]]
+}
+
+@test "reloads and ordinary Zsh startup omit the graffiti banner" {
+  run env JSH_BASH_RUNTIME=1 JSH_RELOADING=1 JSH_ROOT="${JSH_ROOT}" \
+    JSH_RUNTIME_DIR="${BATS_TEST_TMPDIR}/bash-runtime" JSH_BASH="${BASH}" \
+    JSH_COLOR=never bash -c 'source "$JSH_ROOT/bin/jsh"'
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} != *':%@@@@@@@@@#*#@%-'* ]]
+
+  run env HOME="${BATS_TEST_TMPDIR}" JSH_LOAD_CONFIG=0 JSH_RELOADING=1 \
+    JSH_RUNTIME_DIR="${BATS_TEST_TMPDIR}/zsh-runtime" JSH_COLOR=never \
+    zsh -d -c 'source "$1/dotfiles/.zshrc"' _ "${JSH_ROOT}"
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} != *':%@@@@@@@@@#*#@%-'* ]]
+
+  run env HOME="${BATS_TEST_TMPDIR}" JSH_LOAD_CONFIG=0 JSH_COLOR=never \
+    zsh -d -c 'source "$1/dotfiles/.zshrc"' _ "${JSH_ROOT}"
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} != *':%@@@@@@@@@#*#@%-'* ]]
+}
+
+@test "launcher dispatches setup and rejects removed install profiles" {
+  run "${JSH_ROOT}/bin/jsh" setup --help
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == *'Run with setup to install and configure'* ]]
+
+  run "${JSH_ROOT}/j.sh" install slim
+
+  [[ ${status} -eq 2 ]]
+  [[ ${output} == *'Unknown argument: slim'* ]]
+}
+
+@test "launcher enters the Bash runtime when Zsh is unavailable" {
+  local bash_wrapper="${BATS_TEST_TMPDIR}/bash-wrapper" calls="${BATS_TEST_TMPDIR}/bash-calls"
+  cat > "${bash_wrapper}" << 'EOF'
+#!/bin/sh
+if [ "${1:-}" = -c ]; then
+  exec "${REAL_BASH}" "$@"
+fi
+printf 'runtime=%s args=%s\n' "${JSH_BASH_RUNTIME:-0}" "$*" > "${BASH_CALLS}"
+EOF
+  chmod +x "${bash_wrapper}"
+
+  run env JSH= JSH_ZSH=missing-zsh JSH_BASH="${bash_wrapper}" REAL_BASH="${BASH}" \
+    BASH_CALLS="${calls}" JSH_SKIP_HEALTH_CHECK=1 "${JSH_ROOT}/bin/jsh"
+
+  [[ ${status} -eq 0 ]]
+  grep -Fq "runtime=1 args=--noprofile --rcfile ${JSH_ROOT}/bin/jsh -i" "${calls}"
+}
+
+@test "launcher spins through startup stages and clears before the shell" {
+  local tool_dir="${BATS_TEST_TMPDIR}/healthy-tools"
+  local clear_screen=$'\033[2J\033[H' launch_command
+  mkdir -p "${tool_dir}"
+  printf '#!/bin/sh\nexit 0\n' > "${tool_dir}/git"
+  printf '#!/bin/sh\nprintf "test-version\\n"\n' > "${tool_dir}/fzf"
+  printf '#!/bin/sh\nprintf "SHELL_STARTED\\n"\n' > "${tool_dir}/zsh"
+  chmod +x "${tool_dir}/git" "${tool_dir}/fzf" "${tool_dir}/zsh"
+  printf -v launch_command \
+    'env JSH= PATH=%q TERM=xterm JSH_ZSH=%q JSH_COLOR=never %q' \
+    "${tool_dir}:/usr/bin:/bin" "${tool_dir}/zsh" "${JSH_ROOT}/bin/jsh"
+
+  run run_in_pty "${launch_command}"
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == *'Checking required tools'* ]]
+  [[ ${output} == *'Checking bundled plugins'* ]]
+  [[ ${output} == *'Checking fzf runtime'* ]]
+  [[ ${output} == *'Checking pinned revisions'* ]]
+  [[ ${output} == *"${clear_screen}"*'SHELL_STARTED'* ]]
+  [[ ${output} != *'✓ Git:'* ]]
+}
+
+@test "launcher keeps startup failures visible without clearing the screen" {
+  local tool_dir="${BATS_TEST_TMPDIR}/failing-tools"
+  local clear_screen=$'\033[2J\033[H' launch_command
+  mkdir -p "${tool_dir}"
+  printf '#!/bin/sh\nprintf "test-version\\n"\n' > "${tool_dir}/fzf"
+  printf '#!/bin/sh\nprintf "SHELL_STARTED\\n"\n' > "${tool_dir}/zsh"
+  ln -s /bin/sleep "${tool_dir}/sleep"
+  chmod +x "${tool_dir}/fzf" "${tool_dir}/zsh"
+  printf -v launch_command \
+    '/usr/bin/env JSH= PATH=%q TERM=xterm JSH_ZSH=%q JSH_COLOR=never %q </dev/null' \
+    "${tool_dir}" "${tool_dir}/zsh" "${JSH_ROOT}/bin/jsh"
+
+  run run_in_pty "${launch_command}"
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == *'Checking required tools'* ]]
+  [[ ${output} == *'✗ Git is unavailable.'* ]]
+  [[ ${output} == *'✗ Jsh needs attention.'* ]]
+  [[ ${output} == *'Run `jsh repair` to fix startup dependencies'* ]]
+  [[ ${output} == *'SHELL_STARTED'* ]]
+  [[ ${output} != *"${clear_screen}"* ]]
+}
+
+@test "PTY launcher tests terminate stuck process groups" {
+  JSH_TEST_PTY_TIMEOUT=0.1 run run_in_pty 'sleep 30'
+
+  [[ ${status} -eq 124 ]]
+  [[ ${output} == *'PTY command timed out after 0.1s'* ]]
 }
 
 @test "remote interactive sessions are capped at the shell backend" {
@@ -283,6 +542,40 @@ EOF
 
   [[ ${status} -eq 0 ]]
   [[ ${output} == work ]]
+}
+
+@test "open uses leaf for Markdown targets" {
+  local commands="${BATS_TEST_TMPDIR}/commands" calls="${BATS_TEST_TMPDIR}/open-calls"
+  mkdir -p "${commands}"
+  for command in leaf xdg-open; do
+    cat > "${commands}/${command}" <<'EOF'
+#!/bin/sh
+printf '%s:%s\n' "${0##*/}" "$*" >> "${OPEN_CALLS}"
+EOF
+    chmod +x "${commands}/${command}"
+  done
+
+  run env HOME="${BATS_TEST_TMPDIR}" PATH="${commands}:${PATH}" JSH_LOAD_CONFIG=0 \
+    OPEN_CALLS="${calls}" zsh -f -c '
+      source "$1/dotfiles/.zshrc" >/dev/null
+      path=("$3" $path)
+      rehash
+      JSH_OS=linux
+      open "$2/guide.MD" "$2/notes.txt"
+    ' _ "${JSH_ROOT}" "${BATS_TEST_TMPDIR}" "${commands}"
+
+  [[ ${status} -eq 0 ]]
+  [[ $(cat "${calls}") == $'leaf:'"${BATS_TEST_TMPDIR}"$'/guide.MD\nxdg-open:'"${BATS_TEST_TMPDIR}"'/notes.txt' ]]
+}
+
+@test "Zsh reload replaces the legacy AWS profile alias" {
+  run env HOME="${BATS_TEST_TMPDIR}" JSH_LOAD_CONFIG=0 zsh -f -c '
+    alias awsp="echo legacy"
+    source "$1/dotfiles/.zshrc" >/dev/null
+    [[ $+functions[awsp] -eq 1 && $+aliases[awsp] -eq 0 ]]
+  ' _ "${JSH_ROOT}"
+
+  [[ ${status} -eq 0 ]]
 }
 
 @test "plain selectors return stable IDs instead of labels" {

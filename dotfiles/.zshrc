@@ -108,6 +108,8 @@ bindkey -M viins '^S' history-incremental-search-forward
 # Delete key fixes for vi mode
 bindkey -M vicmd '^[[3~' delete-char
 bindkey -M viins '^[[3~' delete-char
+bindkey -M viins '^[[1;5D' backward-word
+bindkey -M viins '^[[1;5C' forward-word
 
 # Shell options (all at once)
 setopt COMPLETE_IN_WORD extended_history hist_find_no_dups hist_ignore_all_dups \
@@ -906,14 +908,14 @@ unalias open 2>/dev/null || true
 open() {
   local -a targets opener
   local target desktop=${(L)${XDG_CURRENT_DESKTOP:-${DESKTOP_SESSION:-}}}
-  local -i result=0
+  local -i result=0 use_leaf=0
 
   (( $# )) && targets=("$@") || targets=(.)
+  has leaf && use_leaf=1
 
   case "${JSH_OS}" in
     macos)
-      command open "${targets[@]}"
-      return
+      opener=(open)
       ;;
     linux)
       if [[ -n ${WSL_DISTRO_NAME:-}${WSL_INTEROP:-} ]]; then
@@ -981,7 +983,11 @@ open() {
   fi
 
   for target in "${targets[@]}"; do
-    command "${opener[@]}" "${target}" || result=$?
+    if (( use_leaf )) && [[ ${target:l} == *.md || ${target:l} == *.markdown ]]; then
+      command leaf "${target}" || result=$?
+    else
+      command "${opener[@]}" "${target}" || result=$?
+    fi
   done
   return ${result}
 }
@@ -1765,13 +1771,13 @@ jgit() {
 
 jsh() {
   case ${1:-} in
-    runtime|install|update|repair)
+    install|setup|update|repair)
       JSH_INSTALL_RETURN=1 command "${JSH}/bin/jsh" "$@" || return
       jsh reload
       ;;
     --yes)
       case ${2:-} in
-        runtime|install|update|repair)
+        install|setup|update|repair)
           JSH_INSTALL_RETURN=1 command "${JSH}/bin/jsh" "$@" || return
           jsh reload
           ;;
@@ -1786,6 +1792,7 @@ jsh() {
       fi
       (( $+functions[_jsh_prompt_git_async_stop] )) && _jsh_prompt_git_async_stop
       setopt LOCAL_OPTIONS GLOBAL_EXPORT
+      local JSH_RELOADING=1
       source "${JSH}/dotfiles/.zshrc"
       ;;
     *) command "${JSH}/bin/jsh" "$@" ;;
@@ -1802,6 +1809,11 @@ ZSH_HIGHLIGHT_STYLES[hashed-command]='fg=green'
   source "${JSH_VENDOR}/zsh-autosuggestions/zsh-autosuggestions.zsh"
 [[ -r "${JSH_VENDOR}/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" ]] && \
   source "${JSH_VENDOR}/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
+
+if (( _jsh_runtime_active )) && [[ ${JSH_RELOADING:-0} != 1 ]]; then
+  source "${JSH}/lib/output.sh"
+  jsh_banner
+fi
 
 if (( _jsh_runtime_active )); then
   if (( _jsh_runtime_had_xdg_cache )); then

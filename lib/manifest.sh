@@ -85,13 +85,24 @@ jsh_manifest_validate() {
 }
 
 jsh_manifest_resolve() {
-  local manifest=${1:-$(jsh_manifest_path)} context
+  local manifest=${1:-$(jsh_manifest_path)} context selected_layers layer
   jsh_manifest_validate "${manifest}" || return
   context=$(jsh_manifest_context) || return
-  jq --argjson context "${context}" '
+  selected_layers=${JSH_PACKAGE_LAYERS:-}
+  if [[ -n ${selected_layers} ]]; then
+    while IFS= read -r layer; do
+      jq -e --arg layer "${layer}" 'any(.layers[]; .id == $layer)' "${manifest}" >/dev/null || {
+        printf 'Unknown package layer: %s\n' "${layer}" >&2
+        return 1
+      }
+    done < <(tr ',' '\n' <<< "${selected_layers}")
+  fi
+  jq --argjson context "${context}" --arg selected_layers "${selected_layers}" '
     def matches($context):
       all((.match // {}) | to_entries[];
         .key as $key | (.value | index($context[$key]) != null));
+    def selected($selected_layers; $layer_id):
+      $selected_layers == "" or ($selected_layers | split(",") | index($layer_id) != null);
     def append_unique($values):
       reduce $values[] as $value (.; if index($value) == null then . + [$value] else . end);
     reduce .layers[] as $layer (
@@ -99,7 +110,7 @@ jsh_manifest_resolve() {
         apt: [], dnf: [], pacman: [], flatpak: [], cargo: [], uv: [],
         brew: {taps: [], formulae: [], casks: []}, npm: {}, layers: []
       };
-      if ($layer | matches($context)) then
+      if ($layer | matches($context)) and selected($selected_layers; $layer.id) then
         .layers += [$layer.id]
         | reduce ["apt", "dnf", "pacman", "flatpak", "cargo", "uv"][] as $manager
             (.; .[$manager] |= append_unique($layer.install[$manager] // []))
@@ -213,7 +224,7 @@ jsh_manifest_main() {
   esac
 }
 
-if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+if [[ ${BASH_SOURCE[0]-} == "$0" ]]; then
   set -euo pipefail
   SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
   JSH_ROOT=$(cd -- "${SCRIPT_DIR}/.." && pwd -P)

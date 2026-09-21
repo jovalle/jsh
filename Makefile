@@ -3,7 +3,7 @@ CHECK_TARGETS := check-script-headers check-readme check-shell-syntax check-zsh-
 	lint-yaml lint-markdown lint-js test-reconciliation
 FORMAT_TARGETS := format-shell format-python format-yaml format-json format-markdown
 
-.PHONY: help install update setup deploy configure patch hooks uninstall check \
+.PHONY: help install essentials update setup deploy configure patch hooks uninstall check \
 	format clean \
 	check-tools check-syntax lint ci validate pre-commit pre-commit-run commit \
 	commit-msg-check $(CHECK_TARGETS) $(FORMAT_TARGETS)
@@ -25,6 +25,7 @@ PLATFORM_DIRS_darwin := unix darwin
 PLATFORM_DIRS_linux := unix linux
 PLATFORM_DIRS_wsl := unix linux windows
 PLATFORM_DIRS := $(PLATFORM_DIRS_$(PLATFORM))
+SCRIPT_BASENAME ?=
 
 define run_scripts
 	@$(OUTPUT) if [ -z "$(PLATFORM_DIRS)" ]; then \
@@ -48,6 +49,7 @@ define run_scripts
 			[ -d "$$dir" ] || continue; \
 			for script in "$$dir"/*; do \
 				[ -f "$$script" ] && [ -x "$$script" ] || continue; \
+				[ -z "$(SCRIPT_BASENAME)" ] || [ "$${script##*/}" = "$(SCRIPT_BASENAME)" ] || continue; \
 				case "$$script" in \
 					*sync-conflict*) continue ;; \
 					*.sh|*.zsh) ;; \
@@ -109,6 +111,11 @@ help: ## Show this help message
 ##@ Setup
 
 install: ## Install packages and repository hooks
+	$(call run_scripts,install)
+
+essentials: export JSH_PACKAGE_LAYERS = core
+essentials: SCRIPT_BASENAME = packages.sh
+essentials: ## Install only the core shell package layer
 	$(call run_scripts,install)
 
 update: ## Update packages, dependencies, and managed configuration
