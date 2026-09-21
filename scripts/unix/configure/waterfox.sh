@@ -136,7 +136,7 @@ waterfox_binary() {
     return
   done
   candidate=$(command -v waterfox 2> /dev/null) || return 1
-  [[ $(readlink -f -- "${candidate}") != "${JSH_ROOT}/bin/waterfox" ]] || return 1
+  [[ $(readlink -f -- "${candidate}") != "${JSH_ROOT}/bin/waterfix" ]] || return 1
   printf '%s\n' "${candidate}"
 }
 
@@ -154,7 +154,7 @@ configure_linux_entry_points() {
   local binary=$1 applications=${XDG_DATA_HOME:-${HOME}/.local/share}/applications
   local flatpak_profile=${HOME}/.var/app/net.waterfox.waterfox/.waterfox
   local temporary ensure_status resolved_binary icon
-  [[ $(uname -s) == Linux ]] || return
+  [[ $(uname -s) == Linux ]] || return 0
 
   resolved_binary=$(readlink -f -- "${binary}" 2> /dev/null || printf '%s\n' "${binary}")
   icon=${resolved_binary%/waterfox}/browser/chrome/icons/default/default128.png
@@ -177,7 +177,7 @@ configure_linux_entry_points() {
   jsh_interrupt_cleanup_path "${temporary}"
   {
     printf '[Desktop Entry]\nType=Application\nName=Waterfox\n'
-    printf 'Exec=%s open -- %%u\n' "$(jsh_desktop_executable "${JSH_ROOT}/bin/waterfox")"
+    printf 'Exec=%s open -- %%u\n' "$(jsh_desktop_executable "${JSH_ROOT}/bin/waterfix")"
     printf 'Icon=%s\n' "${icon}"
     printf 'Categories=Network;WebBrowser;\n'
     printf 'MimeType=text/html;x-scheme-handler/http;x-scheme-handler/https;\n'
@@ -394,7 +394,7 @@ policy_target() {
 }
 
 prepare_policy() {
-  local existing managed merged current
+  local existing managed merged current remove_addon_ids
   POLICY_CHANGED=0
   POLICY_TARGET=$(policy_target) || {
     jsh::log_note "Skipping Waterfox policy: browser executable not found."
@@ -421,6 +421,12 @@ prepare_policy() {
         return 1
       fi
     fi
+  fi
+  remove_addon_ids=${JSH_WATERFOX_REMOVE_ADDON_IDS:-[]}
+  if ! jq -e 'type == "array" and all(.[]; type == "string")' \
+    <<< "${remove_addon_ids}" > /dev/null; then
+    jsh::log_error "Invalid Waterfox add-on removal list."
+    return 1
   fi
   managed=$(waterfox_config_json | jq -c '{
     AutoLaunchProtocolsFromOrigins: [{
@@ -451,19 +457,24 @@ prepare_policy() {
     }
   }')
   if [[ $(uname -s) == Darwin ]]; then
-    merged=$(jq -c --argjson managed "${managed}" \
+    merged=$(jq -c --argjson managed "${managed}" --argjson remove "${remove_addon_ids}" \
       'def merge_managed:
         .ExtensionSettings = ((.ExtensionSettings // {}) * $managed.ExtensionSettings)
         | .Handlers = ((.Handlers // {}) * $managed.Handlers)
         | . * ($managed | del(.ExtensionSettings, .Handlers));
-      .EnterprisePoliciesEnabled = true | merge_managed' <<< "${existing}")
+      reduce $remove[] as $id (.EnterprisePoliciesEnabled = true;
+        .ExtensionSettings = ((.ExtensionSettings // {}) | del(.[$id])))
+      | merge_managed' <<< "${existing}")
   else
-    merged=$(jq -c --argjson managed "${managed}" '
+    merged=$(jq -c --argjson managed "${managed}" --argjson remove "${remove_addon_ids}" '
       def merge_managed:
         .ExtensionSettings = ((.ExtensionSettings // {}) * $managed.ExtensionSettings)
         | .Handlers = ((.Handlers // {}) * $managed.Handlers)
         | . * ($managed | del(.ExtensionSettings, .Handlers));
-      .policies = ((.policies // {}) | merge_managed)
+      .policies = ((.policies // {})
+        | reduce $remove[] as $id (.;
+            .ExtensionSettings = ((.ExtensionSettings // {}) | del(.[$id])))
+        | merge_managed)
     ' <<< "${existing}")
   fi
   current=$(jq -Sc . <<< "${existing}")

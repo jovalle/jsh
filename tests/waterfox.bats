@@ -29,14 +29,15 @@ file_identity() {
   fi
 }
 
-@test "waterfox command provides Waterfox repair" {
-  [[ -x ${JSH_ROOT}/bin/waterfox ]]
+@test "waterfix command provides Waterfox repair" {
+  [[ -x ${JSH_ROOT}/bin/waterfix ]]
   [[ ! -e ${JSH_ROOT}/bin/flushfox ]]
 
-  run "${JSH_ROOT}/bin/waterfox" --help
+  run "${JSH_ROOT}/bin/waterfix" --help
 
   [[ ${status} -eq 0 ]]
-  [[ ${output} == *"Organize Waterfox bookmarks"* ]]
+  [[ ${output} == *"Repair Waterfox configuration"* ]]
+  [[ ${output} == *"waterfix remove"* ]]
 }
 
 @test "removes the Import bookmarks item from the bookmarks toolbar" {
@@ -105,6 +106,48 @@ file_identity() {
   [[ ${status} -eq 0 ]]
   [[ ${output} == *'Would reconcile the Waterfox profile'* ]]
   [[ ! -e ${BATS_TEST_TMPDIR}/profile ]]
+}
+
+@test "Waterfox removal clears only selected stale extension policy" {
+  (
+    # shellcheck source=/dev/null
+    source "${JSH_ROOT}/scripts/unix/configure/waterfox.sh"
+    export TEMP_DIR="${BATS_TEST_TMPDIR}/policy-stage"
+    export POLICY_TARGET="${BATS_TEST_TMPDIR}/distribution/policies.json"
+    export JSH_WATERFOX_REMOVE_ADDON_IDS='["stale@example.test"]'
+    POLICY_CHANGED=0
+    POLICY_SOURCE=
+    mkdir -p "${TEMP_DIR}" "${POLICY_TARGET%/*}"
+    cat > "${POLICY_TARGET}" <<'JSON'
+{"policies":{"ExtensionSettings":{"keep@example.test":{"installation_mode":"normal_installed","install_url":"https://old.example/keep.xpi"},"stale@example.test":{"installation_mode":"normal_installed","install_url":"https://old.example/stale.xpi"}}}}
+JSON
+    uname() { printf 'Linux\n'; }
+    waterfox_binary() { printf '/usr/bin/true\n'; }
+    waterfox_config_json() {
+      cat <<'JSON'
+{"addons":[{"id":"keep@example.test","name":"Keep","installUrl":"https://addons.mozilla.org/firefox/downloads/latest/keep/latest.xpi"}],"citrix":{"protocol":"receiver","allowedOrigins":[]},"search":{"default":"Google","privateDefault":"DuckDuckGo"}}
+JSON
+    }
+
+    prepare_policy
+
+    [[ ${POLICY_CHANGED} -eq 1 ]]
+    jq -e '
+      .policies.ExtensionSettings["stale@example.test"] == null
+        and .policies.ExtensionSettings["keep@example.test"].install_url
+          == "https://addons.mozilla.org/firefox/downloads/latest/keep/latest.xpi"
+    ' "${POLICY_SOURCE}" > /dev/null
+  )
+}
+
+@test "Waterfox Linux entry points are a successful no-op off Linux" {
+  run bash -c '
+    source "$1"
+    uname() { printf "Darwin\n"; }
+    configure_linux_entry_points /bin/true
+  ' _ "${JSH_ROOT}/scripts/unix/configure/waterfox.sh"
+
+  [[ ${status} -eq 0 ]]
 }
 
 @test "Waterfox launcher resolves a symlinked binary for its icon" {

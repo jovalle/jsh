@@ -9,8 +9,11 @@ import gzip
 import io
 import json
 import os
+import re
 import secrets
 import shutil
+import socket
+import ssl
 import sqlite3
 import subprocess
 import sys
@@ -19,12 +22,13 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from contextlib import closing
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 ICON_SIZE = 32
 MAX_ICON_BYTES = 1024 * 1024
@@ -33,6 +37,8 @@ HASH_MASK = 0xFFFFFFFF
 GOLDEN_RATIO = 0x9E3779B9
 EXPIRY_SECONDS = 30 * 24 * 60 * 60
 TRASH_FOLDER = "_trash"
+REVIEW_FOLDER = "_review"
+
 DUPLICATES_FOLDER = "_duplicates"
 NO_ICON_FOLDER = "_faviconless"
 BLOAT_FOLDERS = {"Mozilla Firefox", "Waterfox"}
@@ -41,19 +47,65 @@ CUSTOMIZATION_PREFERENCE = "browser.uiCustomization.state"
 WATERFOX_PROCESS_NAMES = ("waterfox", "waterfox-bin")
 JSH_ROOT = Path(__file__).resolve().parents[1]
 WATERFOX_CONFIGURATOR = JSH_ROOT / "scripts/unix/configure/waterfox.sh"
+WATERFOX_CONFIG = JSH_ROOT / "conf/gecko/waterfox.json"
+JSH_UI = JSH_ROOT / "lib/ui/cli.sh"
+sys.path.insert(0, str(JSH_ROOT))
+from lib.ui.progress import Progress, clear_progress, print_status  # pylint: disable=wrong-import-position,import-error
 
 Bookmark = Tuple[str, int]
+DEAD_STATUSES = {404, 410, -1}
 
-GREEN = "\033[32m"
-RED = "\033[31m"
-YELLOW = "\033[33m"
-CYAN = "\033[36m"
-DIM = "\033[2m"
-RESET = "\033[0m"
 
 
 class FaviconFetchError(Exception):
     pass
+
+
+def ui_confirm(prompt: str, default: str = "no") -> bool:
+    """Confirm through the shared tiered UI while preserving a boolean contract."""
+    result = subprocess.run(
+        [str(JSH_UI), "confirm", "--default", default, "--", prompt], check=False
+    )
+    if result.returncode in (0, 1):
+        return result.returncode == 0
+    raise RuntimeError(f"Jsh confirmation failed with status {result.returncode}")
+
+
+def ui_choose_many(header: str, choices: Sequence[Tuple[str, str]]) -> List[str]:
+    """Choose stable IDs through the shared tiered UI."""
+    arguments = [str(JSH_UI), "choose-many", header]
+    for choice_id, label in choices:
+        arguments.extend((choice_id, label))
+    result = subprocess.run(arguments, capture_output=True, text=True, check=False)
+    if result.returncode == 0:
+        return result.stdout.splitlines()
+    if result.returncode in (1, 130):
+        return []
+    raise RuntimeError(f"Jsh selection failed with status {result.returncode}")
+
+
+def ui_present(command: str, *arguments: str) -> bool:
+    try:
+        result = subprocess.run([str(JSH_UI), command, *arguments], check=False)
+    except OSError:
+        return False
+    return result.returncode == 0
+
+
+def ui_status(state: str, message: str) -> None:
+    if ui_present("status", state, "--", message):
+        return
+    print(message, file=sys.stderr if state in ("warn", "error") else sys.stdout)
+
+
+def ui_title(title: str) -> None:
+    if not ui_present("title", "--", title):
+        print(f"\n=== {title} ===\n")
+
+
+def ui_section(title: str) -> None:
+    if not ui_present("section", "--", title):
+        print(f"\n{title}")
 
 
 @dataclass
@@ -67,6 +119,17 @@ class OrganizationPlan:
     empty_folder_ids: set[int]
     sortable_folders: List[int]
     unfiled_id: int
+    review_ids: set[int] = field(default_factory=set)
+    url_updates: Dict[int, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class Addon:
+    id: str
+    name: str
+    aliases: Tuple[str, ...]
+    installed: bool
+    configured: bool
 
 
 class IconLinkParser(HTMLParser):
@@ -101,11 +164,16 @@ class IconLinkParser(HTMLParser):
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description=(
-            "Organize Waterfox bookmarks, delete bloat and empty folders, move final-404 "
-            "pages and toolbar exceptions into review folders, and fetch missing favicons. "
-            "Use --refresh to fetch existing icons again."
-        )
+        prog="waterfix",
+        description="Repair Waterfox configuration, add-ons, bookmarks, and favicons.",
+        epilog=(
+            "examples:\n"
+            "  waterfix                         repair the default profile\n"
+            "  waterfix --dry-run               preview bookmark changes\n"
+            "  waterfix remove Vimium           remove a matching add-on\n"
+            "  waterfix remove                  choose add-ons interactively"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--profile",
@@ -138,7 +206,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--refresh",
         action="store_true",
-        help="refetch favicons even when Waterfox already has them",
+        help="recheck processed bookmarks and retry all favicon sources",
     )
     parser.add_argument(
         "--skip-health-check",
@@ -148,13 +216,13 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--yes",
         action="store_true",
-        help="apply Waterfox and bookmark changes without confirmation",
+        help="apply Waterfox, bookmark, or add-on changes without confirmation",
     )
     parser.add_argument(
         "command",
         nargs="?",
-        choices=("open", "stop", "restart"),
-        help="control the Waterfox application instead of maintaining its profile",
+        choices=("open", "stop", "restart", "remove"),
+        help="control Waterfox or remove add-ons instead of maintaining bookmarks",
     )
     parser.add_argument("browser_args", nargs=argparse.REMAINDER, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
@@ -405,9 +473,11 @@ def open_waterfox(arguments: Sequence[str] = ()) -> None:
     )
 
 
-def run_waterfox_configuration(assume_yes: bool) -> None:
+def run_waterfox_configuration(assume_yes: bool, remove_addon_ids: Sequence[str] = ()) -> None:
     environment = os.environ.copy()
     environment["JSH_INTERRUPT_REPORT"] = "0"
+    if remove_addon_ids:
+        environment["JSH_WATERFOX_REMOVE_ADDON_IDS"] = json.dumps(remove_addon_ids)
     if assume_yes:
         environment["JSH_ASSUME_YES"] = "1"
         environment["JSH_CONFIGURE_ASSUME_YES"] = "1"
@@ -460,18 +530,270 @@ def ensure_waterfox_closed(assume_yes: bool = False) -> None:
     if not waterfox_is_running():
         return
 
-    print(
-        "Warning: Waterfox is open and its profile database is locked; "
-        "waterfox cannot make changes.",
-        file=sys.stderr,
+    ui_status(
+        "warn",
+        "Waterfox is open and its profile database is locked; waterfix cannot make changes.",
     )
     if not assume_yes:
         if not sys.stdin.isatty():
             raise RuntimeError("Waterfox cannot be closed without an interactive prompt or --yes")
-        answer = input("Close Waterfox and try again? [Y/n] ").strip().lower()
-        if answer not in ("", "y", "yes"):
+        if not ui_confirm("Close Waterfox and try again?", "yes"):
             raise RuntimeError("Cancelled; Waterfox remains open")
     stop_waterfox(check_running=False)
+
+
+def read_configured_addons(config_path: Path) -> Dict[str, str]:
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as error:
+        raise RuntimeError(f"Could not read Waterfox configuration: {config_path}") from error
+    configured = config.get("addons") if isinstance(config, dict) else None
+    if not isinstance(configured, list):
+        raise RuntimeError(f"Invalid Waterfox add-on configuration: {config_path}")
+    result = {}
+    for entry in configured:
+        if not isinstance(entry, dict) or not isinstance(entry.get("id"), str):
+            raise RuntimeError(f"Invalid Waterfox add-on configuration: {config_path}")
+        addon_id = entry["id"]
+        name = entry.get("name")
+        result[addon_id] = name if isinstance(name, str) else addon_id
+    return result
+
+
+def read_installed_addons(profile: Path) -> Dict[str, str]:
+    extensions_path = profile / "extensions.json"
+    if not extensions_path.is_file():
+        return {}
+    try:
+        extensions = json.loads(extensions_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as error:
+        raise RuntimeError(f"Could not read Waterfox add-ons: {extensions_path}") from error
+    active = extensions.get("addons") if isinstance(extensions, dict) else None
+    if not isinstance(active, list):
+        raise RuntimeError(f"Invalid Waterfox add-on registry: {extensions_path}")
+    result = {}
+    for entry in active:
+        if not isinstance(entry, dict) or entry.get("location") != "app-profile":
+            continue
+        addon_id = entry.get("id")
+        if not isinstance(addon_id, str) or "/" in addon_id or entry.get("type") == "theme":
+            continue
+        locale = entry.get("defaultLocale")
+        name = locale.get("name") if isinstance(locale, dict) else None
+        result[addon_id] = name if isinstance(name, str) and name else addon_id
+    return result
+
+
+def load_waterfox_addons(profile: Path, config_path: Path = WATERFOX_CONFIG) -> List[Addon]:
+    configured = read_configured_addons(config_path)
+    installed = read_installed_addons(profile)
+    addon_ids = list(configured) + [
+        addon_id for addon_id in installed if addon_id not in configured
+    ]
+
+    return [
+        Addon(
+            addon_id,
+            configured.get(addon_id, installed[addon_id]),
+            tuple(
+                name
+                for name in dict.fromkeys((configured.get(addon_id), installed.get(addon_id)))
+                if name is not None
+            ),
+            addon_id in installed,
+            addon_id in configured,
+        )
+        for addon_id in addon_ids
+    ]
+
+
+def matching_addons(addons: Sequence[Addon], query: str) -> List[Addon]:
+    folded = query.casefold()
+    return [
+        addon
+        for addon in addons
+        if folded in addon.id.casefold()
+        or any(folded in alias.casefold() for alias in addon.aliases)
+    ]
+
+
+def prompt_addon_selection(addons: Sequence[Addon], message: str) -> List[Addon]:
+    if not addons:
+        raise RuntimeError("No removable Waterfox add-ons were found")
+    if not sys.stdin.isatty():
+        raise RuntimeError("Add-on selection requires an interactive terminal")
+    choices = []
+    addons_by_id = {}
+    for addon in addons:
+        locations = []
+        if addon.installed:
+            locations.append("profile")
+        if addon.configured:
+            locations.append("repository")
+        choices.append((addon.id, f"{addon.name} ({addon.id}) [{', '.join(locations)}]"))
+        addons_by_id[addon.id] = addon
+    return [addons_by_id[addon_id] for addon_id in ui_choose_many(message, choices)]
+
+
+def select_addons(addons: Sequence[Addon], query: str) -> List[Addon]:
+    if query:
+        matches = matching_addons(addons, query)
+        if len(matches) == 1:
+            return matches
+        if matches:
+            return prompt_addon_selection(matches, f"Multiple add-ons matched '{query}':")
+        return prompt_addon_selection(addons, f"No add-on matched '{query}'. Select one:")
+    return prompt_addon_selection(addons, "Select Waterfox add-ons to remove:")
+
+
+def confirm_addon_removal(addons: Sequence[Addon], assume_yes: bool) -> bool:
+    ui_section("Add-ons to remove")
+    for addon in addons:
+        locations = []
+        if addon.installed:
+            locations.append("active profile")
+        if addon.configured:
+            locations.append("repository configuration")
+        print(f"  {addon.name} ({addon.id}) from {', '.join(locations)}")
+    ui_status("note", "Waterfox will close while these changes are applied.")
+    if assume_yes:
+        return True
+    if not sys.stdin.isatty():
+        raise RuntimeError("Add-on removal requires an interactive confirmation or --yes")
+    return ui_confirm("Remove these add-ons?", "no")
+
+
+def atomic_write(path: Path, content: bytes) -> None:
+    temporary = path.with_name(f".{path.name}.waterfox-{secrets.token_hex(4)}")
+    try:
+        temporary.write_bytes(content)
+        if path.exists():
+            temporary.chmod(path.stat().st_mode & 0o777)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def addon_array_layout(
+    source: str, config_path: Path
+) -> Tuple[int, int, List[Tuple[int, int, object]]]:
+    match = re.search(r'"addons"\s*:\s*\[', source)
+    if match is None:
+        raise RuntimeError(f"Invalid Waterfox add-on configuration: {config_path}")
+    decoder = json.JSONDecoder()
+    position = match.end()
+    entries: List[Tuple[int, int, object]] = []
+    while True:
+        while position < len(source) and source[position].isspace():
+            position += 1
+        if position < len(source) and source[position] == "]":
+            array_end = position
+            break
+        value, end = decoder.raw_decode(source, position)
+        entries.append((position, end, value))
+        position = end
+        while position < len(source) and source[position].isspace():
+            position += 1
+        if position < len(source) and source[position] == ",":
+            position += 1
+            continue
+        if position < len(source) and source[position] == "]":
+            array_end = position
+            break
+        raise RuntimeError(f"Invalid Waterfox add-on configuration: {config_path}")
+    return match.end(), array_end, entries
+
+
+def remove_addons_from_config(config_path: Path, addon_ids: set[str]) -> None:
+    source = config_path.read_text(encoding="utf-8")
+    array_start, array_end, entries = addon_array_layout(source, config_path)
+
+    kept = [
+        entry
+        for entry in entries
+        if not (isinstance(entry[2], dict) and entry[2].get("id") in addon_ids)
+    ]
+    if len(kept) == len(entries):
+        return
+    prefix = source[array_start : entries[0][0]] if entries else ""
+    suffix = source[entries[-1][1] : array_end] if entries else ""
+    separator = source[entries[0][1] : entries[1][0]] if len(entries) > 1 else ",\n    "
+    body = separator.join(source[start:end] for start, end, _ in kept)
+    updated = source[:array_start] + prefix + body + suffix + source[array_end:]
+    json.loads(updated)
+    atomic_write(config_path, updated.encode("utf-8"))
+
+
+def backup_path(path: Path, stamp: str) -> Path:
+    backup = path.with_name(f"{path.name}.backup-{stamp}")
+    suffix = 1
+    while backup.exists():
+        backup = path.with_name(f"{path.name}.backup-{stamp}-{suffix}")
+        suffix += 1
+    return backup
+
+
+def remove_addons_from_profile(profile: Path, addon_ids: set[str]) -> List[Path]:
+    backups: List[Path] = []
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    for name in ("extensions.json", "extension-preferences.json"):
+        path = profile / name
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as error:
+            raise RuntimeError(f"Invalid Waterfox profile file: {path}") from error
+        original = json.dumps(data, separators=(",", ":"))
+        if name == "extensions.json":
+            addons = data.get("addons") if isinstance(data, dict) else None
+            if not isinstance(addons, list) or not all(isinstance(addon, dict) for addon in addons):
+                raise RuntimeError(f"Invalid Waterfox profile file: {path}")
+            data["addons"] = [addon for addon in addons if addon.get("id") not in addon_ids]
+        elif isinstance(data, dict):
+            for addon_id in addon_ids:
+                data.pop(addon_id, None)
+        else:
+            raise RuntimeError(f"Invalid Waterfox profile file: {path}")
+        updated = json.dumps(data, separators=(",", ":"))
+        if updated == original:
+            continue
+        backup = backup_path(path, stamp)
+        shutil.copy2(path, backup)
+        backups.append(backup)
+        atomic_write(path, (updated + "\n").encode("utf-8"))
+
+    extensions = profile / "extensions"
+    for addon_id in addon_ids:
+        package = extensions / f"{addon_id}.xpi"
+        if not package.is_file() or package.is_symlink():
+            continue
+        backup = backup_path(package, stamp)
+        package.replace(backup)
+        backups.append(backup)
+    for name in ("addonStartup.json.lz4", "compatibility.ini"):
+        (profile / name).unlink(missing_ok=True)
+    return backups
+
+
+def remove_waterfox_addons(profile: Path, query: str, assume_yes: bool) -> None:
+    addons = load_waterfox_addons(profile, WATERFOX_CONFIG)
+    selected = select_addons(addons, query)
+    if not selected:
+        ui_status("note", "No add-ons removed.")
+        return
+    if not confirm_addon_removal(selected, assume_yes):
+        ui_status("note", "No add-ons removed.")
+        return
+    ensure_waterfox_closed(True)
+    addon_ids = {addon.id for addon in selected}
+    remove_addons_from_config(WATERFOX_CONFIG, addon_ids)
+    run_waterfox_configuration(True, tuple(addon.id for addon in selected))
+    backups = remove_addons_from_profile(profile, addon_ids)
+    for addon in selected:
+        ui_status("success", f"Removed {addon.name} ({addon.id})")
+    for backup in backups:
+        ui_status("detail", f"  Backup: {backup}")
 
 
 def connect_read_only(database: Path) -> sqlite3.Connection:
@@ -479,21 +801,93 @@ def connect_read_only(database: Path) -> sqlite3.Connection:
     return sqlite3.connect(uri, uri=True, timeout=1)
 
 
+def ensure_profile_readable(profile: Path, assume_yes: bool) -> None:
+    for attempt in range(2):
+        try:
+            for name in ("places.sqlite", "favicons.sqlite"):
+                with closing(connect_read_only(profile / name)) as connection:
+                    connection.execute("SELECT name FROM sqlite_master LIMIT 1").fetchone()
+            return
+        except sqlite3.OperationalError as error:
+            code = getattr(error, "sqlite_errorcode", 0) & 0xFF
+            if code not in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED):
+                raise
+            if attempt:
+                raise RuntimeError(
+                    f"{name} is still locked. Close other applications using this profile and retry."
+                ) from error
+            ensure_waterfox_closed(assume_yes)
+
+
+def read_processing_cache(profile: Path) -> Dict[str, Dict[str, str]]:
+    cache: Dict[str, Dict[str, str]] = {"health": {}, "favicon": {}, "reason": {}, "redirect": {}}
+    database = profile / "waterfix.sqlite"
+    if not database.exists():
+        return cache
+    with closing(connect_read_only(database)) as connection:
+        if not connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'checks'"
+        ).fetchone():
+            return cache
+        for kind, url, verdict in connection.execute("SELECT kind, url, verdict FROM checks"):
+            if ((kind == "health" and verdict in ("alive", "dead", "inconclusive", "redirect"))
+                    or (kind == "favicon" and verdict == "missing")
+                    or kind in ("reason", "redirect")):
+                cache[kind][url] = verdict
+    return cache
+
+
+def save_processed_check(
+    profile: Path, kind: str, url: str, verdict: str,
+    details: Optional[Dict[str, str]] = None,
+) -> None:
+    database = profile / "waterfix.sqlite"
+    if not database.exists():
+        database.touch(mode=0o600)
+    with closing(sqlite3.connect(database, timeout=1)) as connection:
+        with connection:
+            connection.execute("""
+                CREATE TABLE IF NOT EXISTS checks (
+                    kind TEXT NOT NULL, url TEXT NOT NULL, verdict TEXT NOT NULL,
+                    PRIMARY KEY (kind, url)
+                )
+                """)
+            records = [(kind, url, verdict)]
+            records.extend((key, url, value) for key, value in (details or {}).items())
+            if kind == "health" and verdict == "redirect" and details:
+                records.append(("health", details["redirect"], "alive"))
+            connection.executemany("""
+                INSERT INTO checks VALUES (?, ?, ?)
+                ON CONFLICT(kind, url) DO UPDATE SET verdict = excluded.verdict
+                WHERE checks.verdict != excluded.verdict
+                """, records)
+
+
 def read_bookmarks(profile: Path) -> List[Bookmark]:
-    with connect_read_only(profile / "places.sqlite") as connection:
+    with closing(connect_read_only(profile / "places.sqlite")) as connection:
         rows = connection.execute("""
+            WITH RECURSIVE excluded(id) AS (
+                SELECT b.id FROM moz_bookmarks AS b
+                JOIN moz_bookmarks AS parent ON parent.id = b.parent
+                WHERE parent.guid = 'unfiled_____' AND b.type = 2
+                  AND b.title IN ('_trash', '_duplicates')
+                UNION ALL
+                SELECT b.id FROM moz_bookmarks AS b JOIN excluded ON b.parent = excluded.id
+            )
             SELECT DISTINCT p.url, p.url_hash
             FROM moz_bookmarks AS b
             JOIN moz_places AS p ON p.id = b.fk
-            WHERE b.type = 1
+            WHERE b.type = 1 AND b.id NOT IN excluded
               AND (p.url LIKE 'http://%' OR p.url LIKE 'https://%')
             ORDER BY p.url
             """).fetchall()
     return [(str(url), int(url_hash)) for url, url_hash in rows]
 
 
-def read_cached_page_urls(profile: Path) -> set[str]:
-    with connect_read_only(profile / "favicons.sqlite") as connection:
+def read_cached_page_urls(
+    profile: Path, bookmarks: Optional[Iterable[Bookmark]] = None,
+) -> set[str]:
+    with closing(connect_read_only(profile / "favicons.sqlite")) as connection:
         rows = connection.execute("""
             SELECT DISTINCT p.page_url
             FROM moz_pages_w_icons AS p
@@ -501,7 +895,15 @@ def read_cached_page_urls(profile: Path) -> set[str]:
             JOIN moz_icons AS i ON i.id = ip.icon_id
             WHERE i.data IS NOT NULL AND length(i.data) > 0
             """).fetchall()
-    return {str(row[0]) for row in rows}
+        roots = connection.execute("""
+            SELECT icon_url FROM moz_icons
+            WHERE root = 1 AND data IS NOT NULL AND length(data) > 0
+            """).fetchall()
+    root_hosts = {normalized_hostname(str(row[0])) for row in roots}
+    return {str(row[0]) for row in rows} | {
+        url for url, _ in (read_bookmarks(profile) if bookmarks is None else bookmarks)
+        if normalized_hostname(url) in root_hosts
+    }
 
 
 def normalized_hostname(url: str) -> Optional[str]:
@@ -627,6 +1029,7 @@ def fetch_icon(
     bookmarks: Iterable[Bookmark],
     timeout: float,
     cancelled: Optional[threading.Event] = None,
+    report: Callable[[str], None] = lambda message: None,
 ) -> Tuple[str, bytes]:
     errors: List[str] = []
     candidates = [
@@ -638,6 +1041,7 @@ def fetch_icon(
         for source, url in items:
             if cancelled is not None and cancelled.is_set():
                 raise FaviconFetchError("Cancelled")
+            report(f"{hostname} favicon {source} {url}...")
             try:
                 return download_icon(url, timeout)
             except (OSError, ValueError, urllib.error.URLError) as error:
@@ -651,6 +1055,7 @@ def fetch_icon(
     for document_url in site_document_urls(bookmarks):
         if cancelled is not None and cancelled.is_set():
             raise FaviconFetchError("Cancelled")
+        report(f"{hostname} favicon HTML {document_url}...")
         try:
             page_url, html = download_document(document_url, timeout)
         except (OSError, ValueError, urllib.error.URLError) as error:
@@ -673,6 +1078,7 @@ def fetch_icon(
 
         for href in parser.manifest_hrefs:
             manifest_url = urllib.parse.urljoin(base_url, href)
+            report(f"{hostname} favicon manifest {manifest_url}...")
             try:
                 final_manifest_url, manifest = download_document(manifest_url, timeout)
                 manifest_icons = parse_manifest_icons(manifest)
@@ -688,98 +1094,42 @@ def fetch_icon(
             )
             if result is not None:
                 return result
-    raise FaviconFetchError("\n".join(errors))
+    raise FaviconFetchError(f"No usable icon after {len(errors)} attempts")
 
 
 def download_error_reason(error: BaseException) -> str:
     if isinstance(error, urllib.error.HTTPError):
         return f"HTTP {error.code}: {error.reason}"
     if isinstance(error, urllib.error.URLError):
-        return str(error.reason)
+        return download_error_reason(error.reason) if isinstance(error.reason, BaseException) else str(error.reason)
+    if isinstance(error, TimeoutError):
+        return "Timed out"
+    if isinstance(error, ssl.SSLCertVerificationError):
+        return f"TLS certificate verification failed: {error.verify_message}"
+    if isinstance(error, socket.gaierror):
+        return f"DNS lookup failed: {error.strerror}"
     return str(error)
 
 
-def format_duration(seconds: float) -> str:
-    seconds = max(0, round(seconds))
-    minutes, seconds = divmod(seconds, 60)
-    hours, minutes = divmod(minutes, 60)
-    if hours:
-        return f"{hours}h {minutes:02d}m"
-    if minutes:
-        return f"{minutes}m {seconds:02d}s"
-    return f"{seconds}s"
 
-
-def show_progress(
-    completed: int,
-    total: int,
-    succeeded: int,
-    failed: int,
-    started_at: float,
-    hostname: str,
-    label: str = "Fetching",
-) -> None:
-    elapsed = time.monotonic() - started_at
-    remaining = total - completed
-    eta = elapsed / completed * remaining if completed else 0
-    interactive = sys.stdout.isatty()
-
-    if not interactive:
-        if completed % 25 and completed != total:
-            return
-        print(
-            f"{label} {completed}/{total} | {succeeded} ok | {failed} failed | "
-            f"{remaining} remaining | ETA {format_duration(eta)}"
-        )
-        return
-
-    columns = shutil.get_terminal_size().columns
-    width = max(10, min(30, columns - 72))
-    filled = round(width * completed / total) if total else width
-    bar = f"{CYAN}{'━' * filled}{DIM}{'─' * (width - filled)}{RESET}"
-    percent = completed / total * 100 if total else 100
-    status = (
-        f"\r\033[K{label} {bar} {percent:5.1f}%  {completed}/{total}  "
-        f"{GREEN}✓ {succeeded}{RESET}  {RED}✗ {failed}{RESET}  "
-        f"{remaining} left  ETA {format_duration(eta)}"
-    )
-    ansi_length = len(CYAN) + len(DIM) + len(GREEN) + len(RED) + 3 * len(RESET)
-    visible_status_length = len(status) - ansi_length
-    available = columns - visible_status_length - 2
-    host = f"  {DIM}{hostname[:available]}{RESET}" if available >= 12 else ""
-    line = status + host
-    print(line, end="\n" if completed == total else "", flush=True)
-
-
-def log_failure(hostname: str, error: FaviconFetchError) -> None:
-    interactive = sys.stdout.isatty()
-    if interactive:
-        print("\r\033[K", end="")
-    color = RED if interactive else ""
-    dim = DIM if interactive else ""
-    reset = RESET if interactive else ""
-    print(f"{color}Failed {hostname}{reset}")
-    for line in str(error).splitlines():
-        print(f"  {dim}{line}{reset}")
-
-
-def clear_progress() -> None:
-    if sys.stdout.isatty():
-        print("\r\033[K", end="", flush=True)
+def log_failure(hostname: str) -> None:
+    clear_progress()
+    print_status("No favicon", hostname)
 
 
 def fetch_icons(
-    grouped: Dict[str, List[Bookmark]], timeout: float, delay: float, workers: int
+    grouped: Dict[str, List[Bookmark]], timeout: float, delay: float, workers: int,
+    on_failure: Callable[[str], None] = lambda hostname: None,
 ) -> Tuple[Dict[str, Tuple[str, bytes]], List[Tuple[str, str]]]:
     hostname_list = list(grouped)
     downloaded: Dict[str, Tuple[str, bytes]] = {}
     failures: List[Tuple[str, str]] = []
-    started_at = time.monotonic()
+    progress = Progress("Checking", len(hostname_list))
     cancelled = threading.Event()
 
     def fetch_one(hostname: str) -> Tuple[str, bytes]:
         try:
-            return fetch_icon(hostname, grouped[hostname], timeout, cancelled)
+            return fetch_icon(hostname, grouped[hostname], timeout, cancelled, progress.report)
         finally:
             if delay and not cancelled.is_set():
                 time.sleep(delay)
@@ -787,23 +1137,21 @@ def fetch_icons(
     executor = ThreadPoolExecutor(max_workers=workers)
     futures = {}
     try:
-        futures = {executor.submit(fetch_one, hostname): hostname for hostname in hostname_list}
-        for completed, future in enumerate(as_completed(futures), start=1):
-            hostname = futures[future]
-            try:
-                downloaded[hostname] = future.result()
-            except FaviconFetchError as error:
-                failures.append((hostname, str(error)))
-                log_failure(hostname, error)
-
-            show_progress(
-                completed,
-                len(hostname_list),
-                len(downloaded),
-                len(failures),
-                started_at,
-                hostname,
-            )
+        with progress:
+            futures = {executor.submit(fetch_one, hostname): hostname for hostname in hostname_list}
+            for completed, future in enumerate(as_completed(futures), start=1):
+                hostname = futures[future]
+                with progress.lock:
+                    progress.clear()
+                    progress.completed = completed
+                    try:
+                        downloaded[hostname] = future.result()
+                    except FaviconFetchError as error:
+                        failures.append((hostname, str(error)))
+                        on_failure(hostname)
+                        log_failure(hostname)
+                    progress.failed = len(failures)
+                    progress.render()
     except KeyboardInterrupt:
         cancelled.set()
         for future in futures:
@@ -832,53 +1180,157 @@ def check_page(url: str, timeout: float) -> Tuple[Optional[int], str, Optional[s
     except urllib.error.HTTPError as error:
         return error.code, error.geturl(), f"HTTP {error.code}: {error.reason}"
     except (OSError, ValueError, urllib.error.URLError) as error:
+        cause = error.reason if isinstance(error, urllib.error.URLError) else error
+        if isinstance(cause, socket.gaierror) and cause.errno == socket.EAI_NONAME:
+            return None, url, "DNS name not found"
         return None, url, download_error_reason(error)
 
 
-def log_health_result(url: str, final_url: str, status: Optional[int], reason: str) -> None:
-    interactive = sys.stdout.isatty()
-    if interactive:
-        print("\r\033[K", end="")
-    color = RED if status == 404 else YELLOW
-    reset = RESET if interactive else ""
-    color = color if interactive else ""
+def assess_redirect(
+    url: str, result: Tuple[Optional[int], str, Optional[str]],
+) -> Tuple[Optional[int], str, Optional[str]]:
+    status, destination, reason = result
+    if destination == url or status is None or status >= 400:
+        return result
+    source = urllib.parse.urlsplit(url)
+    target = urllib.parse.urlsplit(destination)
+    source_path = source.path or "/"
+    target_path = target.path or "/"
+    if status < 200 or status >= 300:
+        reason = f"Redirect did not reach a successful page (HTTP {status})"
+    elif target.scheme not in ("http", "https") or not target.hostname or target.username:
+        reason = "Redirect has an unsupported or authenticated destination"
+    elif source.scheme == "https" and target.scheme != "https":
+        reason = "Redirect downgrades HTTPS to HTTP"
+    elif re.search(r"(?:^|/)(?:404|not-found|error|login|signin|sign-in|auth|oauth)(?:[./-]|$)",
+                   target_path, re.IGNORECASE):
+        reason = "Redirect leads to a login or error page"
+    elif (source.scheme == "http" and target.scheme == "https"
+          and source.hostname == target.hostname and source_path == target_path
+          and source.query == target.query):
+        return status, destination, "HTTPS upgrade"
+    elif target_path.lower() in ("/", "/index.html", "/index.htm", "/index.php", "/default.aspx"):
+        reason = "Redirect leads to a homepage instead of a specific page"
+    else:
+        return status, destination, f"Redirect reaches a healthy page (HTTP {status})"
+    return None, destination, reason
+
+
+def assess_page(
+    url: str,
+    timeout: float,
+    cancelled: threading.Event,
+    report: Callable[[str], None],
+) -> Tuple[Optional[int], str, Optional[str]]:
+    report(f"{url} {urllib.parse.urlsplit(url).scheme.upper()}...")
+    result = check_page(url, timeout)
+    status, final_url, reason = result
+    if status is not None and status not in DEAD_STATUSES and status < 500:
+        return assess_redirect(url, result)
+    if cancelled.is_set():
+        return result
+    report(f"{url} {urllib.parse.urlsplit(url).scheme.upper()} retry...")
+    retry = check_page(url, timeout * 2)
+    if retry[0] is not None:
+        if retry[0] in DEAD_STATUSES and status not in DEAD_STATUSES:
+            return None, retry[1], f"{retry[2]}; not confirmed on both checks"
+        return assess_redirect(url, retry)
+    # ponytail: local DNS plus a control lookup; use authoritative DNS if split DNS needs support.
+    if reason == retry[2] == "DNS name not found":
+        hostname = normalized_hostname(url)
+        report(f"{url} DNS {hostname}...")
+        try:
+            socket.getaddrinfo(hostname, 443)
+        except socket.gaierror as error:
+            if error.errno != socket.EAI_NONAME:
+                return None, url, "DNS temporarily unavailable; preserved"
+        else:
+            return None, url, "Host resolves; request or redirect DNS failed; preserved"
+        report(f"{url} DNS control example.com...")
+        try:
+            socket.getaddrinfo("example.com", 443)
+        except OSError:
+            return None, final_url, "DNS unavailable; preserved"
+        return -1, final_url, "DNS name not found on both checks; control lookup succeeded"
+    parsed = urllib.parse.urlsplit(url)
+    if (
+        not cancelled.is_set()
+        and parsed.scheme in ("http", "https")
+        and parsed.port is None
+        and parsed.username is None
+    ):
+        # Probe only the origin when downgrading, so URL paths and tokens stay on HTTPS.
+        alternate = urllib.parse.urlunsplit(
+            parsed._replace(
+                scheme="http" if parsed.scheme == "https" else "https",
+                path="/",
+                query="",
+                fragment="",
+            )
+        )
+        report(f"{url} alternate {alternate}...")
+        alternate_status, _, _ = check_page(alternate, timeout)
+        if (
+            alternate_status is not None
+            and alternate_status not in DEAD_STATUSES
+            and alternate_status < 500
+        ):
+            return None, url, f"{retry[2]}; alternate protocol responds; preserved"
+    return None, retry[1], f"{retry[2]}; preserved after retry"
+
+
+def log_health_result(
+    url: str, final_url: str, status: Optional[int], reason: str = "",
+) -> None:
+    clear_progress()
+    state = "error" if status in DEAD_STATUSES else "warn"
     redirect = f" -> {final_url}" if final_url != url else ""
-    label = "Dead" if status == 404 else "Inconclusive"
-    print(f"{color}{label}: {url}{redirect}{reset}")
-    print(f"  {reason}")
+    label = "Dead" if status in DEAD_STATUSES else "Inconclusive"
+    if status is not None and 200 <= status < 300 and final_url != url:
+        label = "Redirect"
+    detail = reason or (f"HTTP {status}" if status is not None else "Unknown network failure")
+    print_status(label, f"{url}{redirect} ({detail})", state)
 
 
 def check_pages(
-    bookmarks: Iterable[Bookmark], timeout: float, workers: int
+    bookmarks: Iterable[Bookmark], timeout: float, workers: int,
+    on_result: Callable[[str, str, str, str], None] = lambda url, verdict, target, reason: None,
 ) -> Tuple[set[str], List[Tuple[str, str]]]:
     urls = list(dict.fromkeys(url for url, _ in bookmarks))
     dead: set[str] = set()
     inconclusive: List[Tuple[str, str]] = []
-    started_at = time.monotonic()
     cancelled = threading.Event()
     executor = ThreadPoolExecutor(max_workers=workers)
     futures = {}
     try:
-        futures = {executor.submit(check_page, url, timeout): url for url in urls}
-        for completed, future in enumerate(as_completed(futures), start=1):
-            url = futures[future]
-            status, final_url, reason = future.result()
-            if status == 404:
-                dead.add(url)
-                log_health_result(url, final_url, status, reason or "HTTP 404")
-            elif status is None:
-                detail = reason or "unknown network error"
-                inconclusive.append((url, detail))
-                log_health_result(url, final_url, status, detail)
-            show_progress(
-                completed,
-                len(urls),
-                completed - len(dead) - len(inconclusive),
-                len(dead) + len(inconclusive),
-                started_at,
-                urllib.parse.urlsplit(url).hostname or url,
-                "Checking",
-            )
+        with Progress("Checking", len(urls)) as progress:
+            futures = {
+                executor.submit(assess_page, url, timeout, cancelled, progress.report): url
+                for url in urls
+            }
+            for completed, future in enumerate(as_completed(futures), start=1):
+                url = futures[future]
+                status, final_url, reason = future.result()
+                with progress.lock:
+                    progress.clear()
+                    progress.completed = completed
+                    if status in DEAD_STATUSES:
+                        dead.add(url)
+                        log_health_result(url, final_url, status, reason or "")
+                    elif status is None or status >= 400:
+                        detail = reason or "unknown network error"
+                        inconclusive.append((url, detail))
+                        log_health_result(url, final_url, status, detail)
+                    elif final_url != url:
+                        log_health_result(url, final_url, status, reason or "Update planned")
+                    verdict = (
+                        "dead" if status in DEAD_STATUSES else
+                        "inconclusive" if status is None or status >= 400 else
+                        "redirect" if final_url != url else "alive"
+                    )
+                    on_result(url, verdict, final_url, reason or "")
+                    progress.failed = len(dead) + len(inconclusive)
+                    progress.render()
     except KeyboardInterrupt:
         cancelled.set()
         for future in futures:
@@ -892,7 +1344,7 @@ def check_pages(
 
 
 def read_bookmark_rows(profile: Path) -> List[sqlite3.Row]:
-    with connect_read_only(profile / "places.sqlite") as connection:
+    with closing(connect_read_only(profile / "places.sqlite")) as connection:
         connection.row_factory = sqlite3.Row
         return connection.execute("""
                      SELECT b.id, b.type, b.fk, b.parent, b.position, b.title, b.dateAdded,
@@ -930,7 +1382,8 @@ def folder_is_sorted(rows: Iterable[sqlite3.Row]) -> bool:
 
 
 def plan_organization(
-    profile: Path, dead_urls: set[str], icon_urls: Optional[set[str]] = None
+    profile: Path, dead_urls: set[str], icon_urls: Optional[set[str]] = None,
+    review_urls: Optional[set[str]] = None, redirects: Optional[Dict[str, str]] = None,
 ) -> OrganizationPlan:
     rows = read_bookmark_rows(profile)
     toolbar_id = folder_id(rows, "toolbar_____")
@@ -942,9 +1395,18 @@ def plan_organization(
     trash_id = review_folder_id(rows, unfiled_id, TRASH_FOLDER)
     duplicates_id = review_folder_id(rows, unfiled_id, DUPLICATES_FOLDER)
     no_icon_id = review_folder_id(rows, unfiled_id, NO_ICON_FOLDER)
+    review_id = review_folder_id(rows, unfiled_id, REVIEW_FOLDER)
     children: Dict[int, List[sqlite3.Row]] = {}
     for row in rows:
         children.setdefault(int(row["parent"]), []).append(row)
+    reviewed_ids = {folder for folder in (trash_id, duplicates_id) if folder is not None}
+    pending = list(reviewed_ids)
+    while pending:
+        for child in children.get(pending.pop(), []):
+            child_id = int(child["id"])
+            if child_id not in reviewed_ids:
+                reviewed_ids.add(child_id)
+                pending.append(child_id)
     protected_folder_ids = {
         int(row["id"])
         for row in rows
@@ -982,9 +1444,22 @@ def plan_organization(
         for row in rows
         if row["type"] == 1
         and row["url"] in dead_urls
-        and row["parent"] != trash_id
+        and int(row["id"]) not in reviewed_ids
         and row["parent"] not in tag_folder_ids
         and int(row["id"]) not in delete_ids
+    }
+
+    review_ids = {
+        int(row["id"]) for row in rows
+        if row["type"] == 1 and row["url"] in (review_urls or set())
+        and row["parent"] != review_id and row["parent"] not in tag_folder_ids
+        and int(row["id"]) not in reviewed_ids | dead_ids | delete_ids
+    }
+    url_updates = {
+        int(row["id"]): redirects[row["url"]] for row in rows
+        if redirects and row["type"] == 1 and row["url"] in redirects
+        and redirects[row["url"]] != row["url"] and row["parent"] not in tag_folder_ids
+        and int(row["id"]) not in reviewed_ids | dead_ids | review_ids | delete_ids
     }
 
     toolbar = [
@@ -992,7 +1467,7 @@ def plan_organization(
         for row in rows
         if row["type"] == 1
         and row["parent"] == toolbar_id
-        and int(row["id"]) not in dead_ids | delete_ids
+        and int(row["id"]) not in dead_ids | review_ids | delete_ids
     ]
     duplicate_candidates = sorted(
         (
@@ -1001,8 +1476,10 @@ def plan_organization(
             if row["type"] == 1
             and row["parent"] != toolbar_id
             and row["parent"] != duplicates_id
+            and row["parent"] != review_id
+            and int(row["id"]) not in reviewed_ids
             and row["parent"] not in tag_folder_ids
-            and int(row["id"]) not in dead_ids
+            and int(row["id"]) not in dead_ids | review_ids
             and int(row["id"]) not in delete_ids
         ),
         key=lambda row: (int(row["dateAdded"]), int(row["id"])),
@@ -1010,7 +1487,7 @@ def plan_organization(
     seen_urls: set[str] = set()
     duplicate_ids: set[int] = set()
     for row in duplicate_candidates:
-        url = str(row["url"] or "")
+        url = (redirects or {}).get(str(row["url"]), str(row["url"] or ""))
         if url in seen_urls:
             duplicate_ids.add(int(row["id"]))
         else:
@@ -1037,11 +1514,12 @@ def plan_organization(
         and row["guid"] not in ("root________", "tags________")
         and int(row["id"]) not in tag_folder_ids
     ]
-    moved_ids = dead_ids | duplicate_ids | no_icon_ids
+    moved_ids = dead_ids | review_ids | duplicate_ids | no_icon_ids
     incoming_folder_ids = {
         folder
         for folder, moved in (
             (trash_id, dead_ids),
+            (review_id, review_ids),
             (duplicates_id, duplicate_ids),
             (no_icon_id, no_icon_ids),
         )
@@ -1068,7 +1546,7 @@ def plan_organization(
         for parent in folder_ids
         if parent not in delete_ids and not folder_is_sorted(children.get(parent, []))
     ]
-    if dead_ids or duplicate_ids or no_icon_ids or title_ids or delete_ids:
+    if dead_ids or review_ids or url_updates or duplicate_ids or no_icon_ids or title_ids or delete_ids:
         sortable_folders = [parent for parent in folder_ids if parent not in delete_ids]
     return OrganizationPlan(
         dead_ids,
@@ -1080,6 +1558,8 @@ def plan_organization(
         empty_folder_ids,
         sortable_folders,
         unfiled_id,
+        review_ids,
+        url_updates,
     )
 
 
@@ -1088,22 +1568,32 @@ def print_organization_plan(
     inconclusive: Sequence[Tuple[str, str]],
     remove_import_button: bool,
 ) -> None:
-    print("Bookmark changes:")
-    print(f"  Move {len(plan.dead_ids)} confirmed-404 bookmarks to {TRASH_FOLDER}")
-    print(f"  Move {len(plan.duplicate_ids)} duplicate bookmarks to {DUPLICATES_FOLDER}")
-    print(f"  Move {len(plan.no_icon_ids)} iconless toolbar bookmarks to {NO_ICON_FOLDER}")
-    print(f"  Clear {len(plan.title_ids)} toolbar titles")
-    contained_items = len(plan.delete_ids - plan.bloat_folder_ids - plan.empty_folder_ids)
-    print(
-        f"  Delete {len(plan.bloat_folder_ids)} Mozilla Firefox/Waterfox folders and "
-        f"{contained_items} contained items"
+    ui_section("Bookmark changes")
+    ui_status("detail", f"  Move {len(plan.dead_ids)} dead bookmarks to {TRASH_FOLDER}")
+    ui_status("detail", f"  Move {len(plan.review_ids)} inconclusive bookmarks to {REVIEW_FOLDER}")
+    ui_status("detail", f"  Update {len(plan.url_updates)} redirected bookmark URLs")
+    ui_status(
+        "detail", f"  Move {len(plan.duplicate_ids)} duplicate bookmarks to {DUPLICATES_FOLDER}"
     )
-    print(f"  Delete {len(plan.empty_folder_ids)} empty folders")
-    print(f"  Sort {len(plan.sortable_folders)} bookmark folders")
+    ui_status(
+        "detail", f"  Move {len(plan.no_icon_ids)} iconless toolbar bookmarks to {NO_ICON_FOLDER}"
+    )
+    ui_status("detail", f"  Clear {len(plan.title_ids)} toolbar titles")
+    contained_items = len(plan.delete_ids - plan.bloat_folder_ids - plan.empty_folder_ids)
+    ui_status(
+        "detail",
+        f"  Delete {len(plan.bloat_folder_ids)} Mozilla Firefox/Waterfox folders and "
+        f"{contained_items} contained items",
+    )
+    ui_status("detail", f"  Delete {len(plan.empty_folder_ids)} empty folders")
+    ui_status("detail", f"  Sort {len(plan.sortable_folders)} bookmark folders")
     if remove_import_button:
-        print("  Remove Import bookmarks item from the bookmarks bar")
+        ui_status("detail", "  Remove Import bookmarks item from the bookmarks bar")
     if inconclusive:
-        print(f"  Preserve {len(inconclusive)} bookmarks with inconclusive network checks")
+        ui_status(
+            "detail",
+            f"  Keep {len(inconclusive)} inconclusive bookmarks in {REVIEW_FOLDER} for review",
+        )
 
 
 def confirm_changes(assume_yes: bool) -> bool:
@@ -1111,7 +1601,7 @@ def confirm_changes(assume_yes: bool) -> bool:
         return True
     if not sys.stdin.isatty():
         raise RuntimeError("Waterfox changes require an interactive prompt or --yes")
-    return input("Apply these Waterfox changes? [y/N] ").strip().lower() in ("y", "yes")
+    return ui_confirm("Apply these Waterfox changes?", "no")
 
 
 def current_timestamp() -> int:
@@ -1271,6 +1761,67 @@ def sort_folder(connection: sqlite3.Connection, parent: int, timestamp: int) -> 
     return changed
 
 
+def places_url_hash(url: str) -> int:
+    # Mozilla Places HashURL: 16-bit scheme hash followed by the 32-bit URL hash.
+    # https://github.com/mozilla/gecko-dev/blob/master/toolkit/components/places/Helpers.cpp
+    prefix = url.split(":", 1)[0]
+    return ((places_hash_string(prefix) & 0xFFFF) << 32) | places_hash_string(url)
+
+
+def update_bookmark_urls(
+    connection: sqlite3.Connection, updates: Dict[int, str], timestamp: int,
+) -> None:
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(moz_places)")}
+    recalc = "".join(
+        f", {column} = 1" for column in ("recalc_frecency", "recalc_alt_frecency")
+        if column in columns
+    )
+    for bookmark_id, url in updates.items():
+        bookmark = connection.execute(
+            "SELECT fk, parent FROM moz_bookmarks WHERE id = ?", (bookmark_id,),
+        ).fetchone()
+        if bookmark is None:
+            continue
+        parsed = urllib.parse.urlsplit(url)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username:
+            raise RuntimeError(f"Invalid redirected bookmark URL: {url}")
+        target = connection.execute("SELECT id FROM moz_places WHERE url = ?", (url,)).fetchone()
+        if target is None:
+            prefix = parsed.scheme + "://"
+            connection.execute(
+                "INSERT OR IGNORE INTO moz_origins (prefix, host, frecency) VALUES (?, ?, 0)",
+                (prefix, parsed.netloc),
+            )
+            origin = connection.execute(
+                "SELECT id FROM moz_origins WHERE prefix = ? AND host = ?",
+                (prefix, parsed.netloc),
+            ).fetchone()[0]
+            cursor = connection.execute("""
+                INSERT INTO moz_places (url, url_hash, rev_host, guid, origin_id)
+                VALUES (?, ?, ?, ?, ?)
+                """, (url, places_url_hash(url), normalized_hostname(url)[::-1] + ".",
+                       secrets.token_urlsafe(9), origin))
+            target_id = cursor.lastrowid
+        else:
+            target_id = target[0]
+        if target_id == bookmark[0]:
+            continue
+        connection.execute("""
+            UPDATE moz_bookmarks SET fk = ?, lastModified = ?,
+                syncChangeCounter = syncChangeCounter + 1 WHERE id = ?
+            """, (target_id, timestamp, bookmark_id))
+        # Browser connection TEMP triggers are absent when editing an offline profile.
+        connection.execute(
+            f"UPDATE moz_places SET foreign_count = MAX(0, foreign_count - 1){recalc} WHERE id = ?",
+            (bookmark[0],),
+        )
+        connection.execute(
+            f"UPDATE moz_places SET foreign_count = foreign_count + 1{recalc} WHERE id = ?",
+            (target_id,),
+        )
+        touch_bookmark(connection, int(bookmark[1]), timestamp)
+
+
 def apply_organization(profile: Path, plan: OrganizationPlan) -> Tuple[int, Path]:
     database = profile / "places.sqlite"
     connection = sqlite3.connect(database, timeout=1)
@@ -1288,6 +1839,11 @@ def apply_organization(profile: Path, plan: OrganizationPlan) -> Tuple[int, Path
             trash_id = find_or_create_folder(connection, unfiled_id, TRASH_FOLDER, timestamp)
             move_bookmarks(connection, sorted(plan.dead_ids), trash_id, timestamp)
             review_ids.append(trash_id)
+        if plan.review_ids:
+            review_id = find_or_create_folder(connection, unfiled_id, REVIEW_FOLDER, timestamp)
+            move_bookmarks(connection, sorted(plan.review_ids), review_id, timestamp)
+            review_ids.append(review_id)
+        update_bookmark_urls(connection, plan.url_updates, timestamp)
         if plan.duplicate_ids:
             duplicates_id = find_or_create_folder(
                 connection, unfiled_id, DUPLICATES_FOLDER, timestamp
@@ -1385,7 +1941,7 @@ def create_backup(connection: sqlite3.Connection, database: Path) -> Path:
         backup = database.with_name(f"{database.name}.backup-{timestamp}-{suffix}")
         suffix += 1
 
-    with sqlite3.connect(backup) as destination:
+    with closing(sqlite3.connect(backup)) as destination:
         connection.backup(destination)
     backup.chmod(0o600)
     return backup
@@ -1505,54 +2061,126 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parse_args(argv)
     try:
         if args.command:
+            if args.command == "remove":
+                ui_title("Waterfix: Add-ons")
+                profile = resolve_profile(args.profile)
+                query_parts = list(args.browser_args)
+                if query_parts[:1] == ["--"]:
+                    query_parts = query_parts[1:]
+                remove_waterfox_addons(profile, " ".join(query_parts).strip(), args.yes)
+                return 0
             if args.command in ("stop", "restart"):
                 stop_waterfox()
             if args.command in ("open", "restart"):
                 open_waterfox(args.browser_args)
             return 0
+        ui_title("Waterfix")
         if not args.dry_run and args.profile is None:
             run_waterfox_configuration(args.yes)
         profile = resolve_profile(args.profile)
+        ensure_profile_readable(profile, args.yes)
         preference_updates = plan_import_button_removal(profile)
 
         bookmarks = read_bookmarks(profile)
+        processing_cache = read_processing_cache(profile)
+
+        def remember(kind: str, url: str, verdict: str) -> None:
+            if not args.dry_run:
+                save_processed_check(profile, kind, url, verdict)
+            processing_cache[kind][url] = verdict
+
+        redirects: Dict[str, str] = {}
+
+        def remember_health(url: str, verdict: str, target: str, reason: str) -> None:
+            details = {"reason": reason, "redirect": target if verdict == "redirect" else ""}
+            if not args.dry_run:
+                save_processed_check(profile, "health", url, verdict, details)
+            processing_cache["health"][url] = verdict
+            for kind, value in details.items():
+                processing_cache[kind][url] = value
+            if verdict == "redirect":
+                redirects[url] = target
+                processing_cache["health"][target] = "alive"
+
         dead_urls: set[str] = set()
         inconclusive: List[Tuple[str, str]] = []
-        print(f"Profile: {profile}")
-        print(f"Found {len(bookmarks)} HTTP(S) bookmarks")
+        ui_status("detail", f"Profile: {profile}")
+        ui_status("info", f"Found {len(bookmarks)} HTTP(S) bookmarks")
         if args.skip_health_check:
-            print("Skipping page health checks")
+            ui_status("note", "Skipping page health checks")
         else:
-            dead_urls, inconclusive = check_pages(bookmarks, args.timeout, args.workers)
+            health = {} if args.refresh else processing_cache["health"]
+            unchecked = [bookmark for bookmark in bookmarks if bookmark[0] not in health]
+            dead_urls = {url for url, _ in bookmarks if health.get(url) == "dead"}
+            inconclusive = [
+                (url, processing_cache["reason"].get(url) or
+                 "Previous check saved no reason; use --refresh to retry")
+                for url, _ in bookmarks if health.get(url) == "inconclusive"
+            ]
+            redirects = {
+                url: processing_cache["redirect"][url] for url, _ in bookmarks
+                if health.get(url) == "redirect" and processing_cache["redirect"].get(url)
+            }
+            ui_status("note", f"Using {len(bookmarks) - len(unchecked)} saved bookmark checks")
+            for url, detail in inconclusive:
+                log_health_result(url, url, None, detail)
+            for url in sorted(dead_urls):
+                log_health_result(url, url, 404, processing_cache["reason"].get(url) or "Previously dead")
+            if unchecked:
+                new_dead, new_inconclusive = check_pages(
+                    unchecked, args.timeout, args.workers,
+                    remember_health,
+                )
+                dead_urls.update(new_dead)
+                inconclusive.extend(new_inconclusive)
 
-        existing_cached_urls = read_cached_page_urls(profile)
+        network_bookmarks = [
+            (redirects[url], places_url_hash(redirects[url])) if url in redirects else (url, url_hash)
+            for url, url_hash in bookmarks
+        ]
+        existing_cached_urls = read_cached_page_urls(profile, network_bookmarks)
         cached_urls = set() if args.refresh else existing_cached_urls
         pending_bookmarks = [
             bookmark
-            for bookmark in bookmarks
+            for bookmark in network_bookmarks
             if bookmark[0] not in cached_urls and bookmark[0] not in dead_urls
+            and (args.refresh or bookmark[0] not in processing_cache["favicon"])
         ]
         grouped = group_by_hostname(pending_bookmarks)
         if args.refresh:
-            print(
-                f"Refresh enabled; fetching {len(pending_bookmarks)} bookmarks across {len(grouped)} domains"
+            ui_status(
+                "info",
+                f"Refresh enabled; fetching {len(pending_bookmarks)} bookmarks across {len(grouped)} domains",
             )
         else:
-            print(f"Using {len(existing_cached_urls)} cached bookmark favicons")
-            print(
-                f"Fetching {len(pending_bookmarks)} missing bookmarks across {len(grouped)} domains"
+            ui_status("note", f"Using {len(existing_cached_urls)} cached bookmark favicons")
+            ui_status(
+                "info",
+                f"Fetching {len(pending_bookmarks)} missing bookmarks across {len(grouped)} domains",
             )
 
         downloaded: Dict[str, Tuple[str, bytes]] = {}
         failures: List[Tuple[str, str]] = []
         if grouped:
-            downloaded, failures = fetch_icons(grouped, args.timeout, args.delay, args.workers)
+            def remember_missing_icon(hostname: str) -> None:
+                for url, _ in grouped[hostname]:
+                    remember("favicon", url, "missing")
+
+            downloaded, failures = fetch_icons(
+                grouped, args.timeout, args.delay, args.workers, remember_missing_icon,
+            )
 
         downloaded_urls = {url for hostname in downloaded for url, _ in grouped[hostname]}
-        plan = plan_organization(profile, dead_urls, existing_cached_urls | downloaded_urls)
+        icon_urls = existing_cached_urls | downloaded_urls
+        icon_urls |= {source for source, target in redirects.items() if target in icon_urls}
+        plan = plan_organization(
+            profile, dead_urls, icon_urls, {url for url, _ in inconclusive}, redirects,
+        )
         print_organization_plan(plan, inconclusive, bool(preference_updates))
         organization_changes = bool(
             plan.dead_ids
+            or plan.review_ids
+            or plan.url_updates
             or plan.duplicate_ids
             or plan.no_icon_ids
             or plan.title_ids
@@ -1561,45 +2189,47 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         )
         profile_changes = organization_changes or bool(preference_updates)
         if args.dry_run:
-            print("Dry run; no databases changed")
+            for url in sorted(set(plan.url_updates.values())):
+                print(f"Would fix: {url}")
+            ui_status("note", "Dry run complete; no databases changed.")
             return 0
         if profile_changes and not confirm_changes(args.yes):
-            print("Cancelled; no databases changed")
+            ui_status("note", "No databases changed.")
             return 0
 
-        ensure_waterfox_closed(args.yes)
+        if profile_changes or downloaded:
+            ensure_waterfox_closed(args.yes)
 
         if preference_updates:
             preference_backups = apply_preference_updates(preference_updates)
-            print("Removed Import bookmarks item from the bookmarks bar")
+            ui_status("success", "Removed Import bookmarks item from the bookmarks bar")
             for preference_backup in preference_backups:
-                print(f"Preferences backup: {preference_backup}")
+                ui_status("detail", f"  Backup: {preference_backup}")
         if organization_changes:
             changed_positions, places_backup = apply_organization(profile, plan)
-            print(f"Organized bookmarks ({changed_positions} positions changed)")
-            print(f"Places backup: {places_backup}")
+            for url in sorted(set(plan.url_updates.values())):
+                print_status("Fixed", url, "success")
+            ui_status("success", f"Organized bookmarks ({changed_positions} positions changed)")
+            ui_status("detail", f"  Backup: {places_backup}")
         if downloaded:
             associated, favicon_backup = update_favicons(profile, grouped, downloaded)
-            print(f"Associated favicons with {associated} bookmarked URLs")
-            print(f"Favicons backup: {favicon_backup}")
+            ui_status("success", f"Associated favicons with {associated} bookmarked URLs")
+            ui_status("detail", f"  Backup: {favicon_backup}")
         elif grouped:
-            print("No favicons could be downloaded")
+            ui_status("warn", "No favicons could be downloaded.")
         elif not profile_changes:
-            print("Nothing to change. Use --refresh to fetch existing favicons again.")
+            ui_status("note", "Nothing to change. Use --refresh to recheck bookmarks and favicons.")
 
         if failures:
-            print(
-                f"Could not fetch {len(failures)} domains after trying all sources.",
-                file=sys.stderr,
-            )
+            ui_status("warn", f"Could not fetch {len(failures)} domains after trying all sources.")
             return 1
         return 0
     except (OSError, RuntimeError, sqlite3.Error) as error:
-        print(f"Error: {error}", file=sys.stderr)
+        ui_status("error", str(error))
         return 2
     except KeyboardInterrupt:
         clear_progress()
-        print("Interrupted.", file=sys.stderr)
+        ui_status("warn", "Interrupted.")
         return 130
 
 

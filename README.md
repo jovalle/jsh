@@ -85,4 +85,4 @@ The [`bin/`](bin/) directory is added to `PATH` inside Jsh.
 | [`proxy`](bin/proxy)         | Forces commands through proxy.                                                        |
 | [`spotifix`](bin/spotifix)   | Plays random Spotify library selections with optional shuffle modes.                  |
 | [`sublime`](bin/sublime)     | Opens files or directories in Sublime Text.                                           |
-| [`waterfox`](bin/waterfox)   | Controls Waterfox, organizes bookmarks, and restores missing favicons.                |
+| [`waterfix`](bin/waterfix)   | Controls Waterfox, manages add-ons, organizes bookmarks, and restores favicons.       |
