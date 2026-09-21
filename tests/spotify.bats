@@ -300,7 +300,9 @@ EOF
 @test "confirmation closes a running Spotify Flatpak" {
   local running=1
   export JSH_SPOTIFY_PLATFORM=Linux
+  export JSH_SPOTIFY_TTY="${BATS_TEST_TMPDIR}/confirm-input"
   export SPOTIFY_CLOSE_CALLS="${BATS_TEST_TMPDIR}/spotify-close-calls"
+  printf '\n' > "${JSH_SPOTIFY_TTY}"
   jsh::confirm() { [[ $* == 'Spotify is running. Close it now? --default yes' ]]; }
   # shellcheck disable=SC2329 # Called indirectly by close_spotify_if_running.
   spotify_is_running() { [[ ${running} -eq 1 ]]; }
@@ -358,7 +360,9 @@ EOF
 @test "uses AppleScript to close Spotify on macOS" {
   local running=1
   export JSH_SPOTIFY_PLATFORM=Darwin
+  export JSH_SPOTIFY_TTY="${BATS_TEST_TMPDIR}/confirm-input"
   export SPOTIFY_CLOSE_CALLS="${BATS_TEST_TMPDIR}/spotify-close-calls"
+  printf '\n' > "${JSH_SPOTIFY_TTY}"
   jsh::confirm() { return 0; }
   # shellcheck disable=SC2329 # Called indirectly by close_spotify_if_running.
   spotify_is_running() { [[ ${running} -eq 1 ]]; }
