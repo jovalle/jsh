@@ -27,7 +27,7 @@ class DesktopPreferenceTests(unittest.TestCase):
             [
                 "zsh",
                 "-fc",
-                'source "$1"; first=$(_jsh_prompt_expand); '
+                'COLUMNS=80; source "$1"; first=$(_jsh_prompt_expand); '
                 '_jsh_prompt_visible_length "$first"; print -rn -- "$REPLY"',
                 "test",
                 str(ROOT / "lib/zsh/prompt.zsh"),

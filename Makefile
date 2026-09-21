@@ -3,7 +3,7 @@ CHECK_TARGETS := check-script-headers check-readme check-shell-syntax check-zsh-
 	lint-yaml lint-markdown lint-js test-reconciliation
 FORMAT_TARGETS := format-shell format-python format-yaml format-json format-markdown
 
-.PHONY: help install essentials update setup deploy configure patch hooks uninstall check \
+.PHONY: help install essentials update setup deploy configure patch hooks uninstall preview check \
 	format clean \
 	check-tools check-syntax lint ci validate pre-commit pre-commit-run commit \
 	commit-msg-check $(CHECK_TARGETS) $(FORMAT_TARGETS)
@@ -90,12 +90,12 @@ SHELL_FILES := $(shell find . -type f -name "*.sh" ! -path "*/node_modules/*" ! 
 	find bin -type f 2>/dev/null | while read -r f; do head -n1 "$$f" 2>/dev/null | grep -qE '^$(HASH)!/usr/bin/env bash|^$(HASH)!/bin/(ba)?sh' && echo "$$f"; done)
 ZSH_FILES := $(shell find . -type f \( -name "*.zsh" -o -name ".zshrc" \) ! -path "*/.git/*" ! -path "./local/vendor/*" ! -path "./tmp/*" ! -name "*sync-conflict*")
 SCRIPT_FILES := $(shell find scripts -type f \( -name "*.sh" -o -name "*.zsh" \) ! -name "*sync-conflict*" | sort)
-PYTHON_FILES := $(shell find . -type f -name "*.py" ! -path "*/\.*" ! -path "*/node_modules/*" ! -path "*/.venv/*" ! -path "./local/vendor/*" ! -path "./tmp/*" ! -name "*sync-conflict*"; \
+PYTHON_FILES := $(shell find . -type f -name "*.py" ! -path "*/\.*" ! -path "*/node_modules/*" ! -path "*/.venv/*" ! -path "./local/*" ! -path "./tmp/*" ! -name "*sync-conflict*"; \
 	find bin -type f 2>/dev/null | while read -r f; do head -n1 "$$f" 2>/dev/null | grep -qE '^$(HASH)!/usr/bin/env python3?' && echo "$$f"; done)
 YAML_FILES := $(shell find . -type f \( -name "*.yaml" -o -name "*.yml" \) ! -path "*/\.*" ! -path "*/node_modules/*" ! -path "./local/vendor/*" ! -path "./tmp/*" ! -name "*sync-conflict*")
 JSON_FIND := find . -type f -name "*.json" ! -path "*/\.*" ! -path "*/node_modules/*" ! -path "*/package*.json" ! -path "./local/*" ! -path "./tmp/*" ! -name "*sync-conflict*"
 JSON_FILES := $(shell $(JSON_FIND))
-MD_FILES := $(shell find . -type f -name "*.md" ! -path "*/\.*" ! -path "*/node_modules/*" ! -path "./local/vendor/*" ! -path "./tmp/*" ! -name "*sync-conflict*")
+MD_FILES := $(shell find . -type f -name "*.md" ! -path "*/\.*" ! -path "*/node_modules/*" ! -path "./graphify-out/*" ! -path "./local/vendor/*" ! -path "./tmp/*" ! -name "*sync-conflict*")
 
 ##@ General
 
@@ -141,6 +141,23 @@ uninstall: ## Remove dotfile links managed by jstow
 		jsh::log_warn "Skipping uninstall."; exit 0; \
 	fi; \
 	bash "$(JSH_ROOT)/bin/jstow" --delete --dir "$(JSH_ROOT)" --target "$(HOME)" dotfiles
+
+##@ Documentation
+
+preview: ## Open generated architecture diagrams
+	@$(OUTPUT) diagram_dir="$(JSH_ROOT)/docs/architecture"; \
+	set -- "$$diagram_dir"/*.html; \
+	if [ ! -e "$$1" ]; then \
+		jsh::log_error "No generated architecture diagrams found in $$diagram_dir."; \
+		exit 1; \
+	fi; \
+	case "$(PLATFORM)" in \
+		darwin) opener=open ;; \
+		linux) opener=xdg-open ;; \
+		*) jsh::log_error "Opening diagrams is unsupported on $(PLATFORM)."; exit 1 ;; \
+	esac; \
+	command -v "$$opener" >/dev/null 2>&1 || { jsh::log_error "$$opener is unavailable."; exit 1; }; \
+	for diagram in "$$@"; do "$$opener" "$$diagram"; done
 
 ##@ Formatting
 
@@ -198,7 +215,7 @@ check: $(CHECK_TARGETS) ## Run all checks
 check-tools: ## Check required developer tools
 	@$(OUTPUT) jsh::log_info "Checking for required tools..."
 	@$(OUTPUT) errors=0; \
-	for tool in actionlint autopep8 bats black commitlint cz eslint gitleaks hadolint jq \
+	for tool in actionlint autopep8 bats black check-added-large-files commitlint cz eslint gitleaks hadolint jq \
 		markdownlint pre-commit prettier pylint shellcheck shfmt stow yamllint yq; do \
 		if command -v $$tool >/dev/null 2>&1; then \
 			jsh::log_success "$$tool"; \
@@ -402,7 +419,7 @@ lint-markdown: # Lint Markdown files with markdownlint
 
 lint-js: # Lint JavaScript files with ESLint
 	@$(OUTPUT) jsh::log_info "Linting JavaScript files..."
-	@$(OUTPUT) JS_FILES=$$(find . -type f -name "*.js" ! -path "*/\.*" ! -path "*/node_modules/*" ! -path "./local/vendor/*"); \
+	@$(OUTPUT) JS_FILES=$$(find . -type f -name "*.js" ! -path "*/\.*" ! -path "*/node_modules/*" ! -path "./local/vendor/*" ! -path "./tmp/*"); \
 	if [ -n "$$JS_FILES" ]; then \
 		eslint $$JS_FILES && \
 		jsh::log_success "JavaScript files passed linting"; \
@@ -466,11 +483,16 @@ test-reconciliation: ## Test planning, completions, idempotency and platform ada
 	@$(BATS) tests/cafe.bats
 	@$(BATS) tests/completions.bats
 	@$(BATS) tests/env.bats
+	@$(BATS) tests/helium.bats
 	@$(BATS) tests/install.bats
-	@$(BATS) tests/jgraphify.bats
-	@$(BATS) tests/kubectx.bats
-	@$(BATS) tests/ui.bats
 	@$(BATS) tests/jgit.bats
-	@$(BATS) tests/linux-platform.bats
+	@$(BATS) tests/jgraphify.bats
+	@$(BATS) tests/jmount.bats
+	@$(BATS) tests/kubectx.bats
+	@$(BATS) tests/linux.bats
+	@$(BATS) tests/spotify.bats
+	@$(BATS) tests/syncthing.bats
+	@$(BATS) tests/ui.bats
 	@$(BATS) tests/waterfox.bats
+	@node --test tests/spotifix.test.js
 	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m unittest discover -s tests -p 'test_*.py'
