@@ -250,7 +250,13 @@ class DeployTests(unittest.TestCase):
             root = Path(directory) / "repo"
             home = Path(directory) / "home"
             home.mkdir()
-            for relative in ("scripts/unix/deploy/dotfiles.zsh", "lib/output.sh"):
+            for relative in (
+                "scripts/unix/deploy/dotfiles.zsh",
+                "lib/env.sh",
+                "lib/output.sh",
+                "lib/ui.sh",
+                "lib/ui/theme.sh",
+            ):
                 target = root / relative
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(ROOT / relative, target)
@@ -290,7 +296,14 @@ class DeployTests(unittest.TestCase):
             root = Path(directory) / "repo"
             home = Path(directory) / "home"
             home.mkdir()
-            for relative in ("scripts/unix/deploy/dotfiles.zsh", "bin/jstow", "lib/output.sh"):
+            for relative in (
+                "scripts/unix/deploy/dotfiles.zsh",
+                "bin/jstow",
+                "lib/env.sh",
+                "lib/output.sh",
+                "lib/ui.sh",
+                "lib/ui/theme.sh",
+            ):
                 target = root / relative
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(ROOT / relative, target)
@@ -322,7 +335,14 @@ class DeployTests(unittest.TestCase):
             shim_dir = Path(directory) / "bin"
             home.mkdir()
             shim_dir.mkdir()
-            for relative in ("scripts/unix/deploy/dotfiles.zsh", "bin/jstow", "lib/output.sh"):
+            for relative in (
+                "scripts/unix/deploy/dotfiles.zsh",
+                "bin/jstow",
+                "lib/env.sh",
+                "lib/output.sh",
+                "lib/ui.sh",
+                "lib/ui/theme.sh",
+            ):
                 target = root / relative
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(ROOT / relative, target)
@@ -356,7 +376,14 @@ class DeployTests(unittest.TestCase):
             root = Path(directory) / "repo"
             home = Path(directory) / "home"
             (home / ".config").mkdir(parents=True)
-            for relative in ("scripts/unix/deploy/dotfiles.zsh", "bin/jstow", "lib/output.sh"):
+            for relative in (
+                "scripts/unix/deploy/dotfiles.zsh",
+                "bin/jstow",
+                "lib/env.sh",
+                "lib/output.sh",
+                "lib/ui.sh",
+                "lib/ui/theme.sh",
+            ):
                 target = root / relative
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(ROOT / relative, target)
@@ -387,7 +414,14 @@ class DeployTests(unittest.TestCase):
             root = Path(directory) / "repo"
             home = Path(directory) / "home"
             home.mkdir()
-            for relative in ("scripts/unix/deploy/dotfiles.zsh", "bin/jstow", "lib/output.sh"):
+            for relative in (
+                "scripts/unix/deploy/dotfiles.zsh",
+                "bin/jstow",
+                "lib/env.sh",
+                "lib/output.sh",
+                "lib/ui.sh",
+                "lib/ui/theme.sh",
+            ):
                 target = root / relative
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(ROOT / relative, target)
@@ -423,7 +457,10 @@ class MakeOrchestrationTests(unittest.TestCase):
     def prepare_root(self, directory):
         root = Path(directory)
         (root / "lib").mkdir()
-        shutil.copy2(ROOT / "lib/output.sh", root / "lib/output.sh")
+        for relative in ("env.sh", "output.sh", "ui.sh", "ui/theme.sh"):
+            target = root / "lib" / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / "lib" / relative, target)
         return root
 
     def add_script(self, root, relative, label, exit_code=0, executable=True):
@@ -463,7 +500,7 @@ class MakeOrchestrationTests(unittest.TestCase):
                 ("scripts/linux/install/10-packages.sh", "linux-packages", True),
                 ("scripts/unix/install/30-tools.sh", "unix-tools", True),
                 ("scripts/unix/deploy/10-dotfiles.sh", "unix-dotfiles", True),
-                ("scripts/unix/configure/20-zed.sh", "unix-zed", True),
+                ("scripts/unix/configure/20-sublime-text.sh", "unix-sublime", True),
                 ("scripts/unix/configure/10-spotify.sh", "unix-spotify", True),
                 ("scripts/linux/configure/10-desktop.sh", "linux-desktop", True),
                 ("scripts/linux/patch/10-patch.sh", "linux-patch", True),
@@ -484,7 +521,7 @@ class MakeOrchestrationTests(unittest.TestCase):
                     "unix-tools",
                     "unix-dotfiles",
                     "unix-spotify",
-                    "unix-zed",
+                    "unix-sublime",
                     "linux-desktop",
                 ],
             )

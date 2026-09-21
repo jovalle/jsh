@@ -1,0 +1,485 @@
+#!/usr/bin/env bash
+# shellcheck shell=bash
+# shellcheck disable=SC2310
+##% sublime
+## status ## Check whether Sublime Text is patched
+## apply ## Patch Sublime Text binary
+## restore ## Restore original Sublime Text binary from backup
+## open ## Open files or directories in Sublime Text
+## help ## Show help
+
+set -euo pipefail
+IFS=$'\n\t'
+
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+readonly SCRIPT_DIR
+if [[ -z ${JSH_ROOT:-} ]]; then
+  if [[ -n ${JSH_DIR:-} ]]; then
+    JSH_ROOT=${JSH_DIR}
+  elif [[ -f ${SCRIPT_DIR}/../lib/ui.sh ]]; then
+    JSH_ROOT=$(cd -- "${SCRIPT_DIR}/.." && pwd -P)
+  else
+    JSH_ROOT=${HOME}/.jsh
+  fi
+fi
+readonly JSH_ROOT
+
+for library_file in "${JSH_ROOT}"/lib/*; do
+  [[ -f ${library_file} && -x ${library_file} ]] || continue
+  # shellcheck source=/dev/null
+  . "${library_file}"
+done
+unset library_file
+
+SUBLIME_PLATFORM=$(uname -s)
+readonly SUBLIME_PLATFORM
+readonly TARGET_BUILD="4200"
+
+resolve_sublime_app() {
+  local candidate
+  if [[ ${SUBLIME_PLATFORM} == Linux ]]; then
+    for candidate in "${SUBLIME_BINARY:-}" "${SUBLIME_APP_PATH:+${SUBLIME_APP_PATH}/sublime_text}" \
+      /opt/sublime_text/sublime_text /usr/lib/sublime-text/sublime_text \
+      "$(command -v sublime_text || true)"; do
+      [[ -n ${candidate} && -f ${candidate} ]] || continue
+      candidate=$(readlink -f -- "${candidate}")
+      printf '%s\n' "${candidate%/*}"
+      return 0
+    done
+    return 1
+  fi
+  for candidate in \
+    "${SUBLIME_APP_PATH:-}" \
+    "/Applications/Sublime Text.app" \
+    "${HOME}/Applications/Sublime Text.app"; do
+    [[ -n ${candidate} && -d ${candidate} ]] || continue
+    printf '%s\n' "${candidate}"
+    return 0
+  done
+  return 1
+}
+
+die() {
+  jsh::log_error "Sublime Text: $2"
+  exit "$1"
+}
+
+usage() {
+  cat << 'EOF'
+Usage:
+  sublime [file|directory...]
+  sublime open [--] [file|directory...]
+  sublime status
+  sublime apply [-y|--yes] [--force]
+  sublime restore [-y|--yes]
+  sublime -h|--help
+
+Commands:
+  open     Open files or directories in Sublime Text (default).
+  status   Display current installation, build, and patch status.
+  apply    Patch Sublime Text 4 binary, signing the bundle on macOS.
+  restore  Restore original binary from the most recent backup.
+
+With no arguments or when given file or directory paths, opens Sublime Text directly.
+Linux patching supports native x86_64 Build 4200 installations.
+Set SUBLIME_APP_PATH to the installation directory or SUBLIME_BINARY to its executable.
+EOF
+}
+
+require_command() {
+  command -v "$1" > /dev/null 2>&1 || die 1 "$1 is required."
+}
+
+require_platform() {
+  [[ ${SUBLIME_PLATFORM} == Darwin || ${SUBLIME_PLATFORM} == Linux ]] || {
+    jsh::log_note "Skipping Sublime Text operation: macOS or Linux required."
+    exit 0
+  }
+}
+
+sublime_binary_path() {
+  if [[ ${SUBLIME_PLATFORM} == Linux ]]; then
+    readlink -f -- "${SUBLIME_BINARY:-$1/sublime_text}"
+  else
+    printf '%s/Contents/MacOS/sublime_text\n' "$1"
+  fi
+}
+
+app_build_version() {
+  local app_path=$1
+  if [[ ${SUBLIME_PLATFORM} == Linux ]]; then
+    "$(sublime_binary_path "${app_path}")" --version 2> /dev/null | sed -n 's/^Sublime Text Build \([0-9]*\)$/\1/p' || echo unknown
+    return
+  fi
+  /usr/libexec/PlistBuddy -c "Print CFBundleVersion" "${app_path}/Contents/Info.plist" 2> /dev/null || echo "unknown"
+}
+
+sublime_is_running() {
+  local app_path=$1
+  pgrep -f "^${app_path}/Contents/MacOS/sublime_text" > /dev/null 2>&1 ||
+    pgrep -x sublime_text > /dev/null 2>&1
+}
+
+stop_sublime() {
+  local app_path=$1 attempt
+  sublime_is_running "${app_path}" || return 0
+
+  if [[ ${JSH_ASSUME_YES:-0} != 1 ]]; then
+    if [[ -t 0 ]]; then
+      jsh::confirm "Sublime Text is running. Quit it now?" --default yes || die 1 "Operation cancelled."
+    else
+      die 1 "Sublime Text is running. Quit Sublime Text or pass -y/--yes."
+    fi
+  fi
+
+  jsh::log_info "Quitting Sublime Text..."
+  if [[ ${SUBLIME_PLATFORM} == Darwin ]]; then
+    osascript -e 'tell application "Sublime Text" to quit' > /dev/null 2>&1 || true
+  else
+    pkill -TERM -x sublime_text > /dev/null 2>&1 || true
+  fi
+
+  for ((attempt = 0; attempt < 50; attempt++)); do
+    sublime_is_running "${app_path}" || {
+      jsh::log_success "Sublime Text closed."
+      return 0
+    }
+    sleep 0.1
+  done
+
+  pkill -TERM -x sublime_text > /dev/null 2>&1 || true
+  for ((attempt = 0; attempt < 20; attempt++)); do
+    sublime_is_running "${app_path}" || {
+      jsh::log_success "Sublime Text closed."
+      return 0
+    }
+    sleep 0.1
+  done
+
+  die 1 "Sublime Text could not be closed."
+}
+
+run_privileged() {
+  local target_path=$1
+  shift
+  if [[ -w ${target_path} ]]; then
+    "$@"
+  else
+    jsh::sudo_preflight
+    sudo "$@"
+  fi
+}
+
+run_python_helper() {
+  local mode=$1 binary_path=$2 out_path=${3:-}
+  python3 -c "
+import sys
+
+ORIG_X86 = bytes.fromhex('0F B6 51 05 83 F2 01')
+PATCH_X86 = bytes.fromhex('C6 41 05 01 B2 00 90')
+ORIG_ARM64 = bytes.fromhex('09 15 40 39 4A 00 80 52 3F 01 00 71 E9 13 8A 1A')
+PATCH_ARM64 = bytes.fromhex('29 00 80 52 09 15 00 39 E9 03 1F 2A 1F 20 03 D5')
+
+mode = sys.argv[1]
+bin_path = sys.argv[2]
+
+with open(bin_path, 'rb') as f:
+    data = f.read()
+
+if sys.argv[4] == 'Linux' and (data[:6] != b'\x7fELF\x02\x01' or data[18:20] != b'\x3e\x00'):
+    print('unsupported Linux binary: only x86_64 ELF is verified for Build 4200')
+    sys.exit(1)
+
+for original, patched in ((ORIG_X86, PATCH_X86), (ORIG_ARM64, PATCH_ARM64)):
+    if data.count(original) + data.count(patched) > 1:
+        print('ambiguous patch signature')
+        sys.exit(1)
+
+has_x86_orig = ORIG_X86 in data
+has_x86_patch = PATCH_X86 in data
+has_arm_orig = ORIG_ARM64 in data
+has_arm_patch = PATCH_ARM64 in data
+
+has_x86 = has_x86_orig or has_x86_patch
+has_arm = has_arm_orig or has_arm_patch
+
+if mode == 'status':
+    if not has_x86 and not has_arm:
+        print('unrecognized binary structure')
+        sys.exit(1)
+    parts = []
+    all_patched = True
+    if has_x86:
+        if has_x86_patch:
+            parts.append('x86_64: patched')
+        elif has_x86_orig:
+            parts.append('x86_64: unpatched')
+            all_patched = False
+        else:
+            parts.append('x86_64: unknown')
+            all_patched = False
+    if has_arm:
+        if has_arm_patch:
+            parts.append('arm64: patched')
+        elif has_arm_orig:
+            parts.append('arm64: unpatched')
+            all_patched = False
+        else:
+            parts.append('arm64: unknown')
+            all_patched = False
+    print(', '.join(parts))
+    sys.exit(0 if all_patched else 2)
+
+elif mode == 'patch':
+    if not has_x86_orig and not has_arm_orig:
+        if has_x86_patch or has_arm_patch:
+            print('already_patched')
+            sys.exit(2)
+        print('original byte sequences not found')
+        sys.exit(1)
+    buf = bytearray(data)
+    patched_slices = []
+    if has_x86_orig:
+        idx = buf.find(ORIG_X86)
+        buf[idx:idx + len(PATCH_X86)] = PATCH_X86
+        patched_slices.append('x86_64')
+    if has_arm_orig:
+        idx = buf.find(ORIG_ARM64)
+        buf[idx:idx + len(PATCH_ARM64)] = PATCH_ARM64
+        patched_slices.append('arm64')
+    out_file = sys.argv[3]
+    with open(out_file, 'wb') as f:
+        f.write(buf)
+    print(', '.join(patched_slices))
+    sys.exit(0)
+
+elif mode == 'verify':
+    if (not has_x86 and not has_arm) or (has_x86 and not has_x86_patch) or (has_arm and not has_arm_patch) or has_x86_orig or has_arm_orig:
+        sys.exit(1)
+    sys.exit(0)
+" "${mode}" "${binary_path}" "${out_path}" "${SUBLIME_PLATFORM}"
+}
+
+open_sublime() {
+  require_platform
+  local app_path subl_bin
+  if ! app_path=$(resolve_sublime_app); then
+    die 1 "Sublime Text is not installed. Set SUBLIME_APP_PATH or, on Linux, SUBLIME_BINARY for a custom installation."
+  fi
+
+  if [[ ${SUBLIME_PLATFORM} == Linux ]]; then
+    subl_bin=$(sublime_binary_path "${app_path}")
+    exec "${subl_bin}" "$@"
+  fi
+  subl_bin="${app_path}/Contents/SharedSupport/bin/subl"
+  if [[ -x ${subl_bin} ]]; then
+    exec "${subl_bin}" "$@"
+  fi
+
+  if (($# == 0)); then
+    open -a "${app_path}"
+  else
+    open -a "${app_path}" --args "$@"
+  fi
+}
+
+patch_status() {
+  require_platform
+  local app_path binary_path build status_output status_code=0
+  if ! app_path=$(resolve_sublime_app); then
+    jsh::log_note "Sublime Text is not installed."
+    return 0
+  fi
+  binary_path=$(sublime_binary_path "${app_path}")
+  [[ -f ${binary_path} ]] || {
+    jsh::log_warn "Sublime Text bundle found at ${app_path}, but binary is missing."
+    return 1
+  }
+
+  build=$(app_build_version "${app_path}")
+  status_output=$(run_python_helper status "${binary_path}") || status_code=$?
+
+  if [[ ${status_code} -eq 0 ]]; then
+    jsh::log_success "Sublime Text (Build ${build}) is patched (${status_output})."
+    return 0
+  elif [[ ${status_code} -eq 2 ]]; then
+    jsh::log_warn "Sublime Text (Build ${build}) needs patch (${status_output})."
+    return 1
+  else
+    jsh::log_error "Sublime Text (Build ${build}) status unknown: ${status_output}."
+    return 1
+  fi
+}
+
+apply() {
+  require_platform
+  require_command python3
+  if [[ ${SUBLIME_PLATFORM} == Darwin ]]; then require_command codesign; fi
+
+  local force=false arg
+  for arg in "$@"; do
+    case "${arg}" in
+      --force) force=true ;;
+      -y | --yes) export JSH_ASSUME_YES=1 ;;
+      *) die 64 "Unknown argument: ${arg}" ;;
+    esac
+  done
+
+  local app_path binary_path build status_code=0 status_output backup_file temp_file patch_output
+  if ! app_path=$(resolve_sublime_app); then
+    die 1 "Sublime Text is not installed. Set SUBLIME_APP_PATH or, on Linux, SUBLIME_BINARY for a custom installation."
+  fi
+  binary_path=$(sublime_binary_path "${app_path}")
+  [[ -f ${binary_path} ]] || die 1 "Sublime Text executable missing at ${binary_path}."
+
+  build=$(app_build_version "${app_path}")
+  jsh::log_info "Detected Sublime Text Build ${build} at ${app_path}."
+
+  if [[ "${build}" != "${TARGET_BUILD}" && "${force}" != true ]]; then
+    jsh::log_warn "Patch is designed for Build ${TARGET_BUILD}, but detected Build ${build}."
+    if [[ ${JSH_ASSUME_YES:-0} != 1 ]]; then
+      jsh::confirm "Proceed with patching Build ${build}?" --default no || die 1 "Patch cancelled."
+    fi
+  fi
+
+  status_output=$(run_python_helper status "${binary_path}" 2> /dev/null) || status_code=$?
+  if [[ ${status_code} -eq 0 ]]; then
+    jsh::log_note "Sublime Text is already patched (${status_output})."
+    return 0
+  fi
+
+  if [[ ${status_code} != 0 && ${status_code} != 2 ]]; then
+    die 1 "Cannot patch binary: ${status_output}"
+  fi
+
+  stop_sublime "${app_path}"
+
+  mkdir -p "${JSH_ROOT}/tmp"
+  temp_file=$(mktemp "${JSH_ROOT}/tmp/sublime_text.XXXXXXXXXX")
+  typeset -f jsh_interrupt_cleanup_path > /dev/null 2>&1 && jsh_interrupt_cleanup_path "${temp_file}"
+
+  jsh::log_info "Generating patched binary slices..."
+  if ! patch_output=$(run_python_helper patch "${binary_path}" "${temp_file}"); then
+    rm -f "${temp_file}"
+    die 1 "Failed to patch binary: ${patch_output}"
+  fi
+  if ! run_python_helper verify "${temp_file}"; then
+    rm -f "${temp_file}"
+    die 1 "Generated binary failed byte verification."
+  fi
+  chmod 0755 "${temp_file}"
+
+  backup_file="${binary_path}.backup_$(date +%Y%m%d%H%M%S)"
+  jsh::log_info "Backing up original binary to ${backup_file}..."
+  run_privileged "${binary_path}" cp -p "${binary_path}" "${backup_file}" || {
+    rm -f "${temp_file}"
+    die 1 "Failed to create binary backup."
+  }
+
+  jsh::log_info "Installing patched binary (${patch_output})..."
+  run_privileged "${binary_path}" cp -f "${temp_file}" "${binary_path}" || {
+    rm -f "${temp_file}"
+    die 1 "Failed to write patched binary to ${binary_path}."
+  }
+  rm -f "${temp_file}"
+
+  if [[ ${SUBLIME_PLATFORM} == Darwin ]]; then
+    jsh::log_info "Re-signing application bundle..."
+    run_privileged "${app_path}" xattr -dr com.apple.quarantine "${app_path}" 2> /dev/null || true
+    run_privileged "${app_path}" codesign --force --deep --sign - "${app_path}" 2> /dev/null || {
+      jsh::log_warn "Ad-hoc codesign returned an error; retrying strictly on app bundle..."
+      run_privileged "${app_path}" codesign --force --sign - "${binary_path}" 2> /dev/null || true
+      run_privileged "${app_path}" codesign --force --sign - "${app_path}" || die 1 "Codesigning failed."
+    }
+  fi
+
+  jsh::log_info "Verifying patched binary..."
+  if ! run_python_helper verify "${binary_path}"; then
+    die 1 "Patched binary failed byte verification."
+  fi
+
+  jsh::log_success "Sublime Text Build ${build} patched successfully (${patch_output})."
+  jsh::log_detail "Backup location: ${backup_file}"
+}
+
+restore_backup() {
+  require_platform
+  local arg
+  for arg in "$@"; do
+    case "${arg}" in
+      -y | --yes) export JSH_ASSUME_YES=1 ;;
+      *) die 64 "Unknown argument: ${arg}" ;;
+    esac
+  done
+
+  local app_path binary_path candidate latest_backup=''
+  if ! app_path=$(resolve_sublime_app); then
+    die 1 "Sublime Text is not installed."
+  fi
+  binary_path=$(sublime_binary_path "${app_path}")
+
+  for candidate in "${binary_path}".backup_*; do
+    [[ -f ${candidate} ]] || continue
+    if [[ -z ${latest_backup} || ${candidate} -nt ${latest_backup} ]]; then
+      latest_backup=${candidate}
+    fi
+  done
+  [[ -n ${latest_backup} ]] || die 1 "No backup found for ${binary_path}."
+
+  jsh::log_info "Found backup: ${latest_backup}"
+  if [[ ${JSH_ASSUME_YES:-0} != 1 ]]; then
+    jsh::confirm "Restore Sublime Text binary from backup?" --default yes || die 1 "Restore cancelled."
+  fi
+
+  stop_sublime "${app_path}"
+
+  jsh::log_info "Restoring binary from backup..."
+  run_privileged "${binary_path}" cp -f "${latest_backup}" "${binary_path}" || die 1 "Failed to restore binary."
+
+  if [[ ${SUBLIME_PLATFORM} == Darwin ]]; then
+    jsh::log_info "Re-signing restored application bundle..."
+    run_privileged "${app_path}" codesign --force --deep --sign - "${app_path}" 2> /dev/null || true
+  fi
+
+  jsh::log_success "Sublime Text restored successfully from ${latest_backup}."
+}
+
+main() {
+  case ${1:-} in
+    '')
+      open_sublime
+      ;;
+    status)
+      patch_status
+      ;;
+    apply | patch)
+      shift
+      apply "$@"
+      ;;
+    restore | revert)
+      shift
+      restore_backup "$@"
+      ;;
+    open)
+      shift
+      if [[ ${1:-} == "--" ]]; then
+        shift
+      fi
+      open_sublime "$@"
+      ;;
+    --)
+      shift
+      open_sublime "$@"
+      ;;
+    -h | --help | help)
+      usage
+      ;;
+    *)
+      open_sublime "$@"
+      ;;
+  esac
+}
+
+if [[ ${JSH_SUBLIME_SOURCE_ONLY:-0} != 1 ]]; then
+  main "$@"
+fi

@@ -84,4 +84,5 @@ The [`bin/`](bin/) directory is added to `PATH` inside Jsh.
 | [`nukem`](bin/nukem)         | Helps handle those pesky Kubernetes finalizers.                                       |
 | [`proxy`](bin/proxy)         | Forces commands through proxy.                                                        |
 | [`spotify`](bin/spotify)     | Updates and controls Spotify, including random saved-playlist playback.               |
+| [`sublime`](bin/sublime)     | Opens files or directories in Sublime Text.                                           |
 | [`waterfox`](bin/waterfox)   | Controls Waterfox, organizes bookmarks, and restores missing favicons.                |
