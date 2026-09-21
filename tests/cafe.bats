@@ -20,9 +20,18 @@ write_wrapper_backend() {
   cat > "${CAFE_TEST_BIN}/${name}" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "${CAFE_TEST_LOG}"
-while [[ $# -gt 0 && $1 != -- ]]; do shift; done
-[[ ${1:-} != -- ]] || shift
-exec "$@"
+duration=
+while (($#)) && [[ $1 != -- ]]; do
+  if [[ $1 == -t ]]; then duration=$2; shift 2; else shift; fi
+done
+if [[ ${1:-} == -- ]]; then
+  shift
+  exec "$@"
+elif [[ -n ${duration} ]]; then
+  exec /bin/sleep "${duration}"
+else
+  while :; do /bin/sleep 86400; done
+fi
 EOF
   chmod +x "${CAFE_TEST_BIN}/${name}"
 }
