@@ -9,7 +9,9 @@
 ## commit [-t TIME] [ARGS...] ## Commit with an optional timestamp
 ## amend [REF] -t TIME [--dry-run] [--yes] ## Move a commit timestamp and following commits
 ## rewrite [--last N|REF...] ## Rewrite commit messages and timestamps
+## stash [push options] ## Stash tracked and untracked changes, excluding ignored files
 ## update [--stash] [--all [DIR]] ## Fast-forward repositories from their upstreams
+## heal [--yes] ## Repair broken tool-owned refs
 ## save [--exclude PATH]... ## Back up uncommitted changes to a secret gist
 ## backup [--exclude PATH]... ## Alias for save
 ## load [--exclude PATH]... ## Restore uncommitted changes from a secret gist
@@ -25,6 +27,7 @@
 ##? update --stash ## Stash and restore local changes
 ##? update --all ## Update the base directory and immediate child repositories
 ##? update --all @directory ## Repository base directory
+##? heal --yes ## Back up and remove broken tool-owned refs
 ##? save --exclude @path ## Exclude a repository-relative path
 ##? backup --exclude @path ## Exclude a repository-relative path
 ##? load --exclude @path ## Exclude a repository-relative path
@@ -50,10 +53,10 @@ for library_file in "${JSH_ROOT}"/lib/*; do
   . "${library_file}"
 done
 unset library_file
+jsh::init
 
 JGIT_CONFIG=${JGIT_CONFIG:-${JSH_ROOT}/conf/git.json}
 JGIT_VERSION=1.0.0
-jsh::init
 JGIT_COLOR=0
 jsh_color_enabled 1 && JGIT_COLOR=1
 
@@ -75,8 +78,10 @@ Commands:
   amend [REF] -t TIME   Move a commit timestamp and following commits
   rewrite REF...        Rewrite selected commits by hash, tag, or other ref
   rewrite --last N      Rewrite the last N first-parent commits
+  stash [push options]  Stash tracked and untracked changes, excluding ignored files
   update [--stash]      Fast-forward the current branch from its upstream
   update --all [DIR]    Update repositories in DIR and its immediate children
+  heal [--yes]          Repair broken tool-owned refs; preview by default
   save [--exclude PATH] Back up uncommitted changes to a secret gist
   backup                 Alias for save
   load [--exclude PATH] Restore uncommitted changes from a secret gist
@@ -305,7 +310,8 @@ _jgit_key_health() {
 
 _jgit_helper_health() {
   local helper helper_name exec_dir
-  helper=$(git config --get-all credential.helper 2> /dev/null | awk 'NF { value = $0 } END { print value }')
+  helper=$(git config --get-all credential.helper 2> /dev/null |
+    awk 'NF { value = $0 } END { print value }' || true)
   if [[ -z ${helper} ]]; then
     HEALTH_STATE=warn
     HEALTH_TEXT='not configured'
@@ -487,6 +493,21 @@ _jgit_profile_select_apply() {
   _jgit_profile_apply "${profile}"
 }
 
+_jgit_rewrite_github_https_remotes() {
+  local remote url push_url
+  while IFS= read -r remote; do
+    url=$(git remote get-url "${remote}" 2> /dev/null || true)
+    if [[ ${url} == https://github.com/* ]]; then
+      git remote set-url "${remote}" "git@github.com:${url#https://github.com/}"
+    fi
+
+    push_url=$(git config --local --get "remote.${remote}.pushurl" 2> /dev/null || true)
+    if [[ ${push_url} == https://github.com/* ]]; then
+      git remote set-url --push "${remote}" "git@github.com:${push_url#https://github.com/}"
+    fi
+  done < <(git remote)
+}
+
 _jgit_profile_apply() {
   local profile=$1 show_status=${2:-1} name email ssh_key key_path expanded_key ssh_command
   git rev-parse --git-dir > /dev/null 2>&1 || _jgit_die 'not in a Git repository'
@@ -507,6 +528,7 @@ _jgit_profile_apply() {
   git config --local user.name "${name}"
   git config --local user.email "${email}"
   git config --local core.sshCommand "${ssh_command}"
+  _jgit_rewrite_github_https_remotes
   jsh::log_success "Applied Git profile '${profile}'"
   if ((show_status)); then
     _jgit_profile_status
@@ -1318,6 +1340,29 @@ _jgit_rewrite_restore_worktree() {
   jsh::log_success 'Restored local changes'
 }
 
+_jgit_stash() {
+  local argument parsing_options=1
+  local -a arguments=()
+  case ${1:-} in
+    list | show | drop | pop | apply | branch | clear | create | store | export | import | save)
+      exec git stash "$@"
+      ;;
+    push) shift ;;
+  esac
+
+  for argument in "$@"; do
+    if ((parsing_options)) && [[ ${argument} == -- ]]; then
+      parsing_options=0
+      arguments+=("${argument}")
+    elif ((parsing_options)) && [[ ${argument} == -a || ${argument} == --all ]]; then
+      continue
+    else
+      arguments+=("${argument}")
+    fi
+  done
+  exec git stash push --include-untracked "${arguments[@]}"
+}
+
 _jgit_update_repository() {
   local repo=$1 use_stash=$2 status previous_stash='' stash_oid='' pull_status=0
   if ! git -C "${repo}" symbolic-ref --quiet HEAD > /dev/null; then
@@ -1434,6 +1479,95 @@ _jgit_update() {
   ((failed == 0))
 }
 
+_jgit_heal() {
+  local apply=0 git_dir fsck_output fsck_status=0 ref oid backup index failed=0
+  local -a heal_refs=() heal_oids=() protected_refs=()
+  while (($#)); do
+    case $1 in
+      --yes) apply=1 ;;
+      -h | --help)
+        printf '%s\n' \
+          'Usage: jgit heal [--yes]' \
+          '' \
+          'Find broken refs. Codex turn-diff refs can be backed up and removed;' \
+          'branches, tags, and other refs are reported but never changed.'
+        return
+        ;;
+      *) _jgit_die "unknown heal option: $1" ;;
+    esac
+    shift
+  done
+
+  git_dir=$(git rev-parse --absolute-git-dir 2> /dev/null) || _jgit_die 'not in a Git repository'
+  fsck_output=$(LC_ALL=C git fsck --connectivity-only --no-dangling --no-reflogs 2>&1) || fsck_status=$?
+  while IFS=$'\t' read -r ref oid; do
+    [[ -n ${ref} ]] || continue
+    case ${ref} in
+      refs/codex/turn-diffs/*)
+        heal_refs+=("${ref}")
+        heal_oids+=("${oid}")
+        ;;
+      *) protected_refs+=("${ref}") ;;
+    esac
+  done < <(printf '%s\n' "${fsck_output}" | awk '
+    /^error: refs\/.*: invalid sha1 pointer [0-9a-f]+$/ {
+      line = $0
+      sub(/^error: /, "", line)
+      ref = line
+      sub(/: invalid sha1 pointer .*/, "", ref)
+      oid = line
+      sub(/.* invalid sha1 pointer /, "", oid)
+      print ref "\t" oid
+    }
+  ')
+
+  for ref in "${protected_refs[@]}"; do
+    jsh::log_error "Broken protected ref requires manual recovery: ${ref}"
+  done
+
+  if ((${#heal_refs[@]} == 0)); then
+    ((${#protected_refs[@]} > 0)) && return 1
+    ((fsck_status == 0)) || {
+      if git for-each-ref > /dev/null 2>&1; then
+        jsh::log_success 'No broken refs found'
+        jsh::log_warn 'git fsck found separate object corruption; run git fsck --full for details.'
+        return 1
+      fi
+      printf '%s\n' "${fsck_output}" >&2
+      _jgit_die 'unrecognized ref corruption; no changes made'
+    }
+    jsh::log_success 'No broken refs found'
+    return
+  fi
+
+  if ((apply == 0)); then
+    for ref in "${heal_refs[@]}"; do
+      jsh_warn_stdout "Would remove ${ref}"
+    done
+    jsh::log_warn 'Run jgit heal --yes to back up and remove these refs.'
+    return 1
+  fi
+
+  backup="${git_dir}/jgit-heal-refs.$(date +%Y%m%dT%H%M%S).$$.txt"
+  umask 077
+  for ((index = 0; index < ${#heal_refs[@]}; index++)); do
+    printf '%s %s\n' "${heal_oids[index]}" "${heal_refs[index]}" >> "${backup}"
+  done
+  jsh::log_success "Backed up broken refs to ${backup}"
+
+  for ((index = 0; index < ${#heal_refs[@]}; index++)); do
+    ref=${heal_refs[index]}
+    oid=${heal_oids[index]}
+    if git update-ref -d "${ref}" "${oid}"; then
+      jsh::log_success "Removed ${ref}"
+    else
+      jsh::log_error "Could not remove ${ref}"
+      failed=$((failed + 1))
+    fi
+  done
+  ((failed == 0 && ${#protected_refs[@]} == 0))
+}
+
 case ${1:-} in
   '') _jgit_dashboard ;;
   -h | --help) _jgit_usage ;;
@@ -1476,6 +1610,10 @@ case ${1:-} in
     shift
     _jgit_rewrite "$@"
     ;;
+  stash)
+    shift
+    _jgit_stash "$@"
+    ;;
   __rewrite-sequence)
     shift
     _jgit_rewrite_sequence "$@"
@@ -1487,6 +1625,10 @@ case ${1:-} in
   update)
     shift
     _jgit_update "$@"
+    ;;
+  heal)
+    shift
+    _jgit_heal "$@"
     ;;
   save | backup)
     shift
