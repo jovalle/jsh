@@ -23,6 +23,189 @@ setup() {
   jsh_prompt() { printf '%s' "$*"; }
 }
 
+@test "play opens a sequential library route when no playback exists" {
+  run bash -c '
+    export SPOTIFY_SOURCE_ONLY=1 SPOTIFY_PLATFORM=Linux
+    source "$1"
+    spotify_has_existing_playback() { return 1; }
+    open_spotify_uri() { printf "open:%s\n" "$1"; }
+    main play
+  ' _ "${JSH_ROOT}/bin/spotifix"
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} = open:spotify:search:spotifix-play-library-sequential-* ]]
+}
+
+@test "existing playback detection checks MPRIS metadata and queue state" {
+  run bash -c '
+    export SPOTIFY_SOURCE_ONLY=1
+    source "$1"
+    spotify_mpris_property() {
+      case $1 in
+        Metadata) printf "({\047mpris:trackid\047: <\047/com/spotify/track/test\047>},)\n" ;;
+      esac
+    }
+    spotify_has_existing_playback
+  ' _ "${JSH_ROOT}/bin/spotifix"
+
+  [[ ${status} -eq 0 ]]
+}
+
+@test "existing playback detection finds a queue without current track metadata" {
+  run bash -c '
+    export SPOTIFY_SOURCE_ONLY=1
+    source "$1"
+    spotify_mpris_property() {
+      case $1 in
+        Metadata) printf "({},)\n" ;;
+        CanGoNext) printf "(<true>,)\n" ;;
+      esac
+    }
+    spotify_has_existing_playback
+  ' _ "${JSH_ROOT}/bin/spotifix"
+
+  [[ ${status} -eq 0 ]]
+}
+
+@test "resume existing playback invokes MPRIS Play for a paused context" {
+  local calls="${BATS_TEST_TMPDIR}/gdbus-play-calls"
+  run bash -c '
+    export SPOTIFY_SOURCE_ONLY=1
+    source "$1"
+    calls=$2
+    spotify_playback_status() {
+      [[ ${resumed:-0} == 1 ]] && printf "Playing\n" || printf "Paused\n"
+    }
+    spotify_has_existing_playback() { return 0; }
+    gdbus() { resumed=1; printf "%s\n" "$*" >> "${calls}"; }
+    sleep() { :; }
+    spotify_resume_existing_playback
+  ' _ "${JSH_ROOT}/bin/spotifix" "${calls}"
+
+  [[ ${status} -eq 0 ]]
+  [[ $(< "${calls}") == *"--method org.mpris.MediaPlayer2.Player.Play"* ]]
+}
+
+@test "routes use MPRIS OpenUri when Spotify is running" {
+  local calls="${BATS_TEST_TMPDIR}/gdbus-uri-calls"
+  run bash -c '
+    export SPOTIFY_SOURCE_ONLY=1 SPOTIFY_PLATFORM=Linux
+    source "$1"
+    calls=$2
+    spotify_playback_status() { printf "Playing\n"; }
+    spotify_mpris_open_uri() { printf "%s\n" "$*" >> "${calls}"; }
+    open_spotify() { printf "fallback\n"; }
+    open_spotify_uri spotify:search:spotifix-play-library-sequential-test
+  ' _ "${JSH_ROOT}/bin/spotifix" "${calls}"
+
+  [[ ${status} -eq 0 ]]
+  [[ -z ${output} ]]
+  [[ $(< "${calls}") = spotify:search:spotifix-play-library-sequential-test ]]
+}
+
+@test "cold-start routes open Spotify before waiting for MPRIS" {
+  run bash -c '
+    export SPOTIFY_SOURCE_ONLY=1 SPOTIFY_PLATFORM=Linux
+    source "$1"
+    spotify_playback_status() { return 1; }
+    open_spotify() { printf "open\n"; }
+    spotify_mpris_open_uri() { printf "route:%s\n" "$1"; }
+    open_spotify_uri spotify:search:spotifix-play-library-sequential-test
+  ' _ "${JSH_ROOT}/bin/spotifix"
+
+  [[ ${status} -eq 0 ]]
+  [[ ${lines[0]} = open ]]
+  [[ ${lines[1]} = route:spotify:search:spotifix-play-library-sequential-test ]]
+}
+
+@test "play selector and smart shuffle mode are encoded in the route" {
+  run bash -c '
+    export SPOTIFY_SOURCE_ONLY=1 SPOTIFY_PLATFORM=Linux
+    source "$1"
+    spotify_has_existing_playback() { return 1; }
+    open_spotify_uri() { printf "open:%s\n" "$1"; }
+    main play 180g --smart-shuffle
+  ' _ "${JSH_ROOT}/bin/spotifix"
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} = open:spotify:search:spotifix-play-180g-smart-shuffle-* ]]
+}
+
+@test "play --yes bypasses replacement confirmation" {
+  run bash -c '
+    export SPOTIFY_SOURCE_ONLY=1 SPOTIFY_PLATFORM=Linux
+    source "$1"
+    confirm_play() { [[ ${JSH_ASSUME_YES} == 1 ]]; }
+    open_spotify_uri() { printf "open:%s\n" "$1"; }
+    main play liked --shuffle --yes
+  ' _ "${JSH_ROOT}/bin/spotifix"
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} = open:spotify:search:spotifix-play-liked-shuffle-* ]]
+}
+
+@test "declining replacement resumes the existing playback context" {
+  run bash -c '
+    export SPOTIFY_SOURCE_ONLY=1
+    source "$1"
+    confirm_play() { return 1; }
+    spotify_resume_existing_playback() { printf "resumed\n"; }
+    open_spotify_uri() { printf "opened\n"; }
+    main play playlist
+  ' _ "${JSH_ROOT}/bin/spotifix"
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} = resumed ]]
+}
+
+@test "play rejects multiple selectors" {
+  run bash -c '
+    export SPOTIFY_SOURCE_ONLY=1
+    source "$1"
+    main play liked playlist
+  ' _ "${JSH_ROOT}/bin/spotifix"
+
+  [[ ${status} -eq 2 ]]
+  [[ ${output} = "spotifix: play accepts only one selector." ]]
+}
+
+@test "play rejects multiple shuffle modes" {
+  run bash -c '
+    export SPOTIFY_SOURCE_ONLY=1
+    source "$1"
+    main play --shuffle --smart-shuffle
+  ' _ "${JSH_ROOT}/bin/spotifix"
+
+  [[ ${status} -eq 2 ]]
+  [[ ${output} = "spotifix: play accepts only one shuffle mode." ]]
+}
+
+@test "standalone shuffle command is removed" {
+  run bash -c '
+    export SPOTIFY_SOURCE_ONLY=1
+    source "$1"
+    main shuffle
+  ' _ "${JSH_ROOT}/bin/spotifix"
+
+  [[ ${status} -eq 2 ]]
+  [[ ${lines[0]} = "spotifix: unknown command: shuffle" ]]
+}
+
+@test "apply forces the managed Spicetify configuration" {
+  local configure_script="${BATS_TEST_TMPDIR}/configure-spotify"
+  cat > "${configure_script}" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*"
+EOF
+  chmod +x "${configure_script}"
+
+  run env SPOTIFY_CONFIGURE_SCRIPT="${configure_script}" \
+    SPOTIFY_SOURCE_ONLY=1 bash -c 'source "$1"; main apply' _ "${JSH_ROOT}/bin/spotifix"
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} = '--yes --force' ]]
+}
+
 @test "uses explicit Spotify paths for platform-independent testing" {
   export JSH_SPOTIFY_PATH="${BATS_TEST_TMPDIR}/spotify"
   export JSH_SPOTIFY_PREFS="${BATS_TEST_TMPDIR}/prefs"
@@ -156,6 +339,22 @@ setup() {
   [[ -e ${BATS_TEST_TMPDIR}/closed-called ]]
 }
 
+@test "main --force reapplies a current Spicetify configuration" {
+  spotify_paths() { printf '%s\n%s\n' '/opt/spotify' '/home/user/prefs'; }
+  ensure_spotify_writable() { return 0; }
+  # shellcheck disable=SC2034,SC2329 # SPICETIFY_BIN is consumed by main.
+  ensure_spicetify() { SPICETIFY_BIN=/usr/bin/true; }
+  spotify_configuration_is_current() { return 0; }
+  spotify_is_running() { return 1; }
+  close_spotify_if_running() { return 0; }
+  configure_spicetify() { printf 'force:%s\n' "$4"; }
+
+  run main --force
+
+  [[ ${status} -eq 0 ]]
+  [[ ${lines[0]} = 'force:1' ]]
+}
+
 @test "uses AppleScript to close Spotify on macOS" {
   local running=1
   export JSH_SPOTIFY_PLATFORM=Darwin
@@ -189,17 +388,29 @@ setup() {
 
 @test "installs and enables managed extensions before applying Spicetify" {
   local binary="${BATS_TEST_TMPDIR}/spicetify"
+  local spotify_path="${BATS_TEST_TMPDIR}/spotify"
   export SPICETIFY_CALLS="${BATS_TEST_TMPDIR}/spicetify-calls"
   export SPICETIFY_CONFIG="${BATS_TEST_TMPDIR}/config/config-xpui.ini"
+  export SPICETIFY_EXTENSION_SRC="${JSH_ROOT}/conf/spicetify"
+  export SPICETIFY_SPOTIFY_PATH="${spotify_path}"
   cat > "${binary}" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >> "${SPICETIFY_CALLS}"
 if [ "$1" = -c ]; then
   printf '%s\n' "${SPICETIFY_CONFIG}"
 fi
+case "$*" in
+  '--no-restart backup apply')
+    mkdir -p "${SPICETIFY_SPOTIFY_PATH}/Apps/xpui/extensions"
+    printf '<script src="helper/spicetifyWrapper.js"></script>\n' > "${SPICETIFY_SPOTIFY_PATH}/Apps/xpui/index.html"
+    for ext in settings.js adder.js spotifix.js; do
+      cp "${SPICETIFY_EXTENSION_SRC}/${ext}" "${SPICETIFY_SPOTIFY_PATH}/Apps/xpui/extensions/${ext}"
+    done
+    ;;
+esac
 EOF
   chmod +x "${binary}"
-  run configure_spicetify "${binary}" '/opt/Spotify Resources' '/home/user/Spotify prefs'
+  run configure_spicetify "${binary}" "${spotify_path}" '/home/user/Spotify prefs'
 
   [[ ${status} -eq 0 ]]
   [[ -z ${output} ]]
@@ -211,7 +422,7 @@ EOF
     "${BATS_TEST_TMPDIR}/config/Extensions/spotifix.js"
   mapfile -t calls < "${SPICETIFY_CALLS}"
   [[ ${calls[0]} = '-c' ]]
-  [[ ${calls[1]} = 'config spotify_path /opt/Spotify Resources prefs_path /home/user/Spotify prefs' ]]
+  [[ ${calls[1]} = 'config spotify_path '"${spotify_path}"' prefs_path /home/user/Spotify prefs' ]]
   [[ ${calls[2]} = 'config extensions settings.js' ]]
   [[ ${calls[3]} = 'config extensions adder.js' ]]
   [[ ${calls[4]} = 'config extensions spotifix.js' ]]
@@ -221,13 +432,16 @@ EOF
 
 @test "renames the managed settings extension" {
   local binary="${BATS_TEST_TMPDIR}/spicetify"
+  local spotify_path="${BATS_TEST_TMPDIR}/spotify"
   export SPICETIFY_CALLS="${BATS_TEST_TMPDIR}/spicetify-calls"
   export SPICETIFY_CONFIG="${BATS_TEST_TMPDIR}/config/config-xpui.ini"
+  export SPICETIFY_EXTENSION_SRC="${JSH_ROOT}/conf/spicetify"
+  export SPICETIFY_SPOTIFY_PATH="${spotify_path}"
   mkdir -p "${BATS_TEST_TMPDIR}/config/Extensions"
   touch "${BATS_TEST_TMPDIR}/config/Extensions/jsh-settings.js"
-  cat > "${SPICETIFY_CONFIG}" <<'EOF'
+  cat > "${SPICETIFY_CONFIG}" <<EOF
 [Setting]
-spotify_path = /opt/spotify
+spotify_path = ${spotify_path}
 prefs_path = /home/user/prefs
 
 [AdditionalOptions]
@@ -244,10 +458,19 @@ printf '%s\n' "$*" >> "${SPICETIFY_CALLS}"
 if [ "$1" = -c ]; then
   printf '%s\n' "${SPICETIFY_CONFIG}"
 fi
+case "$*" in
+  '--no-restart apply')
+    mkdir -p "${SPICETIFY_SPOTIFY_PATH}/Apps/xpui/extensions"
+    printf '<script src="helper/spicetifyWrapper.js"></script>\n' > "${SPICETIFY_SPOTIFY_PATH}/Apps/xpui/index.html"
+    for ext in settings.js adder.js spotifix.js; do
+      cp "${SPICETIFY_EXTENSION_SRC}/${ext}" "${SPICETIFY_SPOTIFY_PATH}/Apps/xpui/extensions/${ext}"
+    done
+    ;;
+esac
 EOF
   chmod +x "${binary}"
 
-  run configure_spicetify "${binary}" '/opt/spotify' '/home/user/prefs'
+  run configure_spicetify "${binary}" "${spotify_path}" '/home/user/prefs'
 
   [[ ${status} -eq 0 ]]
   grep -Fxq 'config extensions settings.js' "${SPICETIFY_CALLS}"
@@ -259,14 +482,17 @@ EOF
 
 @test "renames the managed Spotify command extension" {
   local binary="${BATS_TEST_TMPDIR}/spicetify"
+  local spotify_path="${BATS_TEST_TMPDIR}/spotify"
   export SPICETIFY_CALLS="${BATS_TEST_TMPDIR}/spicetify-calls"
   export SPICETIFY_CONFIG="${BATS_TEST_TMPDIR}/config/config-xpui.ini"
+  export SPICETIFY_EXTENSION_SRC="${JSH_ROOT}/conf/spicetify"
+  export SPICETIFY_SPOTIFY_PATH="${spotify_path}"
   mkdir -p "${BATS_TEST_TMPDIR}/config/Extensions"
   touch "${BATS_TEST_TMPDIR}/config/Extensions/spotifi.js"
   touch "${BATS_TEST_TMPDIR}/config/Extensions/spotify.js"
-  cat > "${SPICETIFY_CONFIG}" <<'EOF'
+  cat > "${SPICETIFY_CONFIG}" <<EOF
 [Setting]
-spotify_path = /opt/spotify
+spotify_path = ${spotify_path}
 prefs_path = /home/user/prefs
 
 [AdditionalOptions]
@@ -285,10 +511,19 @@ printf '%s\n' "$*" >> "${SPICETIFY_CALLS}"
 if [ "$1" = -c ]; then
   printf '%s\n' "${SPICETIFY_CONFIG}"
 fi
+case "$*" in
+  '--no-restart apply')
+    mkdir -p "${SPICETIFY_SPOTIFY_PATH}/Apps/xpui/extensions"
+    printf '<script src="helper/spicetifyWrapper.js"></script>\n' > "${SPICETIFY_SPOTIFY_PATH}/Apps/xpui/index.html"
+    for ext in settings.js adder.js spotifix.js; do
+      cp "${SPICETIFY_EXTENSION_SRC}/${ext}" "${SPICETIFY_SPOTIFY_PATH}/Apps/xpui/extensions/${ext}"
+    done
+    ;;
+esac
 EOF
   chmod +x "${binary}"
 
-  run configure_spicetify "${binary}" '/opt/spotify' '/home/user/prefs'
+  run configure_spicetify "${binary}" "${spotify_path}" '/home/user/prefs'
 
   [[ ${status} -eq 0 ]]
   grep -Fxq 'config extensions spotifix.js' "${SPICETIFY_CALLS}"
@@ -302,14 +537,24 @@ EOF
 
 @test "reuses an existing Spicetify backup" {
   local binary="${BATS_TEST_TMPDIR}/spicetify" last_call
+  local spotify_path="${BATS_TEST_TMPDIR}/spotify"
   export SPICETIFY_CALLS="${BATS_TEST_TMPDIR}/spicetify-calls"
   export SPICETIFY_CONFIG="${BATS_TEST_TMPDIR}/config/config-xpui.ini"
+  export SPICETIFY_EXTENSION_SRC="${JSH_ROOT}/conf/spicetify"
+  export SPICETIFY_SPOTIFY_PATH="${spotify_path}"
   cat > "${binary}" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >> "${SPICETIFY_CALLS}"
 case "$*" in
   -c) printf '%s\n' "${SPICETIFY_CONFIG}" ;;
   config) printf '\033[1mBackup\033[0m\nversion 1.2.3\n' ;;
+  '--no-restart apply')
+    mkdir -p "${SPICETIFY_SPOTIFY_PATH}/Apps/xpui/extensions"
+    printf '<script src="helper/spicetifyWrapper.js"></script>\n' > "${SPICETIFY_SPOTIFY_PATH}/Apps/xpui/index.html"
+    for ext in settings.js adder.js spotifix.js; do
+      cp "${SPICETIFY_EXTENSION_SRC}/${ext}" "${SPICETIFY_SPOTIFY_PATH}/Apps/xpui/extensions/${ext}"
+    done
+    ;;
   *) printf 'raw Spicetify output\n' ;;
 esac
 EOF
@@ -318,7 +563,7 @@ EOF
   cp "${JSH_ROOT}/conf/spicetify/settings.js" \
     "${BATS_TEST_TMPDIR}/config/Extensions/settings.js"
 
-  run configure_spicetify "${binary}" '/opt/spotify' '/home/user/prefs'
+  run configure_spicetify "${binary}" "${spotify_path}" '/home/user/prefs'
 
   [[ ${status} -eq 0 ]]
   [[ -z ${output} ]]
@@ -444,9 +689,170 @@ EOF
   run apply_spicetify "${binary}" apply
 
   [[ ${status} -ne 0 ]]
-  [[ $(wc -l < "${SPICETIFY_CALLS}") -eq 1 ]]
-  [[ $(< "${SPICETIFY_CALLS}") = '--no-restart apply' ]]
+  mapfile -t calls < "${SPICETIFY_CALLS}"
+  [[ ${calls[0]} = '--no-restart apply' ]]
+  [[ ${calls[1]} = '-c' ]]
+  [[ ${#calls[@]} -eq 2 ]]
 }
+
+@test "repairs an applied bundle without restoring or replacing its stale backup" {
+  local binary="${BATS_TEST_TMPDIR}/spicetify"
+  local spotify_path="${BATS_TEST_TMPDIR}/spotify"
+  export SPICETIFY_CALLS="${BATS_TEST_TMPDIR}/spicetify-calls"
+  export SPICETIFY_CONFIG="${BATS_TEST_TMPDIR}/config/config-xpui.ini"
+  export SPICETIFY_EXTENSION_SRC="${JSH_ROOT}/conf/spicetify"
+  export SPICETIFY_SPOTIFY_PATH="${spotify_path}"
+  mkdir -p "${BATS_TEST_TMPDIR}/config" "${BATS_TEST_TMPDIR}/state/Backup" \
+    "${BATS_TEST_TMPDIR}/libexec/jsHelper"
+  printf 'stale backup data\n' > "${BATS_TEST_TMPDIR}/state/Backup/xpui.spa"
+  printf 'wrapper\n' > "${BATS_TEST_TMPDIR}/libexec/jsHelper/spicetifyWrapper.js"
+  mkdir -p "${spotify_path}/Apps/xpui"
+  printf 'Spicetify._platform = platform;\n' > "${spotify_path}/Apps/xpui/xpui-modules.js"
+  cat > "${spotify_path}/Apps/xpui/index.html" <<'HTML'
+<!doctype html><html><head><title>Spotify</title></head><body></body></html>
+HTML
+  cat > "${SPICETIFY_CONFIG}" <<EOF
+[Setting]
+spotify_path = ${spotify_path}
+prefs_path = /home/user/prefs
+
+[AdditionalOptions]
+extensions = settings.js|adder.js|spotifix.js
+
+[Backup]
+version = 1.2.0
+with    = 2.45.1
+EOF
+  cat > "${binary}" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >> "${SPICETIFY_CALLS}"
+case "$*" in
+  '--no-restart apply')
+    printf '%s\n' \
+      'A backup is available' \
+      'After clearing backup, Spotify cannot be backed up again'
+    exit 1
+    ;;
+  -c)
+    printf '%s\n' "${SPICETIFY_CONFIG}"
+    ;;
+  -v)
+    printf '2.45.1\n'
+    ;;
+esac
+EOF
+  chmod +x "${binary}"
+
+  run apply_spicetify "${binary}" apply
+
+  [[ ${status} -eq 0 ]]
+  mapfile -t calls < "${SPICETIFY_CALLS}"
+  [[ ${calls[0]} = '--no-restart apply' ]]
+  [[ ${calls[1]} = '-c' ]]
+  [[ ${calls[2]} = '-v' ]]
+  [[ ${#calls[@]} -eq 3 ]]
+  [[ -f ${BATS_TEST_TMPDIR}/state/Backup/xpui.spa ]]
+  cmp -s "${BATS_TEST_TMPDIR}/libexec/jsHelper/spicetifyWrapper.js" \
+    "${spotify_path}/Apps/xpui/helper/spicetifyWrapper.js"
+  for extension in settings.js adder.js spotifix.js; do
+    cmp -s "${JSH_ROOT}/conf/spicetify/${extension}" \
+      "${spotify_path}/Apps/xpui/extensions/${extension}"
+    grep -Fq "extensions/${extension}" "${spotify_path}/Apps/xpui/index.html"
+  done
+  grep -Fq 'helper/spicetifyWrapper.js' "${spotify_path}/Apps/xpui/index.html"
+}
+
+@test "validates extensions are present in the Spotify bundle after apply" {
+  local binary="${BATS_TEST_TMPDIR}/spicetify"
+  export SPICETIFY_CALLS="${BATS_TEST_TMPDIR}/spicetify-calls"
+  export SPICETIFY_CONFIG="${BATS_TEST_TMPDIR}/config/config-xpui.ini"
+  mkdir -p "${BATS_TEST_TMPDIR}/config/Extensions"
+  mkdir -p "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/extensions" \
+    "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/helper"
+  printf 'wrapper\n' > "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/helper/spicetifyWrapper.js"
+  cat > "${SPICETIFY_CONFIG}" <<EOF
+[Setting]
+spotify_path = ${BATS_TEST_TMPDIR}/spotify
+prefs_path = /home/user/prefs
+
+[AdditionalOptions]
+extensions = settings.js|adder.js|spotifix.js
+
+[Backup]
+version = 1.2.3
+EOF
+  cp "${JSH_ROOT}/conf/spicetify/settings.js" \
+    "${BATS_TEST_TMPDIR}/config/Extensions/settings.js"
+  cp "${JSH_ROOT}/conf/spicetify/adder.js" \
+    "${BATS_TEST_TMPDIR}/config/Extensions/adder.js"
+  cp "${JSH_ROOT}/conf/spicetify/spotifix.js" \
+    "${BATS_TEST_TMPDIR}/config/Extensions/spotifix.js"
+  # Only install one extension in the bundle — the other two are missing.
+  cp "${JSH_ROOT}/conf/spicetify/settings.js" \
+    "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/extensions/settings.js"
+  printf '<script src="helper/spicetifyWrapper.js"></script>\n' > "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/index.html"
+  cat > "${binary}" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >> "${SPICETIFY_CALLS}"
+case "$*" in
+  -c) printf '%s\n' "${SPICETIFY_CONFIG}" ;;
+esac
+EOF
+  chmod +x "${binary}"
+  jsh::log_error() { printf '%s\n' "$*"; }
+
+  run configure_spicetify "${binary}" "${BATS_TEST_TMPDIR}/spotify" '/home/user/prefs'
+
+  [[ ${status} -ne 0 ]]
+  [[ ${output} = *'missing from the Spotify bundle'* ]]
+}
+
+@test "validates extension content matches source in the Spotify bundle after apply" {
+  local binary="${BATS_TEST_TMPDIR}/spicetify"
+  export SPICETIFY_CALLS="${BATS_TEST_TMPDIR}/spicetify-calls"
+  export SPICETIFY_CONFIG="${BATS_TEST_TMPDIR}/config/config-xpui.ini"
+  mkdir -p "${BATS_TEST_TMPDIR}/config/Extensions"
+  mkdir -p "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/extensions"
+  cat > "${SPICETIFY_CONFIG}" <<EOF
+[Setting]
+spotify_path = ${BATS_TEST_TMPDIR}/spotify
+prefs_path = /home/user/prefs
+
+[AdditionalOptions]
+extensions = settings.js|adder.js|spotifix.js
+
+[Backup]
+version = 1.2.3
+EOF
+  cp "${JSH_ROOT}/conf/spicetify/settings.js" \
+    "${BATS_TEST_TMPDIR}/config/Extensions/settings.js"
+  cp "${JSH_ROOT}/conf/spicetify/adder.js" \
+    "${BATS_TEST_TMPDIR}/config/Extensions/adder.js"
+  cp "${JSH_ROOT}/conf/spicetify/spotifix.js" \
+    "${BATS_TEST_TMPDIR}/config/Extensions/spotifix.js"
+  # Install all extensions but make one differ from source.
+  cp "${JSH_ROOT}/conf/spicetify/settings.js" \
+    "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/extensions/settings.js"
+  cp "${JSH_ROOT}/conf/spicetify/adder.js" \
+    "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/extensions/adder.js"
+  printf 'stale content\n' > "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/extensions/spotifix.js"
+  printf '<script src="helper/spicetifyWrapper.js"></script>\n' > "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/index.html"
+  cat > "${binary}" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" >> "${SPICETIFY_CALLS}"
+case "$*" in
+  -c) printf '%s\n' "${SPICETIFY_CONFIG}" ;;
+esac
+EOF
+  chmod +x "${binary}"
+  jsh::log_error() { printf '%s\n' "$*"; }
+
+  run configure_spicetify "${binary}" "${BATS_TEST_TMPDIR}/spotify" '/home/user/prefs'
+
+  [[ ${status} -ne 0 ]]
+  [[ ${output} = *'does not match the source'* ]]
+}
+
 
 @test "removes third-party status prefixes from failure details" {
   jsh::log_detail() { printf '%s\n' "$*"; }
@@ -461,12 +867,15 @@ EOF
 
 @test "skips configuring paths and extensions when already present in config" {
   local binary="${BATS_TEST_TMPDIR}/spicetify" last_call
+  local spotify_path="${BATS_TEST_TMPDIR}/spotify"
   export SPICETIFY_CALLS="${BATS_TEST_TMPDIR}/spicetify-calls"
   export SPICETIFY_CONFIG="${BATS_TEST_TMPDIR}/config/config-xpui.ini"
+  export SPICETIFY_EXTENSION_SRC="${JSH_ROOT}/conf/spicetify"
+  export SPICETIFY_SPOTIFY_PATH="${spotify_path}"
   mkdir -p "${BATS_TEST_TMPDIR}/config/Extensions"
   cat > "${SPICETIFY_CONFIG}" <<EOF
 [Setting]
-spotify_path = /opt/spotify
+spotify_path = ${spotify_path}
 prefs_path = /home/user/prefs
 
 [AdditionalOptions]
@@ -487,11 +896,18 @@ EOF
 printf '%s\n' "$*" >> "${SPICETIFY_CALLS}"
 case "$*" in
   -c) printf '%s\n' "${SPICETIFY_CONFIG}" ;;
+  '--no-restart apply')
+    mkdir -p "${SPICETIFY_SPOTIFY_PATH}/Apps/xpui/extensions"
+    printf '<script src="helper/spicetifyWrapper.js"></script>\n' > "${SPICETIFY_SPOTIFY_PATH}/Apps/xpui/index.html"
+    for ext in settings.js adder.js spotifix.js; do
+      cp "${SPICETIFY_EXTENSION_SRC}/${ext}" "${SPICETIFY_SPOTIFY_PATH}/Apps/xpui/extensions/${ext}"
+    done
+    ;;
   *) printf 'ok\n' ;;
 esac
 EOF
   chmod +x "${binary}"
-  run configure_spicetify "${binary}" '/opt/spotify' '/home/user/prefs'
+  run configure_spicetify "${binary}" "${spotify_path}" '/home/user/prefs'
 
   [[ ${status} -eq 0 ]]
   [[ -z ${output} ]]
@@ -527,8 +943,15 @@ EOF
   cp "${JSH_ROOT}/conf/spicetify/spotifix.js" \
     "${BATS_TEST_TMPDIR}/config/Extensions/spotifix.js"
 
-  mkdir -p "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/extensions"
-  printf '<script src="helper/spicetifyWrapper.js"></script>\n' > "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/index.html"
+  mkdir -p "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/extensions" \
+    "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/helper"
+  printf 'wrapper\n' > "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/helper/spicetifyWrapper.js"
+  cat > "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/index.html" <<'HTML'
+<script src="helper/spicetifyWrapper.js"></script>
+<script src="extensions/settings.js"></script>
+<script src="extensions/adder.js"></script>
+<script src="extensions/spotifix.js"></script>
+HTML
   cp "${JSH_ROOT}/conf/spicetify/settings.js" \
     "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/extensions/settings.js"
   cp "${JSH_ROOT}/conf/spicetify/adder.js" \
@@ -576,7 +999,7 @@ extensions = settings.js|adder.js|spotifix.js
 custom_apps =
 
 [Backup]
-version = 1.2.3
+version =
 EOF
   cp "${JSH_ROOT}/conf/spicetify/settings.js" \
     "${BATS_TEST_TMPDIR}/config/Extensions/settings.js"
@@ -585,8 +1008,15 @@ EOF
   cp "${JSH_ROOT}/conf/spicetify/spotifix.js" \
     "${BATS_TEST_TMPDIR}/config/Extensions/spotifix.js"
 
-  mkdir -p "${JSH_SPOTIFY_PATH}/Apps/xpui/extensions"
-  printf '<script src="helper/spicetifyWrapper.js"></script>\n' > "${JSH_SPOTIFY_PATH}/Apps/xpui/index.html"
+  mkdir -p "${JSH_SPOTIFY_PATH}/Apps/xpui/extensions" \
+    "${JSH_SPOTIFY_PATH}/Apps/xpui/helper"
+  printf 'wrapper\n' > "${JSH_SPOTIFY_PATH}/Apps/xpui/helper/spicetifyWrapper.js"
+  cat > "${JSH_SPOTIFY_PATH}/Apps/xpui/index.html" <<'HTML'
+<script src="helper/spicetifyWrapper.js"></script>
+<script src="extensions/settings.js"></script>
+<script src="extensions/adder.js"></script>
+<script src="extensions/spotifix.js"></script>
+HTML
   cp "${JSH_ROOT}/conf/spicetify/settings.js" \
     "${JSH_SPOTIFY_PATH}/Apps/xpui/extensions/settings.js"
   cp "${JSH_ROOT}/conf/spicetify/adder.js" \

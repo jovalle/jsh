@@ -83,6 +83,6 @@ The [`bin/`](bin/) directory is added to `PATH` inside Jsh.
 | [`kubens`](bin/kubens)       | Lists and switches Kubernetes namespaces for the current context.                     |
 | [`nukem`](bin/nukem)         | Helps handle those pesky Kubernetes finalizers.                                       |
 | [`proxy`](bin/proxy)         | Forces commands through proxy.                                                        |
-| [`spotify`](bin/spotify)     | Updates and controls Spotify, including random saved-playlist playback.               |
+| [`spotifix`](bin/spotifix)   | Plays random Spotify library selections with optional shuffle modes.                  |
 | [`sublime`](bin/sublime)     | Opens files or directories in Sublime Text.                                           |
 | [`waterfox`](bin/waterfox)   | Controls Waterfox, organizes bookmarks, and restores missing favicons.                |

@@ -1,0 +1,297 @@
+#!/usr/bin/env bash
+# Update and control Spotify through the desktop client.
+
+set -euo pipefail
+
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+readonly SCRIPT_DIR
+if [[ -z ${JSH_ROOT:-} ]]; then
+  if [[ -n ${JSH_DIR:-} ]]; then
+    JSH_ROOT=${JSH_DIR}
+  elif [[ -f ${SCRIPT_DIR}/../lib/ui.sh ]]; then
+    JSH_ROOT=$(cd -- "${SCRIPT_DIR}/.." && pwd -P)
+  else
+    JSH_ROOT=${HOME}/.jsh
+  fi
+fi
+readonly JSH_ROOT
+readonly SPOTIFY_CONFIGURE_SCRIPT=${SPOTIFY_CONFIGURE_SCRIPT:-"${SCRIPT_DIR}/../scripts/unix/configure/spotify.sh"}
+readonly SPOTIFY_PLAY_ROUTE=spotify:search:spotifix-play
+readonly SPOTIFY_MPRIS_SERVICE=org.mpris.MediaPlayer2.spotify
+readonly SPOTIFY_MPRIS_PATH=/org/mpris/MediaPlayer2
+# shellcheck source=../lib/ui.sh
+. "${JSH_ROOT}/lib/ui.sh"
+jsh::init
+
+usage() {
+  cat << 'EOF'
+Usage: spotifix [apply|restart|stop|open|play [180g|liked|playlist] [options]]
+
+Commands:
+  apply    Reapply the managed Spicetify configuration
+  restart  Close and reopen Spotify
+  stop     Close Spotify
+  open     Open Spotify
+  play     Play a random library selection
+           180g       random album from the 180g playlist
+           liked      random song from Liked Songs
+           playlist   random saved playlist
+           --shuffle, --smart-shuffle select the playback mode
+           -y, --yes skips the existing-playback confirmation
+
+With no command, update Spicetify and configure Spotify.
+EOF
+}
+
+spotify_is_running() {
+  pgrep -x spotify > /dev/null 2>&1 ||
+    pgrep -f 'Spotify.app/Contents/MacOS/Spotify' > /dev/null 2>&1
+}
+
+spotify_flatpak_is_running() {
+  pgrep -f '/app/extra/share/spotify/spotify' > /dev/null 2>&1
+}
+
+spotify_flatpak_is_installed() {
+  command -v flatpak > /dev/null 2>&1 && flatpak info com.spotify.Client > /dev/null 2>&1
+}
+
+spotify_native_binary() {
+  local candidate
+  for candidate in "${SPOTIFY_BINARY:-}" /usr/bin/spotify /usr/local/bin/spotify; do
+    [[ -n ${candidate} && -x ${candidate} ]] || continue
+    [[ ! ${candidate} -ef ${BASH_SOURCE[0]} ]] || continue
+    printf '%s\n' "${candidate}"
+    return 0
+  done
+  return 1
+}
+
+open_spotify() {
+  local uri=${1:-} platform=${SPOTIFY_PLATFORM:-$(uname -s)} binary
+  local -a command
+
+  case ${platform} in
+    Darwin)
+      if [[ -n ${uri} ]]; then
+        open "${uri}"
+      else
+        open -a Spotify
+      fi
+      ;;
+    Linux)
+      # shellcheck disable=SC2310 # Backend detection is intentionally used as a predicate.
+      if spotify_flatpak_is_installed; then
+        command=(flatpak run com.spotify.Client)
+      elif binary=$(spotify_native_binary); then
+        command=("${binary}")
+      else
+        printf 'spotifix: Spotify is not installed.\n' >&2
+        return 1
+      fi
+      [[ -z ${uri} ]] || command+=("--uri=${uri}")
+      "${command[@]}" > /dev/null 2>&1 &
+      ;;
+    *)
+      printf 'spotifix: unsupported platform: %s\n' "${platform}" >&2
+      return 1
+      ;;
+  esac
+}
+
+stop_spotify() {
+  local platform=${SPOTIFY_PLATFORM:-$(uname -s)} attempt
+  # shellcheck disable=SC2310 # Running state is intentionally used as a predicate.
+  spotify_is_running || return 0
+
+  case ${platform} in
+    Darwin) osascript -e 'tell application "Spotify" to quit' > /dev/null ;;
+    Linux)
+      # shellcheck disable=SC2310 # Backend detection is intentionally used as a predicate.
+      if spotify_flatpak_is_running && command -v flatpak > /dev/null 2>&1; then
+        flatpak kill com.spotify.Client > /dev/null 2>&1
+      else
+        pkill -TERM -x spotify > /dev/null 2>&1
+      fi
+      ;;
+    *)
+      printf 'spotifix: unsupported platform: %s\n' "${platform}" >&2
+      return 1
+      ;;
+  esac
+
+  for ((attempt = 0; attempt < 50; attempt++)); do
+    # shellcheck disable=SC2310 # Running state is intentionally used as a predicate.
+    spotify_is_running || return 0
+    sleep 0.2
+  done
+  printf 'spotifix: Spotify did not stop.\n' >&2
+  return 1
+}
+
+restart_spotify() {
+  stop_spotify
+  open_spotify
+}
+
+spotify_mpris_property() {
+  local property=$1
+  command -v gdbus > /dev/null 2>&1 || return 1
+  gdbus call --session --dest "${SPOTIFY_MPRIS_SERVICE}" \
+    --object-path "${SPOTIFY_MPRIS_PATH}" \
+    --method org.freedesktop.DBus.Properties.Get \
+    org.mpris.MediaPlayer2.Player "${property}" 2> /dev/null
+}
+
+open_spotify_uri() {
+  local uri=$1 platform=${SPOTIFY_PLATFORM:-$(uname -s)} attempt
+  if [[ ${platform} == Linux ]]; then
+    if spotify_playback_status > /dev/null 2>&1; then
+      spotify_mpris_open_uri "${uri}"
+      return
+    fi
+    open_spotify
+    for ((attempt = 0; attempt < 50; attempt++)); do
+      spotify_mpris_open_uri "${uri}" && return 0
+      sleep 0.2
+    done
+    return 1
+  fi
+  open_spotify "${uri}"
+}
+
+spotify_mpris_open_uri() {
+  local uri=$1
+  command -v gdbus > /dev/null 2>&1 || return 1
+  gdbus call --session --dest "${SPOTIFY_MPRIS_SERVICE}" \
+    --object-path "${SPOTIFY_MPRIS_PATH}" \
+    --method org.mpris.MediaPlayer2.Player.OpenUri "${uri}" > /dev/null 2>&1
+}
+
+spotify_playback_status() {
+  local output
+  output=$(spotify_mpris_property PlaybackStatus) || return 1
+  case ${output} in
+    *"'Playing'"*) printf 'Playing\n' ;;
+    *"'Paused'"*) printf 'Paused\n' ;;
+    *"'Stopped'"*) printf 'Stopped\n' ;;
+    *) return 1 ;;
+  esac
+}
+
+spotify_has_existing_playback() {
+  local metadata can_go_next
+  metadata=$(spotify_mpris_property Metadata 2> /dev/null) || metadata=
+  [[ ${metadata} == *"'mpris:trackid'"* ]] && return 0
+  can_go_next=$(spotify_mpris_property CanGoNext 2> /dev/null) || return 1
+  [[ ${can_go_next} == *true* ]]
+}
+
+spotify_resume_existing_playback() {
+  local status attempt
+  status=$(spotify_playback_status) || return 1
+  [[ ${status} == Playing ]] && return 0
+  [[ ${status} == Paused || ${status} == Stopped ]] || return 1
+  spotify_has_existing_playback || return 1
+  gdbus call --session --dest "${SPOTIFY_MPRIS_SERVICE}" \
+    --object-path "${SPOTIFY_MPRIS_PATH}" \
+    --method org.mpris.MediaPlayer2.Player.Play > /dev/null 2>&1
+  for ((attempt = 0; attempt < 50; attempt++)); do
+    [[ $(spotify_playback_status 2> /dev/null) == Playing ]] && return 0
+    sleep 0.1
+  done
+  printf 'spotifix: Spotify playback did not resume.\n' >&2
+  return 1
+}
+
+confirm_play() {
+  spotify_has_existing_playback || return 0
+  [[ ${JSH_ASSUME_YES:-0} != 1 ]] || return 0
+  [[ ! -t 0 ]] && return 0
+  jsh::confirm 'Spotify already has playback or a queue. Play something else?' --default no
+}
+
+play_selection() {
+  local selector=$1 shuffle_mode=$2 timestamp
+  if ! confirm_play; then
+    spotify_resume_existing_playback
+    return
+  fi
+  timestamp=$(date +%s)
+  open_spotify_uri "${SPOTIFY_PLAY_ROUTE}-${selector}-${shuffle_mode}-${timestamp}-${RANDOM}"
+}
+
+play_command() {
+  local selector=library shuffle_mode=sequential selector_set=0 option
+  for option in "$@"; do
+    case ${option} in
+      180g | liked | playlist)
+        ((selector_set == 0)) || {
+          printf 'spotifix: play accepts only one selector.\n' >&2
+          return 2
+        }
+        selector=${option}
+        selector_set=1
+        ;;
+      --shuffle)
+        [[ ${shuffle_mode} == sequential ]] || {
+          printf 'spotifix: play accepts only one shuffle mode.\n' >&2
+          return 2
+        }
+        shuffle_mode=shuffle
+        ;;
+      --smart-shuffle)
+        [[ ${shuffle_mode} == sequential ]] || {
+          printf 'spotifix: play accepts only one shuffle mode.\n' >&2
+          return 2
+        }
+        shuffle_mode=smart-shuffle
+        ;;
+      -y | --yes) JSH_ASSUME_YES=1 ;;
+      *)
+        printf 'spotifix: unknown play option: %s\n' "${option}" >&2
+        return 2
+        ;;
+    esac
+  done
+  play_selection "${selector}" "${shuffle_mode}"
+}
+
+configure_spotify() {
+  "${SPOTIFY_CONFIGURE_SCRIPT}" --yes "$@"
+}
+
+update_spicetify() {
+  command -v spicetify > /dev/null 2>&1 || {
+    printf 'spotifix: spicetify is not installed.\n' >&2
+    return 1
+  }
+  spicetify update
+}
+
+main() {
+  case ${1:-} in
+    '')
+      update_spicetify
+      configure_spotify
+      ;;
+    apply) configure_spotify --force ;;
+    restart) restart_spotify ;;
+    stop) stop_spotify ;;
+    open) open_spotify ;;
+    play)
+      shift
+      play_command "$@"
+      ;;
+    -h | --help | help) usage ;;
+    *)
+      printf 'spotifix: unknown command: %s\n' "$1" >&2
+      usage >&2
+      return 2
+      ;;
+  esac
+}
+
+if [[ ${SPOTIFY_SOURCE_ONLY:-0} != 1 ]]; then
+  main "$@"
+fi

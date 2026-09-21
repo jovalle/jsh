@@ -227,26 +227,125 @@ spicetify_backup_needs_restore() {
     $1 == *'Run "spicetify restore backup'* ]]
 }
 
+spicetify_helper_dir() {
+  local binary=$1 binary_path binary_dir candidate link
+  binary_path=${binary}
+  while [[ -L ${binary_path} ]]; do
+    link=$(readlink "${binary_path}") || return 1
+    if [[ ${link} == /* ]]; then
+      binary_path=${link}
+    else
+      binary_path=${binary_path%/*}/${link}
+    fi
+  done
+  binary_dir=$(cd -- "${binary_path%/*}" && pwd -P) || return 1
+
+  for candidate in \
+    "${binary_dir}/jsHelper" \
+    "${binary_dir}/libexec/jsHelper" \
+    "${binary_dir}/../libexec/jsHelper"; do
+    [[ -r ${candidate}/spicetifyWrapper.js ]] || continue
+    (cd -- "${candidate}" && pwd -P)
+    return
+  done
+  return 1
+}
+
+spicetify_bundle_is_applied() {
+  local apps_path=$1 entry has_directory=0 has_spa=0 marker_file
+  for entry in "${apps_path}"/*; do
+    [[ -e ${entry} ]] || continue
+    [[ -d ${entry} ]] && has_directory=1
+    [[ -f ${entry} && ${entry} == *.spa ]] && has_spa=1
+  done
+  ((has_directory && !has_spa)) || return 1
+
+  for marker_file in xpui-modules.js xpui-snapshot.js xpui.js; do
+    [[ -r ${apps_path}/xpui/${marker_file} ]] || continue
+    grep -Eq 'Spicetify\.(_platform|URI|Snackbar)' \
+      "${apps_path}/xpui/${marker_file}" && return 0
+  done
+  return 1
+}
+
+spicetify_repair_applied_bundle() {
+  local binary=$1 config_file spotify_path apps_path xpui_path helper_source
+  local index_file cleaned_index repaired_index extension option helper version
+  local helper_tags='' extension_tags=''
+
+  config_file=$("${binary}" -c 2> /dev/null) || return 1
+  [[ -r ${config_file} ]] || return 1
+  spotify_path=$(spicetify_config_value "${config_file}" "spotify_path") || return 1
+  apps_path=${spotify_path}/Apps
+  xpui_path=${apps_path}/xpui
+  index_file=${xpui_path}/index.html
+  [[ -w ${index_file} ]] || return 1
+  spicetify_bundle_is_applied "${apps_path}" || return 1
+  helper_source=$(spicetify_helper_dir "${binary}") || return 1
+
+  install -d -- "${xpui_path}/helper" "${xpui_path}/extensions"
+  install -m 0644 -- "${helper_source}/spicetifyWrapper.js" \
+    "${xpui_path}/helper/spicetifyWrapper.js"
+  helper_tags="<script src='helper/spicetifyWrapper.js'></script>"
+  while read -r option helper; do
+    [[ $(spicetify_config_value "${config_file}" "${option}") == 1 ]] || continue
+    [[ -r ${helper_source}/${helper}.js ]] || return 1
+    install -m 0644 -- "${helper_source}/${helper}.js" "${xpui_path}/helper/${helper}.js"
+    helper_tags+=$'\n'"<script defer src='helper/${helper}.js'></script>"
+  done <<'EOF'
+sidebar_config sidebarConfig
+home_config homeConfig
+experimental_features expFeatures
+EOF
+
+  for extension in "${SPICETIFY_EXTENSIONS[@]}"; do
+    install -m 0644 -- "${SPICETIFY_EXTENSION_DIR}/${extension}" \
+      "${xpui_path}/extensions/${extension}"
+    extension_tags+="<script defer src='extensions/${extension}'></script>"$'\n'
+  done
+  version=$("${binary}" -v 2> /dev/null || true)
+
+  cleaned_index=${index_file}.tmp
+  perl -0pe '
+    s{\n?<link[^>]+class=["'"'"']userCSS["'"'"'][^>]*>\n?}{}g;
+    s{\n?<script[^>]+src=["'"'"'](?:helper/(?:spicetifyWrapper|sidebarConfig|homeConfig|expFeatures)\.js|extensions/[^"'"'"']+)["'"'"'][^>]*></script>\n?}{}g;
+    s{\n?<!-- spicetify helpers -->\n?}{}g;
+    s{\n?<script>\s*Spicetify\.Config=.*?</script>\n?}{}gs;
+    s{\n?<script>\s*</script>\n?}{}gs;
+  ' "${index_file}" > "${cleaned_index}" || return 1
+  repaired_index=${index_file}.new
+  SPICETIFY_HEAD="${helper_tags}" SPICETIFY_TAIL="${extension_tags}" \
+    SPICETIFY_VERSION="${version}" perl -0pe '
+      s{<body>}{<body>\n$ENV{SPICETIFY_HEAD}\n<script>\nSpicetify.Config={};\nSpicetify.Config["version"]="$ENV{SPICETIFY_VERSION}";\nSpicetify.Config["extensions"]=["settings.js","adder.js","spotifix.js"];\nSpicetify.Config["custom_apps"]=[];\n</script>\n};
+      s{</body>}{$ENV{SPICETIFY_TAIL}</body>};
+    ' "${cleaned_index}" > "${repaired_index}" || return 1
+  mv -- "${repaired_index}" "${index_file}"
+  rm -f -- "${cleaned_index}"
+}
+
 apply_spicetify() {
   local binary=$1 output
   shift
   if output=$("${binary}" --no-restart "$@" 2>&1); then
     return 0
   fi
+  if [[ ${output} == *'cannot be backed up'* ]]; then
+    jsh::log_info "Repairing extensions in the current Spicetify bundle..."
+    if spicetify_repair_applied_bundle "${binary}"; then
+      return 0
+    fi
+  fi
   # shellcheck disable=SC2310 # Retry only when Spicetify requires a restore first.
   if spicetify_backup_needs_restore "${output}"; then
     jsh::log_info "Restoring Spotify before refreshing Spicetify's backup..."
-    if ! output=$("${binary}" --no-restart restore 2>&1); then
-      jsh::log_error "Failed to restore Spotify before refreshing Spicetify's backup."
-      spicetify_failure_details "${output}"
-      return 1
+    if output=$("${binary}" --no-restart restore 2>&1); then
+      if output=$("${binary}" --no-restart backup apply 2>&1); then
+        return 0
+      fi
     fi
-    if ! output=$("${binary}" --no-restart backup apply 2>&1); then
-      jsh::log_error "Failed to restore, refresh, and apply Spicetify."
-      spicetify_failure_details "${output}"
-      return 1
-    fi
-    return 0
+    jsh::log_error "Failed to restore and apply Spicetify."
+    spicetify_failure_details "${output}"
+    return 1
   fi
   # shellcheck disable=SC2310 # Retry only when Spicetify reports a backupable client.
   if ! spicetify_backup_can_refresh "${output}"; then
@@ -255,23 +354,21 @@ apply_spicetify() {
     return 1
   fi
   jsh::log_info "Refreshing Spicetify's backup for the current Spotify version..."
-  if ! output=$("${binary}" --no-restart backup apply 2>&1); then
-    # shellcheck disable=SC2310 # Retry only when backup refresh requires a restore first.
-    if spicetify_backup_needs_restore "${output}"; then
-      jsh::log_info "Restoring Spotify before refreshing Spicetify's backup..."
-      if ! output=$("${binary}" --no-restart restore 2>&1); then
-        jsh::log_error "Failed to restore Spotify before refreshing Spicetify's backup."
-        spicetify_failure_details "${output}"
-        return 1
-      fi
+  if output=$("${binary}" --no-restart backup apply 2>&1); then
+    return 0
+  fi
+  # shellcheck disable=SC2310 # Retry only when backup refresh requires a restore first.
+  if spicetify_backup_needs_restore "${output}"; then
+    jsh::log_info "Restoring Spotify before refreshing Spicetify's backup..."
+    if output=$("${binary}" --no-restart restore 2>&1); then
       if output=$("${binary}" --no-restart backup apply 2>&1); then
         return 0
       fi
     fi
-    jsh::log_error "Failed to refresh and apply Spicetify."
-    spicetify_failure_details "${output}"
-    return 1
   fi
+  jsh::log_error "Failed to refresh and apply Spicetify."
+  spicetify_failure_details "${output}"
+  return 1
 }
 
 spicetify_config_value() {
@@ -355,12 +452,13 @@ spicetify_backup_version() {
 }
 
 spicetify_is_applied() {
-  local spotify_path=$1 backup_version=$2 extension
-  [[ -n ${backup_version} ]] || return 1
+  local spotify_path=$1 extension
   [[ -r ${spotify_path}/Apps/xpui/index.html ]] || return 1
+  [[ -r ${spotify_path}/Apps/xpui/helper/spicetifyWrapper.js ]] || return 1
   grep -Fq 'spicetifyWrapper.js' "${spotify_path}/Apps/xpui/index.html" || return 1
   for extension in "${SPICETIFY_EXTENSIONS[@]}"; do
     [[ -r ${spotify_path}/Apps/xpui/extensions/${extension} ]] || return 1
+    grep -Fq "extensions/${extension}" "${spotify_path}/Apps/xpui/index.html" || return 1
     cmp -s -- "${SPICETIFY_EXTENSION_DIR}/${extension}" \
       "${spotify_path}/Apps/xpui/extensions/${extension}" || return 1
   done
@@ -368,7 +466,7 @@ spicetify_is_applied() {
 
 spotify_configuration_is_current() {
   local binary=$1 spotify_path=$2 prefs_path=$3
-  local config_file config_dir backup_version extension legacy_extension
+  local config_file config_dir extension legacy_extension
 
   [[ -x ${binary} ]] || return 1
   config_file=$("${binary}" -c 2> /dev/null) || return 1
@@ -392,18 +490,15 @@ spotify_configuration_is_current() {
     [[ ! -e ${config_dir}/Extensions/${legacy_extension} ]] || return 1
   done
 
-  backup_version=$(spicetify_backup_version "${config_file}")
-  [[ -n ${backup_version} ]] || return 1
-
   # shellcheck disable=SC2310 # State queries are used as predicates.
-  spicetify_is_applied "${spotify_path}" "${backup_version}" || return 1
+  spicetify_is_applied "${spotify_path}" || return 1
   return 0
 }
 
 configure_spicetify() {
   local binary=$1 spotify_path=$2 prefs_path=$3
   local config_file config_dir extension extension_dir output backup_version legacy_extension
-  local needs_apply=0
+  local force_apply=${4:-0} needs_apply=0
   local -a apply_command=(backup apply)
 
   if ! config_file=$("${binary}" -c 2>&1); then
@@ -483,7 +578,7 @@ configure_spicetify() {
   [[ -z ${backup_version:-} ]] || apply_command=(apply)
 
   # shellcheck disable=SC2310 # State queries are used as predicates.
-  if ((!needs_apply)) && spicetify_is_applied "${spotify_path}" "${backup_version:-}"; then
+  if ((!force_apply && !needs_apply)) && spicetify_is_applied "${spotify_path}"; then
     jsh::log_note "Spicetify is applied."
     return 0
   fi
@@ -491,14 +586,33 @@ configure_spicetify() {
   jsh::log_info "Applying Spicetify..."
   apply_spicetify "${binary}" "${apply_command[@]}" || return 1
   jsh::log_success "Spicetify applied."
+
+  # Validate extensions are in the Spotify bundle.
+  local validation_failed=0
+  for extension in "${SPICETIFY_EXTENSIONS[@]}"; do
+    if [[ ! -r ${spotify_path}/Apps/xpui/extensions/${extension} ]]; then
+      jsh::log_error "Extension ${extension} is missing from the Spotify bundle."
+      validation_failed=1
+    elif ! cmp -s -- "${SPICETIFY_EXTENSION_DIR}/${extension}" \
+        "${spotify_path}/Apps/xpui/extensions/${extension}"; then
+      jsh::log_error "Extension ${extension} in the Spotify bundle does not match the source."
+      validation_failed=1
+    fi
+  done
+  if ((validation_failed)); then
+    jsh::log_error "Spicetify extensions failed validation."
+    return 1
+  fi
+  jsh::log_success "Spicetify extensions validated."
 }
 
 main() {
-  local spotify_path prefs_path locations spotify_was_running=0 spotify_was_flatpak=0
+  local spotify_path prefs_path locations force_apply=0 spotify_was_running=0 spotify_was_flatpak=0
   local -a spotify_locations=()
   while (($#)); do
     case $1 in
       -y | --yes) JSH_ASSUME_YES=1 ;;
+      --force) force_apply=1 ;;
       *)
         jsh::log_error "Unknown option: $1"
         return 2
@@ -517,7 +631,7 @@ main() {
   ensure_spicetify
 
   # shellcheck disable=SC2310 # State check is used as a predicate.
-  if spotify_configuration_is_current "${SPICETIFY_BIN}" "${spotify_path}" "${prefs_path}"; then
+  if ((!force_apply)) && spotify_configuration_is_current "${SPICETIFY_BIN}" "${spotify_path}" "${prefs_path}"; then
     # shellcheck disable=SC2310 # Status check is used as a predicate.
     if spotify_is_running; then
       jsh::log_note "Spotify configuration is current; leaving Spotify open."
@@ -535,7 +649,7 @@ main() {
 
   # shellcheck disable=SC2310 # Shutdown failure is handled explicitly.
   close_spotify_if_running || return 1
-  configure_spicetify "${SPICETIFY_BIN}" "${spotify_path}" "${prefs_path}"
+  configure_spicetify "${SPICETIFY_BIN}" "${spotify_path}" "${prefs_path}" "${force_apply}"
   if ((spotify_was_running)); then
     reopen_spotify "${spotify_was_flatpak}" || return 1
     jsh::log_success "Spotify configuration complete. Spotify reopened."
