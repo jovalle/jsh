@@ -123,6 +123,27 @@ setup() {
   [[ ${output} == *'Would inspect, update, and harden Helium.'* ]]
 }
 
+@test "macOS update reinstalls an app that still fails verification" {
+  local calls="${BATS_TEST_TMPDIR}/brew-calls"
+  local app_path="${BATS_TEST_TMPDIR}/Helium.app"
+  mkdir -p "${app_path}"
+
+  run env CALLS="${calls}" APP_STATE="${calls}.valid" \
+    HELIUM_PLATFORM=Darwin HELIUM_APP_PATH="${app_path}" bash -c '
+    source "$1"
+    verify_app() { [[ -e ${APP_STATE} ]]; }
+    brew() {
+      local IFS=" "
+      printf "%s\n" "$*" >> "${CALLS}"
+      [[ $1 != reinstall ]] || : > "${APP_STATE}"
+    }
+    upgrade_app
+  ' _ "${JSH_ROOT}/scripts/unix/configure/helium.sh"
+
+  [[ ${status} -eq 0 ]]
+  diff -u <(printf 'update\nlist --cask helium-browser\nupgrade --cask helium-browser\nreinstall --cask --force helium-browser\n') "${calls}"
+}
+
 @test "Linux policy contains every managed pin and forced extension" {
   local id _name managed
   local -a extension_ids=()
@@ -204,4 +225,38 @@ setup() {
 @test "macOS Dock includes an installed Helium application" {
   grep -Fq 'pin_dock_app /Applications/Helium.app' \
     "${JSH_ROOT}/scripts/darwin/configure/appearance.sh"
+}
+
+@test "macOS failed verification does not abort installation repair" {
+  run env HELIUM_PLATFORM=Darwin HELIUM_APP_PATH="${BATS_TEST_TMPDIR}/Helium.app" bash -c '
+    source "$1/scripts/unix/configure/helium.sh"
+    verify_app() { exit 1; }
+    brew() { local IFS=" "; printf "brew:%s\n" "$*"; }
+    upgrade_app
+  ' _ "${JSH_ROOT}"
+  [[ ${status} -eq 1 ]]
+  [[ ${output} == *"brew:upgrade --cask helium-browser"* ]]
+  [[ ${output} == *"brew:reinstall --cask --force helium-browser"* ]]
+}
+
+@test "apply accepts yes and quit together without interactive input" {
+  export JSH_CONFIGURE_DRY_RUN=1
+  run main apply --yes --quit
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == *'Would inspect, update, and harden Helium.'* ]]
+}
+
+@test "macOS manifest declares Helium for the package phase" {
+  export JSH_MANIFEST_OS=darwin
+  run jsh_manifest_main brewfile
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == *'cask "helium-browser"'* ]]
+}
+
+@test "macOS apply does not fail at the Linux launcher step" {
+  run env HELIUM_PLATFORM=Darwin bash -c '
+    source "$1/scripts/unix/configure/helium.sh"
+    install_linux_launcher
+  ' _ "${JSH_ROOT}"
+  [[ ${status} -eq 0 ]]
 }
