@@ -1,0 +1,12 @@
+{
+  "ensure_newline_at_eof_on_save": true,
+  "font_face": "JetBrainsMono NF",
+  "font_size": 12,
+  "open_files_in_new_window": false,
+  "rulers": [100],
+  "show_minimap": false,
+  "tab_size": 2,
+  "translate_tabs_to_spaces": true,
+  "update_check": false,
+  "word_wrap": true,
+}
