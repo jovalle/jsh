@@ -490,6 +490,7 @@ EOF
 
 @test "Zsh Git helpers confirm through the shared UI" {
   local gum="${BATS_TEST_TMPDIR}/gum" calls="${BATS_TEST_TMPDIR}/git-confirm-calls"
+  local script="${BATS_TEST_TMPDIR}/git-confirm.zsh"
   cat > "${gum}" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >> "${GUM_CALLS}"
@@ -497,11 +498,12 @@ exit 1
 EOF
   chmod +x "${gum}"
 
-  run env HOME="${BATS_TEST_TMPDIR}" JSH_LOAD_CONFIG=0 JSH_INTERACTIVE=1 JSH_REMOTE=0 \
-    JSH_UI_BACKEND=gum JSH_GUM="${gum}" GUM_CALLS="${calls}" zsh -f -c '
-      source "$1/dotfiles/.zshrc" >/dev/null
-      _git_confirm "Push main?"
-    ' _ "${JSH_ROOT}"
+  cat > "${script}" <<'EOF'
+source "${JSH_ROOT}/dotfiles/.zshrc" >/dev/null
+_git_confirm "Push main?"
+EOF
+  export GUM_CALLS="${calls}" JSH_GUM="${gum}" JSH_TEST_SCRIPT="${script}"
+  run run_in_pty 'env HOME="$BATS_TEST_TMPDIR" JSH_LOAD_CONFIG=0 JSH_INTERACTIVE=1 JSH_REMOTE=0 JSH_UI_BACKEND=gum zsh -f "$JSH_TEST_SCRIPT"'
 
   [[ ${status} -eq 1 ]]
   [[ ${output} == *'Cancelled'* ]]
