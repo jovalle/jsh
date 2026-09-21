@@ -16,7 +16,7 @@ jsh_approve_broken_symlink() {
     ${JSH_CONFIGURE_ASSUME_YES:-${JSH_ASSUME_YES:-0}} == 1 ]]; then
     return 0
   fi
-  if [[ ! -t 0 ]]; then
+  if [[ ${JSH_UI_INPUT_FD:-0} == 0 && ! -t 0 ]]; then
     printf 'Non-interactive setup cannot replace it without --yes.\n' >&2
     return 1
   fi
