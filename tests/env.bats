@@ -569,7 +569,12 @@ EOF
 }
 
 @test "Zsh reload replaces the legacy AWS profile alias" {
-  run env HOME="${BATS_TEST_TMPDIR}" JSH_LOAD_CONFIG=0 zsh -f -c '
+  local commands="${BATS_TEST_TMPDIR}/commands"
+  mkdir -p "${commands}"
+  printf '#!/bin/sh\nexit 0\n' > "${commands}/aws"
+  chmod +x "${commands}/aws"
+
+  run env HOME="${BATS_TEST_TMPDIR}" PATH="${commands}:${PATH}" JSH_LOAD_CONFIG=0 zsh -f -c '
     alias awsp="echo legacy"
     source "$1/dotfiles/.zshrc" >/dev/null
     [[ $+functions[awsp] -eq 1 && $+aliases[awsp] -eq 0 ]]

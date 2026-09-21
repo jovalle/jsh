@@ -9,11 +9,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y bats zsh shellcheck
+        with:
+          submodules: recursive
+      - run: sudo apt-get update && sudo apt-get install -y bats bzip2 jq libarchive-tools unzip zsh shellcheck
       - run: make check-shell-syntax check-zsh-syntax lint-shell test-reconciliation
   macos:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - run: brew install bash
       - run: python3 -m unittest discover -s tests -p 'test_*.py'
