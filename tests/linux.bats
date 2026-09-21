@@ -43,6 +43,60 @@ load_ssh_agent_service_functions() {
   eval "$(sed -n '/^activate_ssh_agent() {$/,/^}$/p' "${script}")"
 }
 
+@test "spans the XFCE wallpaper only across a split ultrawide" {
+  local root="${BATS_TEST_TMPDIR}/wallpaper-root" commands="${BATS_TEST_TMPDIR}/wallpaper-bin"
+  local split expected
+  mkdir -p "${root}/lib" "${root}/local" "${root}/scripts/linux/configure" "${commands}"
+  cp "${JSH_ROOT}/lib/env.sh" "${JSH_ROOT}/lib/linux.sh" "${JSH_ROOT}/lib/output.sh" \
+    "${JSH_ROOT}/lib/ui.sh" "${root}/lib/"
+  cp -R "${JSH_ROOT}/lib/ui" "${root}/lib/"
+  cp "${JSH_ROOT}/scripts/linux/configure/wallpaper.sh" "${root}/scripts/linux/configure/"
+  : > "${root}/local/wallpaper.png"
+  cat > "${commands}/file" << 'EOF'
+#!/usr/bin/env bash
+printf '%s\n' image/png
+EOF
+  cat > "${commands}/xrandr" << 'EOF'
+#!/usr/bin/env bash
+case $1 in
+  --listmonitors)
+    printf '%s\n' 'Monitors: 1'
+    if [[ ${SPLIT:-0} == 1 ]]; then
+      printf '%s\n' ' 0: *jsh-left 2560/595x1440/340+0+0 DisplayPort-0'
+    else
+      printf '%s\n' ' 0: +*DisplayPort-0 5120/1190x1440/340+0+0 DisplayPort-0'
+    fi
+    ;;
+  --query) printf '%s\n' 'DisplayPort-0 connected 5120x1440+0+0' ;;
+esac
+EOF
+  cat > "${commands}/xfconf-query" << 'EOF'
+#!/usr/bin/env bash
+case $* in
+  '-c xfce4-desktop -l') printf '%s\n' '/backdrop/screen0/monitor0/workspace0/image-style' ;;
+  '-c xfwm4 -p /general/workspace_count') printf '%s\n' 1 ;;
+  *'/rgba1' | *'/rgba2') printf '%s\n' 0 0 0 1 ;;
+  *'/color1') printf '%s\n' 0 0 0 65535 ;;
+  *'/color-style') printf '%s\n' 0 ;;
+  *'/backdrop-cycle-enable') printf '%s\n' false ;;
+  *'/image-style') printf '%s\n' 5 ;;
+  *'/image-show') printf '%s\n' true ;;
+  *'/last-image') printf '%s\n' /old/wallpaper.png ;;
+esac
+EOF
+  chmod +x "${commands}/file" "${commands}/xrandr" "${commands}/xfconf-query"
+
+  for split in 0 1; do
+    expected=5
+    [[ ${split} == 0 ]] || expected=6
+    run env PATH="${commands}:${PATH}" JSH_CONFIGURE_DRY_RUN=1 JSH_DESKTOP=XFCE SPLIT="${split}" \
+      bash -x "${root}/scripts/linux/configure/wallpaper.sh"
+
+    [[ ${status} -eq 0 ]]
+    [[ ${output} == *"/image-style int ${expected}"* ]]
+  done
+}
+
 @test "requires Python 3 during Debian-family installation" {
   linux_package_manager() { printf '%s\n' apt-get; }
   install_linux_prerequisites() { printf '%s\n' "$*"; }
@@ -78,6 +132,21 @@ load_ssh_agent_service_functions() {
   output=$(PATH="$(prerequisite_path)" install_prerequisites shell 0)
 
   [[ -z "${output}" ]]
+}
+
+@test "accepts Bash 5.1 or newer for the lightweight runtime without Zsh" {
+  local directory="${BATS_TEST_TMPDIR}/bash-runtime-bin"
+  mkdir -p "${directory}"
+  ln -sf "${BASH}" "${directory}/bash"
+  ln -sf "${BASH}" "${directory}/git"
+  linux_package_manager() { printf '%s\n' apt-get; }
+  install_linux_prerequisites() { printf 'unexpected install: %s\n' "$*"; }
+  jsh_warn() { :; }
+  jsh_note() { :; }
+
+  output=$(PATH="${directory}" install_prerequisites shell 0)
+
+  [[ -z ${output} ]]
 }
 
 @test "detects Arch-family distributions" {
@@ -268,11 +337,86 @@ WantedBy=default.target' > "${HOME}/.config/systemd/user/ssh-agent.service"
   local installed=0
   package_installed() { [[ ${installed} == 1 ]]; }
   package_available() { return 0; }
-  jsh_run_root() { printf '%s\n' "$*" >> "${calls}"; installed=1; }
+  jsh_run_root() {
+    printf '%s\n' "$*" >> "${calls}"
+    installed=1
+  }
 
   install_native_packages
 
   grep -Fxq 'dnf install -y -- example-package' "${calls}"
+}
+
+@test "plans Sublime Text from the official Debian repository" {
+  run env JSH_INSTALL_DRY_RUN=1 \
+    SUBLIME_APT_KEY_PATH="${BATS_TEST_TMPDIR}/apt/sublimehq-pub.gpg" \
+    SUBLIME_APT_SOURCE_PATH="${BATS_TEST_TMPDIR}/apt/sublime-text.sources" \
+    bash -c '
+      source "$1"
+      jsh_linux_family() { printf "debian\n"; }
+      dpkg-query() { return 1; }
+      install_sublime_text
+    ' _ "${JSH_ROOT}/scripts/linux/install/sublime-text.sh"
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == *"Would install ${BATS_TEST_TMPDIR}/apt/sublimehq-pub.gpg"* ]]
+  [[ ${output} == *"Would install ${BATS_TEST_TMPDIR}/apt/sublime-text.sources"* ]]
+  [[ ${output} == *'Would run as root: apt-get update'* ]]
+  [[ ${output} == *'Would run as root: env DEBIAN_FRONTEND=noninteractive apt-get install -y -- sublime-text'* ]]
+}
+
+@test "plans Sublime Text from the official Fedora repository" {
+  run env JSH_INSTALL_DRY_RUN=1 \
+    SUBLIME_RPM_KEY_PATH="${BATS_TEST_TMPDIR}/dnf/RPM-GPG-KEY-sublimehq" \
+    SUBLIME_DNF_REPO_PATH="${BATS_TEST_TMPDIR}/dnf/sublime-text.repo" \
+    bash -c '
+      source "$1"
+      jsh_linux_family() { printf "fedora\n"; }
+      uname() { printf "x86_64\n"; }
+      rpm() { return 1; }
+      install_sublime_text
+    ' _ "${JSH_ROOT}/scripts/linux/install/sublime-text.sh"
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == *"Would install ${BATS_TEST_TMPDIR}/dnf/RPM-GPG-KEY-sublimehq"* ]]
+  [[ ${output} == *'Would import the Sublime Text RPM signing key.'* ]]
+  [[ ${output} == *"Would install ${BATS_TEST_TMPDIR}/dnf/sublime-text.repo"* ]]
+  [[ ${output} == *'Would run as root: dnf install -y -- sublime-text'* ]]
+}
+
+@test "plans Sublime Text from the official Arch repository" {
+  run env JSH_INSTALL_DRY_RUN=1 \
+    SUBLIME_PACMAN_CONF="${BATS_TEST_TMPDIR}/pacman.conf" \
+    bash -c '
+      source "$1"
+      jsh_linux_family() { printf "arch\n"; }
+      uname() { printf "x86_64\n"; }
+      pacman() { return 1; }
+      pacman-key() { return 1; }
+      install_sublime_text
+    ' _ "${JSH_ROOT}/scripts/linux/install/sublime-text.sh"
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == *'Would import and locally sign the Sublime Text pacman key.'* ]]
+  [[ ${output} == *"Would add the Sublime Text repository to ${BATS_TEST_TMPDIR}/pacman.conf"* ]]
+  [[ ${output} == *'Would run as root: pacman -Syu --needed --noconfirm -- sublime-text'* ]]
+}
+
+@test "rejects an invalid existing Sublime Text apt signing key" {
+  local key="${BATS_TEST_TMPDIR}/invalid-sublime-key"
+  printf 'not a key\n' > "${key}"
+
+  run env SUBLIME_APT_KEY_PATH="${key}" \
+    SUBLIME_APT_SOURCE_PATH="${BATS_TEST_TMPDIR}/apt/sublime-text.sources" \
+    bash -c '
+      source "$1"
+      jsh_linux_family() { printf "debian\n"; }
+      install_sublime_text
+    ' _ "${JSH_ROOT}/scripts/linux/install/sublime-text.sh"
+
+  [[ ${status} -ne 0 ]]
+  [[ ${output} == *"Existing Sublime Text signing key is invalid: ${key}"* ]]
+  [[ ${output} != *'apt-get install'* ]]
 }
 
 @test "updates Debian packages with APT" {
@@ -423,7 +567,20 @@ WantedBy=default.target' > "${HOME}/.config/systemd/user/ssh-agent.service"
     > "${home}/.ICAClient/wfclient.ini"
 
   run env HOME="${home}" XDG_STATE_HOME="${BATS_TEST_TMPDIR}/state" JSH_ROOT="${JSH_ROOT}" \
-    bash -c 'source "$1"; configure_citrix_preferences "$2"; before=$(stat -c "%i:%Y" "$HOME/.ICAClient/wfclient.ini"); configure_citrix_preferences "$2"; [[ $(stat -c "%i:%Y" "$HOME/.ICAClient/wfclient.ini") == "$before" ]]' \
+    bash -c '
+      file_identity() {
+        if stat -c "%i:%Y" "$1" > /dev/null 2>&1; then
+          stat -c "%i:%Y" "$1"
+        else
+          stat -f "%i:%m" "$1"
+        fi
+      }
+      source "$1"
+      configure_citrix_preferences "$2"
+      before=$(file_identity "$HOME/.ICAClient/wfclient.ini")
+      configure_citrix_preferences "$2"
+      [[ $(file_identity "$HOME/.ICAClient/wfclient.ini") == "$before" ]]
+    ' \
     _ "${JSH_ROOT}/scripts/linux/configure/work.sh" "${stage}"
 
   [[ ${status} -eq 0 ]]
@@ -450,8 +607,27 @@ WantedBy=default.target' > "${HOME}/.config/systemd/user/ssh-agent.service"
 
   [[ ${status} -eq 0 ]]
   jq -e '."editor.fontSize" == 15 and ."terminal.integrated.profiles.linux".bash.path == "/bin/bash" and ."terminal.integrated.defaultProfile.linux" == "zsh"' \
-    "${config}/Code/User/settings.json" >/dev/null
-  jq -e 'any(.[]; .command == "test.keep")' "${config}/Code/User/keybindings.json" >/dev/null
+    "${config}/Code/User/settings.json" > /dev/null
+  jq -e 'any(.[]; .command == "test.keep")' "${config}/Code/User/keybindings.json" > /dev/null
+}
+
+@test "VS Code configuration handles the macOS Application Support path" {
+  local home="${BATS_TEST_TMPDIR}/vscode-home"
+
+  run env HOME="${home}" XDG_STATE_HOME="${BATS_TEST_TMPDIR}/state" JSH_ROOT="${JSH_ROOT}" \
+    bash -c '
+      source "$1"
+      code() { :; }
+      zsh() { :; }
+      uname() { printf "Darwin\n"; }
+      configure_vscode
+    ' _ "${JSH_ROOT}/scripts/unix/configure/vscode.sh"
+
+  [[ ${status} -eq 0 ]]
+  jq -e '."terminal.integrated.defaultProfile.osx" == "zsh"' \
+    "${home}/Library/Application Support/Code/User/settings.json" > /dev/null
+  jq -e 'type == "array"' \
+    "${home}/Library/Application Support/Code/User/keybindings.json" > /dev/null
 }
 
 @test "registers shell and changes default shell via usermod" {
@@ -556,10 +732,8 @@ run_adopt() {
   [[ "${status}" -eq 0 ]]
   [[ -L "${ADOPT_HOME}/.config/example" ]]
   [[ ! -L "${ADOPT_HOME}/.config/example/one" ]]
-  [[ "${ADOPT_HOME}/.config/example/one/settings" -ef \
-    "${ADOPT_ROOT}/dotfiles/.config/example/one/settings" ]]
-  [[ "${ADOPT_HOME}/.config/example/two/settings" -ef \
-    "${ADOPT_ROOT}/dotfiles/.config/example/two/settings" ]]
+  [[ "${ADOPT_HOME}/.config/example/one/settings" -ef "${ADOPT_ROOT}/dotfiles/.config/example/one/settings" ]]
+  [[ "${ADOPT_HOME}/.config/example/two/settings" -ef "${ADOPT_ROOT}/dotfiles/.config/example/two/settings" ]]
 }
 
 @test "adopt consolidates a new sibling with an existing managed link" {
@@ -576,10 +750,8 @@ run_adopt() {
   [[ "${status}" -eq 0 ]]
   [[ -L "${ADOPT_HOME}/.config/example" ]]
   [[ ! -L "${ADOPT_HOME}/.config/example/one" ]]
-  [[ "${ADOPT_HOME}/.config/example/one/settings" -ef \
-    "${ADOPT_ROOT}/dotfiles/.config/example/one/settings" ]]
-  [[ "${ADOPT_HOME}/.config/example/two/settings" -ef \
-    "${ADOPT_ROOT}/dotfiles/.config/example/two/settings" ]]
+  [[ "${ADOPT_HOME}/.config/example/one/settings" -ef "${ADOPT_ROOT}/dotfiles/.config/example/one/settings" ]]
+  [[ "${ADOPT_HOME}/.config/example/two/settings" -ef "${ADOPT_ROOT}/dotfiles/.config/example/two/settings" ]]
 }
 
 @test "adopt consolidates nested selections at their greatest common path" {
@@ -656,10 +828,8 @@ run_adopt() {
 
   [[ "${status}" -eq 0 ]]
   [[ -L "${ADOPT_HOME}/.config/example" ]]
-  [[ "${ADOPT_HOME}/.config/example/one/settings" -ef \
-    "${ADOPT_ROOT}/dotfiles/.config/example/one/settings" ]]
-  [[ "${ADOPT_HOME}/.config/example/two/settings" -ef \
-    "${ADOPT_ROOT}/dotfiles/.config/example/two/settings" ]]
+  [[ "${ADOPT_HOME}/.config/example/one/settings" -ef "${ADOPT_ROOT}/dotfiles/.config/example/one/settings" ]]
+  [[ "${ADOPT_HOME}/.config/example/two/settings" -ef "${ADOPT_ROOT}/dotfiles/.config/example/two/settings" ]]
 }
 
 @test "adopt restores consolidated descendants when linking fails" {
@@ -672,7 +842,7 @@ run_adopt() {
   mkdir -p "${ADOPT_HOME}/.config/example/two"
   printf 'two\n' > "${ADOPT_HOME}/.config/example/two/settings"
   fake_link="${BATS_TEST_TMPDIR}/fake-link"
-  cat > "${fake_link}" <<'EOF'
+  cat > "${fake_link}" << 'EOF'
 #!/usr/bin/env bash
 exit 1
 EOF
@@ -726,7 +896,7 @@ EOF
   prepare_adopt_fixture
   printf 'restore me\n' > "${ADOPT_HOME}/.example"
   fake_link="${BATS_TEST_TMPDIR}/fake-link"
-  cat > "${fake_link}" <<'EOF'
+  cat > "${fake_link}" << 'EOF'
 #!/usr/bin/env bash
 exit 1
 EOF

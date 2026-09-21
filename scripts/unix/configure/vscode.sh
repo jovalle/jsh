@@ -21,7 +21,7 @@ configure_vscode() {
   [[ -n ${shell_path} ]] || return
   if [[ $(uname -s) == Darwin ]]; then
     platform=osx
-    destination=${HOME}/Library/Application Support/Code/User
+    destination="${HOME}/Library/Application Support/Code/User"
   else
     platform=linux
     destination=${XDG_CONFIG_HOME:-${HOME}/.config}/Code/User
