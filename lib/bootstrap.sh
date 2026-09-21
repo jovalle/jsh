@@ -110,7 +110,7 @@ jsh::bootstrap_gum() {
 
   [[ ${JSH_INTERACTIVE:-0} == 1 && ${JSH_REMOTE:-0} != 1 ]] || return 0
   [[ -z ${JSH_GUM:-} || ! -x ${JSH_GUM} ]] || return 0
-  jsh_gum_release || {
+  jsh_gum_release "${JSH_PLATFORM:-}" "${JSH_ARCH:-}" || {
     jsh::log_note "Gum is unavailable for ${JSH_PLATFORM:-unknown}-${JSH_ARCH:-unknown}; keeping the shell UI."
     return 0
   }
