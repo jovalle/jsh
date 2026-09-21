@@ -1,0 +1,369 @@
+#!/usr/bin/env bash
+##% jmount
+## smb://[user@]host/share ## Mount an SMB share
+## nfs://host/export ## Mount an NFS export
+## profile ## Mount a profile from mounts.json
+## --help ## Show help
+
+set -euo pipefail
+umask 077
+
+case $0 in
+  /*) jmount_launcher=$0 ;;
+  *) jmount_launcher=${PWD}/$0 ;;
+esac
+
+if [[ -z ${JSH_ROOT:-} ]]; then
+  JSH_ROOT=$(CDPATH='' cd -P "${jmount_launcher%/*}/.." 2> /dev/null && pwd -P) || {
+    printf 'jmount: cannot locate the repository root\n' >&2
+    exit 1
+  }
+fi
+
+# shellcheck source=../lib/ui.sh
+. "${JSH_ROOT}/lib/ui.sh"
+jsh::init
+: "${JSH_PLATFORM:=unknown}"
+
+_jmount_usage() {
+  cat <<'EOF'
+Usage: jmount smb://[user@]host/share
+       jmount nfs://host/export
+       jmount PROFILE
+
+Mount an SMB/CIFS share or NFS export, then open the user's shell in the
+mount point. Profiles are read from conf/mounts.json and overridden by
+~/.local/.mounts.json. SMB profiles use host, share, user, and optional pass
+fields. NFS profiles set type to "nfs" and use host and share fields. An
+absolute mountpoint field overrides /Volumes/PROFILE on macOS or /mnt/PROFILE
+on Linux.
+
+Options:
+  -h, --help  Show help
+EOF
+}
+
+_jmount_die() {
+  jsh::log_error "$*"
+  exit 1
+}
+
+_jmount_profile_values() {
+  local profile=$1 config_file output
+  local -a config_files=()
+
+  for config_file in "${JSH_ROOT}/conf/mounts.json" "${HOME}/.local/.mounts.json"; do
+    [[ -f ${config_file} ]] && config_files+=("${config_file}")
+  done
+  ((${#config_files[@]} > 0)) || return 1
+
+  if ! command -v jq > /dev/null 2>&1; then
+    jsh::log_warn 'jq is unavailable; prompting for mount details.'
+    return 1
+  fi
+
+  if ! output=$(jq -r -s --arg profile "${profile}" '
+      def text: if type == "string" then . else "" end;
+      . as $documents
+      | (reduce $documents[] as $document ({};
+          . * (($document[$profile] // {})
+            | if type == "object" then . else {} end))) as $entry
+      | (($entry.type // $entry.protocol // "smb") | text),
+        (($entry.host // "") | text),
+        (($entry.share // $entry.export // "") | text),
+        (($entry.user // "") | text),
+        (($entry.pass // "") | text),
+        (($entry.mountpoint // "") | text)
+    ' "${config_files[@]}" 2> /dev/null); then
+    jsh::log_warn 'Mount configuration is invalid; prompting for mount details.'
+    return 1
+  fi
+
+  printf '%s\n' "${output}"
+}
+
+_jmount_load_profile() {
+  local values
+  values=$(_jmount_profile_values "$1") || return 0
+  {
+    IFS= read -r protocol || true
+    IFS= read -r host || true
+    IFS= read -r share || true
+    IFS= read -r user || true
+    IFS= read -r pass || true
+    IFS= read -r mountpoint || true
+  } <<< "${values}"
+}
+
+_jmount_parse_uri() {
+  local uri=$1 remainder authority
+
+  case ${uri} in
+    smb://*) protocol=smb; remainder=${uri#smb://} ;;
+    nfs://*) protocol=nfs; remainder=${uri#nfs://} ;;
+    *://*) _jmount_die "unsupported mount protocol: ${uri%%://*}" ;;
+    *) return 1 ;;
+  esac
+
+  if [[ ${remainder} == */* ]]; then
+    authority=${remainder%%/*}
+    share=${remainder#*/}
+  else
+    authority=${remainder}
+    share=
+  fi
+
+  if [[ ${protocol} == smb && ${authority} == *@* ]]; then
+    user=${authority%@*}
+    host=${authority##*@}
+  else
+    host=${authority}
+  fi
+}
+
+_jmount_prompt_required() {
+  local label=$1 value
+  value=$(jsh::input "${label}") || _jmount_die "${label} is required."
+  [[ -n ${value} ]] || _jmount_die "${label} is required."
+  printf '%s\n' "${value}"
+}
+
+_jmount_prompt_password() {
+  local value
+  value=$(jsh::input 'Password' --secret) || _jmount_die 'Password is required.'
+  [[ -n ${value} ]] || _jmount_die 'Password is required.'
+  printf '%s\n' "${value}"
+}
+
+_jmount_sanitize() {
+  local value=$1
+  value=${value//[^[:alnum:]._-]/_}
+  while [[ ${value} == _* ]]; do value=${value#_}; done
+  while [[ ${value} == *_ ]]; do value=${value%_}; done
+  [[ -n ${value} ]] || value=share
+  printf '%s\n' "${value}"
+}
+
+_jmount_urlencode() {
+  local input=$1 output='' character ordinal encoded
+  LC_ALL=C
+  while [[ -n ${input} ]]; do
+    character=${input:0:1}
+    input=${input:1}
+    case ${character} in
+      [[:alnum:].~_-]) output+=${character} ;;
+      *)
+        printf -v ordinal '%d' "'${character}"
+        printf -v encoded '%%%02X' "${ordinal}"
+        output+=${encoded}
+        ;;
+    esac
+  done
+  printf '%s\n' "${output}"
+}
+
+_jmount_find_mounted() {
+  local line source target
+  while IFS= read -r line; do
+    [[ ${line} == *' on '* ]] || continue
+    source=${line%% on *}
+    target=${line#* on }
+    target=${target%% \(*}
+    if [[ ${target} == "${mountpoint}" ]]; then
+      printf '%s\n' "${target}"
+      return
+    fi
+    case ${protocol} in
+      smb)
+        if [[ ${source} == "//${user}@${host}/${share}" || ${source} == "//${host}/${share}" ]]; then
+          printf '%s\n' "${target}"
+          return
+        fi
+        ;;
+      nfs)
+        if [[ ${source} == "${host}:/${share}" ]]; then
+          printf '%s\n' "${target}"
+          return
+        fi
+        ;;
+    esac
+  done < <(mount 2> /dev/null)
+  return 1
+}
+
+_jmount_default_root() {
+  if [[ -n ${JMOUNT_MOUNT_ROOT:-} ]]; then
+    printf '%s\n' "${JMOUNT_MOUNT_ROOT}"
+    return
+  fi
+
+  case ${JSH_PLATFORM} in
+    darwin) printf '%s\n' /Volumes ;;
+    linux) printf '%s\n' /mnt ;;
+    *) _jmount_die 'jmount supports only macOS and Linux.' ;;
+  esac
+}
+
+_jmount_create_mountpoint() {
+  if mkdir -p -- "${mountpoint}" 2> /dev/null; then
+    return
+  fi
+
+  [[ ${JSH_PLATFORM} != darwin ]] || _jmount_die "cannot create mount point without root access: ${mountpoint}"
+  command -v sudo > /dev/null 2>&1 || _jmount_die "cannot create mount point: ${mountpoint}"
+  sudo mkdir -p -- "${mountpoint}" || _jmount_die "cannot create mount point: ${mountpoint}"
+}
+
+_jmount_remove_mountpoint() {
+  if [[ ${JSH_PLATFORM} == darwin ]]; then
+    rmdir -- "${mountpoint}" 2> /dev/null || true
+  else
+    rmdir -- "${mountpoint}" 2> /dev/null || sudo rmdir -- "${mountpoint}" 2> /dev/null || true
+  fi
+}
+
+_jmount_wait_for_mount() {
+  local attempt=0 attempts=${JMOUNT_WAIT_ATTEMPTS:-100} mounted_path
+  while ((attempt < attempts)); do
+    if mounted_path=$(_jmount_find_mounted); then
+      mountpoint=${mounted_path}
+      return
+    fi
+    sleep 0.1
+    attempt=$((attempt + 1))
+  done
+  return 1
+}
+
+_jmount_mount_share() {
+  local credentials_file mount_status options source encoded_share encoded_user
+
+  case ${JSH_PLATFORM}:${protocol} in
+    darwin:smb)
+      encoded_user=$(_jmount_urlencode "${user}")
+      encoded_share=$(_jmount_urlencode "${share}")
+      if ((mountpoint_explicit)); then
+        command -v mount_smbfs > /dev/null 2>&1 || _jmount_die 'mount_smbfs is required.'
+        mount_smbfs "//${encoded_user}@${host}/${encoded_share}" "${mountpoint}"
+      else
+        command -v open > /dev/null 2>&1 || _jmount_die 'open is required.'
+        open -g "smb://${encoded_user}@${host}/${encoded_share}" || return
+        unset pass
+        _jmount_wait_for_mount
+      fi
+      ;;
+    darwin:nfs)
+      source=${host}:/${share}
+      if ((mountpoint_explicit)); then
+        command -v mount_nfs > /dev/null 2>&1 || _jmount_die 'mount_nfs is required.'
+        mount_nfs "${source}" "${mountpoint}"
+      else
+        command -v open > /dev/null 2>&1 || _jmount_die 'open is required.'
+        open -g "nfs://${host}/${share}" || return
+        _jmount_wait_for_mount
+      fi
+      ;;
+    linux:smb)
+      command -v sudo > /dev/null 2>&1 || _jmount_die 'sudo is required.'
+      [[ ${user} != *$'\n'* && ${pass} != *$'\n'* ]] || _jmount_die 'SMB credentials cannot contain newlines.'
+      mkdir -p -- "${JSH_ROOT}/tmp"
+      credentials_file=$(mktemp "${JSH_ROOT}/tmp/jmount-credentials.XXXXXX")
+      printf 'username=%s\npassword=%s\n' "${user}" "${pass}" > "${credentials_file}"
+      options="credentials=${credentials_file},uid=$(id -u),gid=$(id -g)"
+      mount_status=0
+      sudo mount -t cifs "//${host}/${share}" "${mountpoint}" -o "${options}" || mount_status=$?
+      rm -f -- "${credentials_file}"
+      return "${mount_status}"
+      ;;
+    linux:nfs)
+      command -v sudo > /dev/null 2>&1 || _jmount_die 'sudo is required.'
+      source=${host}:/${share}
+      sudo mount -t nfs "${source}" "${mountpoint}"
+      ;;
+    unknown:*) _jmount_die 'jmount supports only macOS and Linux.' ;;
+    *) _jmount_die "unsupported mount protocol: ${protocol}" ;;
+  esac
+}
+
+_jmount_enter() {
+  local shell=${JMOUNT_SHELL:-${SHELL:-/bin/sh}}
+  [[ -x ${shell} ]] || _jmount_die "shell is not executable: ${shell}"
+  cd -- "${mountpoint}" || _jmount_die "cannot enter mount point: ${mountpoint}"
+  jsh::log_success "Opening ${mountpoint}"
+  exec "${shell}"
+}
+
+case ${1:-} in
+  -h | --help)
+    _jmount_usage
+    exit 0
+    ;;
+esac
+(($# == 1)) || {
+  _jmount_usage >&2
+  exit 2
+}
+
+protocol=
+host=
+share=
+user=
+pass=
+mountpoint=
+mount_name=
+mountpoint_explicit=0
+if ! _jmount_parse_uri "$1"; then
+  mount_name=$1
+  _jmount_load_profile "$1"
+fi
+
+protocol=$(printf '%s' "${protocol:-smb}" | tr '[:upper:]' '[:lower:]')
+case ${protocol} in smb | cifs) protocol=smb ;; nfs) ;; *) _jmount_die "unsupported mount protocol: ${protocol}" ;; esac
+
+[[ -n ${host} ]] || host=$(_jmount_prompt_required 'Host')
+[[ -n ${share} ]] || share=$(_jmount_prompt_required 'Share')
+while [[ ${share} == /* ]]; do share=${share#/}; done
+while [[ ${share} == */ ]]; do share=${share%/}; done
+[[ -n ${share} ]] || _jmount_die 'Share is required.'
+if [[ ${protocol} == smb && -z ${user} ]]; then
+  user=$(_jmount_prompt_required 'User')
+fi
+
+if [[ -n ${mountpoint} ]]; then
+  mountpoint_explicit=1
+  [[ ${mountpoint} == /* && ${mountpoint} != / && ${mountpoint} != *$'\n'* ]] ||
+    _jmount_die 'mountpoint must be an absolute path other than /.'
+  while [[ ${mountpoint} == */ ]]; do mountpoint=${mountpoint%/}; done
+else
+  [[ -n ${mount_name} ]] || mount_name=${share##*/}
+  mount_root=$(_jmount_default_root)
+  mountpoint=${mount_root%/}/$(_jmount_sanitize "${mount_name}")
+fi
+
+if mounted_path=$(_jmount_find_mounted); then
+  mountpoint=${mounted_path}
+  jsh::log_note "Already mounted: ${mountpoint}"
+  _jmount_enter
+fi
+
+if [[ ${protocol} == smb && ${JSH_PLATFORM} != darwin && -z ${pass} ]]; then
+  pass=$(_jmount_prompt_password)
+fi
+
+mountpoint_created=0
+if [[ ${JSH_PLATFORM} == darwin && ${mountpoint_explicit} == 0 ]]; then
+  if [[ -e ${mountpoint} ]] && ! rmdir -- "${mountpoint}" 2> /dev/null; then
+    _jmount_die "mount point exists but is not mounted: ${mountpoint}"
+  fi
+elif [[ ! -d ${mountpoint} ]]; then
+  _jmount_create_mountpoint
+  mountpoint_created=1
+fi
+
+jsh::log_info "Mounting ${protocol}://${host}/${share}"
+if ! _jmount_mount_share; then
+  ((mountpoint_created == 0)) || _jmount_remove_mountpoint
+  _jmount_die "mount failed: ${protocol}://${host}/${share}"
+fi
+unset pass
+_jmount_enter

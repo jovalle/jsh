@@ -1,0 +1,13 @@
+{
+  "media": {
+    "type": "smb",
+    "host": "nas.example.net",
+    "share": "media",
+    "user": "yourusername"
+  },
+  "archive": {
+    "type": "nfs",
+    "host": "files.example.net",
+    "share": "/exports/archive"
+  }
+}
