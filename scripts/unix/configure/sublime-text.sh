@@ -90,7 +90,9 @@ configure_macos() {
   fi
 
   for content_type in "${content_types[@]}"; do
-    duti -s "${SUBLIME_BUNDLE_ID}" "${content_type}" all
+    if ! duti -s "${SUBLIME_BUNDLE_ID}" "${content_type}" all > /dev/null 2>&1; then
+      jsh::log_warn "Skipping unsupported macOS content type: ${content_type}."
+    fi
   done
   for extension in "${extensions[@]}"; do
     duti -s "${SUBLIME_BUNDLE_ID}" ".${extension}" all > /dev/null 2>&1 || true

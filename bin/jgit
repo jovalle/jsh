@@ -89,6 +89,7 @@ Commands:
 
 Timestamp examples:
   +30m                  30 minutes after the latest commit
+  ++30m                 30 minutes after the amended commit's first parent
   -2h                   2 hours before the latest commit
   now, now+1h           Current time, optionally with an offset
   2026-09-05 14         Absolute hour; randomizes minutes and seconds
@@ -846,7 +847,7 @@ _jgit_amend_cleanup() {
 
 _jgit_amend() {
   local target_ref=HEAD target_set=0 timestamp='' dry_run=0 assume_yes=0 argument target old_tip branch
-  local target_epoch resolved_epoch delta index commit parent parent_epoch new_author new_committer
+  local target_epoch resolved_epoch delta index commit parent parent_epoch previous_epoch new_author new_committer
   local author_timezone committer_timezone tree message rewritten_message new_commit answer
   local -a parents parent_args
   AMEND_OLD_COMMITS=()
@@ -870,7 +871,8 @@ _jgit_amend() {
           'Usage: jgit amend [REF] -t TIME [--dry-run] [--yes]' \
           '' \
           'Moves REF (default HEAD) and every following first-parent commit by' \
-          'the effective timestamp delta. Trees, messages, and merge topology are preserved.'
+          'the effective timestamp delta. Use ++OFFSET or +-OFFSET to resolve' \
+          'TIME from REF^1. Trees, messages, and merge topology are preserved.'
         return
         ;;
       -*) _jgit_die "unknown amend option: ${argument}" ;;
@@ -911,8 +913,16 @@ _jgit_amend() {
     _jgit_die 'target must be on the current branch first-parent history'
 
   target_epoch=$(git show -s --format='%ct' "${target}")
-  resolved_epoch=$(_jgit_resolve_timestamp_from "${timestamp}" "${target_epoch}") ||
-    _jgit_die "invalid timestamp: ${timestamp}"
+  if [[ ${timestamp} == ++* || ${timestamp} == +-* ]]; then
+    parent=$(git rev-parse --verify "${target}^1" 2> /dev/null) ||
+      _jgit_die 'cannot use a previous-commit timestamp for the root commit'
+    previous_epoch=$(git show -s --format='%ct' "${parent}")
+    resolved_epoch=$(_jgit_resolve_timestamp_from "${timestamp:1}" "${previous_epoch}") ||
+      _jgit_die "invalid timestamp: ${timestamp}"
+  else
+    resolved_epoch=$(_jgit_resolve_timestamp_from "${timestamp}" "${target_epoch}") ||
+      _jgit_die "invalid timestamp: ${timestamp}"
+  fi
   delta=$((resolved_epoch - target_epoch))
 
   for ((index = 0; index < ${#AMEND_OLD_COMMITS[@]}; index++)); do

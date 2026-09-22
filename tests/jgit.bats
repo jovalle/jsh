@@ -252,6 +252,36 @@ EOF
   [[ $(git show -s --format='%ct') -eq 1789485010 ]]
 }
 
+@test "amend supports offsets relative to the previous first-parent commit" {
+  local repository="${BATS_TEST_TMPDIR}/repository"
+  init_repo "${repository}"
+  commit_file "${repository}" first one Parent '2026-09-15 09:00:00 +0000'
+  commit_file "${repository}" second two Target '2026-09-15 11:00:00 +0000'
+  commit_file "${repository}" third three Following '2026-09-15 12:00:00 +0000'
+  cd "${repository}"
+
+  run env JGIT_RANDOM_VALUE=0 "${JSH_ROOT}/bin/jgit" amend HEAD~1 -t ++30m --yes
+
+  [[ ${status} -eq 0 ]]
+  [[ $(git log --reverse --format='%s %ct') == $'Parent 1789462800\nTarget 1789464600\nFollowing 1789468200' ]]
+
+  run run_jgit amend HEAD -t +-30m0s --yes
+  [[ ${status} -ne 0 ]]
+  [[ ${output} == *'before parent'* ]]
+}
+
+@test "amend rejects previous-relative timestamps for a root commit" {
+  local repository="${BATS_TEST_TMPDIR}/repository"
+  init_repo "${repository}"
+  commit_file "${repository}" file one Initial '2026-09-15 10:00:00 +0000'
+  cd "${repository}"
+
+  run run_jgit amend -t ++30m0s --yes
+
+  [[ ${status} -ne 0 ]]
+  [[ ${output} == *'root commit'* ]]
+}
+
 @test "amend preserves merge topology and leaves side history unchanged" {
   local repository="${BATS_TEST_TMPDIR}/repository" target side old_tree
   init_repo "${repository}"
