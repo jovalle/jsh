@@ -69,6 +69,7 @@ Network\ Trash\ Folder
 Temporary\ Items
 __pycache__
 bh_unicode_properties.cache
+dotfiles/.config/.wrangler/
 dotfiles/.config/Code/
 dotfiles/.config/colima/
 dotfiles/.config/gh/
