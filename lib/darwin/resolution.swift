@@ -44,10 +44,24 @@ private func effectivePPI(_ mode: DisplayMode, widthMM: Double, heightMM: Double
     return String(format: "%.1f", locale: Locale(identifier: "en_US_POSIX"), ppi)
 }
 
-private func closestMode(widthMM: Double, heightMM: Double, modes: [DisplayMode]) -> DisplayMode? {
+private func closestMode(
+    widthMM: Double,
+    heightMM: Double,
+    modes: [DisplayMode],
+    isBuiltIn: Bool = false
+) -> DisplayMode? {
     guard widthMM > 0, heightMM > 0 else { return nil }
 
     let nativeRetinaMode = modes.first { $0.isNative && $0.scaling == "on" }
+    if isBuiltIn,
+        nativeRetinaMode?.pixelWidth == 2560,
+        nativeRetinaMode?.pixelHeight == 1600,
+        let moreSpaceMode = modes.first(where: {
+            $0.width == 1680 && $0.height == 1050 && $0.scaling == "on"
+        })
+    {
+        return moreSpaceMode
+    }
     let candidates = modes.filter { mode in
         guard let nativeRetinaMode else { return true }
         return mode.width >= nativeRetinaMode.width && mode.height >= nativeRetinaMode.height
@@ -109,6 +123,24 @@ private func runSelfTest() {
         ]
     )
     precondition(retinaMacBook?.width == 1728 && retinaMacBook?.height == 1117)
+
+    let zealot = closestMode(
+        widthMM: 286,
+        heightMM: 179,
+        modes: [
+            DisplayMode(
+                width: 1280,
+                height: 800,
+                pixelWidth: 2560,
+                pixelHeight: 1600,
+                isNative: true
+            ),
+            DisplayMode(width: 1680, height: 1050, pixelWidth: 3360, pixelHeight: 2100),
+        ],
+        isBuiltIn: true
+    )
+    precondition(zealot?.width == 1680 && zealot?.height == 1050)
+    precondition(zealot?.scaling == "on")
     print("Display resolution selection checks passed.")
 }
 
@@ -143,7 +175,12 @@ for display in displays where CGDisplayIsActive(display) != 0 {
         DisplayMode($0)
     }
 
-    guard let mode = closestMode(widthMM: widthMM, heightMM: heightMM, modes: modes) else {
+    guard let mode = closestMode(
+        widthMM: widthMM,
+        heightMM: heightMM,
+        modes: modes,
+        isBuiltIn: CGDisplayIsBuiltin(display) != 0
+    ) else {
         fputs("Skipping display \(display): physical dimensions or display modes are unavailable.\n", stderr)
         continue
     }
