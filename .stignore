@@ -1,6 +1,10 @@
-.cache
-.config/colima/
+(?d).cache
 .git
-.kube/cache
-.venv
+(?d)*.ipc
+(?d)*.sock
+(?d).DS_Store
+(?d)__pycache__
+(?d)*.pyc
+(?d).kube/cache
+(?d).venv
 /local/vendor/
