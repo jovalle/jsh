@@ -14,6 +14,7 @@ done
 unset library_file
 
 declare -A PACKAGE_OWNERS=()
+declare -a BLOCKED_FORMULAE=()
 
 manifest() {
   jsh_manifest_main "$@"
@@ -194,6 +195,43 @@ update_brew() {
   brew update
 }
 
+exclude_blocked_formulae() {
+  local brewfile=$1 present info name reason formula kept
+  local -a missing=() patterns=()
+
+  present=$(brew list --formula -1 --full-name 2> /dev/null) || return 0
+  while IFS= read -r formula; do
+    grep -Fxq -- "${formula}" <<< "${present}" || missing+=("${formula}")
+  done < <(sed -nE 's/^brew "([^"]+)".*/\1/p' "${brewfile}")
+  ((${#missing[@]} > 0)) || return 0
+
+  # Unknown names make brew info fail; brew bundle reports those itself.
+  info=$(HOMEBREW_NO_AUTO_UPDATE=1 brew info --json=v2 --formula "${missing[@]}" 2> /dev/null) || return 0
+  present+=$'\n'$(sed -nE 's/^brew "([^"]+)".*/\1/p' "${brewfile}")
+
+  while IFS=$'\t' read -r name reason; do
+    jsh::log_warn "${name} is deprecated (${reason})."
+  done < <(jq -r '.formulae[] | select(.deprecated and (.disabled | not))
+    | [.full_name, "\(.deprecation_reason // "no reason given"); disabled on \(.disable_date // "an unknown date")"] | @tsv' <<< "${info}")
+
+  while IFS=$'\t' read -r name reason; do
+    jsh::log_error "Skipping ${name}: ${reason}."
+    BLOCKED_FORMULAE+=("${name}")
+    patterns+=(-e "brew \"${name}\"")
+  done < <(jq -r --arg present "${present}" '
+    ($present | split("\n")) as $present
+    | .formulae[]
+    | [.conflicts_with[] as $other | select($present | index($other)) | $other] as $conflicts
+    | if .disabled then [.full_name, "disabled (\(.disable_reason // "no reason given"))"]
+      elif ($conflicts | length) > 0 then [.full_name, "conflicts with \($conflicts | join(", "))"]
+      else empty end
+    | @tsv' <<< "${info}")
+  ((${#patterns[@]} > 0)) || return 0
+
+  kept=$(grep -vFx "${patterns[@]}" "${brewfile}" || true)
+  printf '%s\n' "${kept}" > "${brewfile}"
+}
+
 install_brew_manifest() {
   local brewfile=$1
 
@@ -201,6 +239,7 @@ install_brew_manifest() {
     jsh::log_note "Homebrew packages are current."
     return
   fi
+  exclude_blocked_formulae "${brewfile}"
   jsh::log_info "Installing Homebrew packages..."
   if [[ ${JSH_UPDATE:-0} == 1 ]]; then
     HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --file="${brewfile}"
@@ -405,6 +444,11 @@ main() {
   install_cargo_packages
   install_uv_tools
   install_npm_packages
+
+  if ((${#BLOCKED_FORMULAE[@]} > 0)); then
+    jsh::log_error "Not installed: ${BLOCKED_FORMULAE[*]}. Fix these entries in conf/packages.json."
+    exit 1
+  fi
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
