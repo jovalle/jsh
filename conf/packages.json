@@ -40,7 +40,6 @@
             "fnm",
             "fzf",
             "gawk",
-            "gemini-cli",
             "gh",
             "git-lfs",
             "git",
@@ -59,7 +58,7 @@
             "kew",
             "kubernetes-cli",
             "lazygit",
-            "leaf",
+            "leaf-markdown-viewer",
             "make",
             "mpv",
             "ncdu",
@@ -75,7 +74,7 @@
             "rsync",
             "rtk",
             "sops",
-            "speedtest-cli",
+            "speedtest-go",
             "spicetify-cli",
             "sshpass",
             "stow",
@@ -91,7 +90,6 @@
             "xz"
           ]
         },
-        "cargo": ["eza", "fd-find", "leaf", "ripgrep"],
         "uv": ["pre-commit-hooks", "tmail-cli"],
         "npm": {}
       }
