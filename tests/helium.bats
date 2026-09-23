@@ -235,8 +235,10 @@ setup() {
     "${JSH_ROOT}/scripts/linux/configure/dock.sh"
 }
 
-@test "macOS Dock includes an installed Helium application" {
-  grep -Fq 'pin_dock_app /Applications/Helium.app' \
+@test "macOS Dock clears all pinned applications" {
+  grep -Fq 'defaults write com.apple.dock persistent-apps -array' \
+    "${JSH_ROOT}/scripts/darwin/configure/appearance.sh"
+  run ! grep -Fq 'persistent-apps -array-add' \
     "${JSH_ROOT}/scripts/darwin/configure/appearance.sh"
 }
 
