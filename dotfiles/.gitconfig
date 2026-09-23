@@ -20,11 +20,15 @@
   changed = green
   untracked = cyan
 [diff]
+  algorithm = histogram
   tool = vimdiff
 [difftool]
   prompt = false
 [merge]
+  conflictStyle = zdiff3
   tool = vimdiff
+[rerere]
+  enabled = true
 [push]
   default = simple
 [pull]
