@@ -13,13 +13,6 @@ for library_file in "${JSH_ROOT}"/lib/*; do
 done
 unset library_file
 
-pin_dock_app() {
-  local app_path=$1
-  [[ -d ${app_path} ]] || return 0
-  defaults write com.apple.dock persistent-apps -array-add \
-    "{\"tile-data\" = {\"file-data\" = {\"_CFURLString\" = \"file://${app_path}/\"; \"_CFURLStringType\" = 15;};}; \"tile-type\" = \"file-tile\";}"
-}
-
 configure_appearance() {
   local appearance_dir="${HOME}/Library/Application Support/jsh"
   local wallpaper candidate
@@ -35,7 +28,6 @@ configure_appearance() {
   defaults write NSGlobalDomain AppleInterfaceStyleSwitchesAutomatically -bool false
   defaults write com.apple.dock persistent-apps -array
   defaults write com.apple.dock persistent-others -array
-  pin_dock_app /Applications/Helium.app
   defaults write com.apple.dock launchanim -bool false
   defaults write com.apple.dock expose-animation-duration -float 0.1
   defaults write com.apple.dock show-recents -bool false
@@ -99,4 +91,6 @@ main() {
   fi
 }
 
-main "$@"
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+  main "$@"
+fi
