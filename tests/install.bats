@@ -256,6 +256,34 @@ EOF
   [[ ! -e ${calls} ]]
 }
 
+@test "Homebrew skips formulae that conflict with installed or declared formulae" {
+  local brewfile="${BATS_TEST_TMPDIR}/Brewfile"
+  printf '%s\n' 'brew "jq"' 'brew "leaf"' 'brew "old"' 'brew "fresh"' 'cask "app"' > "${brewfile}"
+
+  run bash -c '
+    source "$1"
+    brew() {
+      case $1 in
+        list) printf "%s\n" jq leaf-markdown-viewer ;;
+        info) printf "%s" "{\"formulae\": [
+          {\"name\": \"leaf\", \"full_name\": \"leaf\", \"conflicts_with\": [\"leaf-markdown-viewer\"], \"deprecated\": false, \"disabled\": false},
+          {\"name\": \"old\", \"full_name\": \"old\", \"conflicts_with\": [], \"deprecated\": true, \"disabled\": true, \"disable_reason\": \"unmaintained\"},
+          {\"name\": \"fresh\", \"full_name\": \"fresh\", \"conflicts_with\": [], \"deprecated\": true, \"disabled\": false, \"deprecation_reason\": \"unsupported\", \"disable_date\": \"2027-01-01\"}
+        ]}" ;;
+      esac
+    }
+    exclude_blocked_formulae "$2"
+    printf "blocked=%s\n" "${BLOCKED_FORMULAE[*]}"
+  ' _ "${JSH_DIR}/scripts/unix/install/packages.sh" "${brewfile}"
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == *'fresh is deprecated (unsupported; disabled on 2027-01-01).'* ]]
+  [[ ${output} == *'Skipping leaf: conflicts with leaf-markdown-viewer.'* ]]
+  [[ ${output} == *'Skipping old: disabled (unmaintained).'* ]]
+  [[ ${output} == *'blocked=leaf old'* ]]
+  diff -u <(printf '%s\n' 'brew "jq"' 'brew "fresh"' 'cask "app"') "${brewfile}"
+}
+
 @test "package manifest resolves additive platform and host layers" {
   export JSH_MANIFEST_OS=darwin
   export JSH_MANIFEST_DISTRO=unknown
