@@ -51,3 +51,21 @@ setup() {
   [[ ${status} -eq 0 ]]
   [[ ${output} == /projects/two ]]
 }
+
+@test "j prefers a hidden exact basename over a higher-scored descendant" {
+  local database="${BATS_TEST_TMPDIR}/j.db"
+  local now
+  mkdir -p -- "${TEST_HOME}/.jsh/lib"
+  now=$(($(date +%s) / 3600))
+  printf '%s|1|%s\n%s|10|%s\n' \
+    "${TEST_HOME}/.jsh" "${now}" "${TEST_HOME}/.jsh/lib" "${now}" >"${database}"
+
+  run env HOME="${TEST_HOME}" JSH="${JSH_ROOT}" J_DATA="${database}" \
+    J_PATHS="${BATS_TEST_TMPDIR}/missing" J_NO_HOOK=1 \
+    zsh -f -c 'source "$JSH/lib/zsh/j.zsh"
+      j jsh
+      print -r -- "$PWD"'
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == "${TEST_HOME}/.jsh" ]]
+}

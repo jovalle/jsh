@@ -227,6 +227,12 @@ _j_matches() {
   done
 }
 
+_j_exact_basename_matches() {
+  local basename=$(_j_lowercase "${1:t}") query=$(_j_lowercase "$2")
+  [[ ${query} == .* ]] || basename=${basename#.}
+  [[ ${basename} == ${query} ]]
+}
+
 _j_query() {
   local exact_results="" results="" line score candidate exact_query=""
   (( $# != 1 )) || exact_query=$(_j_lowercase "$1")
@@ -235,7 +241,7 @@ _j_query() {
     [[ -n ${candidate} && -d ${candidate} ]] || continue
     if (( $# == 0 )) || _j_matches "${candidate}" "$@"; then
       line="${score}|${candidate}"$'\n'
-      if [[ -n ${exact_query} && $(_j_lowercase "${candidate:t}") == ${exact_query} ]]; then
+      if [[ -n ${exact_query} ]] && _j_exact_basename_matches "${candidate}" "${exact_query}"; then
         exact_results+=${line}
       else
         results+=${line}
@@ -287,7 +293,7 @@ _j_interactive() {
 
   while IFS= read -r line; do
     [[ -n ${line} ]] || continue
-    if [[ -n ${exact_query} && $(_j_lowercase "${${line#*|}:t}") != ${exact_query} ]]; then
+    if [[ -n ${exact_query} ]] && ! _j_exact_basename_matches "${line#*|}" "${exact_query}"; then
       continue
     fi
     paths+=("${line#*|}")
@@ -301,7 +307,7 @@ _j_interactive() {
     [[ -n ${project_path} ]] || continue
     absolute_path=${project_path/#\~/${HOME}}
     [[ -d ${absolute_path} && ${absolute_path} != ${PWD} ]] || continue
-    if [[ -n ${exact_query} && $(_j_lowercase "${absolute_path:t}") != ${exact_query} ]]; then
+    if [[ -n ${exact_query} ]] && ! _j_exact_basename_matches "${absolute_path}" "${exact_query}"; then
       continue
     fi
     _j_array_contains "${absolute_path}" "${paths[@]}" "${extra_paths[@]}" && continue
@@ -443,7 +449,7 @@ j() {
   while IFS= read -r line; do
     [[ -n ${line} ]] || continue
     [[ -n ${best} ]] || best=${line}
-    if (( $# == 1 )) && [[ $(_j_lowercase "${${line#*|}:t}") == $(_j_lowercase "$1") ]]; then
+    if (( $# == 1 )) && _j_exact_basename_matches "${line#*|}" "$1"; then
       exact_matches+=("${line#*|}")
     fi
     (( ++count ))
@@ -454,7 +460,7 @@ j() {
       [[ -n ${project_candidate} ]] || continue
       absolute_path=${project_candidate/#\~/${HOME}}
       [[ -d ${absolute_path} ]] || continue
-      [[ $(_j_lowercase "${absolute_path:t}") == $(_j_lowercase "$1") ]] || continue
+      _j_exact_basename_matches "${absolute_path}" "$1" || continue
       if [[ -n ${project_path} ]] &&
         ! _j_array_contains "${absolute_path}" "${project_path}"; then
         has_exact_conflict=true
