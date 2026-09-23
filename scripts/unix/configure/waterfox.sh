@@ -542,6 +542,10 @@ confirm_betterfox_update() {
 
 update_betterfox() {
   local current latest release revision downloaded checksum candidate
+  if [[ -z $(waterfox_binary 2> /dev/null || true) && ! -d $(waterfox_root) ]]; then
+    jsh::log_note "Skipping Betterfox update: Waterfox is not installed."
+    return 10
+  fi
   require_command curl
   require_command jq
   validate_manifest
