@@ -247,14 +247,18 @@ helium_installed_version() {
 
 install_linux_launcher() {
   local applications=${XDG_DATA_HOME:-${HOME}/.local/share}/applications
-  local temporary ensure_status
+  local temporary ensure_status executable profile_argument
   [[ ${PLATFORM} == Linux ]] || return 0
+  executable=$(app_executable) || die 1 "Helium is not installed."
+  profile_argument="--user-data-dir=${PROFILE_ROOT}"
   mkdir -p "${JSH_ROOT}/tmp"
   temporary=$(mktemp "${JSH_ROOT}/tmp/helium.desktop.XXXXXXXXXX")
   jsh_interrupt_cleanup_path "${temporary}"
   {
     printf '[Desktop Entry]\nType=Application\nName=Helium\n'
-    printf 'Exec=%s open -- %%U\n' "$(jsh_desktop_executable "${JSH_ROOT}/bin/helium")"
+    printf 'Exec=%s %s --profile-directory=Default --no-first-run --no-default-browser-check --disable-sync --disable-notifications --disable-breakpad --new-window %%U\n' \
+      "$(jsh_desktop_executable "${executable}")" \
+      "$(jsh_desktop_executable "${profile_argument}")"
     printf 'Icon=helium\nCategories=Network;WebBrowser;\n'
     printf 'MimeType=text/html;x-scheme-handler/http;x-scheme-handler/https;\n'
     printf 'StartupNotify=true\nStartupWMClass=Helium\n'

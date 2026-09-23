@@ -89,7 +89,7 @@ confirm_waterfox_shutdown() {
 
 install_waterfox() {
   local installed destination launcher artifact temporary staging actual checksum
-  [[ $(jsh_linux_family) == debian && $(uname -m) == x86_64 ]] || return
+  [[ $(jsh_linux_family) == debian && $(uname -m) == x86_64 ]] || return 0
   waterfox_latest_release
   destination=/opt/jsh/waterfox-${WATERFOX_VERSION}
   launcher=${JSH_WATERFOX_SYSTEM_BIN:-/usr/local/bin/waterfox}

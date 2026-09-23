@@ -15,7 +15,7 @@ unset library_file
 
 install_ghostty() {
   local codename=trixie metadata asset name version url digest checksum
-  [[ $(jsh_linux_family) == debian && $(uname -m) == x86_64 ]] || return
+  [[ $(jsh_linux_family) == debian && $(uname -m) == x86_64 ]] || return 0
   if [[ -r ${JSH_OS_RELEASE:-/etc/os-release} ]]; then
     codename=$(awk -F= '$1 == "VERSION_CODENAME" {gsub(/["\047]/, "", $2); print $2}' \
       "${JSH_OS_RELEASE:-/etc/os-release}")

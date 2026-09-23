@@ -15,7 +15,7 @@ unset library_file
 
 install_vscode() {
   local metadata url version checksum
-  [[ $(jsh_linux_family) == debian && $(uname -m) == x86_64 ]] || return
+  [[ $(jsh_linux_family) == debian && $(uname -m) == x86_64 ]] || return 0
   metadata=$(curl -fsSL -H 'User-Agent: jsh/vscode' \
     'https://update.code.visualstudio.com/api/update/linux-deb-x64/stable/latest')
   url=$(jq -r '.url // empty' <<< "${metadata}")

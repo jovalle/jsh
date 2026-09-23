@@ -9,6 +9,9 @@ setup() {
   export HOME="${BATS_TEST_TMPDIR}/home"
   export JGIT_CONFIG="${BATS_TEST_TMPDIR}/git.json"
   export JSH_PLAIN_OUTPUT=1
+  export JSH_INTERACTIVE=0
+  export JSH_NON_INTERACTIVE=0
+  export JSH_UI_BACKEND=auto
   export TZ=UTC
   mkdir -p "${HOME}/.ssh"
   printf 'test key\n' > "${HOME}/.ssh/id_test"
@@ -144,7 +147,7 @@ EOF
   init_repo "${launcher}"
   cd "${launcher}"
 
-  run bash -c 'printf "personal\n" | JSH_PROJECT_DIR="$1" "$2/bin/jgit" create example' \
+  run bash -c 'printf "personal\n" | JSH_INTERACTIVE=1 JSH_PROJECT_DIR="$1" "$2/bin/jgit" create example' \
     _ "${projects}" "${JSH_ROOT}"
 
   [[ ${status} -eq 0 ]]
@@ -179,6 +182,29 @@ EOF
   run env JGIT_RANDOM_VALUE=754 "${JSH_ROOT}/bin/jgit" commit -t '2026-09-17 22' -m Absolute
   [[ ${status} -eq 0 ]]
   [[ $(git show -s --format='%ct') -eq 1789683154 ]]
+}
+
+@test "commit chains unsigned durations after now or a future HEAD" {
+  local repository="${BATS_TEST_TMPDIR}/repository" before after first_epoch
+  init_repo "${repository}"
+  before=$(date +%s)
+  commit_file "${repository}" first one Initial "@$((before - 3600)) +0000"
+  cd "${repository}"
+
+  printf 'two\n' > second
+  git add second
+  run run_jgit commit -t 30m0s -m Second
+  [[ ${status} -eq 0 ]]
+  after=$(date +%s)
+  first_epoch=$(git show -s --format='%ct')
+  [[ ${first_epoch} -ge $((before + 1800)) ]]
+  [[ ${first_epoch} -le $((after + 1800)) ]]
+
+  printf 'three\n' > third
+  git add third
+  run run_jgit commit -t 21m0s -m Third
+  [[ ${status} -eq 0 ]]
+  [[ $(git show -s --format='%ct') -eq $((first_epoch + 1260)) ]]
 }
 
 @test "partial timestamp parsing is portable to GNU date" {
@@ -223,7 +249,7 @@ EOF
   status_before=$(git -C "${repository}" status --porcelain)
   cd "${repository}"
 
-  run env JGIT_RANDOM_VALUE=754 "${JSH_ROOT}/bin/jgit" amend HEAD~2 -t +5h --yes
+  run env JGIT_RANDOM_VALUE=754 "${JSH_ROOT}/bin/jgit" amend HEAD~2 -t '2026-09-15 15' --yes
 
   [[ ${status} -eq 0 ]]
   [[ ${output} == *'Moved 3 commits'* ]]
@@ -238,18 +264,22 @@ EOF
 @test "amend supports exact offsets dry runs and HEAD by default" {
   local repository="${BATS_TEST_TMPDIR}/repository" old_tip
   init_repo "${repository}"
-  commit_file "${repository}" file one Initial '2026-09-15 10:10:10 +0000'
+  commit_file "${repository}" first one Parent '2026-09-15 10:10:10 +0000'
+  commit_file "${repository}" second two Target '2026-09-15 12:10:10 +0000'
   cd "${repository}"
   old_tip=$(git rev-parse HEAD)
+  git update-ref refs/remotes/origin/main "${old_tip}"
 
   run run_jgit amend -t +5h0m0s --dry-run
   [[ ${status} -eq 0 ]]
-  [[ ${output} == *'+18000 seconds'* ]]
+  [[ ${output} == *'+10800 seconds'* ]]
   [[ $(git rev-parse HEAD) == "${old_tip}" ]]
 
-  run run_jgit amend -t +5h0m0s --yes
+  run run_jgit amend -t +5h0m0s
   [[ ${status} -eq 0 ]]
+  [[ ${output} == *'Local branch updated; no remote refs were changed.'* ]]
   [[ $(git show -s --format='%ct') -eq 1789485010 ]]
+  [[ $(git rev-parse refs/remotes/origin/main) == "${old_tip}" ]]
 }
 
 @test "amend supports offsets relative to the previous first-parent commit" {
@@ -260,26 +290,42 @@ EOF
   commit_file "${repository}" third three Following '2026-09-15 12:00:00 +0000'
   cd "${repository}"
 
-  run env JGIT_RANDOM_VALUE=0 "${JSH_ROOT}/bin/jgit" amend HEAD~1 -t ++30m --yes
+  run env JGIT_RANDOM_VALUE=0 "${JSH_ROOT}/bin/jgit" amend HEAD~1 -t +30m --yes
 
   [[ ${status} -eq 0 ]]
   [[ $(git log --reverse --format='%s %ct') == $'Parent 1789462800\nTarget 1789464600\nFollowing 1789468200' ]]
 
-  run run_jgit amend HEAD -t +-30m0s --yes
+  run run_jgit amend HEAD -t -30m0s --yes
   [[ ${status} -ne 0 ]]
   [[ ${output} == *'before parent'* ]]
 }
 
-@test "amend rejects previous-relative timestamps for a root commit" {
+@test "amend rejects signed offsets for a root commit" {
   local repository="${BATS_TEST_TMPDIR}/repository"
   init_repo "${repository}"
   commit_file "${repository}" file one Initial '2026-09-15 10:00:00 +0000'
   cd "${repository}"
 
-  run run_jgit amend -t ++30m0s --yes
+  run run_jgit amend -t +30m0s --yes
 
   [[ ${status} -ne 0 ]]
-  [[ ${output} == *'root commit'* ]]
+  [[ ${output} == *'signed offset for the root commit'* ]]
+}
+
+@test "amend resolves unsigned durations after now or the branch tip" {
+  local repository="${BATS_TEST_TMPDIR}/repository" future
+  init_repo "${repository}"
+  future=$(($(date +%s) + 3600))
+  commit_file "${repository}" first one Parent "@$((future - 7200)) +0000"
+  commit_file "${repository}" second two Target "@$((future - 3600)) +0000"
+  commit_file "${repository}" third three Following "@${future} +0000"
+  cd "${repository}"
+
+  run run_jgit amend HEAD~1 -t 30m0s --yes
+
+  [[ ${status} -eq 0 ]]
+  [[ $(git show -s --format='%ct' HEAD~1) -eq $((future + 1800)) ]]
+  [[ $(git show -s --format='%ct' HEAD) -eq $((future + 5400)) ]]
 }
 
 @test "amend preserves merge topology and leaves side history unchanged" {
@@ -305,7 +351,7 @@ EOF
   [[ $(git rev-list --parents -n 1 HEAD | wc -w | tr -d ' ') -eq 3 ]]
   [[ $(git rev-parse HEAD^2) == "${side}" ]]
   [[ $(git rev-parse 'HEAD^{tree}') == "${old_tree}" ]]
-  [[ $(git log --first-parent --reverse --format='%s %ct' | tail -3) == $'Target 1789473600\nMain 1789477200\nMerge 1789480800' ]]
+  [[ $(git log --first-parent --reverse --format='%s %ct' | tail -3) == $'Target 1789470000\nMain 1789473600\nMerge 1789477200' ]]
 }
 
 @test "amend rejects invalid refs detached heads and non-first-parent commits" {
@@ -365,7 +411,7 @@ EOF
   old_tip=$(git -C "${repository}" rev-parse HEAD)
   cd "${repository}"
 
-  run run_jgit amend -t +1h --yes
+  run run_jgit amend -t '2026-09-15 11:00:00' --yes
 
   [[ ${status} -ne 0 ]]
   [[ ${output} == *'unsupported gpgsig header'* ]]
@@ -387,6 +433,21 @@ EOF
   run run_jgit rewrite
   [[ ${status} -ne 0 ]]
   [[ ${output} == *'requires one or more refs'* ]]
+}
+
+@test "rewrite resolves signed offsets from the selected commit parent" {
+  local repository="${BATS_TEST_TMPDIR}/repository"
+  init_repo "${repository}"
+  commit_file "${repository}" first one Parent '2026-09-15 09:00:00 +0000'
+  commit_file "${repository}" second two Target '2026-09-15 11:00:00 +0000'
+  commit_file "${repository}" third three Following '2026-09-15 12:00:00 +0000'
+  cd "${repository}"
+
+  run bash -c 'printf "+30m0s\n" | JSH_ASSUME_YES=1 GIT_EDITOR=true "$1/bin/jgit" rewrite HEAD~1' \
+    _ "${JSH_ROOT}"
+
+  [[ ${status} -eq 0 ]]
+  [[ $(git log --reverse --format='%s %ct') == $'Parent 1789462800\nTarget 1789464600\nFollowing 1789473600' ]]
 }
 
 @test "heal previews broken Codex refs without changing them" {
@@ -483,4 +544,98 @@ EOF
     [[ ${status} -eq 0 ]]
     [[ ${output} == "Usage: jgit ${canonical}"* ]]
   done
+}
+
+@test "backup helpers accept no excludes under nounset" {
+  run /bin/bash -u -c '
+    source "$1/lib/backup.sh"
+    JGIT_BACKUP_ROOT=$2 JGIT_BACKUP_ACTION=load
+    _jgit_backup_parse_excludes
+    _jgit_backup_map_excludes ""
+    _jgit_backup_build_pathspecs
+    [[ ${#JGIT_BACKUP_EXCLUDES[@]} -eq 0 ]]
+    [[ ${#JGIT_BACKUP_LOCAL_EXCLUDES[@]} -eq 0 ]]
+    [[ ${JGIT_BACKUP_PATHS[*]} == "-- ." ]]
+  ' test "${JSH_ROOT}" "${BATS_TEST_TMPDIR}"
+
+  [[ ${status} -eq 0 ]]
+}
+
+@test "backup load rolls back ordinary conflicts and retains recovery stash" {
+  local repository="${BATS_TEST_TMPDIR}/repository" snapshot="${BATS_TEST_TMPDIR}/snapshot"
+  local work="${BATS_TEST_TMPDIR}/work" before_status
+  init_repo "${repository}"
+  commit_file "${repository}" file $'before\nbase\nafter' Initial '2026-09-15 10:00:00 +0000'
+  mkdir -p "${snapshot}/main" "${snapshot}/submodules" "${work}"
+  printf 'before\nbackup\nafter\n' > "${repository}/file"
+  git -C "${repository}" diff --binary --full-index > "${snapshot}/main/tracked.patch"
+  : > "${snapshot}/main/staged.patch"
+  : > "${snapshot}/main/untracked.list"
+  git -C "${repository}" checkout -q -- file
+  printf 'before\ncurrent\nafter\n' > "${repository}/file"
+  before_status=$(git -C "${repository}" status --porcelain=v1)
+
+  run bash -c '
+    source "$1/lib/backup.sh"
+    jsh::log_error() { printf "error: %s\n" "$*" >&2; }
+    jsh::log_info() { :; }
+    jsh::log_warn() { :; }
+    JGIT_BACKUP_ROOT=$2 JGIT_BACKUP_SNAPSHOT=$3 JGIT_BACKUP_WORK_DIR=$4
+    JGIT_BACKUP_EXCLUDES=()
+    _jgit_backup_stash_current_changes && _jgit_backup_apply_transaction
+  ' test "${JSH_ROOT}" "${repository}" "${snapshot}" "${work}"
+
+  [[ ${status} -ne 0 ]]
+  [[ $(< "${repository}/file") == $'before\ncurrent\nafter' ]]
+  [[ $(git -C "${repository}" status --porcelain=v1) == "${before_status}" ]]
+  [[ -z $(git -C "${repository}" ls-files -u) ]]
+  [[ $(git -C "${repository}" stash list --format='%s' | head -n 1) == On\ main:\ jgit\ load* ]]
+}
+
+@test "backup load resolves populated submodule conflicts to the newer commit" {
+  local child="${BATS_TEST_TMPDIR}/child" repository="${BATS_TEST_TMPDIR}/repository"
+  local old_commit new_commit selected
+  init_repo "${child}"
+  commit_file "${child}" file old Old '2026-09-15 10:00:00 +0000'
+  old_commit=$(git -C "${child}" rev-parse HEAD)
+  commit_file "${child}" file new New '2026-09-16 10:00:00 +0000'
+  new_commit=$(git -C "${child}" rev-parse HEAD)
+  init_repo "${repository}"
+  git -c protocol.file.allow=always -C "${repository}" submodule add -q "${child}" vendor/child
+  git -C "${repository}/vendor/child" checkout -q --detach "${old_commit}"
+  git -C "${repository}" add .gitmodules vendor/child
+  git -C "${repository}" commit -q -m 'Add child'
+  git -C "${repository}" update-index --force-remove vendor/child
+  printf '160000 %s 1\tvendor/child\n160000 %s 2\tvendor/child\n160000 %s 3\tvendor/child\n' \
+    "${old_commit}" "${old_commit}" "${new_commit}" |
+    git -C "${repository}" update-index --index-info
+
+  run bash -c '
+    source "$1/lib/backup.sh"
+    jsh::log_info() { :; }
+    JGIT_BACKUP_ROOT=$2 JGIT_BACKUP_WORK_DIR=$3
+    mkdir -p "$3"
+    _jgit_backup_resolve_gitlink_conflicts "$2"
+  ' test "${JSH_ROOT}" "${repository}" "${BATS_TEST_TMPDIR}/work"
+
+  [[ ${status} -eq 0 ]]
+  [[ -z $(git -C "${repository}" ls-files -u) ]]
+  selected=$(git -C "${repository}" ls-files -s vendor/child | awk '{print $2}')
+  [[ ${selected} == "${new_commit}" ]]
+  [[ $(git -C "${repository}/vendor/child" rev-parse HEAD) == "${new_commit}" ]]
+
+  git -C "${repository}/vendor/child" checkout -q --detach "${old_commit}"
+  git -C "${repository}" update-index --add --cacheinfo 160000 "${new_commit}" vendor/child
+  run bash -c '
+    source "$1/lib/backup.sh"
+    jsh::log_info() { :; }
+    JGIT_BACKUP_ROOT=$2 JGIT_BACKUP_WORK_DIR=$3
+    _jgit_backup_reconcile_gitlink vendor/child "$4"
+  ' test "${JSH_ROOT}" "${repository}" "${BATS_TEST_TMPDIR}/work" "${new_commit}"
+
+  [[ ${status} -eq 0 ]] || {
+    printf 'status=%s\n%s\n' "${status}" "${output}" >&2
+    false
+  }
+  [[ $(git -C "${repository}/vendor/child" rev-parse HEAD) == "${new_commit}" ]]
 }

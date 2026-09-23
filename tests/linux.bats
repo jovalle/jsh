@@ -347,6 +347,20 @@ WantedBy=default.target' > "${HOME}/.config/systemd/user/ssh-agent.service"
   grep -Fxq 'dnf install -y -- example-package' "${calls}"
 }
 
+@test "skips x86-only installers on unsupported architectures" {
+  local installer
+  for installer in ghostty vscode waterfox; do
+    run bash -c '
+      source "$1"
+      jsh_linux_family() { printf "debian\n"; }
+      uname() { printf "aarch64\n"; }
+      "$2"
+    ' _ "${JSH_ROOT}/scripts/linux/install/${installer}.sh" "install_${installer}"
+
+    [[ ${status} -eq 0 ]]
+  done
+}
+
 @test "plans Sublime Text from the official Debian repository" {
   run env JSH_INSTALL_DRY_RUN=1 \
     SUBLIME_APT_KEY_PATH="${BATS_TEST_TMPDIR}/apt/sublimehq-pub.gpg" \

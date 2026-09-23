@@ -114,6 +114,7 @@ typeset -gi _JSH_PROMPT_GIT_STAGED=0 _JSH_PROMPT_GIT_UNSTAGED=0
 typeset -gi _JSH_PROMPT_GIT_UNTRACKED=0 _JSH_PROMPT_GIT_CONFLICTED=0
 typeset -gi _JSH_PROMPT_GIT_AHEAD=0 _JSH_PROMPT_GIT_BEHIND=0 _JSH_PROMPT_GIT_STASH=0
 typeset -g _JSH_PROMPT_NODE='' _JSH_PROMPT_NODE_PWD='' _JSH_PROMPT_KUBE_CACHE=''
+typeset -g _JSH_PROMPT_KUBE_SIGNATURE=''
 typeset -gi _JSH_PROMPT_KUBE_DIRTY=1 _JSH_PROMPT_DIR_MAX=0 _JSH_PROMPT_BRANCH_MAX=0
 typeset -gi _JSH_PROMPT_HIDE_OS=0 _JSH_PROMPT_HIDE_GIT=0
 typeset -gi _JSH_PROMPT_HIDE_DURATION=0 _JSH_PROMPT_HIDE_JOBS=0
@@ -545,6 +546,29 @@ _jsh_prompt_kube_update() {
 		_JSH_PROMPT_KUBE_CACHE=''
 }
 
+_jsh_prompt_kube_signature() {
+	emulate -L zsh
+	local config signature=${KUBECONFIG:-${HOME}/.kube/config}
+	local -a configs
+	local -A metadata
+
+	zmodload -F zsh/stat b:zstat 2>/dev/null || { REPLY=''; return 1; }
+	if [[ -n ${KUBECONFIG:-} ]]; then
+		configs=("${(@s.:.)KUBECONFIG}")
+	else
+		configs=("${HOME}/.kube/config")
+	fi
+	for config in ${configs}; do
+		metadata=()
+		if zstat -F '%s.%N' -H metadata -- "${config}" 2>/dev/null; then
+			signature+="|${metadata[inode]}:${metadata[size]}:${metadata[mtime]}:${metadata[ctime]}"
+		else
+			signature+='|missing'
+		fi
+	done
+	REPLY=${signature}
+}
+
 _jsh_prompt_now() {
 	if [[ -n ${EPOCHREALTIME:-} ]]; then
 		printf -v REPLY '%.0f' "$((EPOCHREALTIME * 1000))"
@@ -574,6 +598,10 @@ _jsh_prompt_precmd() {
 	_JSH_PROMPT_STARTED=''
 	_jsh_prompt_git_update
 	_jsh_prompt_node_update
+	if _jsh_prompt_kube_signature && [[ ${REPLY} != ${_JSH_PROMPT_KUBE_SIGNATURE} ]]; then
+		_JSH_PROMPT_KUBE_SIGNATURE=${REPLY}
+		_JSH_PROMPT_KUBE_DIRTY=1
+	fi
 	if (( _JSH_PROMPT_KUBE_DIRTY )); then
 		_jsh_prompt_kube_update
 		_JSH_PROMPT_KUBE_DIRTY=0

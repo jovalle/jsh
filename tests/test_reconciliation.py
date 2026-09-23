@@ -90,6 +90,44 @@ class DesktopPreferenceTests(unittest.TestCase):
         self.assertEqual(trap, "0")
         self.assertNotIn("_jsh_prompt_line_pre_redraw", hooks)
 
+    @unittest.skipUnless(shutil.which("zsh"), "Zsh required")
+    def test_prompt_refreshes_context_after_any_kubeconfig_change(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            commands = root / "bin"
+            commands.mkdir()
+            kubectl = commands / "kubectl"
+            kubectl.write_text(
+                '#!/bin/sh\n[ "$1 $2" = "config current-context" ] && cat "$KUBECONFIG"\n'
+            )
+            kubectl.chmod(0o755)
+            kubeconfig = root / "config"
+            kubeconfig.write_text("alpha\n")
+            env = dict(
+                os.environ,
+                JSH_PLAIN_OUTPUT="1",
+                JSH_PROMPT_ASYNC="0",
+                JSH_PROMPT_MODE="ascii",
+                KUBECONFIG=str(kubeconfig),
+                PATH=f"{commands}{os.pathsep}{os.environ['PATH']}",
+            )
+            result = subprocess.run(
+                [
+                    "zsh",
+                    "-fc",
+                    'source "$1"; _jsh_prompt_precmd; first=$_JSH_PROMPT_KUBE_CACHE; '
+                    'print -r -- bravo > "$KUBECONFIG"; _jsh_prompt_precmd; '
+                    'print -rn -- "$first:$_JSH_PROMPT_KUBE_CACHE"',
+                    "test",
+                    str(ROOT / "lib/zsh/prompt.zsh"),
+                ],
+                env=env,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.stdout, "alpha:bravo")
+
     @unittest.skipUnless(sys.platform == "linux" and shutil.which("zsh"), "Linux/Zsh required")
     def test_prompt_uses_debian_logo_and_linux_fallback(self):
         with tempfile.TemporaryDirectory() as directory:

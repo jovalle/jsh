@@ -2,8 +2,8 @@
 # shellcheck shell=bash
 #
 # Cross-platform utility to keep your system awake during long-running tasks.
-# Works on macOS (caffeinate), Linux (systemd-inhibit, gnome-session-inhibit,
-# xdg-screensaver), and falls back to keeping a process running.
+# Works on macOS (caffeinate), Linux (gnome-session-inhibit), and Windows
+# (PowerShell with native execution-state and input APIs).
 #
 # "Un cafe para mantener el sistema despierto"
 
@@ -40,6 +40,7 @@ CAFE_REASON="${CAFE_REASON:-User requested via cafe command}"
 # Platform and backend overrides keep behavior deterministic in tests.
 CAFE_PLATFORM="${CAFE_PLATFORM:-$(uname -s)}"
 CAFE_CAFFEINATE_BIN="${CAFE_CAFFEINATE_BIN:-caffeinate}"
+CAFE_PMSET_BIN="${CAFE_PMSET_BIN:-pmset}"
 
 # PID file for background mode
 readonly CAFE_PID_FILE="${XDG_RUNTIME_DIR:-/tmp}/cafe.${USER:-$(id -un)}.pid"
@@ -80,9 +81,9 @@ Usage: cafe [options] [command...]
 
 Options:
   -t, --time DURATION  Keep awake for a duration such as 30m or 2h
-  -d, --display        Also prevent display sleep
-  -i, --idle           Prevent idle sleep
-  -s, --system         Also prevent system sleep
+  -d, --display        Prevent display sleep (enabled by default)
+  -i, --idle           Prevent idle sleep (enabled by default)
+  -s, --system         Prevent system sleep (enabled by default)
   -b, --background     Run in the background
   -r, --reason TEXT    Set the displayed inhibit reason
       --status         Show background status
@@ -97,6 +98,18 @@ EOF
 
 # Override debug with script-specific env var
 debug() { [[ "${CAFE_DEBUG:-0}" == "1" ]] && _debug "$@" || true; }
+
+print_active_status() {
+  local summary=$1 inspection_command=$2
+  jsh::log_success "Validation: PASS - ${summary}"
+  jsh::log_note "Inspect: ${inspection_command}"
+  jsh::log_info "Cafe active: idle lock, display sleep, and system sleep are inhibited"
+  jsh::log_note "Press Ctrl+C to stop."
+}
+
+print_stopped() {
+  jsh::log_success "Cafe stopped."
+}
 
 # =============================================================================
 # Utilities
@@ -229,7 +242,7 @@ handle_signal() {
   [[ "${signal}" != TERM ]] || exit_status=143
   cleanup_active_state
   printf '\n'
-  jsh::log_note "Stopped"
+  print_stopped
   exit "${exit_status}"
 }
 
@@ -367,60 +380,48 @@ run_caffeinate() {
   local system="$3"
   shift 3
   local cmd=("$@")
+  local args=(-i -u)
+  local assertions attempt command_status=0 owner_pid=${BASHPID:-$$}
 
-  local args=()
-
-  # -i: prevent idle sleep
-  args+=(-i)
-
-  # -d: prevent display sleep
   [[ "${display}" == "true" ]] && args+=(-d)
-
-  # -s: prevent system sleep
   [[ "${system}" == "true" ]] && args+=(-s)
 
+  debug "Running: caffeinate ${args[*]} -w ${owner_pid}"
+  "${CAFE_CAFFEINATE_BIN}" "${args[@]}" -w "${owner_pid}" &
+  CAFE_BACKEND_PID=$!
+
+  for ((attempt = 0; attempt < 50; attempt++)); do
+    assertions=$("${CAFE_PMSET_BIN}" -g assertions 2>/dev/null || true)
+    [[ ${assertions} == *"asserting on behalf of Process ID ${owner_pid}"* ]] && break
+    kill -0 "${CAFE_BACKEND_PID}" 2>/dev/null || break
+    sleep 0.02
+  done
+  if [[ ${assertions} != *"asserting on behalf of Process ID ${owner_pid}"* ]]; then
+    cleanup_active_state
+    die "macOS caffeinate assertions were not registered"
+  fi
+  print_active_status \
+    "macOS display, user-idle, and system sleep assertions started" \
+    "pmset -g assertions"
+
   if [[ ${#cmd[@]} -gt 0 ]]; then
-    debug "Running: caffeinate ${args[*]} -- ${cmd[*]}"
-    run_tracked "${CAFE_CAFFEINATE_BIN}" "${args[@]}" -- "${cmd[@]}"
+    run_tracked "${cmd[@]}" || command_status=$?
   elif [[ ${duration} -gt 0 ]]; then
-    debug "Running: caffeinate ${args[*]} -t ${duration}"
-    run_tracked "${CAFE_CAFFEINATE_BIN}" "${args[@]}" -t "${duration}"
+    run_tracked sleep "${duration}" || command_status=$?
   else
-    debug "Running: caffeinate ${args[*]}"
-    run_tracked "${CAFE_CAFFEINATE_BIN}" "${args[@]}"
+    wait_for_process "${CAFE_BACKEND_PID}" || command_status=$?
   fi
-}
 
-# Linux systemd-inhibit
-# Returns 0 on success, 1 on failure (allows cascade to next method)
-run_systemd_inhibit() {
-  local duration="$1"
-  local display="$2"
-  local system="$3"
-  local reason="$4"
-  shift 4
-
-  local what=idle
-  [[ "${system}" != true ]] || what=idle:sleep:shutdown
-  local args=(
-    --what="${what}"
-    --who="${SCRIPT_NAME}"
-    --why="${reason}"
-    --mode=block
-  )
-
-  if [[ ${#cmd[@]} -eq 0 ]]; then
-    [[ "${duration}" -gt 0 ]] && cmd=(sleep "${duration}") || cmd=(sleep infinity)
-  fi
-  debug "Running: systemd-inhibit --what=${what} --mode=block"
-  run_tracked systemd-inhibit "${args[@]}" -- "${cmd[@]}" 2>/dev/null
+  kill "${CAFE_BACKEND_PID}" 2>/dev/null || true
+  wait "${CAFE_BACKEND_PID}" 2>/dev/null || true
+  CAFE_BACKEND_PID=
+  return "${command_status}"
 }
 
 run_powershell_inhibit() {
-  local duration=$1 display=$2
+  local duration=$1
   shift 4
-  local cmd=("$@") state=0x80000001 attempt command_status=0
-  [[ "${display}" != true ]] || state=0x80000003
+  local cmd=("$@") attempt command_status=0 powershell_command
 
   CAFE_READY_FILE="${XDG_RUNTIME_DIR:-/tmp}/cafe.${USER:-$(id -un)}.$$.ready"
   CAFE_STOP_FILE="${XDG_RUNTIME_DIR:-/tmp}/cafe.${USER:-$(id -un)}.$$.stop"
@@ -428,8 +429,94 @@ run_powershell_inhibit() {
   WSLENV="${WSLENV:+${WSLENV}:}CAFE_READY_FILE:CAFE_STOP_FILE"
   export CAFE_READY_FILE CAFE_STOP_FILE WSLENV
 
-  powershell.exe -NoProfile -NonInteractive -Command \
-    "[void][Cafe.NativeMethods]::SetThreadExecutionState(${state}); SetThreadExecutionState; while (-not (Test-Path \$env:CAFE_STOP_FILE)) { Start-Sleep -Milliseconds 50 }; [void][Cafe.NativeMethods]::SetThreadExecutionState(0x80000000)" &
+  powershell_command=$(cat <<'POWERSHELL'
+  Add-Type -TypeDefinition @'
+  using System;
+  using System.Runtime.InteropServices;
+
+  namespace Cafe {
+    public static class NativeMethods {
+      [StructLayout(LayoutKind.Sequential)]
+      public struct INPUT {
+        public uint type;
+        public InputUnion value;
+      }
+
+      [StructLayout(LayoutKind.Explicit)]
+      public struct InputUnion {
+        [FieldOffset(0)] public MOUSEINPUT mouse;
+        [FieldOffset(0)] public KEYBDINPUT keyboard;
+        [FieldOffset(0)] public HARDWAREINPUT hardware;
+      }
+
+      [StructLayout(LayoutKind.Sequential)]
+      public struct MOUSEINPUT {
+        public int x;
+        public int y;
+        public uint mouseData;
+        public uint flags;
+        public uint time;
+        public UIntPtr extraInfo;
+      }
+
+      [StructLayout(LayoutKind.Sequential)]
+      public struct KEYBDINPUT {
+        public ushort virtualKey;
+        public ushort scanCode;
+        public uint flags;
+        public uint time;
+        public UIntPtr extraInfo;
+      }
+
+      [StructLayout(LayoutKind.Sequential)]
+      public struct HARDWAREINPUT {
+        public uint message;
+        public ushort parameterLow;
+        public ushort parameterHigh;
+      }
+
+      [DllImport("kernel32.dll")]
+      public static extern uint SetThreadExecutionState(uint executionState);
+
+      [DllImport("user32.dll", SetLastError = true)]
+      private static extern uint SendInput(uint inputCount, INPUT[] inputs, int inputSize);
+
+      public static bool SendF15() {
+        INPUT[] inputs = new INPUT[2];
+        inputs[0].type = 1;
+        inputs[0].value.keyboard.virtualKey = 0x7E;
+        inputs[1].type = 1;
+        inputs[1].value.keyboard.virtualKey = 0x7E;
+        inputs[1].value.keyboard.flags = 0x0002;
+        return SendInput(2, inputs, Marshal.SizeOf(typeof(INPUT))) == 2;
+      }
+    }
+  }
+  '@
+
+  $continuousDisplayAndSystem = [uint32]2147483651
+  $continuous = [uint32]2147483648
+  if ([Cafe.NativeMethods]::SetThreadExecutionState($continuousDisplayAndSystem) -eq 0) {
+    exit 1
+  }
+  try {
+    if (-not [Cafe.NativeMethods]::SendF15()) { exit 1 }
+    New-Item -ItemType File -Force -Path $env:CAFE_READY_FILE | Out-Null
+    $elapsedMilliseconds = 0
+    while (-not (Test-Path $env:CAFE_STOP_FILE)) {
+      Start-Sleep -Milliseconds 100
+      $elapsedMilliseconds += 100
+      if ($elapsedMilliseconds -ge 30000) {
+        if (-not [Cafe.NativeMethods]::SendF15()) { exit 1 }
+        $elapsedMilliseconds = 0
+      }
+    }
+  } finally {
+    [void][Cafe.NativeMethods]::SetThreadExecutionState($continuous)
+  }
+POWERSHELL
+  )
+  powershell.exe -NoProfile -NonInteractive -Command "${powershell_command}" &
   CAFE_BACKEND_PID=$!
 
   for ((attempt = 0; attempt < 250; attempt++)); do
@@ -442,15 +529,19 @@ run_powershell_inhibit() {
     fi
     sleep 0.02
   done
-  [[ -e "${CAFE_READY_FILE}" ]] || {
+  if [[ ! -e "${CAFE_READY_FILE}" ]]; then
     cleanup_active_state
-    return 1
-  }
-
-  if [[ ${#cmd[@]} -eq 0 ]]; then
-    [[ "${duration}" -gt 0 ]] && cmd=(sleep "${duration}") || cmd=(sleep infinity)
+    die "Windows sleep inhibition could not be started"
   fi
-  if run_tracked "${cmd[@]}"; then
+  print_active_status \
+    "Windows display and system execution state set; F15 activity sent" \
+    "powercfg /requests"
+
+  if [[ ${#cmd[@]} -gt 0 ]]; then
+    run_tracked "${cmd[@]}" || command_status=$?
+  elif [[ ${duration} -gt 0 ]]; then
+    run_tracked sleep "${duration}" || command_status=$?
+  elif wait_for_process "${CAFE_BACKEND_PID}"; then
     command_status=0
   else
     command_status=$?
@@ -464,209 +555,76 @@ run_powershell_inhibit() {
 }
 
 # Linux gnome-session-inhibit
-# Returns 0 on success, 1 on failure (allows cascade to next method)
 run_gnome_inhibit() {
   local duration="$1"
-  local display="$2"
-  local system="$3"
   local reason="$4"
   shift 4
   local cmd=("$@")
-
-  local what="idle:suspend"
-  [[ "${display}" == "true" ]] && what="${what}:idle"
-
-  # gnome-session-inhibit uses space-separated args, not = format
+  local inhibitors attempt command_status=0
   local args=(
     --app-id "${SCRIPT_NAME}"
     --reason "${reason}"
-    --inhibit "${what}"
+    --inhibit idle:suspend
+    --inhibit-only
   )
 
-  if [[ ${#cmd[@]} -gt 0 ]]; then
-    debug "Trying: gnome-session-inhibit ${args[*]} -- ${cmd[*]}"
-    if run_tracked gnome-session-inhibit "${args[@]}" -- "${cmd[@]}" 2>/dev/null; then
-      return 0
-    fi
-  else
-    # Use --inhibit-only when no command is provided
-    if [[ "${duration}" -gt 0 ]]; then
-      # With duration, use timeout to limit the inhibit
-      debug "Trying: gnome-session-inhibit ${args[*]} -- sleep ${duration}"
-      if run_tracked gnome-session-inhibit "${args[@]}" -- sleep "${duration}" 2>/dev/null; then
-        return 0
-      fi
-    else
-      # No duration, use --inhibit-ony for indefinite inhibit
-      debug "Trying: gnome-session-inhibit ${args[*]} --inhibit-only"
-      if run_tracked gnome-session-inhibit "${args[@]}" --inhibit-only 2>/dev/null; then
-        return 0
-      fi
-    fi
+  debug "Running: gnome-session-inhibit ${args[*]}"
+  gnome-session-inhibit "${args[@]}" &
+  CAFE_BACKEND_PID=$!
+
+  for ((attempt = 0; attempt < 50; attempt++)); do
+    inhibitors=$(gnome-session-inhibit --list 2>/dev/null || true)
+    [[ ${inhibitors} == *"${SCRIPT_NAME}: ${reason}"* ]] && break
+    kill -0 "${CAFE_BACKEND_PID}" 2>/dev/null || break
+    sleep 0.02
+  done
+  if [[ ${inhibitors} != *"${SCRIPT_NAME}: ${reason}"* ]]; then
+    cleanup_active_state
+    die "GNOME idle and suspend inhibitor was not registered"
   fi
-
-  debug "gnome-session-inhibit failed"
-  return 1
-}
-
-# X11 xdg-screensaver fallback
-# Returns 0 on success, 1 on failure (allows cascade to next method)
-run_xdg_inhibit() {
-  local duration="$1"
-  shift 4 # Skip duration, display, system, reason
-  local cmd=("$@")
-
-  # Requires X11 display
-  if [[ -z "${DISPLAY:-}" ]]; then
-    debug "xdg-screensaver requires DISPLAY (no X11 session)"
-    return 1
-  fi
-
-  # Get a window ID (use root window if none)
-  local window_id
-  if command -v xdotool &>/dev/null; then
-    window_id=$(xdotool getactivewindow 2>/dev/null || echo "root")
-  else
-    window_id="root"
-  fi
-
-  # Test if xdg-screensaver actually works
-  if ! xdg-screensaver suspend "${window_id}" 2>/dev/null; then
-    debug "xdg-screensaver suspend failed"
-    return 1
-  fi
-
-  debug "xdg-screensaver inhibit active"
-
-  # Cleanup on exit
-  cleanup() {
-    xdg-screensaver resume "${window_id}" 2>/dev/null || true
-  }
-  trap cleanup EXIT
+  print_active_status \
+    "GNOME idle and suspend inhibitor registered" \
+    "gnome-session-inhibit --list"
 
   if [[ ${#cmd[@]} -gt 0 ]]; then
-    "${cmd[@]}"
+    run_tracked "${cmd[@]}" || command_status=$?
+  elif [[ ${duration} -gt 0 ]]; then
+    run_tracked sleep "${duration}" || command_status=$?
   else
-    if [[ "${duration}" -gt 0 ]]; then
-      sleep "${duration}"
-    else
-      sleep infinity
-    fi
+    wait_for_process "${CAFE_BACKEND_PID}" || command_status=$?
   fi
-  return 0
+
+  kill "${CAFE_BACKEND_PID}" 2>/dev/null || true
+  wait "${CAFE_BACKEND_PID}" 2>/dev/null || true
+  CAFE_BACKEND_PID=
+  return "${command_status}"
 }
 
-# A wrapped command can still run without inhibition, but idle waiting cannot
-# prevent sleep and must not claim success.
-run_fallback() {
-  local duration="$1"
-  shift 4 # Skip duration, display, system, reason
-  local cmd=("$@")
-
-  jsh::log_warn "No system inhibit method available, using fallback"
-  jsh::log_note "System may still sleep - consider installing systemd-inhibit"
-
-  if [[ ${#cmd[@]} -gt 0 ]]; then
-    "${cmd[@]}"
-  else
-    die "No supported system inhibit method is available"
-  fi
-}
-
-# =============================================================================
-# Cascading Inhibit Runner
-# =============================================================================
-
-# Try each inhibit method in sequence until one succeeds
-# This handles cases where a tool exists but fails (e.g., permissions)
 run_inhibit() {
   local duration="$1"
   local display="$2"
   local system="$3"
   local reason="$4"
   shift 4
-  local cmd=("$@")
 
-  local methods=()
-  local method
-  local method_status=0
-
-  # Build list of available methods based on platform
   case "${CAFE_PLATFORM}" in
     Darwin)
-      command -v "${CAFE_CAFFEINATE_BIN}" &>/dev/null && methods+=(caffeinate)
+      command -v "${CAFE_CAFFEINATE_BIN}" &>/dev/null || die "caffeinate is required on macOS"
+      command -v "${CAFE_PMSET_BIN}" &>/dev/null || die "pmset is required on macOS"
+      run_caffeinate "${duration}" "${display}" "${system}" "$@"
       ;;
-    WSL)
-      command -v powershell.exe &>/dev/null && methods+=(powershell)
+    WSL | Windows | MINGW* | MSYS* | CYGWIN*)
+      command -v powershell.exe &>/dev/null || die "powershell.exe is required on Windows"
+      run_powershell_inhibit "${duration}" "${display}" "${system}" "${reason}" "$@"
       ;;
     Linux)
-      command -v systemd-inhibit &>/dev/null && methods+=(systemd-inhibit)
-      command -v gnome-session-inhibit &>/dev/null && methods+=(gnome-session-inhibit)
-      command -v xdg-screensaver &>/dev/null && methods+=(xdg-screensaver)
+      command -v gnome-session-inhibit &>/dev/null || die "gnome-session-inhibit is required on Linux"
+      run_gnome_inhibit "${duration}" "${display}" "${system}" "${reason}" "$@"
+      ;;
+    *)
+      die "Unsupported platform: ${CAFE_PLATFORM}"
       ;;
   esac
-
-  # Always have fallback as last resort
-  methods+=(fallback)
-
-  # Try each method until one succeeds
-  for method in "${methods[@]}"; do
-    debug "Trying inhibit method: ${method}"
-
-    case "${method}" in
-      caffeinate)
-        if run_caffeinate "${duration}" "${display}" "${system}" "$@"; then
-          return 0
-        else
-          method_status=$?
-        fi
-        ;;
-      powershell)
-        if run_powershell_inhibit "${duration}" "${display}" "${system}" "${reason}" "$@"; then
-          return 0
-        else
-          method_status=$?
-        fi
-        ;;
-      systemd-inhibit)
-        if run_systemd_inhibit "${duration}" "${display}" "${system}" "${reason}" "$@"; then
-          return 0
-        else
-          method_status=$?
-        fi
-        ;;
-      gnome-session-inhibit)
-        if run_gnome_inhibit "${duration}" "${display}" "${system}" "${reason}" "$@"; then
-          return 0
-        else
-          method_status=$?
-        fi
-        ;;
-      xdg-screensaver)
-        if run_xdg_inhibit "${duration}" "${display}" "${system}" "${reason}" "$@"; then
-          return 0
-        else
-          method_status=$?
-        fi
-        ;;
-      fallback)
-        if (($# > 0)); then
-          run_fallback "${duration}" "${display}" "${system}" "${reason}" "$@"
-        else
-          run_fallback "${duration}" "${display}" "${system}" "${reason}"
-        fi
-        return $?
-        ;;
-    esac
-
-    if (($# > 0)); then
-      return "${method_status}"
-    fi
-
-    debug "${method} failed, trying next method..."
-  done
-
-  return 0
 }
 
 # Get the first available method name (for display purposes)
@@ -678,28 +636,20 @@ get_primary_method() {
         return
       }
       ;;
-    WSL)
+    WSL | Windows | MINGW* | MSYS* | CYGWIN*)
       command -v powershell.exe &>/dev/null && {
         printf 'powershell.exe'
         return
       }
       ;;
     Linux)
-      command -v systemd-inhibit &>/dev/null && {
-        printf 'systemd-inhibit'
-        return
-      }
       command -v gnome-session-inhibit &>/dev/null && {
         printf 'gnome-session-inhibit'
         return
       }
-      command -v xdg-screensaver &>/dev/null && {
-        printf 'xdg-screensaver'
-        return
-      }
       ;;
   esac
-  printf 'fallback'
+  printf 'unavailable'
 }
 
 # =============================================================================
@@ -708,11 +658,10 @@ get_primary_method() {
 
 main() {
   local duration="${CAFE_DURATION}"
-  local display=false
-  local system=false
+  local display=true
+  local system=true
   local background=false
   local reason="${CAFE_REASON}"
-  local verbose=false
 
   # Parse arguments
   while [[ $# -gt 0 ]]; do
@@ -768,7 +717,6 @@ main() {
         shift 2
         ;;
       -v | --verbose)
-        verbose=true
         CAFE_DEBUG=1
         export CAFE_DEBUG
         shift
@@ -789,12 +737,12 @@ main() {
   # Remaining args are the command to wrap
   local cmd=("$@")
 
-  # Get primary method name (for display - actual method may cascade)
+  # Get the platform method name for display.
   local method
   method=$(get_primary_method)
   CAFE_METHOD=${method}
   export CAFE_METHOD
-  debug "Primary inhibit method: ${method} (will cascade on failure)"
+  debug "Inhibit method: ${method}"
 
   # Check for existing background process
   if [[ "${background}" == "true" ]]; then
@@ -803,23 +751,9 @@ main() {
       show_status
       exit 0
     fi
-    if [[ "${method}" == fallback && ${#cmd[@]} -eq 0 ]]; then
+    if [[ "${method}" == unavailable && ${#cmd[@]} -eq 0 ]]; then
       die "No supported system inhibit method is available"
     fi
-  fi
-
-  # Show what we're doing
-  if [[ "${verbose}" == "true" || "${background}" != "true" ]]; then
-    if [[ ${#cmd[@]} -gt 0 ]]; then
-      jsh::log_note "Running command with sleep inhibited..."
-    elif [[ "${duration}" -gt 0 ]]; then
-      jsh::log_note "Keeping awake for $(format_duration "${duration}")..."
-    else
-      jsh::log_note "Keeping awake indefinitely (Ctrl+C to stop)..."
-    fi
-    jsh::status info "Method ${method}, automatic"
-    jsh::status info "Display sleep ${display}"
-    jsh::status info "System sleep ${system}"
   fi
 
   # Background mode
@@ -841,7 +775,7 @@ main() {
         sleep 0.01
       done
 
-      # Run inhibit with automatic cascade on failure
+      # Start the platform inhibitor.
       if [[ ${#cmd[@]} -gt 0 ]]; then
         run_inhibit "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"
       else
@@ -864,7 +798,7 @@ main() {
   fi
 
   if [[ ${#cmd[@]} -eq 0 && "${duration}" -gt 0 ]]; then
-    jsh::log_success "Cafe stopped"
+    print_stopped
   fi
 }
 

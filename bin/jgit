@@ -23,7 +23,6 @@
 ##? identity @profile ## Configured identity
 ##? profile @profile ## Configured identity
 ##? amend --dry-run ## Preview timestamp changes without rewriting history
-##? amend --yes ## Rewrite history without confirmation
 ##? update --stash ## Stash and restore local changes
 ##? update --all ## Update the base directory and immediate child repositories
 ##? update --all @directory ## Repository base directory
@@ -88,9 +87,9 @@ Commands:
   restore                Alias for load
 
 Timestamp examples:
-  +30m                  30 minutes after the latest commit
-  ++30m                 30 minutes after the amended commit's first parent
-  -2h                   2 hours before the latest commit
+  30m                   30 minutes after now or the latest commit
+  +30m                  30 minutes after the previous commit
+  -2h                   2 hours before the previous commit
   now, now+1h           Current time, optionally with an offset
   2026-09-05 14         Absolute hour; randomizes minutes and seconds
   2026-09-05 14:30      Absolute local date and time
@@ -461,7 +460,7 @@ _jgit_profile_select() {
   [[ -r ${JGIT_CONFIG} ]] || _jgit_die "profile config not found: ${JGIT_CONFIG}"
   _jgit_profile_names | grep -q . || _jgit_die "no profiles found in ${JGIT_CONFIG}"
 
-  if [[ ${JSH_INTERACTIVE:-0} == 1 ]]; then
+  if [[ ${JSH_INTERACTIVE:-0} == 1 && -t ${JSH_UI_INPUT_FD:-0} ]]; then
     while IFS=$'\t' read -r profile label; do
       choices+=("${profile}" "${label}")
     done < <(_jgit_profile_choices "${preferred}")
@@ -747,13 +746,16 @@ _jgit_randomize_timestamp() {
 }
 
 _jgit_resolve_timestamp() {
-  local base
-  base=$(git log -1 --format='%at' 2> /dev/null || _jgit_now)
-  _jgit_resolve_timestamp_from "$1" "${base}"
+  local now base rolling_base
+  now=$(_jgit_now)
+  base=$(git log -1 --format='%ct' 2> /dev/null || printf '%s\n' "${now}")
+  rolling_base=${base}
+  ((now <= rolling_base)) || rolling_base=${now}
+  _jgit_resolve_timestamp_from "$1" "${base}" "${rolling_base}"
 }
 
 _jgit_resolve_timestamp_from() {
-  local input=$1 base=$2 parsed offset precision
+  local input=$1 base=$2 rolling_base=${3:-$2} parsed offset precision
   case ${input} in
     now) _jgit_now ;;
     now+* | now-*)
@@ -770,6 +772,12 @@ _jgit_resolve_timestamp_from() {
       _jgit_randomize_timestamp "$((base + offset))" "${precision}"
       ;;
     *)
+      if parsed=$(_jgit_parse_offset "+${input}"); then
+        offset=${parsed%% *}
+        precision=${parsed#* }
+        _jgit_randomize_timestamp "$((rolling_base + offset))" "${precision}"
+        return
+      fi
       parsed=$(_jgit_parse_absolute_with_precision "${input}") || return 1
       offset=${parsed%% *}
       precision=${parsed#* }
@@ -846,8 +854,9 @@ _jgit_amend_cleanup() {
 }
 
 _jgit_amend() {
-  local target_ref=HEAD target_set=0 timestamp='' dry_run=0 assume_yes=0 argument target old_tip branch
-  local target_epoch resolved_epoch delta index commit parent parent_epoch previous_epoch new_author new_committer
+  local target_ref=HEAD target_set=0 timestamp='' dry_run=0 argument target old_tip branch
+  local target_epoch resolved_epoch delta index commit parent parent_epoch previous_epoch head_epoch now_epoch rolling_epoch
+  local new_author new_committer
   local author_timezone committer_timezone tree message rewritten_message new_commit answer
   local -a parents parent_args
   AMEND_OLD_COMMITS=()
@@ -865,14 +874,14 @@ _jgit_amend() {
         ;;
       -t=* | --timestamp=*) timestamp=${argument#*=}; shift ;;
       --dry-run) dry_run=1; shift ;;
-      -y | --yes) assume_yes=1; shift ;;
+      -y | --yes) shift ;;
       -h | --help)
         printf '%s\n' \
-          'Usage: jgit amend [REF] -t TIME [--dry-run] [--yes]' \
+          'Usage: jgit amend [REF] -t TIME [--dry-run]' \
           '' \
           'Moves REF (default HEAD) and every following first-parent commit by' \
-          'the effective timestamp delta. Use ++OFFSET or +-OFFSET to resolve' \
-          'TIME from REF^1. Trees, messages, and merge topology are preserved.'
+          'the effective timestamp delta. Signed offsets resolve from REF^1;' \
+          'unsigned durations resolve from the later of now and HEAD.'
         return
         ;;
       -*) _jgit_die "unknown amend option: ${argument}" ;;
@@ -913,16 +922,18 @@ _jgit_amend() {
     _jgit_die 'target must be on the current branch first-parent history'
 
   target_epoch=$(git show -s --format='%ct' "${target}")
-  if [[ ${timestamp} == ++* || ${timestamp} == +-* ]]; then
+  previous_epoch=${target_epoch}
+  if [[ ${timestamp} == +* || ${timestamp} == -* ]]; then
     parent=$(git rev-parse --verify "${target}^1" 2> /dev/null) ||
-      _jgit_die 'cannot use a previous-commit timestamp for the root commit'
+      _jgit_die 'cannot use a signed offset for the root commit'
     previous_epoch=$(git show -s --format='%ct' "${parent}")
-    resolved_epoch=$(_jgit_resolve_timestamp_from "${timestamp:1}" "${previous_epoch}") ||
-      _jgit_die "invalid timestamp: ${timestamp}"
-  else
-    resolved_epoch=$(_jgit_resolve_timestamp_from "${timestamp}" "${target_epoch}") ||
-      _jgit_die "invalid timestamp: ${timestamp}"
   fi
+  now_epoch=$(_jgit_now)
+  head_epoch=$(git show -s --format='%ct' HEAD)
+  rolling_epoch=${head_epoch}
+  ((now_epoch <= rolling_epoch)) || rolling_epoch=${now_epoch}
+  resolved_epoch=$(_jgit_resolve_timestamp_from "${timestamp}" "${previous_epoch}" "${rolling_epoch}") ||
+    _jgit_die "invalid timestamp: ${timestamp}"
   delta=$((resolved_epoch - target_epoch))
 
   for ((index = 0; index < ${#AMEND_OLD_COMMITS[@]}; index++)); do
@@ -967,12 +978,6 @@ _jgit_amend() {
   done
   if ((dry_run)); then
     return 0
-  fi
-
-  jsh::log_warn 'This rewrites commit IDs and may require a force push.'
-  if ((assume_yes == 0)) && ! jsh::confirm 'Continue?' --default no; then
-    jsh::log_warn 'Amend cancelled'
-    return
   fi
 
   JGIT_AMEND_TEMP=$(mktemp -d "$(git rev-parse --git-path jgit-amend.XXXXXX)") ||
@@ -1025,6 +1030,7 @@ _jgit_amend() {
   trap - EXIT HUP INT TERM
   unset JGIT_AMEND_TEMP
   jsh::log_success "Moved ${#AMEND_OLD_COMMITS[@]} commit$([[ ${#AMEND_OLD_COMMITS[@]} == 1 ]] || printf s)"
+  jsh::log_note 'Local branch updated; no remote refs were changed.'
   printf 'Rollback: git update-ref %q %q %q\n' "${branch}" "${old_tip}" "${new_commit}"
 }
 
@@ -1120,6 +1126,7 @@ _jgit_rewrite_abort() {
 _jgit_rewrite() {
   local last='' ref commit count common base parent sequence_editor answer original timestamp
   local author_date committer_date committer_name committer_email epoch git_date edited=0
+  local now_epoch tip_epoch rolling_epoch predecessor predecessor_epoch
   REWRITE_COMMITS=()
   REWRITE_REFS=()
 
@@ -1167,6 +1174,11 @@ _jgit_rewrite() {
   [[ ! -d $(git rev-parse --git-path rebase-merge) && ! -d $(git rev-parse --git-path rebase-apply) ]] ||
     _jgit_die 'another rebase is already in progress'
   [[ -z ${last} || ${#REWRITE_REFS[@]} == 0 ]] || _jgit_die 'use either refs or --last, not both'
+
+  now_epoch=$(_jgit_now)
+  tip_epoch=$(git show -s --format='%ct' HEAD)
+  rolling_epoch=${tip_epoch}
+  ((now_epoch <= rolling_epoch)) || rolling_epoch=${now_epoch}
 
   if [[ -n ${last} ]]; then
     [[ ${last} =~ ^[1-9][0-9]*$ ]] || _jgit_die '--last requires a positive integer'
@@ -1261,10 +1273,19 @@ _jgit_rewrite() {
       }
     fi
     if [[ -n ${timestamp} ]]; then
-      epoch=$(_jgit_resolve_timestamp_from "${timestamp}" "$(git show -s --format='%at' "${original}")") || {
+      predecessor_epoch=$(git show -s --format='%ct' "${original}")
+      if [[ ${timestamp} == +* || ${timestamp} == -* ]]; then
+        predecessor=$(git rev-parse --verify 'HEAD^1' 2> /dev/null) || {
+          _jgit_rewrite_abort
+          _jgit_die 'cannot use a signed offset for the root commit'
+        }
+        predecessor_epoch=$(git show -s --format='%ct' "${predecessor}")
+      fi
+      epoch=$(_jgit_resolve_timestamp_from "${timestamp}" "${predecessor_epoch}" "${rolling_epoch}") || {
         _jgit_rewrite_abort
         _jgit_die "invalid timestamp: ${timestamp}"
       }
+      ((epoch <= rolling_epoch)) || rolling_epoch=${epoch}
       git_date=$(_jgit_git_date "${epoch}")
       author_date=${git_date}
       committer_date=${git_date}
@@ -1321,7 +1342,7 @@ _jgit_rewrite_stash_worktree() {
   JGIT_REWRITE_REPO=$(git rev-parse --show-toplevel)
   JGIT_REWRITE_STASH_OID=
   status=$(git status --porcelain) || _jgit_die 'could not inspect the working tree'
-  [[ -n ${status} ]] || return
+  [[ -n ${status} ]] || return 0
 
   previous_stash=$(git rev-parse --verify refs/stash 2> /dev/null || true)
   git stash push --include-untracked --quiet \
@@ -1344,7 +1365,7 @@ _jgit_rewrite_stash_worktree() {
 }
 
 _jgit_rewrite_restore_worktree() {
-  [[ -n ${JGIT_REWRITE_STASH_OID:-} ]] || return
+  [[ -n ${JGIT_REWRITE_STASH_OID:-} ]] || return 0
   _jgit_update_restore_stash "${JGIT_REWRITE_REPO}" "${JGIT_REWRITE_STASH_OID}" || return 1
   JGIT_REWRITE_STASH_OID=
   jsh::log_success 'Restored local changes'
