@@ -110,7 +110,7 @@ help: ## Show this help message
 
 ##@ Setup
 
-install: ## Install packages and repository hooks
+install: ## Install packages and platform applications
 	$(call run_scripts,install)
 
 essentials: export JSH_PACKAGE_LAYERS = core
