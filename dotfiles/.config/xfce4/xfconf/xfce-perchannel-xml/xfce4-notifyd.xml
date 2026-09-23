@@ -6,6 +6,7 @@
     <property name="known_applications" type="array">
       <value type="string" value="chatgpt"/>
       <value type="string" value="code"/>
+      <value type="string" value="helium"/>
       <value type="string" value="notify-send"/>
       <value type="string" value="waterfox"/>
       <value type="string" value="Xfce volume control"/>

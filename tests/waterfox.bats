@@ -176,8 +176,10 @@ JSON
   ' _ "${JSH_ROOT}/scripts/unix/configure/waterfox.sh"
 
   [[ ${status} -eq 0 ]]
+  grep -Fxq "Exec=${home}/bin/waterfox %u" "${home}/share/applications/waterfox.desktop"
   grep -Fxq "Icon=${resolved_install}/browser/chrome/icons/default/default128.png" \
     "${home}/share/applications/waterfox.desktop"
+  grep -Fxq 'StartupWMClass=waterfox' "${home}/share/applications/waterfox.desktop"
 }
 
 @test "Waterfox launcher uses the themed icon for a nonstandard binary" {

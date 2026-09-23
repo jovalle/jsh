@@ -30,7 +30,7 @@ palette = 15=#e5e5e5
 quit-after-last-window-closed = true
 selection-background = #3a3d41
 selection-foreground = #e0e0e0
-shell-integration-features = ssh-env,ssh-terminfo
+shell-integration-features = ssh-env
 theme = Dark+
 window-theme = dark
 

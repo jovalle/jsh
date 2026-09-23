@@ -21,17 +21,26 @@ write_wrapper_backend() {
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "${CAFE_TEST_LOG}"
 [[ -z ${CAFE_TEST_BACKEND_PID_FILE:-} ]] || printf '%s' "${BASHPID}" > "${CAFE_TEST_BACKEND_PID_FILE}"
-duration=
+duration= owner_pid=
 while (($#)) && [[ $1 != -- ]]; do
-  if [[ $1 == -t ]]; then duration=$2; shift 2; else shift; fi
+  if [[ $1 == -t ]]; then
+    duration=$2
+    shift 2
+  elif [[ $1 == -w ]]; then
+    owner_pid=$2
+    shift 2
+  else
+    shift
+  fi
 done
+[[ -z ${CAFE_TEST_OWNER_PID_FILE:-} || -z ${owner_pid} ]] || printf '%s' "${owner_pid}" > "${CAFE_TEST_OWNER_PID_FILE}"
 if [[ ${1:-} == -- ]]; then
   shift
   exec "$@"
 elif [[ -n ${duration} ]]; then
   exec /bin/sleep "${duration}"
 else
-  while :; do /bin/sleep 86400; done
+  exec /bin/sleep 86400
 fi
 EOF
   chmod +x "${CAFE_TEST_BIN}/${name}"
@@ -47,6 +56,37 @@ while [[ ! -e ${CAFE_STOP_FILE} ]]; do sleep 0.02; done
 printf 'cleared\n' >> "${CAFE_TEST_LOG}"
 EOF
   chmod +x "${CAFE_TEST_BIN}/powershell.exe"
+}
+
+write_pmset_backend() {
+  cat > "${CAFE_TEST_BIN}/pmset" <<'EOF'
+#!/usr/bin/env bash
+owner_pid=$(cat "${CAFE_TEST_OWNER_PID_FILE}" 2>/dev/null || true)
+printf "Details: caffeinate asserting on behalf of Process ID %s\n" "${owner_pid:-0}"
+EOF
+  chmod +x "${CAFE_TEST_BIN}/pmset"
+}
+
+write_gnome_backend() {
+  cat > "${CAFE_TEST_BIN}/gnome-session-inhibit" <<'EOF'
+#!/usr/bin/env bash
+if [[ ${1:-} == --list ]]; then
+  cat "${CAFE_TEST_GNOME_STATE}" 2>/dev/null || true
+  exit 0
+fi
+printf '%s\n' "$*" >> "${CAFE_TEST_LOG}"
+app_id= reason=
+while (($#)); do
+  case $1 in
+    --app-id) app_id=$2; shift 2 ;;
+    --reason) reason=$2; shift 2 ;;
+    *) shift ;;
+  esac
+done
+printf '%s: %s\n' "${app_id}" "${reason}" > "${CAFE_TEST_GNOME_STATE}"
+exec /bin/sleep 86400
+EOF
+  chmod +x "${CAFE_TEST_BIN}/gnome-session-inhibit"
 }
 
 write_xfce_command() {
@@ -97,66 +137,80 @@ EOF
   grep -Fq 'xfce4-panel --plugin-event=genmon-26:refresh:bool:true' "${CAFE_TEST_LOG}"
 }
 
-@test "macOS uses caffeinate with idle and requested display assertions" {
+@test "macOS starts and validates all caffeine assertions" {
   write_wrapper_backend caffeinate
+  write_pmset_backend
 
   run env PATH="${CAFE_TEST_BIN}:${PATH}" CAFE_PLATFORM=Darwin \
     CAFE_CAFFEINATE_BIN="${CAFE_TEST_BIN}/caffeinate" JSH_PLAIN_OUTPUT=1 \
-    "${JSH_ROOT}/bin/cafe" -d -- true
+    CAFE_PMSET_BIN="${CAFE_TEST_BIN}/pmset" \
+    CAFE_TEST_OWNER_PID_FILE="${BATS_TEST_TMPDIR}/owner.pid" \
+    "${JSH_ROOT}/bin/cafe" -- true
 
   [[ ${status} -eq 0 ]]
+  [[ ${output} == *'Validation: PASS - macOS display, user-idle, and system sleep assertions started'* ]]
+  [[ ${output} == *'Inspect: pmset -g assertions'* ]]
+  [[ ${output} == *'Cafe active: idle lock, display sleep, and system sleep are inhibited'* ]]
+  [[ ${output} == *'Press Ctrl+C to stop.'* ]]
+  [[ ${output} != *'Method caffeinate'* ]]
   grep -Eq '(^| )-i( |$)' "${CAFE_TEST_LOG}"
+  grep -Eq '(^| )-u( |$)' "${CAFE_TEST_LOG}"
   grep -Eq '(^| )-d( |$)' "${CAFE_TEST_LOG}"
-  run ! grep -Eq '(^| )-s( |$)' "${CAFE_TEST_LOG}"
+  grep -Eq '(^| )-s( |$)' "${CAFE_TEST_LOG}"
+  grep -Eq '(^| )-w [0-9]+( |$)' "${CAFE_TEST_LOG}"
 }
 
-@test "systemd uses idle only by default and widens system scope on request" {
-  write_wrapper_backend systemd-inhibit
+@test "Linux starts and validates GNOME idle and suspend inhibition" {
+  write_gnome_backend
 
   run env PATH="${CAFE_TEST_BIN}:${PATH}" CAFE_PLATFORM=Linux JSH_PLAIN_OUTPUT=1 \
+    CAFE_TEST_GNOME_STATE="${BATS_TEST_TMPDIR}/gnome.state" \
     "${JSH_ROOT}/bin/cafe" -- true
   [[ ${status} -eq 0 ]]
-  grep -Fq -- '--what=idle' "${CAFE_TEST_LOG}"
-
-  : > "${CAFE_TEST_LOG}"
-  run env PATH="${CAFE_TEST_BIN}:${PATH}" CAFE_PLATFORM=Linux JSH_PLAIN_OUTPUT=1 \
-    "${JSH_ROOT}/bin/cafe" -s -- true
-  [[ ${status} -eq 0 ]]
-  grep -Fq -- '--what=idle:sleep:shutdown' "${CAFE_TEST_LOG}"
-  grep -Fq -- '--mode=block' "${CAFE_TEST_LOG}"
+  [[ ${output} == *'Validation: PASS - GNOME idle and suspend inhibitor registered'* ]]
+  [[ ${output} == *'Inspect: gnome-session-inhibit --list'* ]]
+  grep -Fq -- '--app-id cafe' "${CAFE_TEST_LOG}"
+  grep -Fq -- '--reason User requested via cafe command' "${CAFE_TEST_LOG}"
+  grep -Fq -- '--inhibit idle:suspend' "${CAFE_TEST_LOG}"
 }
 
 @test "a failing wrapped command runs once and preserves its status" {
-  write_wrapper_backend systemd-inhibit
+  write_gnome_backend
   local calls="${BATS_TEST_TMPDIR}/command-calls"
 
   run env PATH="${CAFE_TEST_BIN}:${PATH}" CAFE_PLATFORM=Linux JSH_PLAIN_OUTPUT=1 \
+    CAFE_TEST_GNOME_STATE="${BATS_TEST_TMPDIR}/gnome.state" \
     "${JSH_ROOT}/bin/cafe" -- bash -c 'printf "called\n" >> "$1"; exit 23' _ "${calls}"
 
   [[ ${status} -eq 23 ]]
   [[ $(wc -l < "${calls}") -eq 1 ]]
 }
 
-@test "WSL prefers PowerShell and clears its execution state on exit" {
+@test "Windows sets execution state, sends F15 activity, and clears state" {
   write_powershell_backend
-  write_wrapper_backend systemd-inhibit
 
-  run env PATH="${CAFE_TEST_BIN}:${PATH}" CAFE_PLATFORM=WSL JSH_PLAIN_OUTPUT=1 \
-    "${JSH_ROOT}/bin/cafe" -d -- true
+  run env PATH="${CAFE_TEST_BIN}:${PATH}" CAFE_PLATFORM=Windows JSH_PLAIN_OUTPUT=1 \
+    "${JSH_ROOT}/bin/cafe" -- true
 
   [[ ${status} -eq 0 ]]
+  [[ ${output} == *'Validation: PASS - Windows display and system execution state set; F15 activity sent'* ]]
+  [[ ${output} == *'Inspect: powercfg /requests'* ]]
   grep -Fq 'SetThreadExecutionState' "${CAFE_TEST_LOG}"
-  grep -Fq '0x80000003' "${CAFE_TEST_LOG}"
+  grep -Fq 'SendInput' "${CAFE_TEST_LOG}"
+  grep -Fq 'SendF15' "${CAFE_TEST_LOG}"
+  grep -Fq '0x7E' "${CAFE_TEST_LOG}"
   grep -Fq 'CAFE_READY_FILE:CAFE_STOP_FILE' "${CAFE_TEST_LOG}"
   grep -Fq 'cleared' "${CAFE_TEST_LOG}"
-  run ! grep -Fq -- '--what=' "${CAFE_TEST_LOG}"
 }
 
 @test "background status and stop preserve the public PID-file contract" {
   write_wrapper_backend caffeinate
+  write_pmset_backend
   local backend_pid backend_pid_file="${BATS_TEST_TMPDIR}/backend.pid"
   local -a cafe_env=(env PATH="${CAFE_TEST_BIN}:${PATH}" CAFE_PLATFORM=Darwin
     CAFE_CAFFEINATE_BIN="${CAFE_TEST_BIN}/caffeinate"
+    CAFE_PMSET_BIN="${CAFE_TEST_BIN}/pmset"
+    CAFE_TEST_OWNER_PID_FILE="${BATS_TEST_TMPDIR}/owner.pid"
     CAFE_TEST_BACKEND_PID_FILE="${backend_pid_file}" JSH_PLAIN_OUTPUT=1)
 
   run "${cafe_env[@]}" "${JSH_ROOT}/bin/cafe" --background
@@ -192,10 +246,13 @@ EOF
 
 @test "a timed background session removes its PID file when complete" {
   write_wrapper_backend caffeinate
+  write_pmset_backend
   local pid_file="${XDG_RUNTIME_DIR}/cafe.${USER}.pid"
 
   run env PATH="${CAFE_TEST_BIN}:${PATH}" CAFE_PLATFORM=Darwin \
     CAFE_CAFFEINATE_BIN="${CAFE_TEST_BIN}/caffeinate" JSH_PLAIN_OUTPUT=1 \
+    CAFE_PMSET_BIN="${CAFE_TEST_BIN}/pmset" \
+    CAFE_TEST_OWNER_PID_FILE="${BATS_TEST_TMPDIR}/owner.pid" \
     "${JSH_ROOT}/bin/cafe" --background --time 1
   [[ ${status} -eq 0 ]]
 
@@ -209,26 +266,46 @@ EOF
 
 @test "piped execution does not depend on the script path" {
   write_wrapper_backend caffeinate
+  write_pmset_backend
 
   run env PATH="${CAFE_TEST_BIN}:${PATH}" CAFE_PLATFORM=Darwin \
     CAFE_CAFFEINATE_BIN="${CAFE_TEST_BIN}/caffeinate" JSH_PLAIN_OUTPUT=1 \
+    CAFE_PMSET_BIN="${CAFE_TEST_BIN}/pmset" \
+    CAFE_TEST_OWNER_PID_FILE="${BATS_TEST_TMPDIR}/owner.pid" \
     CAFE_DURATION=1 /bin/bash < "${JSH_ROOT}/bin/cafe"
 
   [[ ${status} -eq 0 ]]
-  [[ ${output} = *'Method caffeinate'* ]]
+  [[ ${output} = *'Validation: PASS'* ]]
   [[ ${output} != *'Method bash'* ]]
+}
+
+@test "active output uses semantic success, detail, and activity colors" {
+  write_wrapper_backend caffeinate
+  write_pmset_backend
+
+  run env PATH="${CAFE_TEST_BIN}:${PATH}" CAFE_PLATFORM=Darwin TERM=xterm \
+    JSH_COLOR=always CAFE_CAFFEINATE_BIN="${CAFE_TEST_BIN}/caffeinate" \
+    CAFE_PMSET_BIN="${CAFE_TEST_BIN}/pmset" \
+    CAFE_TEST_OWNER_PID_FILE="${BATS_TEST_TMPDIR}/owner.pid" \
+    "${JSH_ROOT}/bin/cafe" -- true
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == *$'\033[32m✓ Validation: PASS - macOS'* ]]
+  [[ ${output} == *$'\033[2;37mInspect: pmset -g assertions'* ]]
+  [[ ${output} == *$'\033[36mCafe active: idle lock'* ]]
+  [[ ${output} == *$'\033[2;37mPress Ctrl+C to stop.'* ]]
 }
 
 @test "TUI animates dotted steam and repeats its cycle" {
   run env CAFE_SOURCE_ONLY=1 LINES=24 COLUMNS=80 JSH_PLAIN_OUTPUT=1 bash -c '
     source "$1"
-    CAFE_METHOD=systemd-inhibit
+    CAFE_METHOD=gnome-session-inhibit
     first=$(render_tui_frame 0 3661)
     next=$(render_tui_frame 1 3661)
     cycle=$(render_tui_frame 12 3661)
     [[ ${first} != "${next}" && ${first} == "${cycle}" ]]
     [[ ${first} == *"•"* && ${first} == *"01h 01m 01s"* ]]
-    [[ ${first} == *"systemd-inhibit"* ]]
+    [[ ${first} == *"gnome-session-inhibit"* ]]
   ' _ "${JSH_ROOT}/bin/cafe"
   [[ ${status} -eq 0 ]]
 }
@@ -266,9 +343,12 @@ EOF
 
 @test "a completed foreground wait prints an exit message" {
   write_wrapper_backend caffeinate
+  write_pmset_backend
 
   run env PATH="${CAFE_TEST_BIN}:${PATH}" CAFE_PLATFORM=Darwin \
     CAFE_CAFFEINATE_BIN="${CAFE_TEST_BIN}/caffeinate" JSH_PLAIN_OUTPUT=1 \
+    CAFE_PMSET_BIN="${CAFE_TEST_BIN}/pmset" \
+    CAFE_TEST_OWNER_PID_FILE="${BATS_TEST_TMPDIR}/owner.pid" \
     "${JSH_ROOT}/bin/cafe" --time 1
 
   [[ ${status} -eq 0 ]]
@@ -277,11 +357,14 @@ EOF
 
 @test "SIGTERM restores state and exits with signal status" {
   write_wrapper_backend caffeinate
+  write_pmset_backend
   local output_file="${BATS_TEST_TMPDIR}/signal-output"
   local exit_code=0 pid
 
   env PATH="${CAFE_TEST_BIN}:${PATH}" CAFE_PLATFORM=Darwin \
     CAFE_CAFFEINATE_BIN="${CAFE_TEST_BIN}/caffeinate" JSH_PLAIN_OUTPUT=1 \
+    CAFE_PMSET_BIN="${CAFE_TEST_BIN}/pmset" \
+    CAFE_TEST_OWNER_PID_FILE="${BATS_TEST_TMPDIR}/owner.pid" \
     "${JSH_ROOT}/bin/cafe" --time 30 > "${output_file}" 2>&1 &
   pid=$!
   local attempt
@@ -293,6 +376,6 @@ EOF
   wait "${pid}" || exit_code=$?
 
   [[ ${exit_code} -eq 143 ]]
-  grep -Fq 'Stopped' "${output_file}"
+  grep -Fq 'Cafe stopped.' "${output_file}"
   run ! pgrep -f -- "${XDG_RUNTIME_DIR}/cafe.${USER}.${pid}.stop"
 }

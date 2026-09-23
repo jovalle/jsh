@@ -31,6 +31,19 @@ setup() {
   fi
 }
 
+@test "Linux desktop entry launches the native browser with the managed profile" {
+  local browser="${BATS_TEST_TMPDIR}/helium-native"
+  export HELIUM_BINARY="${browser}"
+  export XDG_DATA_HOME="${BATS_TEST_TMPDIR}/share"
+  printf '#!/usr/bin/env bash\n' > "${browser}"
+  chmod +x "${browser}"
+
+  install_linux_launcher
+
+  grep -Fxq "Exec=${browser} \"--user-data-dir=${PROFILE_ROOT}\" --profile-directory=Default --no-first-run --no-default-browser-check --disable-sync --disable-notifications --disable-breakpad --new-window %U" \
+    "${XDG_DATA_HOME}/applications/helium.desktop"
+}
+
 @test "desktop launch loads Homebrew dependencies outside PATH" {
   local brew_root="${BATS_TEST_TMPDIR}/brew"
   mkdir -p "${brew_root}/bin"

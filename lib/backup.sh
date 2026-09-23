@@ -109,7 +109,7 @@ _jgit_backup_parse_excludes() {
       _jgit_die "invalid excluded path: ${exclude:-<empty>}"
     [[ ${exclude} != *$'\n'* ]] || _jgit_die 'excluded paths cannot contain newlines'
 
-    for existing in "${JGIT_BACKUP_EXCLUDES[@]}"; do
+    for existing in ${JGIT_BACKUP_EXCLUDES[@]+"${JGIT_BACKUP_EXCLUDES[@]}"}; do
       [[ ${existing} == "${exclude}" ]] && continue 2
     done
     JGIT_BACKUP_EXCLUDES+=("${exclude}")
@@ -120,7 +120,7 @@ _jgit_backup_map_excludes() {
   local repository_path=$1 exclude local_exclude existing
   JGIT_BACKUP_LOCAL_EXCLUDES=()
   JGIT_BACKUP_SKIP_REPOSITORY=0
-  for exclude in "${JGIT_BACKUP_EXCLUDES[@]}"; do
+  for exclude in ${JGIT_BACKUP_EXCLUDES[@]+"${JGIT_BACKUP_EXCLUDES[@]}"}; do
     if [[ -z ${repository_path} ]]; then
       local_exclude=${exclude}
     elif [[ ${exclude} == "${repository_path}" || ${repository_path} == "${exclude}"/* ]]; then
@@ -131,7 +131,7 @@ _jgit_backup_map_excludes() {
     else
       continue
     fi
-    for existing in "${JGIT_BACKUP_LOCAL_EXCLUDES[@]}"; do
+    for existing in ${JGIT_BACKUP_LOCAL_EXCLUDES[@]+"${JGIT_BACKUP_LOCAL_EXCLUDES[@]}"}; do
       [[ ${existing} == "${local_exclude}" ]] && continue 2
     done
     JGIT_BACKUP_LOCAL_EXCLUDES+=("${local_exclude}")
@@ -141,7 +141,7 @@ _jgit_backup_map_excludes() {
 _jgit_backup_build_pathspecs() {
   local exclude
   JGIT_BACKUP_PATHS=(-- .)
-  for exclude in "${JGIT_BACKUP_LOCAL_EXCLUDES[@]}"; do
+  for exclude in ${JGIT_BACKUP_LOCAL_EXCLUDES[@]+"${JGIT_BACKUP_LOCAL_EXCLUDES[@]}"}; do
     JGIT_BACKUP_PATHS+=(":(top,literal,exclude)${exclude}")
   done
 }
@@ -197,7 +197,7 @@ _jgit_backup_write_manifest() {
     printf 'origin=%s\n' "${JGIT_BACKUP_IDENTITY}"
     printf 'head=%s\n' "$(git -C "${JGIT_BACKUP_ROOT}" rev-parse HEAD)"
     printf 'created=%s\n' "${created}"
-    for exclude in "${JGIT_BACKUP_EXCLUDES[@]}"; do
+    for exclude in ${JGIT_BACKUP_EXCLUDES[@]+"${JGIT_BACKUP_EXCLUDES[@]}"}; do
       printf 'exclude=%s\n' "${exclude}"
     done
   } > "${destination}"
@@ -365,11 +365,11 @@ _jgit_backup_discover_valid_gists() {
   local gist_id updated index=0
   local -a discovered_ids discovered_updated
   _jgit_backup_discover_gists
-  discovered_ids=("${JGIT_BACKUP_GIST_IDS[@]}")
-  discovered_updated=("${JGIT_BACKUP_GIST_UPDATED[@]}")
+  discovered_ids=(${JGIT_BACKUP_GIST_IDS[@]+"${JGIT_BACKUP_GIST_IDS[@]}"})
+  discovered_updated=(${JGIT_BACKUP_GIST_UPDATED[@]+"${JGIT_BACKUP_GIST_UPDATED[@]}"})
   JGIT_BACKUP_GIST_IDS=()
   JGIT_BACKUP_GIST_UPDATED=()
-  for gist_id in "${discovered_ids[@]}"; do
+  for gist_id in ${discovered_ids[@]+"${discovered_ids[@]}"}; do
     updated=${discovered_updated[index]:-}
     if _jgit_backup_validate_gist "${gist_id}"; then
       JGIT_BACKUP_GIST_IDS+=("${gist_id}")
@@ -511,7 +511,7 @@ _jgit_backup_download() {
 
 _jgit_backup_path_is_excluded() {
   local path=$1 exclude
-  for exclude in "${JGIT_BACKUP_LOCAL_EXCLUDES[@]}"; do
+  for exclude in ${JGIT_BACKUP_LOCAL_EXCLUDES[@]+"${JGIT_BACKUP_LOCAL_EXCLUDES[@]}"}; do
     [[ ${path} == "${exclude}" || ${path} == "${exclude}"/* ]] && return 0
   done
   return 1
@@ -577,11 +577,14 @@ _jgit_backup_stash_repository() {
 }
 
 _jgit_backup_stash_current_changes() {
-  local submodule_path repository submodule_list ordered_submodules
+  local submodule_path repository submodule_list ordered_submodules original_head
   JGIT_BACKUP_STASH_REPOSITORIES=()
   JGIT_BACKUP_STASH_PATHS=()
   JGIT_BACKUP_STASH_OIDS=()
   JGIT_BACKUP_STAGED_PATCHES=()
+  JGIT_BACKUP_TRANSACTION_REPOSITORIES=()
+  JGIT_BACKUP_TRANSACTION_PATHS=()
+  JGIT_BACKUP_TRANSACTION_HEADS=()
   submodule_list=${JGIT_BACKUP_WORK_DIR}/initialized-submodules.list
   ordered_submodules=${JGIT_BACKUP_WORK_DIR}/ordered-submodules.list
   git -C "${JGIT_BACKUP_ROOT}" submodule foreach --quiet --recursive \
@@ -599,8 +602,16 @@ _jgit_backup_stash_current_changes() {
       _jgit_die 'an initialized submodule has an unsupported path'
     repository=${JGIT_BACKUP_ROOT}/${submodule_path}
     _jgit_backup_preflight_repository "${repository}" "${submodule_path}" || return 1
+    original_head=$(git -C "${repository}" rev-parse HEAD) || return 1
+    JGIT_BACKUP_TRANSACTION_REPOSITORIES+=("${repository}")
+    JGIT_BACKUP_TRANSACTION_PATHS+=("${submodule_path}")
+    JGIT_BACKUP_TRANSACTION_HEADS+=("${original_head}")
   done < "${ordered_submodules}"
   _jgit_backup_preflight_repository "${JGIT_BACKUP_ROOT}" '' || return 1
+  original_head=$(git -C "${JGIT_BACKUP_ROOT}" rev-parse HEAD) || return 1
+  JGIT_BACKUP_TRANSACTION_REPOSITORIES+=("${JGIT_BACKUP_ROOT}")
+  JGIT_BACKUP_TRANSACTION_PATHS+=('main repository')
+  JGIT_BACKUP_TRANSACTION_HEADS+=("${original_head}")
   while IFS= read -r submodule_path; do
     repository=${JGIT_BACKUP_ROOT}/${submodule_path}
     _jgit_backup_stash_repository "${repository}" "${submodule_path}" || return 1
@@ -617,29 +628,183 @@ _jgit_backup_report_stashes() {
   done
 }
 
-_jgit_backup_restore_stashes() {
-  local index repository stash_oid stash_path stash_ref staged_patch failed=0
-  for ((index = ${#JGIT_BACKUP_STASH_OIDS[@]} - 1; index >= 0; index--)); do
+_jgit_backup_choose_newer_commit() {
+  local repository=$1 first=$2 second=$3 first_time second_time
+  if [[ ${first} == "${second}" ]] ||
+    git -C "${repository}" merge-base --is-ancestor "${second}" "${first}" 2> /dev/null; then
+    JGIT_BACKUP_NEWER_COMMIT=${first}
+  elif git -C "${repository}" merge-base --is-ancestor "${first}" "${second}" 2> /dev/null; then
+    JGIT_BACKUP_NEWER_COMMIT=${second}
+  else
+    first_time=$(git -C "${repository}" show -s --format=%ct "${first}") || return 1
+    second_time=$(git -C "${repository}" show -s --format=%ct "${second}") || return 1
+    if ((second_time > first_time)); then
+      JGIT_BACKUP_NEWER_COMMIT=${second}
+    else
+      JGIT_BACKUP_NEWER_COMMIT=${first}
+    fi
+  fi
+}
+
+_jgit_backup_resolve_gitlink_conflicts() {
+  local repository=$1 conflicts paths entry metadata mode object stage gitlink
+  local submodule first second current selected
+  conflicts=${JGIT_BACKUP_WORK_DIR}/gitlink-conflicts-${RANDOM}.list
+  paths=${JGIT_BACKUP_WORK_DIR}/gitlink-paths-${RANDOM}.list
+  git -C "${repository}" ls-files -u -z > "${conflicts}" || return 1
+  : > "${paths}"
+  while IFS= read -r -d '' entry; do
+    metadata=${entry%%$'\t'*}
+    mode=${metadata%% *}
+    [[ ${mode} == 160000 ]] || continue
+    printf '%s\n' "${entry#*$'\t'}" >> "${paths}"
+  done < "${conflicts}"
+  LC_ALL=C sort -u -o "${paths}" "${paths}"
+  [[ -s ${paths} ]] || return 1
+
+  while IFS= read -r gitlink; do
+    first=
+    second=
+    while IFS= read -r -d '' entry; do
+      [[ ${entry#*$'\t'} == "${gitlink}" ]] || continue
+      metadata=${entry%%$'\t'*}
+      mode=${metadata%% *}
+      metadata=${metadata#* }
+      object=${metadata%% *}
+      stage=${metadata##* }
+      [[ ${mode} == 160000 ]] || return 1
+      case ${stage} in
+        2) first=${object} ;;
+        3) second=${object} ;;
+      esac
+    done < "${conflicts}"
+    [[ -n ${first} && -n ${second} ]] || return 1
+    submodule=${repository}/${gitlink}
+    git -C "${submodule}" rev-parse --git-dir > /dev/null 2>&1 || return 1
+    current=$(git -C "${submodule}" rev-parse HEAD) || return 1
+    _jgit_backup_choose_newer_commit "${submodule}" "${first}" "${second}" || return 1
+    selected=${JGIT_BACKUP_NEWER_COMMIT}
+    _jgit_backup_choose_newer_commit "${submodule}" "${selected}" "${current}" || return 1
+    selected=${JGIT_BACKUP_NEWER_COMMIT}
+    git -C "${submodule}" checkout --quiet --detach "${selected}" || return 1
+    git -C "${repository}" update-index --add --cacheinfo 160000 "${selected}" "${gitlink}" ||
+      return 1
+    jsh::log_info "Resolved submodule ${gitlink} at ${selected}"
+  done < "${paths}"
+}
+
+_jgit_backup_reconcile_gitlink() {
+  local full_path=$1 backup_head=$2 repository parent relative current index_head selected
+  repository=${JGIT_BACKUP_ROOT}/${full_path}
+  git -C "${repository}" rev-parse --git-dir > /dev/null 2>&1 || return 1
+  repository=$(CDPATH='' cd -P "${repository}" && pwd -P) || return 1
+  git -C "${repository}" cat-file -e "${backup_head}^{commit}" 2> /dev/null ||
+    git -C "${repository}" fetch --quiet origin "${backup_head}" || return 1
+  current=$(git -C "${repository}" rev-parse HEAD) || return 1
+  _jgit_backup_choose_newer_commit "${repository}" "${backup_head}" "${current}" || return 1
+  selected=${JGIT_BACKUP_NEWER_COMMIT}
+  parent=$(git -C "${repository}" rev-parse --show-superproject-working-tree) || return 1
+  parent=$(CDPATH='' cd -P "${parent}" && pwd -P) || return 1
+  relative=${repository#"${parent}"/}
+  [[ ${relative} != "${repository}" ]] || return 1
+  index_head=$(git -C "${parent}" ls-files -s -- "${relative}" | awk '$1 == 160000 { print $2; exit }')
+  [[ -n ${index_head} ]] || return 1
+  git -C "${repository}" checkout --quiet --detach "${selected}" || return 1
+  if [[ ${index_head} == "${backup_head}" && ${selected} != "${backup_head}" ]]; then
+    git -C "${parent}" update-index --add --cacheinfo 160000 "${selected}" "${relative}" ||
+      return 1
+  fi
+  [[ ${selected} == "${backup_head}" ]] ||
+    jsh::log_info "Kept newer submodule ${full_path} at ${selected}"
+}
+
+_jgit_backup_apply_stashes() {
+  local index repository stash_oid stash_path stash_ref staged_patch conflicts failed=0
+  for ((index = 0; index < ${#JGIT_BACKUP_STASH_OIDS[@]}; index++)); do
     repository=${JGIT_BACKUP_STASH_REPOSITORIES[index]}
     stash_oid=${JGIT_BACKUP_STASH_OIDS[index]}
     stash_path=${JGIT_BACKUP_STASH_PATHS[index]}
     staged_patch=${JGIT_BACKUP_STAGED_PATCHES[index]}
     stash_ref=$(git -C "${repository}" stash list --format='%gd %H' |
       awk -v wanted="${stash_oid}" '$2 == wanted { print $1; exit }')
-    if [[ -z ${stash_ref} ]] || ! git -C "${repository}" stash apply --quiet "${stash_ref}"; then
+    if [[ -z ${stash_ref} ]]; then
       jsh::log_error "Recovery stash retained for ${stash_path}: ${stash_oid}"
       failed=1
       continue
+    fi
+    if ! git -C "${repository}" stash apply --quiet "${stash_ref}"; then
+      if ! _jgit_backup_resolve_gitlink_conflicts "${repository}"; then
+        jsh::log_error "Recovery stash retained for ${stash_path}: ${stash_oid}"
+        failed=1
+        continue
+      fi
+      conflicts=$(git -C "${repository}" ls-files -u) || conflicts=unknown
+      if [[ -n ${conflicts} ]]; then
+        jsh::log_error "Recovery stash retained for ${stash_path}: ${stash_oid}"
+        failed=1
+        continue
+      fi
     fi
     if [[ -s ${staged_patch} ]] &&
       ! git -C "${repository}" apply --cached --3way "${staged_patch}"; then
-      jsh::log_error "Recovery stash retained for ${stash_path}: ${stash_oid}"
-      failed=1
-      continue
+      if ! _jgit_backup_resolve_gitlink_conflicts "${repository}"; then
+        jsh::log_error "Recovery stash retained for ${stash_path}: ${stash_oid}"
+        failed=1
+        continue
+      fi
+      conflicts=$(git -C "${repository}" ls-files -u) || conflicts=unknown
+      if [[ -n ${conflicts} ]]; then
+        jsh::log_error "Recovery stash retained for ${stash_path}: ${stash_oid}"
+        failed=1
+        continue
+      fi
     fi
-    git -C "${repository}" stash drop --quiet "${stash_ref}"
   done
   ((failed == 0))
+}
+
+_jgit_backup_drop_stashes() {
+  local index repository stash_oid stash_ref
+  for ((index = 0; index < ${#JGIT_BACKUP_STASH_OIDS[@]}; index++)); do
+    repository=${JGIT_BACKUP_STASH_REPOSITORIES[index]}
+    stash_oid=${JGIT_BACKUP_STASH_OIDS[index]}
+    stash_ref=$(git -C "${repository}" stash list --format='%gd %H' |
+      awk -v wanted="${stash_oid}" '$2 == wanted { print $1; exit }')
+    [[ -z ${stash_ref} ]] || git -C "${repository}" stash drop --quiet "${stash_ref}" || return 1
+  done
+}
+
+_jgit_backup_reset_transaction() {
+  local index repository repository_path original_head failed=0
+  for ((index = 0; index < ${#JGIT_BACKUP_TRANSACTION_REPOSITORIES[@]}; index++)); do
+    repository=${JGIT_BACKUP_TRANSACTION_REPOSITORIES[index]}
+    repository_path=${JGIT_BACKUP_TRANSACTION_PATHS[index]}
+    original_head=${JGIT_BACKUP_TRANSACTION_HEADS[index]}
+    git -C "${repository}" reset --hard --quiet "${original_head}" &&
+      git -C "${repository}" clean -fdq || {
+      jsh::log_error "Could not reset ${repository_path} after backup load failed"
+      failed=1
+    }
+  done
+  ((failed == 0))
+}
+
+_jgit_backup_rollback_transaction() {
+  _jgit_backup_reset_transaction || return 1
+  _jgit_backup_apply_stashes || return 1
+  _jgit_backup_report_stashes
+  jsh::log_warn 'Restored the pre-load worktree; recovery stashes were retained'
+}
+
+_jgit_backup_apply_transaction() {
+  if _jgit_backup_apply_snapshot && _jgit_backup_apply_stashes; then
+    _jgit_backup_drop_stashes
+    return
+  fi
+  jsh::log_error 'Backup conflicted with the current worktree; rolling back'
+  _jgit_backup_rollback_transaction ||
+    jsh::log_error 'Automatic rollback failed; recovery stashes were retained'
+  return 1
 }
 
 _jgit_backup_apply_untracked() {
@@ -674,7 +839,7 @@ _jgit_backup_apply_repository() {
   ((JGIT_BACKUP_SKIP_REPOSITORY == 0)) || return 0
   _jgit_backup_build_pathspecs
   apply_excludes=()
-  for exclude in "${JGIT_BACKUP_LOCAL_EXCLUDES[@]}"; do
+  for exclude in ${JGIT_BACKUP_LOCAL_EXCLUDES[@]+"${JGIT_BACKUP_LOCAL_EXCLUDES[@]}"}; do
     escaped_exclude=${exclude//\\/\\\\}
     escaped_exclude=${escaped_exclude//\*/\\*}
     escaped_exclude=${escaped_exclude//\?/\\?}
@@ -683,12 +848,14 @@ _jgit_backup_apply_repository() {
   done
 
   if [[ -s ${source}/tracked.patch ]]; then
-    git -C "${repository}" apply --index --3way "${apply_excludes[@]}" \
+    git -C "${repository}" apply --index --3way \
+      ${apply_excludes[@]+"${apply_excludes[@]}"} \
       "${source}/tracked.patch" || return 1
     git -C "${repository}" reset --quiet "${JGIT_BACKUP_PATHS[@]}" || return 1
   fi
   if [[ -s ${source}/staged.patch ]]; then
-    git -C "${repository}" apply --cached --3way "${apply_excludes[@]}" \
+    git -C "${repository}" apply --cached --3way \
+      ${apply_excludes[@]+"${apply_excludes[@]}"} \
       "${source}/staged.patch" || return 1
   fi
   _jgit_backup_apply_untracked "${repository}" "${source}" "${repository_path}"
@@ -727,7 +894,7 @@ _jgit_backup_prepare_submodule() {
 }
 
 _jgit_backup_apply_snapshot() {
-  local submodule_dir submodule_path repository
+  local submodule_dir submodule_path submodule_head repository
   for submodule_dir in "${JGIT_BACKUP_SNAPSHOT}"/submodules/*; do
     [[ -d ${submodule_dir} ]] || continue
     submodule_path=$(< "${submodule_dir}/path")
@@ -738,7 +905,9 @@ _jgit_backup_apply_snapshot() {
   for submodule_dir in "${JGIT_BACKUP_SNAPSHOT}"/submodules/*; do
     [[ -d ${submodule_dir} ]] || continue
     submodule_path=$(< "${submodule_dir}/path")
+    submodule_head=$(< "${submodule_dir}/head")
     repository=${JGIT_BACKUP_ROOT}/${submodule_path}
+    _jgit_backup_reconcile_gitlink "${submodule_path}" "${submodule_head}" || return 1
     _jgit_backup_apply_repository "${repository}" "${submodule_dir}" "${submodule_path}" ||
       return 1
   done
@@ -784,22 +953,15 @@ _jgit_backup_load() {
 
   if ! _jgit_backup_stash_current_changes; then
     if ((${#JGIT_BACKUP_STASH_OIDS[@]} > 0)); then
-      if _jgit_backup_restore_stashes; then
-        jsh::log_warn 'Restored changes stashed before backup setup failed'
+      if _jgit_backup_rollback_transaction; then
+        jsh::log_warn 'Restored changes stashed before backup setup failed; recovery stashes were retained'
       else
         jsh::log_error 'Some recovery stashes could not be restored'
       fi
     fi
     _jgit_die 'could not prepare local changes for backup load'
   fi
-  if ! _jgit_backup_apply_snapshot; then
-    _jgit_backup_report_stashes
-    jsh::log_error 'Backup could not be applied; any recovery stashes were retained'
-    return 1
-  fi
-  if ! _jgit_backup_restore_stashes; then
-    _jgit_die 'backup applied, but some prior local changes remain in recovery stashes'
-  fi
+  _jgit_backup_apply_transaction || return 1
   jsh::log_success "Loaded uncommitted changes from secret gist ${gist_id}"
   git -C "${JGIT_BACKUP_ROOT}" status --short
 }

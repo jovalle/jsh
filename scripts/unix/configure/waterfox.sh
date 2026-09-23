@@ -177,11 +177,12 @@ configure_linux_entry_points() {
   jsh_interrupt_cleanup_path "${temporary}"
   {
     printf '[Desktop Entry]\nType=Application\nName=Waterfox\n'
-    printf 'Exec=%s open -- %%u\n' "$(jsh_desktop_executable "${JSH_ROOT}/bin/waterfix")"
+    printf 'Exec=%s %%u\n' "$(jsh_desktop_executable "${binary}")"
     printf 'Icon=%s\n' "${icon}"
     printf 'Categories=Network;WebBrowser;\n'
     printf 'MimeType=text/html;x-scheme-handler/http;x-scheme-handler/https;\n'
     printf 'StartupNotify=true\n'
+    printf 'StartupWMClass=waterfox\n'
   } > "${temporary}"
   jsh_ensure_file "${applications}/waterfox.desktop" "${temporary}" 0644 || {
     ensure_status=$?
