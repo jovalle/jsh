@@ -600,7 +600,7 @@ add_to_manifest() {
 }
 
 adopt_command() {
-  local selector=auto package metadata formula cask kind name scope config
+  local selector=auto package metadata formula cask kind name scope config conflicts
   local -a packages=()
 
   for package in "$@"; do
@@ -635,6 +635,12 @@ adopt_command() {
       hydrate_formula_metadata
       metadata_for "${name}"
       [[ ${META_STATE} != disabled ]] || die "${name} is disabled"
+      conflicts=$(jq -r --arg present "$(
+        "${BREW}" list --formula -1 --full-name 2>/dev/null || true
+        jq -r '.layers[].install.brew.formulae // [] | .[]' "$(jsh_manifest_path)"
+      )" '($present | split("\n")) as $present
+        | [.formulae[0].conflicts_with[] as $other | select($present | index($other)) | $other] | join(", ")' <<<"${metadata}")
+      [[ -z ${conflicts} ]] || die "${name} conflicts with ${conflicts}"
       if [[ ${META_MAC} == yes && ${META_LIN} == yes ]]; then
         scope=unix
       elif [[ ${META_MAC} == yes && ${META_LIN} == no ]]; then
