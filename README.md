@@ -79,6 +79,10 @@ When tracked local changes exist, Jsh offers to stash them, fast-forward, and re
 `--yes` accepts that offer. `jsh update --dry-run` fetches, then previews repository and submodule drift, outdated
 Homebrew packages, and the planned steps without applying them.
 
+`jsh doctor` reports startup dependencies, upstream drift as of the last fetch, the install profile, and stale links to
+removed dotfiles. `jsh repair` fixes submodules, the vendored fzf executable, and stale links. `jsh uninstall` removes
+the jstow-managed dotfile links.
+
 ## Included Commands
 
 The [`bin/`](bin/) directory is added to `PATH` inside Jsh.
