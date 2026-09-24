@@ -478,6 +478,7 @@ setup_system() {
       JSH_UPDATE=1 run_make_target install
       run_make_target deploy
       run_make_target configure
+      run_make_target patch
       ;;
     *)
       jsh_error "Unknown install profile: ${profile}"
@@ -545,6 +546,7 @@ update_environment() {
       run_update_step "Betterfox" "${JSH_DIR}/scripts/unix/configure/waterfox.sh" update
       run_update_step "Dotfiles" run_make_target deploy
       run_update_step "Configuration" run_make_target configure
+      run_update_step "Patches" run_make_target patch
       ;;
     *)
       jsh_error "Unknown install profile: ${profile}"

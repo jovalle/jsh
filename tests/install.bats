@@ -110,7 +110,7 @@ EOF
 
   setup_system
 
-  diff -u <(printf 'install\t1\ndeploy\t0\nconfigure\t0\n') "${calls}"
+  diff -u <(printf 'install\t1\ndeploy\t0\nconfigure\t0\npatch\t0\n') "${calls}"
 }
 
 @test "slim install limits packages to core and skips platform configuration" {

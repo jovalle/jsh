@@ -69,7 +69,8 @@ owned by their component scripts. Installers inspect current state before changi
 ## Update Jsh
 
 Run `jsh update` to update the repository and reconcile the installed experience. Bare updates only the runtime; install
-reconciles core packages and dotfiles; setup also updates all selected packages, applications, and managed configuration.
+reconciles core packages and dotfiles; setup also updates all selected packages, applications, and managed configuration,
+then reapplies platform patches.
 The persistent scope is stored at `${XDG_STATE_HOME:-$HOME/.local/state}/jsh/install-profile`. When no state exists, Jsh
 defaults to bare unless deployed Jsh dotfiles identify a legacy full installation.
 
