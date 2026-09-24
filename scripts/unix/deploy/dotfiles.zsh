@@ -97,6 +97,12 @@ if ! jsh::confirm "Continue?" --default yes; then
   exit 0
 fi
 
+jsh::log_info "Checking for stale Jsh symlinks..."
+while IFS= read -r link; do
+  jsh::log_info "Removing stale managed symlink: ${link}"
+  stash_path "${link}"
+done < <("${repo_root}/lib/unix/stale-links.sh" "${repo_root}")
+
 jsh::log_info "Checking for legacy Jsh symlinks..."
 typeset -a dotfile_sources
 while IFS= read -r -d $'\0' link; do
