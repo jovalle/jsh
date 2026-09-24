@@ -6,6 +6,7 @@
 ## setup ## Install and configure the complete managed workstation
 ## update ## Update Jsh, dependencies, packages, and managed configuration
 ##? update --dry-run ## Fetch and preview the update without applying it
+## doctor ## Report dependencies, repository drift, and managed links
 ## repair ## Initialize submodules, install fzf, and remove stale links
 ## uninstall ## Remove dotfile links managed by jstow
 ## reload ## Reload the active J shell
@@ -38,7 +39,7 @@ if [ "${JSH_BASH_RUNTIME:-0}" = 1 ]; then
         JSH_INSTALL_RETURN=1 JSH_BASH_RUNTIME=0 command "${JSH_ROOT}/bin/jsh" "$@" || return
         JSH_RELOADING=1 JSH_BASH_RUNTIME=1 exec "${JSH_BASH}" --noprofile --rcfile "${JSH_ROOT}/bin/jsh" -i
         ;;
-      adopt | uninstall)
+      adopt | doctor | uninstall)
         JSH_BASH_RUNTIME=0 command "${JSH_ROOT}/bin/jsh" "$@"
         ;;
       --yes)
@@ -181,7 +182,7 @@ jsh_health_check() {
   JSH_HEALTH_ISSUES=
   JSH_HEALTH_VERBOSE=${1:-0}
   JSH_HEALTH_PROGRESS=0
-  if [ "${JSH_HEALTH_VERBOSE}" -eq 1 ] && [ -t 2 ] &&
+  if [ "${JSH_HEALTH_VERBOSE}" -eq 1 ] && [ "${2:-progress}" = progress ] && [ -t 2 ] &&
     [ "${TERM:-}" != dumb ] && [ "${JSH_PLAIN_OUTPUT:-0}" != 1 ]; then
     JSH_HEALTH_PROGRESS=1
   fi
@@ -300,6 +301,76 @@ jsh_repair() {
   return 1
 }
 
+jsh_doctor() {
+  jsh_info 'Startup dependencies'
+  jsh_health_check 1 static || :
+
+  jsh_blank
+  jsh_info 'Repository'
+  if command -v git > /dev/null 2>&1 && [ -e "${JSH_ROOT}/.git" ]; then
+    if doctor_branch=$(git -C "${JSH_ROOT}" symbolic-ref --quiet --short HEAD 2> /dev/null); then
+      jsh_health_status ok "Branch: ${doctor_branch}"
+    else
+      jsh_health_status skip 'Branch: detached HEAD'
+    fi
+    if doctor_counts=$(git -C "${JSH_ROOT}" rev-list --left-right --count 'HEAD...@{upstream}' 2> /dev/null); then
+      doctor_ahead=${doctor_counts%%[[:space:]]*}
+      doctor_behind=${doctor_counts##*[[:space:]]}
+      if [ "${doctor_ahead}" -gt 0 ] && [ "${doctor_behind}" -gt 0 ]; then
+        jsh_health_issue "Diverged from upstream as of the last fetch: ${doctor_ahead} ahead, ${doctor_behind} behind."
+      elif [ "${doctor_behind}" -gt 0 ]; then
+        jsh_health_issue "Behind upstream by ${doctor_behind} as of the last fetch; run \`jsh update\`."
+      elif [ "${doctor_ahead}" -gt 0 ]; then
+        jsh_health_status skip "Ahead of upstream by ${doctor_ahead} as of the last fetch."
+      else
+        jsh_health_status ok 'Up to date with upstream as of the last fetch.'
+      fi
+    else
+      jsh_health_status skip 'No upstream is configured.'
+    fi
+    doctor_changes=$(git -C "${JSH_ROOT}" status --porcelain --untracked-files=no | wc -l | tr -d ' ')
+    if [ "${doctor_changes}" -gt 0 ]; then
+      jsh_health_status skip "Local changes: ${doctor_changes} tracked path(s)."
+    else
+      jsh_health_status ok 'No local changes to tracked files.'
+    fi
+  else
+    jsh_health_status skip 'Git checkout unavailable.'
+  fi
+
+  jsh_blank
+  jsh_info 'Installation'
+  doctor_profile_file=${JSH_PROFILE_STATE_FILE:-${XDG_STATE_HOME:-${HOME}/.local/state}/jsh/install-profile}
+  if [ -r "${doctor_profile_file}" ] && IFS= read -r doctor_profile < "${doctor_profile_file}"; then
+    jsh_health_status ok "Install profile: ${doctor_profile}"
+  else
+    jsh_health_status skip 'Install profile: not recorded (runtime only).'
+  fi
+  if [ "${HOME}/.local/bin/jsh" -ef "${JSH_ROOT}/bin/jsh" ]; then
+    jsh_health_status ok "Launcher: ${HOME}/.local/bin/jsh"
+  else
+    jsh_health_status skip 'Launcher: not installed.'
+  fi
+  if doctor_links=$("${JSH_ROOT}/lib/unix/stale-links.sh" "${JSH_ROOT}"); then
+    if [ -n "${doctor_links}" ]; then
+      while IFS= read -r doctor_link; do
+        jsh_health_issue "Stale managed symlink: ${doctor_link}"
+      done << EOF
+${doctor_links}
+EOF
+    else
+      jsh_health_status ok 'No stale managed symlinks.'
+    fi
+  else
+    jsh_health_issue 'Managed symlinks could not be scanned.'
+  fi
+
+  [ -n "${JSH_HEALTH_ISSUES}" ] || return 0
+  jsh_blank
+  jsh_error 'Jsh needs attention. Run `jsh repair` for dependencies and stale links, or `jsh update` for upstream changes.'
+  return 1
+}
+
 assume_yes=
 if [ "${1:-}" = --yes ] || [ "${1:-}" = -y ]; then
   assume_yes=$1
@@ -325,13 +396,18 @@ if [ "${1:-}" = install ] || [ "${1:-}" = setup ] || [ "${1:-}" = update ]; then
   exec "${JSH_ROOT}/j.sh" "${action}" "$@"
 fi
 
-if [ "${1:-}" = repair ]; then
+if [ "${1:-}" = repair ] || [ "${1:-}" = doctor ]; then
+  action=$1
   shift
   if [ "$#" -ne 0 ]; then
-    printf 'jsh: repair does not accept arguments\n' >&2
+    printf 'jsh: %s does not accept arguments\n' "${action}" >&2
     exit 2
   fi
-  jsh_repair
+  if [ "${action}" = doctor ]; then
+    jsh_doctor
+  else
+    jsh_repair
+  fi
   exit $?
 fi
 
@@ -372,6 +448,7 @@ ${usage_heading}Commands${usage_reset}
   ${usage_command}setup${usage_reset}                      Install and configure the managed workstation
   ${usage_command}update${usage_reset} [--dry-run]         Update Jsh, packages, and configuration
   ${usage_command}adopt${usage_reset} [--dry-run] PATH...  Move home paths into the shared dotfiles package
+  ${usage_command}doctor${usage_reset}                     Report dependencies, repository drift, and links
   ${usage_command}repair${usage_reset}                     Initialize submodules, install fzf, remove stale links
   ${usage_command}uninstall${usage_reset}                  Remove dotfile links managed by jstow
 
