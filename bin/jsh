@@ -159,11 +159,17 @@ jsh_health_path() {
   jsh_health_status ok "${health_label}: ${health_path}"
 }
 
+jsh_vendored_fzf_current() {
+  fzf_pinned=$(sed -n 's/^version=//p' "${JSH_ROOT}/local/vendor/fzf/install" 2> /dev/null) || fzf_pinned=
+  fzf_version=$("${JSH_ROOT}/local/vendor/fzf/bin/fzf" --version 2> /dev/null) || return 1
+  [ -z "${fzf_pinned}" ] || [ "${fzf_version%% *}" = "${fzf_pinned}" ]
+}
+
 jsh_fzf_healthy() {
   if command -v fzf > /dev/null 2>&1; then
     fzf --version > /dev/null 2>&1
   elif [ -x "${JSH_ROOT}/local/vendor/fzf/bin/fzf" ]; then
-    "${JSH_ROOT}/local/vendor/fzf/bin/fzf" --version > /dev/null 2>&1
+    jsh_vendored_fzf_current
   else
     return 1
   fi
@@ -207,10 +213,12 @@ jsh_health_check() {
     fi
   elif [ -x "${JSH_ROOT}/local/vendor/fzf/bin/fzf" ]; then
     health_fzf=${JSH_ROOT}/local/vendor/fzf/bin/fzf
-    if health_version=$("${health_fzf}" --version 2> /dev/null); then
-      jsh_health_status ok "fzf: ${health_version} (${health_fzf})"
-    else
+    if ! health_version=$("${health_fzf}" --version 2> /dev/null); then
       jsh_health_issue "The vendored fzf executable cannot run (${health_fzf})."
+    elif ! jsh_vendored_fzf_current; then
+      jsh_health_issue "The vendored fzf executable ${health_version%% *} does not match the pinned ${fzf_pinned}."
+    else
+      jsh_health_status ok "fzf: ${health_version} (${health_fzf})"
     fi
   else
     jsh_health_issue "The fzf executable is missing (expected ${JSH_ROOT}/local/vendor/fzf/bin/fzf or fzf in PATH)."
