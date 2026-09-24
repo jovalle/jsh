@@ -5,6 +5,7 @@
 ## install ## Install the launcher, core shell tools, and managed dotfiles
 ## setup ## Install and configure the complete managed workstation
 ## update ## Update Jsh, dependencies, packages, and managed configuration
+##? update --dry-run ## Fetch and preview the update without applying it
 ## repair ## Initialize submodules, install fzf, and remove stale links
 ## reload ## Reload the active J shell
 ## -r ## Reload the active J shell
@@ -355,7 +356,7 @@ ${usage_heading}Commands${usage_reset}
   ${usage_command}runtime${usage_reset}                    Open the minimal, ephemeral shell (default)
   ${usage_command}install${usage_reset}                    Add the launcher, core tools, and managed dotfiles
   ${usage_command}setup${usage_reset}                      Install and configure the managed workstation
-  ${usage_command}update${usage_reset}                     Update Jsh, packages, and configuration
+  ${usage_command}update${usage_reset} [--dry-run]         Update Jsh, packages, and configuration
   ${usage_command}adopt${usage_reset} [--dry-run] PATH...  Move home paths into the shared dotfiles package
   ${usage_command}repair${usage_reset}                     Initialize submodules, install fzf, remove stale links
 
