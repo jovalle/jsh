@@ -148,6 +148,7 @@ for source in "${dotfile_sources[@]}"; do
   target="${HOME}/${relative}"
 
   # Stow may link a parent directory; its children already are the source files.
+  [[ "${target:h:A}/${target:t}" != "${source:h:A}/${source:t}" ]] || continue
   [[ ! -e "${target}" || ! "${target}" -ef "${source}" ]] || continue
 
   if [[ -L "${target}" ]]; then

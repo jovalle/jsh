@@ -409,6 +409,40 @@ class DeployTests(unittest.TestCase):
             self.assertFalse((home / "state/jsh/backups").exists())
 
     @unittest.skipUnless(shutil.which("zsh"), "Zsh is required for dotfile deployment")
+    def test_redeploy_preserves_broken_links_under_stow_directory_links(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "repo"
+            home = Path(directory) / "home"
+            (home / ".config").mkdir(parents=True)
+            for relative in (
+                "scripts/unix/deploy/dotfiles.zsh",
+                "bin/jstow",
+                "lib/env.sh",
+                "lib/output.sh",
+                "lib/ui.sh",
+                "lib/ui/theme.sh",
+            ):
+                target = root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(ROOT / relative, target)
+            source = root / "dotfiles/.config/example/SKILL.md"
+            source.parent.mkdir(parents=True)
+            source.symlink_to("../../../local/vendor/missing/SKILL.md")
+            env = dict(
+                os.environ,
+                HOME=str(home),
+                XDG_STATE_HOME=str(home / "state"),
+                JSH_ASSUME_YES="1",
+                JSH_PLAIN_OUTPUT="1",
+            )
+            command = ["zsh", str(root / "scripts/unix/deploy/dotfiles.zsh")]
+            subprocess.run(command, env=env, capture_output=True, check=True)
+            self.assertTrue((home / ".config/example").is_symlink())
+            subprocess.run(command, env=env, capture_output=True, check=True)
+            self.assertTrue(source.is_symlink())
+            self.assertFalse((home / "state/jsh/backups").exists())
+
+    @unittest.skipUnless(shutil.which("zsh"), "Zsh is required for dotfile deployment")
     def test_deploy_leaves_gitignored_dotfile_state_unmanaged(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "repo"
