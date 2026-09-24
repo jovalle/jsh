@@ -64,8 +64,8 @@ export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-${HOME}/.config}"         # Wwhere ap
 export JSH_VENDOR="${JSH}/local/vendor"
 export FZF_BASE="${JSH}/local/vendor/fzf"
 
-# Paths - ORDER MATTERS (priority: local > jsh > vendored fzf > go > cargo)
-export PATH=${HOME}/.local/bin:${JSH}/bin:${FZF_BASE}/bin:${HOME}/go/bin:${PATH}:${HOME}/.cargo/bin
+# Paths - ORDER MATTERS (priority: local > jsh local > jsh > vendored fzf > go > cargo)
+export PATH=${HOME}/.local/bin:${JSH}/local/bin:${JSH}/bin:${FZF_BASE}/bin:${HOME}/go/bin:${PATH}:${HOME}/.cargo/bin
 # Locate an existing Homebrew installation before shell hooks and completions.
 for _jsh_brew_bin in /opt/homebrew/bin /usr/local/bin /home/linuxbrew/.linuxbrew/bin; do
   [[ ! -x ${_jsh_brew_bin}/brew ]] || path+=(${_jsh_brew_bin})
