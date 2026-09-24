@@ -5,6 +5,7 @@
 ## install ## Install the launcher, core shell tools, and managed dotfiles
 ## setup ## Install and configure the complete managed workstation
 ## update ## Update Jsh, dependencies, packages, and managed configuration
+## repair ## Initialize submodules, install fzf, and remove stale links
 ## reload ## Reload the active J shell
 ## -r ## Reload the active J shell
 ## --help ## Show help
@@ -269,6 +270,18 @@ jsh_repair() {
     fi
   fi
 
+  if repair_links=$("${JSH_ROOT}/lib/unix/stale-links.sh" "${JSH_ROOT}"); then
+    if [ -n "${repair_links}" ]; then
+      jsh_info 'Removing stale managed symlinks...'
+      printf '%s\n' "${repair_links}" | while IFS= read -r repair_link; do
+        rm -f -- "${repair_link}" || exit 1
+        jsh_detail "${repair_link}"
+      done || repair_failed=1
+    fi
+  else
+    repair_failed=1
+  fi
+
   if [ "${repair_failed}" -eq 0 ] && jsh_health_check 1; then
     return 0
   fi
@@ -336,7 +349,7 @@ ${usage_heading}Commands${usage_reset}
   ${usage_command}setup${usage_reset}                      Install and configure the managed workstation
   ${usage_command}update${usage_reset}                     Update Jsh, packages, and configuration
   ${usage_command}adopt${usage_reset} [--dry-run] PATH...  Move home paths into the shared dotfiles package
-  ${usage_command}repair${usage_reset}                     Initialize submodules and install fzf
+  ${usage_command}repair${usage_reset}                     Initialize submodules, install fzf, remove stale links
 
 ${usage_heading}Options${usage_reset}
   -y, --yes                 Accept prompts without interaction
