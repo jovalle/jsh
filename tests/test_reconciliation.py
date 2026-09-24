@@ -557,6 +557,7 @@ class MakeOrchestrationTests(unittest.TestCase):
                     "unix-spotify",
                     "unix-sublime",
                     "linux-desktop",
+                    "linux-patch",
                 ],
             )
 

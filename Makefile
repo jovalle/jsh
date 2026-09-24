@@ -131,7 +131,7 @@ patch: ## Apply patches for the current platform
 	$(call run_scripts,patch)
 
 setup: ## Discover and run the current platform setup
-	$(call run_scripts,install deploy configure)
+	$(call run_scripts,install deploy configure patch)
 
 hooks: ## Install repository hooks
 	@"$(JSH_ROOT)/scripts/development/hooks.sh"
