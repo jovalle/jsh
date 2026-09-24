@@ -318,13 +318,24 @@ install_prerequisites() {
   fi
 }
 
+refresh_vendored_fzf() {
+  local fzf_dir=${JSH_DIR}/local/vendor/fzf pinned installed
+  [[ -x ${fzf_dir}/bin/fzf && -x ${fzf_dir}/install ]] || return 0
+  pinned=$(sed -n 's/^version=//p' "${fzf_dir}/install")
+  installed=$("${fzf_dir}/bin/fzf" --version 2> /dev/null) || installed=
+  [[ -n ${pinned} && ${installed%% *} != "${pinned}" ]] || return 0
+  jsh_info "Updating the vendored fzf executable to ${pinned}..."
+  "${fzf_dir}/install" --bin
+}
+
 sync_submodules() {
   if ! confirm "Initialize and update Jsh submodules?"; then
     jsh_note "Skipped submodule initialization and update."
     return
   fi
-  git -C "${JSH_DIR}" submodule sync --recursive
-  git -C "${JSH_DIR}" submodule update --init --recursive
+  git -C "${JSH_DIR}" submodule sync --recursive || return
+  git -C "${JSH_DIR}" submodule update --init --recursive || return
+  refresh_vendored_fzf
 }
 
 sync_repository() {
