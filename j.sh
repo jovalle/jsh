@@ -338,20 +338,71 @@ sync_submodules() {
   refresh_vendored_fzf
 }
 
+plural() {
+  (($1 == 1)) || printf s
+}
+
+# Sets REPOSITORY_AHEAD, REPOSITORY_BEHIND, and REPOSITORY_DIRTY; returns 10 when upstream is unavailable.
+inspect_repository() {
+  local counts
+  REPOSITORY_AHEAD=0 REPOSITORY_BEHIND=0 REPOSITORY_DIRTY=0
+  if ! git -C "${JSH_DIR}" rev-parse --verify --quiet '@{upstream}' > /dev/null; then
+    jsh_note "No upstream is configured for ${JSH_DIR}; skipping repository pull."
+    return 10
+  fi
+  if ! git -C "${JSH_DIR}" fetch --quiet --no-recurse-submodules; then
+    jsh_warn "Could not fetch Jsh from upstream; skipping repository pull."
+    return 10
+  fi
+  counts=$(git -C "${JSH_DIR}" rev-list --left-right --count 'HEAD...@{upstream}') || return
+  read -r REPOSITORY_AHEAD REPOSITORY_BEHIND <<< "${counts}"
+  [[ -z "$(git -C "${JSH_DIR}" status --porcelain --untracked-files=no)" ]] || REPOSITORY_DIRTY=1
+
+  if ((REPOSITORY_AHEAD && REPOSITORY_BEHIND)); then
+    jsh_warn "Jsh has diverged from upstream: ${REPOSITORY_AHEAD} ahead, ${REPOSITORY_BEHIND} behind."
+  elif ((REPOSITORY_BEHIND)); then
+    jsh_note "Upstream has ${REPOSITORY_BEHIND} new commit$(plural "${REPOSITORY_BEHIND}")."
+  elif ((REPOSITORY_AHEAD)); then
+    jsh_note "Jsh is ${REPOSITORY_AHEAD} commit$(plural "${REPOSITORY_AHEAD}") ahead of upstream."
+  else
+    jsh_note "Jsh is up to date with upstream."
+  fi
+  ((REPOSITORY_DIRTY == 0)) || jsh_note "Local changes found in ${JSH_DIR}."
+}
+
+# Returns 10 when the pull is skipped so update summaries report it.
+pull_repository() {
+  inspect_repository || return
+  ((REPOSITORY_BEHIND)) || return 0
+  if ((REPOSITORY_AHEAD)); then
+    jsh_warn "Rebase or merge ${JSH_DIR} manually; skipping repository pull."
+    return 10
+  fi
+  if ((REPOSITORY_DIRTY)); then
+    if ! confirm "Stash local changes, pull, and restore them?" no; then
+      jsh_note "Skipped repository pull."
+      return 10
+    fi
+    (cd -- "${JSH_DIR}" && "${JSH_DIR}/bin/jgit" update --stash)
+    return
+  fi
+  if ! confirm "Pull Jsh from upstream?"; then
+    jsh_note "Skipped repository pull."
+    return 10
+  fi
+  git -C "${JSH_DIR}" pull --ff-only
+}
+
 sync_repository() {
+  local result=0
   if ! command -v git > /dev/null 2>&1; then
     jsh_error "Git is required. Run the prerequisite phase first."
     exit 1
   fi
 
   if [[ -d "${JSH_DIR}/.git" ]]; then
-    if [[ -n "$(git -C "${JSH_DIR}" status --porcelain --untracked-files=no)" ]]; then
-      jsh_note "Local changes found in ${JSH_DIR}; skipping repository pull."
-    elif confirm "Pull Jsh from upstream?"; then
-      git -C "${JSH_DIR}" pull --ff-only || return
-    else
-      jsh_note "Skipped repository pull."
-    fi
+    pull_repository || result=$?
+    ((result == 0 || result == 10)) || return "${result}"
     sync_submodules || return
     return
   fi
@@ -398,14 +449,11 @@ update_repository() {
     jsh_error "Jsh is not a Git checkout: ${JSH_DIR}"
     return 1
   fi
-  if [[ -n "$(git -C "${JSH_DIR}" status --porcelain --untracked-files=no)" ]]; then
-    jsh_note "Local changes found in ${JSH_DIR}; skipping repository pull."
-  elif confirm "Pull Jsh from upstream?"; then
-    git -C "${JSH_DIR}" pull --ff-only || return
-  else
-    jsh_note "Skipped repository pull."
-  fi
+  local result=0
+  pull_repository || result=$?
+  ((result == 0 || result == 10)) || return "${result}"
   sync_submodules || return
+  return "${result}"
 }
 
 setup_system() {
