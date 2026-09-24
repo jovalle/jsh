@@ -395,6 +395,7 @@ pull_repository() {
 
 sync_repository() {
   local result=0
+  local -a clone_options=()
   if ! command -v git > /dev/null 2>&1; then
     jsh_error "Git is required. Run the prerequisite phase first."
     exit 1
@@ -412,8 +413,10 @@ sync_repository() {
     exit 1
   fi
 
+  # The runtime needs only the current tree; history blobs download on demand.
+  [[ ${mode} != runtime ]] || clone_options=(--filter=blob:none)
   mkdir -p "$(dirname "${JSH_DIR}")"
-  git clone "${JSH_REPO}" "${JSH_DIR}"
+  git clone ${clone_options[@]+"${clone_options[@]}"} "${JSH_REPO}" "${JSH_DIR}"
   sync_submodules
 }
 
