@@ -96,25 +96,28 @@ fi
 
 usage() {
   cat <<'EOF'
-Usage: j.sh [-y|--yes] [runtime|install|setup|update]
+Usage: j.sh [-y|--yes] [runtime|install|setup|update [--dry-run]]
 
 With no arguments, prepare and open the isolated Jsh runtime.
 Run with runtime for the same minimal, ephemeral experience.
 Run with install to add the launcher, core shell tools, and managed dotfiles.
 Run with setup to install and configure the complete managed workstation.
 Run with update to update Jsh and reapply the managed environment.
+Use update --dry-run to fetch and preview the update without changing anything else.
 Use -y or --yes to accept prompts for the selected command without interactive input.
 EOF
 }
 
 mode=runtime
 command_seen=0
+update_dry_run=0
 while (($#)); do
   case $1 in
     -y | --yes)
       export JSH_ASSUME_YES=1 JSH_CONFIGURE_ASSUME_YES=1 JSH_UPDATE_ASSUME_YES=1
       export JSH_NON_INTERACTIVE=1
       ;;
+    --dry-run) update_dry_run=1 ;;
     runtime | install | setup | update)
       if ((command_seen)); then
         jsh_error "Too many commands."
@@ -136,6 +139,15 @@ while (($#)); do
   esac
   shift
 done
+
+if ((update_dry_run)); then
+  if [[ ${mode} != update ]]; then
+    jsh_error "--dry-run is only supported by update."
+    usage >&2
+    exit 2
+  fi
+  export JSH_NON_INTERACTIVE=1
+fi
 
 install_profile=
 case ${mode} in
@@ -160,7 +172,7 @@ if declare -F jsh::init > /dev/null; then
 fi
 
 if [[ -r /proc/self/status ]] && grep -Eq '^NoNewPrivs:[[:space:]]+1$' /proc/self/status; then
-  if [[ ${mode} == install || ${mode} == setup || ${mode} == update ]]; then
+  if [[ ${mode} == install || ${mode} == setup || ${mode} == update ]] && ((!update_dry_run)); then
     jsh_error "This session prohibits privilege elevation. Run Jsh from a regular terminal."
     exit 1
   fi
@@ -459,6 +471,43 @@ update_repository() {
   return "${result}"
 }
 
+preview_repository() {
+  local drift
+  if [[ ! -d "${JSH_DIR}/.git" ]]; then
+    jsh_error "Jsh is not a Git checkout: ${JSH_DIR}"
+    return 1
+  fi
+  inspect_repository || :
+  drift=$(git -C "${JSH_DIR}" submodule status --recursive | grep -E '^[-+U]') || :
+  if [[ -n ${drift} ]]; then
+    jsh_note "Submodules that would be initialized or moved:"
+    jsh_detail "${drift}"
+  fi
+}
+
+preview_update() {
+  local profile=$1 outdated
+  jsh_blank
+  jsh_info "Repository and submodules"
+  preview_repository || return
+  if [[ ${profile} != bare ]]; then
+    load_brew
+    if command -v brew > /dev/null 2>&1; then
+      jsh_blank
+      jsh_info "Outdated Homebrew packages"
+      outdated=$(HOMEBREW_NO_AUTO_UPDATE=1 brew outdated --quiet 2> /dev/null) || :
+      if [[ -n ${outdated} ]]; then
+        jsh_detail "${outdated}"
+      else
+        jsh_note "None."
+      fi
+    fi
+  fi
+  jsh_blank
+  jsh_info "Planned steps"
+  UPDATE_PREVIEW=1 update_environment "${profile}"
+}
+
 setup_system() {
   local profile=${1:-full}
   if [[ ! -f "${JSH_DIR}/Makefile" ]]; then
@@ -631,6 +680,10 @@ configure_runtime_path() {
 run_update_step() {
   local label=$1 result
   shift
+  if [[ ${UPDATE_PREVIEW:-0} == 1 ]]; then
+    jsh_detail "${label}"
+    return
+  fi
   jsh_blank
   jsh_info "${label}"
   if "$@"; then
@@ -699,6 +752,12 @@ if [[ ${mode} == update ]]; then
   jsh_detail "Install directory: ${JSH_DIR}"
   install_profile=$(read_install_profile)
   jsh_detail "Installed experience: ${install_profile}"
+  if ((update_dry_run)); then
+    exit_status=0
+    preview_update "${install_profile}" || exit_status=$?
+    declare -F jsh::cleanup > /dev/null && jsh::cleanup
+    exit "${exit_status}"
+  fi
   export JSH_CONTINUE_ON_ERROR=1
   update_environment "${install_profile}"
   print_update_summary

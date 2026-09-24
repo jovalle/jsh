@@ -74,6 +74,11 @@ then reapplies platform patches.
 The persistent scope is stored at `${XDG_STATE_HOME:-$HOME/.local/state}/jsh/install-profile`. When no state exists, Jsh
 defaults to bare unless deployed Jsh dotfiles identify a legacy full installation.
 
+Updates fetch first and report how far the checkout is ahead of or behind upstream. A diverged checkout is never pulled.
+When tracked local changes exist, Jsh offers to stash them, fast-forward, and restore them through `jgit update --stash`;
+`--yes` accepts that offer. `jsh update --dry-run` fetches, then previews repository and submodule drift, outdated
+Homebrew packages, and the planned steps without applying them.
+
 ## Included Commands
 
 The [`bin/`](bin/) directory is added to `PATH` inside Jsh.
