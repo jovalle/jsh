@@ -18,6 +18,6 @@ Type `/graphify` in Copilot Chat to build or update the graph.
 
 ## archify
 
-Use the project-local `.agents/skills/archify` skill for architecture, workflow, sequence, data-flow,
+Use the global `archify` skill for architecture, workflow, sequence, data-flow,
 and lifecycle diagrams. Run its Node commands with `ARCHIFY_UPDATE_CHECK_DISABLED=1`, and keep typed
 sources and rendered HTML together under `docs/architecture/`.

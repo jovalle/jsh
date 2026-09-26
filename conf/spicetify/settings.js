@@ -13,7 +13,8 @@
     [settings.quality.volumeLevel, 1],
     [settings.playback.audioCrossfade, true],
     [settings.playback.audioCrossfadeMs, 3000],
-    [settings.viewportZoom, -122],
+    // Spotify sizes the macOS titlebar only for zoom levels in steps of 50.
+    [settings.viewportZoom, -100],
   ];
 
   Promise.all(
@@ -21,6 +22,14 @@
       if ((await setting.getValue()) !== desiredValue) await setting.setValue(desiredValue);
     }),
   ).catch((error) => console.error('[settings] Failed to apply Spotify settings', error));
+
+  // Spicetify maps Spotify's macOS (52px) and Windows/Linux (28px) spacers to one class; 28px wins.
+  if (/mac/i.test(navigator.userAgentData?.platform || navigator.platform)) {
+    const spacerStyle = document.createElement('style');
+    spacerStyle.textContent =
+      '.main-globalNav-historyButtonsSpacer { height: calc(12px / (var(--zoom-level, 100) / 100)) !important; width: calc(52px / (var(--zoom-level, 100) / 100)) !important; }';
+    document.head.append(spacerStyle);
+  }
 
   for (const key of Object.keys(localStorage).filter((key) => key.endsWith(':items-view'))) {
     if (localStorage.getItem(key) === '2') continue;

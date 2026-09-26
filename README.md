@@ -67,6 +67,12 @@ Everyday commands, rebuilt the way I wish they worked.
 
 With `jsh setup`, popular apps are configured the way I like them.
 
+#### Spotify
+
+Augmented with Spicetify and [my own enhancements](conf/spicetify/README.md), most notably better controls:
+
+![Traffic Light Controls Screenshot](assets/traffic-light-controls.png)
+
 #### Waterfox
 
 ![Waterfox](assets/waterfox.png)

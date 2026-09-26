@@ -4,10 +4,7 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
-const source = fs.readFileSync(
-  path.join(__dirname, '..', 'conf', 'spicetify', 'spotifix.js'),
-  'utf8',
-);
+const source = fs.readFileSync(path.join(__dirname, '..', 'conf', 'spicetify', 'play.js'), 'utf8');
 
 async function runRoute(pathname, randomValues, options = {}) {
   const playlistItems = options.rootItems || [

@@ -94,13 +94,14 @@ repos:
         language: system
         args: [--config=.markdownlint.json, --fix]
         types: [markdown]
+        exclude: '^dotfiles/\.agents/skills/'
 
       - id: prettier
         name: prettier
         entry: prettier --write --ignore-unknown
         language: system
         types_or: [javascript, json, markdown]
-        exclude: 'package-lock\.json'
+        exclude: 'package-lock\.json|^dotfiles/\.agents/skills/'
 
       - id: commitlint
         name: commitlint
