@@ -248,4 +248,41 @@
   Spicetify.Player.addEventListener('songchange', scheduleScan);
   new MutationObserver(scheduleScan).observe(document.body, { childList: true, subtree: true });
   loadLoved().catch(() => scheduleScan());
+
+  const isMac = /mac/i.test(navigator.userAgentData?.platform || navigator.platform);
+  const handledEvents = new WeakSet();
+  const handleShortcut = (event) => {
+    if (handledEvents.has(event)) return;
+    // Option+Shift changes event.key on macOS (L becomes Ò), so match the physical key.
+    const isL = event.code === 'KeyL' || event.key?.toLocaleLowerCase() === 'l';
+    const modifier = event.metaKey || event.ctrlKey;
+    if (!isL || !event.shiftKey || !event.altKey || !modifier) return;
+
+    handledEvents.add(event);
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.repeat) return;
+    const uri = Spicetify.Player.data?.item?.uri;
+    if (!isTrack(uri)) {
+      Spicetify.showNotification(`Play a track before toggling ${PLAYLIST_NAME}`, true);
+      return;
+    }
+    toggleLoved(uri);
+  };
+
+  try {
+    Spicetify.Keyboard?.registerShortcut(
+      { key: 'l', meta: isMac, ctrl: !isMac, alt: true, shift: true },
+      handleShortcut,
+    );
+    if (isMac) {
+      Spicetify.Keyboard?.registerShortcut(
+        { key: 'l', ctrl: true, alt: true, shift: true },
+        handleShortcut,
+      );
+    }
+  } catch {
+    // The native listener below remains the portable fallback.
+  }
+  window.addEventListener('keydown', handleShortcut, true);
 })();
