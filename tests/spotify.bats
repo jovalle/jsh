@@ -407,7 +407,7 @@ case "$*" in
   '--no-restart backup apply')
     mkdir -p "${SPICETIFY_SPOTIFY_PATH}/Apps/xpui/extensions"
     printf '<script src="helper/spicetifyWrapper.js"></script>\n' > "${SPICETIFY_SPOTIFY_PATH}/Apps/xpui/index.html"
-    for ext in settings.js adder.js spotifix.js; do
+    for ext in settings.js add.js play.js like.js love.js lyrics.js; do
       cp "${SPICETIFY_EXTENSION_SRC}/${ext}" "${SPICETIFY_SPOTIFY_PATH}/Apps/xpui/extensions/${ext}"
     done
     ;;
@@ -420,18 +420,27 @@ EOF
   [[ -z ${output} ]]
   cmp -s "${JSH_ROOT}/conf/spicetify/settings.js" \
     "${BATS_TEST_TMPDIR}/config/Extensions/settings.js"
-  cmp -s "${JSH_ROOT}/conf/spicetify/adder.js" \
-    "${BATS_TEST_TMPDIR}/config/Extensions/adder.js"
-  cmp -s "${JSH_ROOT}/conf/spicetify/spotifix.js" \
-    "${BATS_TEST_TMPDIR}/config/Extensions/spotifix.js"
+  cmp -s "${JSH_ROOT}/conf/spicetify/add.js" \
+    "${BATS_TEST_TMPDIR}/config/Extensions/add.js"
+  cmp -s "${JSH_ROOT}/conf/spicetify/play.js" \
+    "${BATS_TEST_TMPDIR}/config/Extensions/play.js"
+  cmp -s "${JSH_ROOT}/conf/spicetify/like.js" \
+    "${BATS_TEST_TMPDIR}/config/Extensions/like.js"
+  cmp -s "${JSH_ROOT}/conf/spicetify/love.js" \
+    "${BATS_TEST_TMPDIR}/config/Extensions/love.js"
+  cmp -s "${JSH_ROOT}/conf/spicetify/lyrics.js" \
+    "${BATS_TEST_TMPDIR}/config/Extensions/lyrics.js"
   mapfile -t calls < "${SPICETIFY_CALLS}"
   [[ ${calls[0]} = '-c' ]]
   [[ ${calls[1]} = 'config spotify_path '"${spotify_path}"' prefs_path /home/user/Spotify prefs' ]]
   [[ ${calls[2]} = 'config extensions settings.js' ]]
-  [[ ${calls[3]} = 'config extensions adder.js' ]]
-  [[ ${calls[4]} = 'config extensions spotifix.js' ]]
-  [[ ${calls[5]} = 'config' ]]
-  [[ ${calls[6]} = '--no-restart backup apply' ]]
+  [[ ${calls[3]} = 'config extensions add.js' ]]
+  [[ ${calls[4]} = 'config extensions play.js' ]]
+  [[ ${calls[5]} = 'config extensions like.js' ]]
+  [[ ${calls[6]} = 'config extensions love.js' ]]
+  [[ ${calls[7]} = 'config extensions lyrics.js' ]]
+  [[ ${calls[8]} = 'config' ]]
+  [[ ${calls[9]} = '--no-restart backup apply' ]]
 }
 
 @test "renames the managed settings extension" {
@@ -449,13 +458,13 @@ spotify_path = ${spotify_path}
 prefs_path = /home/user/prefs
 
 [AdditionalOptions]
-extensions = jsh-settings.js|adder.js
+extensions = jsh-settings.js|add.js
 
 [Backup]
 version = 1.2.3
 EOF
-  cp "${JSH_ROOT}/conf/spicetify/adder.js" \
-    "${BATS_TEST_TMPDIR}/config/Extensions/adder.js"
+  cp "${JSH_ROOT}/conf/spicetify/add.js" \
+    "${BATS_TEST_TMPDIR}/config/Extensions/add.js"
   cat > "${binary}" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >> "${SPICETIFY_CALLS}"
@@ -466,7 +475,7 @@ case "$*" in
   '--no-restart apply')
     mkdir -p "${SPICETIFY_SPOTIFY_PATH}/Apps/xpui/extensions"
     printf '<script src="helper/spicetifyWrapper.js"></script>\n' > "${SPICETIFY_SPOTIFY_PATH}/Apps/xpui/index.html"
-    for ext in settings.js adder.js spotifix.js; do
+    for ext in settings.js add.js play.js like.js love.js lyrics.js; do
       cp "${SPICETIFY_EXTENSION_SRC}/${ext}" "${SPICETIFY_SPOTIFY_PATH}/Apps/xpui/extensions/${ext}"
     done
     ;;
@@ -484,31 +493,30 @@ EOF
     "${BATS_TEST_TMPDIR}/config/Extensions/settings.js"
 }
 
-@test "renames the managed Spotify command extension" {
-  local binary="${BATS_TEST_TMPDIR}/spicetify"
+@test "renames legacy managed extensions" {
+  local binary="${BATS_TEST_TMPDIR}/spicetify" legacy
   local spotify_path="${BATS_TEST_TMPDIR}/spotify"
   export SPICETIFY_CALLS="${BATS_TEST_TMPDIR}/spicetify-calls"
   export SPICETIFY_CONFIG="${BATS_TEST_TMPDIR}/config/config-xpui.ini"
   export SPICETIFY_EXTENSION_SRC="${JSH_ROOT}/conf/spicetify"
   export SPICETIFY_SPOTIFY_PATH="${spotify_path}"
   mkdir -p "${BATS_TEST_TMPDIR}/config/Extensions"
-  touch "${BATS_TEST_TMPDIR}/config/Extensions/spotifi.js"
-  touch "${BATS_TEST_TMPDIR}/config/Extensions/spotify.js"
+  for legacy in spotifi.js spotify.js spotifix.js adder.js shuffle.js; do
+    touch "${BATS_TEST_TMPDIR}/config/Extensions/${legacy}"
+  done
   cat > "${SPICETIFY_CONFIG}" <<EOF
 [Setting]
 spotify_path = ${spotify_path}
 prefs_path = /home/user/prefs
 
 [AdditionalOptions]
-extensions = settings.js|adder.js|spotifi.js|spotify.js
+extensions = settings.js|adder.js|spotifix.js|spotifi.js|spotify.js|shuffle.js
 
 [Backup]
 version = 1.2.3
 EOF
   cp "${JSH_ROOT}/conf/spicetify/settings.js" \
     "${BATS_TEST_TMPDIR}/config/Extensions/settings.js"
-  cp "${JSH_ROOT}/conf/spicetify/adder.js" \
-    "${BATS_TEST_TMPDIR}/config/Extensions/adder.js"
   cat > "${binary}" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >> "${SPICETIFY_CALLS}"
@@ -519,7 +527,7 @@ case "$*" in
   '--no-restart apply')
     mkdir -p "${SPICETIFY_SPOTIFY_PATH}/Apps/xpui/extensions"
     printf '<script src="helper/spicetifyWrapper.js"></script>\n' > "${SPICETIFY_SPOTIFY_PATH}/Apps/xpui/index.html"
-    for ext in settings.js adder.js spotifix.js; do
+    for ext in settings.js add.js play.js like.js love.js lyrics.js; do
       cp "${SPICETIFY_EXTENSION_SRC}/${ext}" "${SPICETIFY_SPOTIFY_PATH}/Apps/xpui/extensions/${ext}"
     done
     ;;
@@ -530,13 +538,16 @@ EOF
   run configure_spicetify "${binary}" "${spotify_path}" '/home/user/prefs'
 
   [[ ${status} -eq 0 ]]
-  grep -Fxq 'config extensions spotifix.js' "${SPICETIFY_CALLS}"
-  grep -Fxq 'config extensions spotifi.js-' "${SPICETIFY_CALLS}"
-  grep -Fxq 'config extensions spotify.js-' "${SPICETIFY_CALLS}"
-  [[ ! -e ${BATS_TEST_TMPDIR}/config/Extensions/spotifi.js ]]
-  [[ ! -e ${BATS_TEST_TMPDIR}/config/Extensions/spotify.js ]]
-  cmp -s "${JSH_ROOT}/conf/spicetify/spotifix.js" \
-    "${BATS_TEST_TMPDIR}/config/Extensions/spotifix.js"
+  grep -Fxq 'config extensions add.js' "${SPICETIFY_CALLS}"
+  grep -Fxq 'config extensions play.js' "${SPICETIFY_CALLS}"
+  for legacy in spotifi.js spotify.js spotifix.js adder.js shuffle.js; do
+    grep -Fxq "config extensions ${legacy}-" "${SPICETIFY_CALLS}"
+    [[ ! -e ${BATS_TEST_TMPDIR}/config/Extensions/${legacy} ]]
+  done
+  cmp -s "${JSH_ROOT}/conf/spicetify/add.js" \
+    "${BATS_TEST_TMPDIR}/config/Extensions/add.js"
+  cmp -s "${JSH_ROOT}/conf/spicetify/play.js" \
+    "${BATS_TEST_TMPDIR}/config/Extensions/play.js"
 }
 
 @test "reuses an existing Spicetify backup" {
@@ -555,7 +566,7 @@ case "$*" in
   '--no-restart apply')
     mkdir -p "${SPICETIFY_SPOTIFY_PATH}/Apps/xpui/extensions"
     printf '<script src="helper/spicetifyWrapper.js"></script>\n' > "${SPICETIFY_SPOTIFY_PATH}/Apps/xpui/index.html"
-    for ext in settings.js adder.js spotifix.js; do
+    for ext in settings.js add.js play.js like.js love.js lyrics.js; do
       cp "${SPICETIFY_EXTENSION_SRC}/${ext}" "${SPICETIFY_SPOTIFY_PATH}/Apps/xpui/extensions/${ext}"
     done
     ;;
@@ -721,7 +732,7 @@ spotify_path = ${spotify_path}
 prefs_path = /home/user/prefs
 
 [AdditionalOptions]
-extensions = settings.js|adder.js|spotifix.js
+extensions = settings.js|add.js|play.js|like.js|love.js|lyrics.js
 
 [Backup]
 version = 1.2.0
@@ -758,7 +769,7 @@ EOF
   [[ -f ${BATS_TEST_TMPDIR}/state/Backup/xpui.spa ]]
   cmp -s "${BATS_TEST_TMPDIR}/libexec/jsHelper/spicetifyWrapper.js" \
     "${spotify_path}/Apps/xpui/helper/spicetifyWrapper.js"
-  for extension in settings.js adder.js spotifix.js; do
+  for extension in settings.js add.js play.js like.js love.js lyrics.js; do
     cmp -s "${JSH_ROOT}/conf/spicetify/${extension}" \
       "${spotify_path}/Apps/xpui/extensions/${extension}"
     grep -Fq "extensions/${extension}" "${spotify_path}/Apps/xpui/index.html"
@@ -780,17 +791,17 @@ spotify_path = ${BATS_TEST_TMPDIR}/spotify
 prefs_path = /home/user/prefs
 
 [AdditionalOptions]
-extensions = settings.js|adder.js|spotifix.js
+extensions = settings.js|add.js|play.js
 
 [Backup]
 version = 1.2.3
 EOF
   cp "${JSH_ROOT}/conf/spicetify/settings.js" \
     "${BATS_TEST_TMPDIR}/config/Extensions/settings.js"
-  cp "${JSH_ROOT}/conf/spicetify/adder.js" \
-    "${BATS_TEST_TMPDIR}/config/Extensions/adder.js"
-  cp "${JSH_ROOT}/conf/spicetify/spotifix.js" \
-    "${BATS_TEST_TMPDIR}/config/Extensions/spotifix.js"
+  cp "${JSH_ROOT}/conf/spicetify/add.js" \
+    "${BATS_TEST_TMPDIR}/config/Extensions/add.js"
+  cp "${JSH_ROOT}/conf/spicetify/play.js" \
+    "${BATS_TEST_TMPDIR}/config/Extensions/play.js"
   # Only install one extension in the bundle — the other two are missing.
   cp "${JSH_ROOT}/conf/spicetify/settings.js" \
     "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/extensions/settings.js"
@@ -823,23 +834,23 @@ spotify_path = ${BATS_TEST_TMPDIR}/spotify
 prefs_path = /home/user/prefs
 
 [AdditionalOptions]
-extensions = settings.js|adder.js|spotifix.js
+extensions = settings.js|add.js|play.js
 
 [Backup]
 version = 1.2.3
 EOF
   cp "${JSH_ROOT}/conf/spicetify/settings.js" \
     "${BATS_TEST_TMPDIR}/config/Extensions/settings.js"
-  cp "${JSH_ROOT}/conf/spicetify/adder.js" \
-    "${BATS_TEST_TMPDIR}/config/Extensions/adder.js"
-  cp "${JSH_ROOT}/conf/spicetify/spotifix.js" \
-    "${BATS_TEST_TMPDIR}/config/Extensions/spotifix.js"
+  cp "${JSH_ROOT}/conf/spicetify/add.js" \
+    "${BATS_TEST_TMPDIR}/config/Extensions/add.js"
+  cp "${JSH_ROOT}/conf/spicetify/play.js" \
+    "${BATS_TEST_TMPDIR}/config/Extensions/play.js"
   # Install all extensions but make one differ from source.
   cp "${JSH_ROOT}/conf/spicetify/settings.js" \
     "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/extensions/settings.js"
-  cp "${JSH_ROOT}/conf/spicetify/adder.js" \
-    "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/extensions/adder.js"
-  printf 'stale content\n' > "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/extensions/spotifix.js"
+  cp "${JSH_ROOT}/conf/spicetify/add.js" \
+    "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/extensions/add.js"
+  printf 'stale content\n' > "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/extensions/play.js"
   printf '<script src="helper/spicetifyWrapper.js"></script>\n' > "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/index.html"
   cat > "${binary}" <<'EOF'
 #!/bin/sh
@@ -883,7 +894,7 @@ spotify_path = ${spotify_path}
 prefs_path = /home/user/prefs
 
 [AdditionalOptions]
-extensions = settings.js|adder.js|spotifix.js
+extensions = settings.js|add.js|play.js|like.js|love.js|lyrics.js
 custom_apps =
 
 [Backup]
@@ -891,10 +902,16 @@ version = 1.2.3
 EOF
   cp "${JSH_ROOT}/conf/spicetify/settings.js" \
     "${BATS_TEST_TMPDIR}/config/Extensions/settings.js"
-  cp "${JSH_ROOT}/conf/spicetify/adder.js" \
-    "${BATS_TEST_TMPDIR}/config/Extensions/adder.js"
-  cp "${JSH_ROOT}/conf/spicetify/spotifix.js" \
-    "${BATS_TEST_TMPDIR}/config/Extensions/spotifix.js"
+  cp "${JSH_ROOT}/conf/spicetify/add.js" \
+    "${BATS_TEST_TMPDIR}/config/Extensions/add.js"
+  cp "${JSH_ROOT}/conf/spicetify/play.js" \
+    "${BATS_TEST_TMPDIR}/config/Extensions/play.js"
+  cp "${JSH_ROOT}/conf/spicetify/like.js" \
+    "${BATS_TEST_TMPDIR}/config/Extensions/like.js"
+  cp "${JSH_ROOT}/conf/spicetify/love.js" \
+    "${BATS_TEST_TMPDIR}/config/Extensions/love.js"
+  cp "${JSH_ROOT}/conf/spicetify/lyrics.js" \
+    "${BATS_TEST_TMPDIR}/config/Extensions/lyrics.js"
   cat > "${binary}" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$*" >> "${SPICETIFY_CALLS}"
@@ -903,7 +920,7 @@ case "$*" in
   '--no-restart apply')
     mkdir -p "${SPICETIFY_SPOTIFY_PATH}/Apps/xpui/extensions"
     printf '<script src="helper/spicetifyWrapper.js"></script>\n' > "${SPICETIFY_SPOTIFY_PATH}/Apps/xpui/index.html"
-    for ext in settings.js adder.js spotifix.js; do
+    for ext in settings.js add.js play.js like.js love.js lyrics.js; do
       cp "${SPICETIFY_EXTENSION_SRC}/${ext}" "${SPICETIFY_SPOTIFY_PATH}/Apps/xpui/extensions/${ext}"
     done
     ;;
@@ -934,7 +951,7 @@ spotify_path = ${BATS_TEST_TMPDIR}/spotify
 prefs_path = /home/user/prefs
 
 [AdditionalOptions]
-extensions = settings.js|adder.js|spotifix.js
+extensions = settings.js|add.js|play.js|like.js|love.js|lyrics.js
 custom_apps =
 
 [Backup]
@@ -942,10 +959,16 @@ version = 1.2.3
 EOF
   cp "${JSH_ROOT}/conf/spicetify/settings.js" \
     "${BATS_TEST_TMPDIR}/config/Extensions/settings.js"
-  cp "${JSH_ROOT}/conf/spicetify/adder.js" \
-    "${BATS_TEST_TMPDIR}/config/Extensions/adder.js"
-  cp "${JSH_ROOT}/conf/spicetify/spotifix.js" \
-    "${BATS_TEST_TMPDIR}/config/Extensions/spotifix.js"
+  cp "${JSH_ROOT}/conf/spicetify/add.js" \
+    "${BATS_TEST_TMPDIR}/config/Extensions/add.js"
+  cp "${JSH_ROOT}/conf/spicetify/play.js" \
+    "${BATS_TEST_TMPDIR}/config/Extensions/play.js"
+  cp "${JSH_ROOT}/conf/spicetify/like.js" \
+    "${BATS_TEST_TMPDIR}/config/Extensions/like.js"
+  cp "${JSH_ROOT}/conf/spicetify/love.js" \
+    "${BATS_TEST_TMPDIR}/config/Extensions/love.js"
+  cp "${JSH_ROOT}/conf/spicetify/lyrics.js" \
+    "${BATS_TEST_TMPDIR}/config/Extensions/lyrics.js"
 
   mkdir -p "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/extensions" \
     "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/helper"
@@ -953,15 +976,24 @@ EOF
   cat > "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/index.html" <<'HTML'
 <script src="helper/spicetifyWrapper.js"></script>
 <script src="extensions/settings.js"></script>
-<script src="extensions/adder.js"></script>
-<script src="extensions/spotifix.js"></script>
+<script src="extensions/add.js"></script>
+<script src="extensions/play.js"></script>
+<script src="extensions/like.js"></script>
+<script src="extensions/love.js"></script>
+<script src="extensions/lyrics.js"></script>
 HTML
   cp "${JSH_ROOT}/conf/spicetify/settings.js" \
     "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/extensions/settings.js"
-  cp "${JSH_ROOT}/conf/spicetify/adder.js" \
-    "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/extensions/adder.js"
-  cp "${JSH_ROOT}/conf/spicetify/spotifix.js" \
-    "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/extensions/spotifix.js"
+  cp "${JSH_ROOT}/conf/spicetify/add.js" \
+    "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/extensions/add.js"
+  cp "${JSH_ROOT}/conf/spicetify/play.js" \
+    "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/extensions/play.js"
+  cp "${JSH_ROOT}/conf/spicetify/like.js" \
+    "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/extensions/like.js"
+  cp "${JSH_ROOT}/conf/spicetify/love.js" \
+    "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/extensions/love.js"
+  cp "${JSH_ROOT}/conf/spicetify/lyrics.js" \
+    "${BATS_TEST_TMPDIR}/spotify/Apps/xpui/extensions/lyrics.js"
 
   cat > "${binary}" <<'EOF'
 #!/bin/sh
@@ -999,7 +1031,7 @@ spotify_path = ${JSH_SPOTIFY_PATH}
 prefs_path = ${JSH_SPOTIFY_PREFS}
 
 [AdditionalOptions]
-extensions = settings.js|adder.js|spotifix.js
+extensions = settings.js|add.js|play.js|like.js|love.js|lyrics.js
 custom_apps =
 
 [Backup]
@@ -1007,10 +1039,16 @@ version =
 EOF
   cp "${JSH_ROOT}/conf/spicetify/settings.js" \
     "${BATS_TEST_TMPDIR}/config/Extensions/settings.js"
-  cp "${JSH_ROOT}/conf/spicetify/adder.js" \
-    "${BATS_TEST_TMPDIR}/config/Extensions/adder.js"
-  cp "${JSH_ROOT}/conf/spicetify/spotifix.js" \
-    "${BATS_TEST_TMPDIR}/config/Extensions/spotifix.js"
+  cp "${JSH_ROOT}/conf/spicetify/add.js" \
+    "${BATS_TEST_TMPDIR}/config/Extensions/add.js"
+  cp "${JSH_ROOT}/conf/spicetify/play.js" \
+    "${BATS_TEST_TMPDIR}/config/Extensions/play.js"
+  cp "${JSH_ROOT}/conf/spicetify/like.js" \
+    "${BATS_TEST_TMPDIR}/config/Extensions/like.js"
+  cp "${JSH_ROOT}/conf/spicetify/love.js" \
+    "${BATS_TEST_TMPDIR}/config/Extensions/love.js"
+  cp "${JSH_ROOT}/conf/spicetify/lyrics.js" \
+    "${BATS_TEST_TMPDIR}/config/Extensions/lyrics.js"
 
   mkdir -p "${JSH_SPOTIFY_PATH}/Apps/xpui/extensions" \
     "${JSH_SPOTIFY_PATH}/Apps/xpui/helper"
@@ -1018,15 +1056,24 @@ EOF
   cat > "${JSH_SPOTIFY_PATH}/Apps/xpui/index.html" <<'HTML'
 <script src="helper/spicetifyWrapper.js"></script>
 <script src="extensions/settings.js"></script>
-<script src="extensions/adder.js"></script>
-<script src="extensions/spotifix.js"></script>
+<script src="extensions/add.js"></script>
+<script src="extensions/play.js"></script>
+<script src="extensions/like.js"></script>
+<script src="extensions/love.js"></script>
+<script src="extensions/lyrics.js"></script>
 HTML
   cp "${JSH_ROOT}/conf/spicetify/settings.js" \
     "${JSH_SPOTIFY_PATH}/Apps/xpui/extensions/settings.js"
-  cp "${JSH_ROOT}/conf/spicetify/adder.js" \
-    "${JSH_SPOTIFY_PATH}/Apps/xpui/extensions/adder.js"
-  cp "${JSH_ROOT}/conf/spicetify/spotifix.js" \
-    "${JSH_SPOTIFY_PATH}/Apps/xpui/extensions/spotifix.js"
+  cp "${JSH_ROOT}/conf/spicetify/add.js" \
+    "${JSH_SPOTIFY_PATH}/Apps/xpui/extensions/add.js"
+  cp "${JSH_ROOT}/conf/spicetify/play.js" \
+    "${JSH_SPOTIFY_PATH}/Apps/xpui/extensions/play.js"
+  cp "${JSH_ROOT}/conf/spicetify/like.js" \
+    "${JSH_SPOTIFY_PATH}/Apps/xpui/extensions/like.js"
+  cp "${JSH_ROOT}/conf/spicetify/love.js" \
+    "${JSH_SPOTIFY_PATH}/Apps/xpui/extensions/love.js"
+  cp "${JSH_ROOT}/conf/spicetify/lyrics.js" \
+    "${JSH_SPOTIFY_PATH}/Apps/xpui/extensions/lyrics.js"
 
   cat > "${binary}" <<'EOF'
 #!/bin/sh

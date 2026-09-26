@@ -16,8 +16,8 @@ unset library_file
 readonly SPICETIFY_FORMULA=spicetify-cli
 readonly SPICETIFY_EXTENSION_DIR="${JSH_ROOT}/conf/spicetify"
 readonly SPICETIFY_LEGACY_SETTINGS_EXTENSION=jsh-settings.js
-readonly -a SPICETIFY_LEGACY_COMMAND_EXTENSIONS=(spotifi.js spotify.js)
-readonly -a SPICETIFY_EXTENSIONS=(settings.js adder.js spotifix.js)
+readonly -a SPICETIFY_LEGACY_COMMAND_EXTENSIONS=(spotifi.js spotify.js spotifix.js adder.js shuffle.js lyrics-window.js)
+readonly -a SPICETIFY_EXTENSIONS=(settings.js add.js play.js like.js love.js lyrics.js)
 
 SPICETIFY_BIN=
 
@@ -316,7 +316,7 @@ EOF
   repaired_index=${index_file}.new
   SPICETIFY_HEAD="${helper_tags}" SPICETIFY_TAIL="${extension_tags}" \
     SPICETIFY_VERSION="${version}" perl -0pe '
-      s{<body>}{<body>\n$ENV{SPICETIFY_HEAD}\n<script>\nSpicetify.Config={};\nSpicetify.Config["version"]="$ENV{SPICETIFY_VERSION}";\nSpicetify.Config["extensions"]=["settings.js","adder.js","spotifix.js"];\nSpicetify.Config["custom_apps"]=[];\n</script>\n};
+      s{<body>}{<body>\n$ENV{SPICETIFY_HEAD}\n<script>\nSpicetify.Config={};\nSpicetify.Config["version"]="$ENV{SPICETIFY_VERSION}";\nSpicetify.Config["extensions"]=["settings.js","add.js","play.js","like.js","love.js","lyrics.js"];\nSpicetify.Config["custom_apps"]=[];\n</script>\n};
       s{</body>}{$ENV{SPICETIFY_TAIL}</body>};
     ' "${cleaned_index}" > "${repaired_index}" || return 1
   mv -- "${repaired_index}" "${index_file}"

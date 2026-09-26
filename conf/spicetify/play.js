@@ -1,10 +1,10 @@
-(function spotifix() {
+(function play() {
   const playRoute =
     /^\/search\/spotifix-play-(library|180g|liked|playlist)-(sequential|shuffle|smart-shuffle)-/;
   const likedSongsUri = 'spotify:collection:tracks';
 
   if (!window.Spicetify || !Spicetify.Player?.playUri || !Spicetify.Platform?.History) {
-    setTimeout(spotifix, 250);
+    setTimeout(play, 250);
     return;
   }
 
@@ -170,8 +170,8 @@
     try {
       await playSelection(route[1], route[2]);
     } catch (error) {
-      console.error('[spotifix] Failed to select random playback', error);
-      Spicetify.showNotification(`Spotifix: ${error.message}`, true);
+      console.error('[play] Failed to select playback', error);
+      Spicetify.showNotification(`Play: ${error.message}`, true);
     } finally {
       handlingRoute = false;
     }

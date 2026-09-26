@@ -1,12 +1,19 @@
-(function adder() {
+(function add() {
   if (!window.Spicetify?.Player || !Spicetify.ContextMenu) {
-    setTimeout(adder, 250);
+    setTimeout(add, 250);
     return;
   }
 
   const OVERLAY_ID = 'adder';
   const RESULT_LIMIT = 100;
+  const ADD_LABEL = 'Add to Playlists';
   let activeOverlay = null;
+  let hoveredAddButton = null;
+  let addScanQueued = false;
+
+  const addStyle = document.createElement('style');
+  addStyle.textContent = '.jsh-like-button + button[aria-checked] { opacity: 1 !important; }';
+  document.head.append(addStyle);
 
   function normalize(value) {
     return value.normalize('NFKD').replace(/\p{M}/gu, '').toLocaleLowerCase();
@@ -236,8 +243,8 @@
       <style>
         #${OVERLAY_ID} { align-items: center; background: rgb(0 0 0 / 72%); box-sizing: border-box; color: var(--spice-text); display: flex; inset: 0; justify-content: center; padding: 24px; position: fixed; z-index: 1000; }
         #${OVERLAY_ID} * { box-sizing: border-box; }
-        #${OVERLAY_ID} .panel { background: var(--spice-main); border: 1px solid rgb(255 255 255 / 8%); border-radius: 8px; box-shadow: 0 20px 64px rgb(0 0 0 / 55%); display: grid; grid-template-rows: auto auto minmax(0, 1fr); height: min(620px, calc(100vh - 48px)); min-height: 300px; overflow: hidden; width: min(560px, 100%); }
-        #${OVERLAY_ID} .header { align-items: center; background: var(--spice-card); border-radius: 6px; display: grid; gap: 16px; grid-template-columns: 112px minmax(0, 1fr); height: 136px; margin: 16px; padding: 12px; }
+        #${OVERLAY_ID} .panel { background: var(--spice-main); border: 1px solid rgb(255 255 255 / 8%); border-radius: 8px; box-shadow: 0 20px 64px rgb(0 0 0 / 55%); display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr); height: min(620px, calc(100vh - 48px)); min-height: 300px; overflow: hidden; width: min(560px, 100%); }
+        #${OVERLAY_ID} .item-card { align-items: center; background: var(--spice-card); border-radius: 6px; display: grid; gap: 16px; grid-template-columns: 112px minmax(0, 1fr); min-height: 136px; margin: 16px; padding: 12px; }
         #${OVERLAY_ID} .artwork-link { border-radius: 4px; display: block; height: 112px; overflow: hidden; width: 112px; }
         #${OVERLAY_ID} .artwork { background: var(--spice-main); display: block; height: 100%; object-fit: cover; width: 100%; }
         #${OVERLAY_ID} .artwork-fallback { align-items: center; color: var(--spice-subtext); display: flex; justify-content: center; }
@@ -245,7 +252,7 @@
         #${OVERLAY_ID} .track-info { min-width: 0; }
         #${OVERLAY_ID} .track-title { color: var(--spice-text); display: block; font-size: 22px; font-weight: 700; line-height: 27px; margin-bottom: 7px; overflow: hidden; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
         #${OVERLAY_ID} .artists { color: var(--spice-subtext); font-size: 14px; font-weight: 600; line-height: 20px; margin-bottom: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        #${OVERLAY_ID} .release { color: var(--spice-subtext); font-size: 12px; line-height: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        #${OVERLAY_ID} .release { color: var(--spice-subtext); font-size: 12px; line-height: 18px; overflow-wrap: anywhere; white-space: normal; }
         #${OVERLAY_ID} .metadata-link { color: inherit; text-decoration: none; }
         #${OVERLAY_ID} .track-title:hover, #${OVERLAY_ID} .metadata-link:hover { text-decoration: underline; }
         #${OVERLAY_ID} .search { margin: 0 16px 12px; position: relative; }
@@ -269,7 +276,7 @@
         #${OVERLAY_ID} .empty { color: var(--spice-subtext); padding: 40px 16px; text-align: center; }
         #${OVERLAY_ID} .sr-only { clip: rect(0, 0, 0, 0); clip-path: inset(50%); height: 1px; overflow: hidden; position: absolute; white-space: nowrap; width: 1px; }
         @keyframes adder-spin { to { transform: rotate(360deg); } }
-        @media (max-width: 480px) { #${OVERLAY_ID} { padding: 12px; } #${OVERLAY_ID} .panel { height: min(620px, calc(100vh - 24px)); } #${OVERLAY_ID} .header { gap: 12px; grid-template-columns: 88px minmax(0, 1fr); height: 112px; margin: 12px; padding: 12px; } #${OVERLAY_ID} .artwork-link { height: 88px; width: 88px; } #${OVERLAY_ID} .track-title { font-size: 19px; line-height: 24px; } }
+        @media (max-width: 480px) { #${OVERLAY_ID} { padding: 12px; } #${OVERLAY_ID} .panel { height: min(620px, calc(100vh - 24px)); } #${OVERLAY_ID} .item-card { gap: 12px; grid-template-columns: 88px minmax(0, 1fr); min-height: 112px; margin: 12px; padding: 12px; } #${OVERLAY_ID} .artwork-link { height: 88px; width: 88px; } #${OVERLAY_ID} .track-title { font-size: 19px; line-height: 24px; } }
         @media (prefers-reduced-motion: reduce) { #${OVERLAY_ID} * { scroll-behavior: auto !important; transition: none !important; } #${OVERLAY_ID} .status.busy { animation: none; } }
       </style>
     `;
@@ -281,7 +288,7 @@
     panel.setAttribute('role', 'dialog');
 
     const header = document.createElement('header');
-    header.className = 'header';
+    header.className = 'item-card';
 
     function createSpotifyLink(label, uri, className) {
       const path = spotifyPath(uri);
@@ -648,7 +655,7 @@
 
     const trackUri = Spicetify.Player.data?.item?.uri;
     if (!isTrack(trackUri)) {
-      Spicetify.showNotification('Play a track before opening Adder', true);
+      Spicetify.showNotification('Play a track before adding it to playlists', true);
       return;
     }
 
@@ -722,6 +729,83 @@
     return null;
   }
 
+  function curationTarget(button) {
+    const fiberKey = Object.getOwnPropertyNames(button).find((key) =>
+      key.startsWith('__reactFiber$'),
+    );
+    let fiber = fiberKey ? button[fiberKey] : null;
+    let openMenu = null;
+    for (let level = 0; fiber && level < 40; level += 1, fiber = fiber.return) {
+      const props = fiber.memoizedProps;
+      if (!openMenu && typeof props?.handleContextMenu === 'function') {
+        openMenu = props.handleContextMenu;
+      }
+      if (typeof props?.curateDefault === 'function') {
+        return isTrack(props.uri) ? { openMenu, uri: props.uri } : null;
+      }
+    }
+    return null;
+  }
+
+  function scanNativeAddButtons() {
+    addScanQueued = false;
+    for (const button of document.querySelectorAll('button[aria-checked="false"]')) {
+      if (curationTarget(button) && button.ariaLabel !== ADD_LABEL) {
+        button.setAttribute('aria-label', ADD_LABEL);
+      }
+    }
+  }
+
+  function scheduleAddScan() {
+    if (addScanQueued) return;
+    addScanQueued = true;
+    requestAnimationFrame(scanNativeAddButtons);
+  }
+
+  function relabelAddTooltip() {
+    if (!hoveredAddButton?.isConnected) return;
+    const tooltip = document.getElementById('hover-or-focus-tooltip');
+    if (tooltip && tooltip.textContent !== ADD_LABEL) tooltip.textContent = ADD_LABEL;
+  }
+
+  window.addEventListener(
+    'click',
+    (event) => {
+      const button =
+        event.target instanceof Element && event.target.closest('button[aria-checked="false"]');
+      const target = button && curationTarget(button);
+      if (!target?.openMenu) return;
+      event.preventDefault();
+      event.stopPropagation();
+      target.openMenu({
+        clientX: event.clientX,
+        clientY: event.clientY,
+        currentTarget: button,
+        nativeEvent: event,
+        persist() {},
+        preventDefault() {},
+        stopPropagation() {},
+        target: button,
+        type: event.type,
+      });
+    },
+    true,
+  );
+  window.addEventListener(
+    'pointerover',
+    (event) => {
+      const button =
+        event.target instanceof Element && event.target.closest('button[aria-checked="false"]');
+      hoveredAddButton = button && curationTarget(button) ? button : null;
+    },
+    true,
+  );
+  new MutationObserver(() => {
+    relabelAddTooltip();
+    scheduleAddScan();
+  }).observe(document.body, { childList: true, subtree: true });
+  scheduleAddScan();
+
   function injectContextItem(targetUri) {
     const nativeLabel = Spicetify.Locale?.get?.('contextmenu.add-to-playlist') || 'Add to playlist';
     const nativeItem = [...document.querySelectorAll('[role="menuitem"]')].find(
@@ -794,7 +878,7 @@
     true,
   );
 
-  const isMac = /Mac|iPhone|iPad/.test(navigator.userAgentData?.platform || navigator.platform);
+  const isMac = /mac/i.test(navigator.userAgentData?.platform || navigator.platform);
   const shortcut = { key: 'p', meta: isMac, ctrl: !isMac, shift: true };
   const handledEvents = new WeakSet();
   const handleShortcut = (event) => {
