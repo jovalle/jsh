@@ -13,3 +13,35 @@
 [submodule "local/vendor/zsh-syntax-highlighting"]
 	path = local/vendor/zsh-syntax-highlighting
 	url = https://github.com/zsh-users/zsh-syntax-highlighting.git
+[submodule "local/vendor/skills/archify"]
+	path = local/vendor/skills/archify
+	url = https://github.com/tt-a1i/archify.git
+	shallow = true
+[submodule "local/vendor/skills/anthropics-skills"]
+	path = local/vendor/skills/anthropics-skills
+	url = https://github.com/anthropics/skills.git
+	shallow = true
+[submodule "local/vendor/skills/better-icons"]
+	path = local/vendor/skills/better-icons
+	url = https://github.com/better-auth/better-icons.git
+	shallow = true
+[submodule "local/vendor/skills/chrome-agent"]
+	path = local/vendor/skills/chrome-agent
+	url = https://github.com/sderosiaux/chrome-agent.git
+	shallow = true
+[submodule "local/vendor/skills/cloudflare-skills"]
+	path = local/vendor/skills/cloudflare-skills
+	url = https://github.com/cloudflare/skills.git
+	shallow = true
+[submodule "local/vendor/skills/mattpocock-skills"]
+	path = local/vendor/skills/mattpocock-skills
+	url = https://github.com/mattpocock/skills.git
+	shallow = true
+[submodule "local/vendor/skills/openai-skills"]
+	path = local/vendor/skills/openai-skills
+	url = https://github.com/openai/skills.git
+	shallow = true
+[submodule "local/vendor/skills/ui-ux-pro-max-skill"]
+	path = local/vendor/skills/ui-ux-pro-max-skill
+	url = https://github.com/nextlevelbuilder/ui-ux-pro-max-skill.git
+	shallow = true
