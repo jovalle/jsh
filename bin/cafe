@@ -1,811 +1,242 @@
-#!/usr/bin/env bash
-# shellcheck shell=bash
-#
-# Cross-platform utility to keep your system awake during long-running tasks.
-# Works on macOS (caffeinate), Linux (gnome-session-inhibit), and Windows
-# (PowerShell with native execution-state and input APIs).
-#
-# "Un cafe para mantener el sistema despierto"
+#!/usr/bin/env python3
 
-set -euo pipefail
+import ctypes
+import os
+import platform
+import shutil
+import subprocess
+import sys
+import time
+from ctypes import wintypes
+from pathlib import Path
 
-# =============================================================================
-# Configuration
-# =============================================================================
 
-readonly SCRIPT_NAME="${0##*/}"
-case $0 in
-  /*) launcher=$0 ;;
-  *) launcher=${PWD}/$0 ;;
-esac
-if [[ -z ${JSH_ROOT:-} ]]; then
-  if [[ -n ${JSH_DIR:-} ]]; then
-    JSH_ROOT=${JSH_DIR}
-  elif [[ -f ${launcher%/*}/../lib/ui.sh ]]; then
-    JSH_ROOT=$(CDPATH='' cd -P "${launcher%/*}/.." && pwd -P)
-  else
-    JSH_ROOT=${HOME}/.jsh
-  fi
-fi
-# shellcheck source=../lib/ui.sh
-. "${JSH_ROOT}/lib/ui.sh"
-jsh::init
+APP_NAME = "caffeine"
+LINUX_CHILD_ARGUMENT = "--linux-inhibited"
+MACOS_CHILD_ARGUMENT = "--macos-inhibited"
+REASON = "Keep the screen active"
+WINDOWS_ACTIVITY_INTERVAL_SECONDS = 30
 
-# Default duration (seconds) - 0 means indefinite
-CAFE_DURATION="${CAFE_DURATION:-0}"
 
-# Default inhibit reasons
-CAFE_REASON="${CAFE_REASON:-User requested via cafe command}"
+def print_validation(summary: str, inspection_command: str) -> None:
+    print(f"Validation: PASS - {summary}")
+    print(f"Inspect: {inspection_command}", flush=True)
 
-# Platform and backend overrides keep behavior deterministic in tests.
-CAFE_PLATFORM="${CAFE_PLATFORM:-$(uname -s)}"
-CAFE_CAFFEINATE_BIN="${CAFE_CAFFEINATE_BIN:-caffeinate}"
-CAFE_PMSET_BIN="${CAFE_PMSET_BIN:-pmset}"
 
-# PID file for background mode
-readonly CAFE_PID_FILE="${XDG_RUNTIME_DIR:-/tmp}/cafe.${USER:-$(id -un)}.pid"
+def wait_until_stopped(status: str, on_interval=None) -> None:
+    print(f"Caffeine active: {status}")
+    print("Press Ctrl+C to stop.", flush=True)
 
-CAFE_ACTIVE_PID=
-CAFE_BACKEND_PID=
-CAFE_READY_FILE=
-CAFE_STOP_FILE=
+    try:
+        while True:
+            if on_interval is not None:
+                on_interval()
+            time.sleep(WINDOWS_ACTIVITY_INTERVAL_SECONDS)
+    except KeyboardInterrupt:
+        print("\nCaffeine stopped.", flush=True)
 
-# =============================================================================
-# Output
-# =============================================================================
 
-if [[ "${JSH_PLAIN_OUTPUT:-0}" != 1 && "${TERM:-dumb}" != dumb &&
-  -z ${NO_COLOR+x} && "${JSH_COLOR:-auto}" != never ]] \
-  && { [[ -t 1 ]] || [[ "${JSH_COLOR:-auto}" == always ]]; }; then
-  C_RESET=$'\033[0m' C_DIM=$'\033[2m' C_CYAN=$'\033[36m'
-else
-  C_RESET='' C_DIM=''
-  C_CYAN=''
-fi
+def run_linux() -> None:
+    if sys.argv[1:] == [LINUX_CHILD_ARGUMENT]:
+        inhibitor = shutil.which("gnome-session-inhibit")
+        if inhibitor is None:
+            raise RuntimeError("gnome-session-inhibit is required on Linux")
 
-die() {
-  local message=$1
-  shift
-  jsh::log_error "${message}"
-  for message in "$@"; do
-    jsh::log_detail "  ${message}" >&2
-  done
-  exit 1
-}
-_debug() { printf '%sdebug:%s %s\n' "${C_DIM}" "${C_RESET}" "$*" >&2; }
-jsh_command_preview() { printf '  %s$%s %s\n' "${C_CYAN}" "${C_RESET}" "$*"; }
-cli_version() { printf 'cafe 1.0.1\n'; }
-cli_help() {
-  cat <<'EOF'
-Usage: cafe [options] [command...]
+        result = subprocess.run(
+            [inhibitor, "--list"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        if f"{APP_NAME}: {REASON}" not in result.stdout:
+            raise RuntimeError("GNOME idle and suspend inhibitor was not registered")
+        print_validation(
+            "GNOME idle and suspend inhibitor registered",
+            "gnome-session-inhibit --list",
+        )
+        wait_until_stopped("idle lock, display sleep, and system sleep are inhibited")
+        return
 
-Options:
-  -t, --time DURATION  Keep awake for a duration such as 30m or 2h
-  -d, --display        Prevent display sleep (enabled by default)
-  -i, --idle           Prevent idle sleep (enabled by default)
-  -s, --system         Prevent system sleep (enabled by default)
-  -b, --background     Run in the background
-  -r, --reason TEXT    Set the displayed inhibit reason
-      --status         Show background status
-      --stop           Stop the background instance
-      --xfce-status    Print XFCE Genmon status
-      --xfce-toggle    Toggle Cafe from XFCE Genmon
-  -v, --verbose        Show debug output
-  -h, --help           Show help
-      --version        Show version
-EOF
-}
+    if sys.argv[1:]:
+        raise RuntimeError(f"usage: {Path(sys.argv[0]).name}")
 
-# Override debug with script-specific env var
-debug() { [[ "${CAFE_DEBUG:-0}" == "1" ]] && _debug "$@" || true; }
+    inhibitor = shutil.which("gnome-session-inhibit")
+    if inhibitor is None:
+        raise RuntimeError("gnome-session-inhibit is required on Linux")
 
-print_active_status() {
-  local summary=$1 inspection_command=$2
-  jsh::log_success "Validation: PASS - ${summary}"
-  jsh::log_note "Inspect: ${inspection_command}"
-  jsh::log_info "Cafe active: idle lock, display sleep, and system sleep are inhibited"
-  jsh::log_note "Press Ctrl+C to stop."
-}
+    command = [
+        inhibitor,
+        "--app-id",
+        APP_NAME,
+        "--reason",
+        REASON,
+        "--inhibit",
+        "idle:suspend",
+        sys.executable,
+        str(Path(__file__).resolve()),
+        LINUX_CHILD_ARGUMENT,
+    ]
+    os.execv(inhibitor, command)
 
-print_stopped() {
-  jsh::log_success "Cafe stopped."
-}
 
-# =============================================================================
-# Utilities
-# =============================================================================
+def run_macos() -> None:
+    if sys.argv[1:] == [MACOS_CHILD_ARGUMENT]:
+        result = subprocess.run(
+            ["ps", "-p", str(os.getppid()), "-o", "comm="],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        if Path(result.stdout.strip()).name != "caffeinate":
+            raise RuntimeError("macOS caffeinate assertion owner was not started")
+        print_validation(
+            "macOS display, user-idle, and system sleep assertions started",
+            "pmset -g assertions",
+        )
+        wait_until_stopped("idle lock, display sleep, and system sleep are inhibited")
+        return
 
-# Parse duration string to seconds
-parse_duration() {
-  local input="$1"
-  local total=0
+    if sys.argv[1:]:
+        raise RuntimeError(f"usage: {Path(sys.argv[0]).name}")
 
-  # If it's just a number, assume seconds
-  if [[ "${input}" =~ ^[0-9]+$ ]]; then
-    printf '%s' "${input}"
+    inhibitor = shutil.which("caffeinate")
+    if inhibitor is None:
+        raise RuntimeError("caffeinate is required on macOS")
+
+    command = [
+        inhibitor,
+        "-d",
+        "-i",
+        "-s",
+        "-u",
+        sys.executable,
+        str(Path(__file__).resolve()),
+        MACOS_CHILD_ARGUMENT,
+    ]
+    os.execv(inhibitor, command)
+
+
+def windows_input_types():
+    class KeyboardInput(ctypes.Structure):
+        _fields_ = [
+            ("virtual_key", wintypes.WORD),
+            ("scan_code", wintypes.WORD),
+            ("flags", wintypes.DWORD),
+            ("time", wintypes.DWORD),
+            ("extra_info", wintypes.WPARAM),
+        ]
+
+    class MouseInput(ctypes.Structure):
+        _fields_ = [
+            ("x", wintypes.LONG),
+            ("y", wintypes.LONG),
+            ("mouse_data", wintypes.DWORD),
+            ("flags", wintypes.DWORD),
+            ("time", wintypes.DWORD),
+            ("extra_info", wintypes.WPARAM),
+        ]
+
+    class HardwareInput(ctypes.Structure):
+        _fields_ = [
+            ("message", wintypes.DWORD),
+            ("parameter_low", wintypes.WORD),
+            ("parameter_high", wintypes.WORD),
+        ]
+
+    class InputValue(ctypes.Union):
+        _fields_ = [
+            ("mouse", MouseInput),
+            ("keyboard", KeyboardInput),
+            ("hardware", HardwareInput),
+        ]
+
+    class Input(ctypes.Structure):
+        _anonymous_ = ("value",)
+        _fields_ = [("type", wintypes.DWORD), ("value", InputValue)]
+
+    return KeyboardInput, Input
+
+
+def run_windows() -> None:
+    if sys.argv[1:]:
+        raise RuntimeError(f"usage: {Path(sys.argv[0]).name}")
+
+    execution_state_continuous = 0x80000000
+    execution_state_system_required = 0x00000001
+    execution_state_display_required = 0x00000002
+    input_keyboard = 1
+    virtual_key_f15 = 0x7E
+    keyeventf_keyup = 0x0002
+    keyboard_input, input_type = windows_input_types()
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    kernel32.SetThreadExecutionState.argtypes = [wintypes.DWORD]
+    kernel32.SetThreadExecutionState.restype = wintypes.DWORD
+    user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(input_type), ctypes.c_int]
+    user32.SendInput.restype = wintypes.UINT
+
+    required_state = (
+        execution_state_continuous
+        | execution_state_system_required
+        | execution_state_display_required
+    )
+    if not kernel32.SetThreadExecutionState(required_state):
+        raise ctypes.WinError(ctypes.get_last_error())
+
+    key_events = (input_type * 2)(
+        input_type(
+            type=input_keyboard,
+            keyboard=keyboard_input(virtual_key=virtual_key_f15),
+        ),
+        input_type(
+            type=input_keyboard,
+            keyboard=keyboard_input(
+                virtual_key=virtual_key_f15,
+                flags=keyeventf_keyup,
+            ),
+        ),
+    )
+
+    def report_activity() -> None:
+        sent_events = user32.SendInput(
+            len(key_events),
+            key_events,
+            ctypes.sizeof(input_type),
+        )
+        if sent_events != len(key_events):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+    try:
+        report_activity()
+        print_validation(
+            "Windows display and system execution state set; F15 activity sent",
+            "powercfg /requests",
+        )
+        wait_until_stopped(
+            "idle lock, display sleep, and system sleep are inhibited",
+            report_activity,
+        )
+    finally:
+        kernel32.SetThreadExecutionState(execution_state_continuous)
+
+
+def main() -> int:
+    system = platform.system()
+    try:
+        if system == "Linux":
+            run_linux()
+        elif system == "Darwin":
+            run_macos()
+        elif system == "Windows":
+            run_windows()
+        else:
+            raise RuntimeError(f"unsupported operating system: {system}")
+    except (OSError, RuntimeError) as error:
+        print(f"{APP_NAME}: {error}", file=sys.stderr)
+        return 1
     return 0
-  fi
 
-  # Parse combined format like "1h30m"
-  local remaining="${input}"
 
-  # Hours
-  if [[ "${remaining}" =~ ([0-9]+)h(ours?|r)? ]]; then
-    total=$((total + BASH_REMATCH[1] * 3600))
-    remaining="${remaining/${BASH_REMATCH[0]}/}"
-  fi
-
-  # Minutes
-  if [[ "${remaining}" =~ ([0-9]+)m(in(utes?)?)? ]]; then
-    total=$((total + BASH_REMATCH[1] * 60))
-    remaining="${remaining/${BASH_REMATCH[0]}/}"
-  fi
-
-  # Seconds
-  if [[ "${remaining}" =~ ([0-9]+)s(ec(onds?)?)? ]]; then
-    total=$((total + BASH_REMATCH[1]))
-  fi
-
-  if [[ "${total}" -eq 0 ]]; then
-    die "Invalid duration format: ${input}" "Examples: 3600, 30m, 2h, 1h30m"
-  fi
-
-  printf '%s' "${total}"
-}
-
-# Format seconds to human-readable
-format_duration() {
-  local seconds="$1"
-  local hours=$((seconds / 3600))
-  local minutes=$(((seconds % 3600) / 60))
-  local secs=$((seconds % 60))
-
-  if [[ "${hours}" -gt 0 ]]; then
-    printf '%dh%02dm%02ds' "${hours}" "${minutes}" "${secs}"
-  elif [[ "${minutes}" -gt 0 ]]; then
-    printf '%dm%02ds' "${minutes}" "${secs}"
-  else
-    printf '%ds' "${secs}"
-  fi
-}
-
-render_tui_frame() {
-  local frame=$(( $1 % 12 )) elapsed=$2
-  local lines=${LINES:-24} columns=${COLUMNS:-80}
-  local hours=$((elapsed / 3600)) minutes=$(((elapsed % 3600) / 60)) seconds=$((elapsed % 60))
-  local -a steam=(
-    '•    ' ' •   ' '  •  ' '   • ' '    •' '   • '
-    '  •  ' ' •   ' '•    ' ' •   ' '  •  ' '   • '
-  )
-
-  if ((lines <= 3 || columns <= 12)); then
-    printf 'Cafe'
-    return
-  fi
-
-  if ((lines <= 10 || columns <= 24)); then
-    printf 'Cafe %s\nCtrl+C to stop' "${steam[frame]// /}"
-    return
-  fi
-
-  local rule
-  printf -v rule '%*s' "${columns}" ''
-  rule=${rule// /=}
-  printf '%s\n%s\n   Cafe\n   %02dh %02dm %02ds\n   Method %s\n   Ctrl+C to stop\n%s' \
-    "${rule}" "   ${steam[frame]}" "${hours}" "${minutes}" "${seconds}" \
-    "${CAFE_METHOD:-unknown}" "${rule}"
-}
-
-enter_tui() {
-  printf '\033[?1049h\033[H\033[?25l'
-}
-
-leave_tui() {
-  printf '\033[?25h\033[?1049l'
-}
-
-wait_for_process() {
-  local process_pid=$1 process_status
-  CAFE_ACTIVE_PID=${process_pid}
-  if wait "${process_pid}"; then
-    process_status=0
-  else
-    process_status=$?
-  fi
-  CAFE_ACTIVE_PID=
-  return "${process_status}"
-}
-
-run_tracked() {
-  "$@" &
-  wait_for_process "$!"
-}
-
-cleanup_active_state() {
-  [[ -z "${CAFE_STOP_FILE}" ]] || : >"${CAFE_STOP_FILE}"
-  if [[ -n "${CAFE_ACTIVE_PID}" ]]; then
-    kill "${CAFE_ACTIVE_PID}" 2>/dev/null || true
-    wait "${CAFE_ACTIVE_PID}" 2>/dev/null || true
-    CAFE_ACTIVE_PID=
-  fi
-  if [[ -n "${CAFE_BACKEND_PID}" ]]; then
-    kill "${CAFE_BACKEND_PID}" 2>/dev/null || true
-    wait "${CAFE_BACKEND_PID}" 2>/dev/null || true
-    CAFE_BACKEND_PID=
-  fi
-  [[ -z "${CAFE_READY_FILE}" ]] || rm -f "${CAFE_READY_FILE}"
-  [[ -z "${CAFE_STOP_FILE}" ]] || rm -f "${CAFE_STOP_FILE}"
-}
-
-handle_signal() {
-  local signal=$1 exit_status=130
-  [[ "${signal}" != TERM ]] || exit_status=143
-  cleanup_active_state
-  printf '\n'
-  print_stopped
-  exit "${exit_status}"
-}
-
-# Check if background cafe is running
-is_running() {
-  if [[ -f "${CAFE_PID_FILE}" ]]; then
-    local pid
-    pid=$(cat "${CAFE_PID_FILE}" 2>/dev/null || true)
-    if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
-      return 0
-    fi
-    # Stale PID file
-    rm -f "${CAFE_PID_FILE}"
-  fi
-  return 1
-}
-
-# Show status
-show_status() {
-  if is_running; then
-    local pid
-    pid=$(cat "${CAFE_PID_FILE}")
-    jsh::status ok "Cafe running, PID ${pid}"
-
-    # Try to show remaining time on macOS
-    if [[ "$(uname -s)" == "Darwin" ]]; then
-      local start elapsed
-      if stat -f %m "${CAFE_PID_FILE}" &>/dev/null; then
-        start=$(stat -f %m "${CAFE_PID_FILE}")
-        elapsed=$(($(date +%s) - start))
-        jsh::log_detail "  Running for $(format_duration "${elapsed}")"
-      fi
-    fi
-    return 0
-  else
-    jsh::status skip "Cafe not running"
-    return 1
-  fi
-}
-
-collect_descendants() {
-  local parent_pid=$1 child_pid
-  command -v pgrep >/dev/null 2>&1 || return
-  while IFS= read -r child_pid; do
-    [[ -n ${child_pid} ]] || continue
-    collect_descendants "${child_pid}"
-    CAFE_DESCENDANT_PIDS+=("${child_pid}")
-  done < <(pgrep -P "${parent_pid}" 2>/dev/null || true)
-}
-
-# Stop background cafe
-stop_cafe() {
-  if [[ -f "${CAFE_PID_FILE}" ]]; then
-    local pid child_pid
-    pid=$(cat "${CAFE_PID_FILE}" 2>/dev/null || true)
-    if [[ -n "${pid}" ]]; then
-      if kill -0 "${pid}" 2>/dev/null; then
-        local -a CAFE_DESCENDANT_PIDS=()
-        collect_descendants "${pid}"
-        for child_pid in "${CAFE_DESCENDANT_PIDS[@]}"; do
-          kill "${child_pid}" 2>/dev/null || true
-        done
-        kill "${pid}" 2>/dev/null || true
-        # Wait briefly for clean shutdown
-        sleep 0.5
-        # Force kill if still running
-        for child_pid in "${CAFE_DESCENDANT_PIDS[@]}"; do
-          kill -9 "${child_pid}" 2>/dev/null || true
-        done
-        kill -9 "${pid}" 2>/dev/null || true
-        jsh::log_success "Stopped cafe (PID: ${pid})"
-      fi
-    fi
-    rm -f "${CAFE_PID_FILE}"
-  else
-    jsh::log_note "No background cafe found"
-  fi
-}
-
-show_xfce_status() {
-  local icon tip root
-  if is_running; then
-    icon=cafe-on.svg
-    tip="Cafe: Active (Sleep disabled - Click to allow sleep)"
-  else
-    icon=cafe-off.svg
-    tip="Cafe: Inactive (Normal sleep - Click to disable sleep)"
-  fi
-
-  root=${JSH_ROOT:-${HOME}/.jsh}
-  printf '<img>%s/assets/icons/%s</img><tool>%s</tool><click>%s/bin/cafe --xfce-toggle</click>\n' \
-    "${root}" "${icon}" "${tip}" "${root}"
-}
-
-toggle_xfce() {
-  local cafe_command plugin_file id
-  cafe_command=${BASH_SOURCE[0]}
-
-  if is_running; then
-    stop_cafe >/dev/null 2>&1 || true
-    xfconf-query -c xfce4-screensaver -p /saver/enabled -s true 2>/dev/null || true
-    xfconf-query -c xfce4-screensaver -p /lock/enabled -s true 2>/dev/null || true
-    xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/dpms-enabled -s true 2>/dev/null || true
-    xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/presentation-mode -s false 2>/dev/null || true
-    DISPLAY="${DISPLAY:-:0}" xset +dpms 2>/dev/null || true
-    DISPLAY="${DISPLAY:-:0}" xset s on 2>/dev/null || true
-  else
-    "${cafe_command}" -b -d -s -i >/dev/null 2>&1 || true
-    xfconf-query -c xfce4-screensaver -p /saver/enabled -s false 2>/dev/null || true
-    xfconf-query -c xfce4-screensaver -p /lock/enabled -s false 2>/dev/null || true
-    xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/dpms-enabled -s false 2>/dev/null || true
-    xfconf-query -c xfce4-power-manager -p /xfce4-power-manager/presentation-mode -n -t bool -s true 2>/dev/null || true
-    DISPLAY="${DISPLAY:-:0}" xset -dpms 2>/dev/null || true
-    DISPLAY="${DISPLAY:-:0}" xset s off 2>/dev/null || true
-    DISPLAY="${DISPLAY:-:0}" xfce4-screensaver-command -d 2>/dev/null || true
-  fi
-
-  for plugin_file in "${HOME}/.config/xfce4/panel"/genmon-*.rc; do
-    [[ -r "${plugin_file}" ]] || continue
-    if grep -q -- '--xfce-status' "${plugin_file}" 2>/dev/null; then
-      id=$(basename "${plugin_file}" .rc | sed 's/genmon-//')
-      DISPLAY="${DISPLAY:-:0}" xfce4-panel --plugin-event="genmon-${id}:refresh:bool:true" 2>/dev/null || true
-    fi
-  done
-}
-
-# =============================================================================
-# Inhibit Implementations
-# =============================================================================
-
-# macOS caffeinate
-run_caffeinate() {
-  local duration="$1"
-  local display="$2"
-  local system="$3"
-  shift 3
-  local cmd=("$@")
-  local args=(-i -u)
-  local assertions attempt command_status=0 owner_pid=${BASHPID:-$$}
-
-  [[ "${display}" == "true" ]] && args+=(-d)
-  [[ "${system}" == "true" ]] && args+=(-s)
-
-  debug "Running: caffeinate ${args[*]} -w ${owner_pid}"
-  "${CAFE_CAFFEINATE_BIN}" "${args[@]}" -w "${owner_pid}" &
-  CAFE_BACKEND_PID=$!
-
-  for ((attempt = 0; attempt < 50; attempt++)); do
-    assertions=$("${CAFE_PMSET_BIN}" -g assertions 2>/dev/null || true)
-    [[ ${assertions} == *"asserting on behalf of Process ID ${owner_pid}"* ]] && break
-    kill -0 "${CAFE_BACKEND_PID}" 2>/dev/null || break
-    sleep 0.02
-  done
-  if [[ ${assertions} != *"asserting on behalf of Process ID ${owner_pid}"* ]]; then
-    cleanup_active_state
-    die "macOS caffeinate assertions were not registered"
-  fi
-  print_active_status \
-    "macOS display, user-idle, and system sleep assertions started" \
-    "pmset -g assertions"
-
-  if [[ ${#cmd[@]} -gt 0 ]]; then
-    run_tracked "${cmd[@]}" || command_status=$?
-  elif [[ ${duration} -gt 0 ]]; then
-    run_tracked sleep "${duration}" || command_status=$?
-  else
-    wait_for_process "${CAFE_BACKEND_PID}" || command_status=$?
-  fi
-
-  kill "${CAFE_BACKEND_PID}" 2>/dev/null || true
-  wait "${CAFE_BACKEND_PID}" 2>/dev/null || true
-  CAFE_BACKEND_PID=
-  return "${command_status}"
-}
-
-run_powershell_inhibit() {
-  local duration=$1
-  shift 4
-  local cmd=("$@") attempt command_status=0 powershell_command
-
-  CAFE_READY_FILE="${XDG_RUNTIME_DIR:-/tmp}/cafe.${USER:-$(id -un)}.$$.ready"
-  CAFE_STOP_FILE="${XDG_RUNTIME_DIR:-/tmp}/cafe.${USER:-$(id -un)}.$$.stop"
-  rm -f "${CAFE_READY_FILE}" "${CAFE_STOP_FILE}"
-  WSLENV="${WSLENV:+${WSLENV}:}CAFE_READY_FILE:CAFE_STOP_FILE"
-  export CAFE_READY_FILE CAFE_STOP_FILE WSLENV
-
-  powershell_command=$(cat <<'POWERSHELL'
-  Add-Type -TypeDefinition @'
-  using System;
-  using System.Runtime.InteropServices;
-
-  namespace Cafe {
-    public static class NativeMethods {
-      [StructLayout(LayoutKind.Sequential)]
-      public struct INPUT {
-        public uint type;
-        public InputUnion value;
-      }
-
-      [StructLayout(LayoutKind.Explicit)]
-      public struct InputUnion {
-        [FieldOffset(0)] public MOUSEINPUT mouse;
-        [FieldOffset(0)] public KEYBDINPUT keyboard;
-        [FieldOffset(0)] public HARDWAREINPUT hardware;
-      }
-
-      [StructLayout(LayoutKind.Sequential)]
-      public struct MOUSEINPUT {
-        public int x;
-        public int y;
-        public uint mouseData;
-        public uint flags;
-        public uint time;
-        public UIntPtr extraInfo;
-      }
-
-      [StructLayout(LayoutKind.Sequential)]
-      public struct KEYBDINPUT {
-        public ushort virtualKey;
-        public ushort scanCode;
-        public uint flags;
-        public uint time;
-        public UIntPtr extraInfo;
-      }
-
-      [StructLayout(LayoutKind.Sequential)]
-      public struct HARDWAREINPUT {
-        public uint message;
-        public ushort parameterLow;
-        public ushort parameterHigh;
-      }
-
-      [DllImport("kernel32.dll")]
-      public static extern uint SetThreadExecutionState(uint executionState);
-
-      [DllImport("user32.dll", SetLastError = true)]
-      private static extern uint SendInput(uint inputCount, INPUT[] inputs, int inputSize);
-
-      public static bool SendF15() {
-        INPUT[] inputs = new INPUT[2];
-        inputs[0].type = 1;
-        inputs[0].value.keyboard.virtualKey = 0x7E;
-        inputs[1].type = 1;
-        inputs[1].value.keyboard.virtualKey = 0x7E;
-        inputs[1].value.keyboard.flags = 0x0002;
-        return SendInput(2, inputs, Marshal.SizeOf(typeof(INPUT))) == 2;
-      }
-    }
-  }
-  '@
-
-  $continuousDisplayAndSystem = [uint32]2147483651
-  $continuous = [uint32]2147483648
-  if ([Cafe.NativeMethods]::SetThreadExecutionState($continuousDisplayAndSystem) -eq 0) {
-    exit 1
-  }
-  try {
-    if (-not [Cafe.NativeMethods]::SendF15()) { exit 1 }
-    New-Item -ItemType File -Force -Path $env:CAFE_READY_FILE | Out-Null
-    $elapsedMilliseconds = 0
-    while (-not (Test-Path $env:CAFE_STOP_FILE)) {
-      Start-Sleep -Milliseconds 100
-      $elapsedMilliseconds += 100
-      if ($elapsedMilliseconds -ge 30000) {
-        if (-not [Cafe.NativeMethods]::SendF15()) { exit 1 }
-        $elapsedMilliseconds = 0
-      }
-    }
-  } finally {
-    [void][Cafe.NativeMethods]::SetThreadExecutionState($continuous)
-  }
-POWERSHELL
-  )
-  powershell.exe -NoProfile -NonInteractive -Command "${powershell_command}" &
-  CAFE_BACKEND_PID=$!
-
-  for ((attempt = 0; attempt < 250; attempt++)); do
-    [[ ! -e "${CAFE_READY_FILE}" ]] || break
-    if ! kill -0 "${CAFE_BACKEND_PID}" 2>/dev/null; then
-      wait "${CAFE_BACKEND_PID}" 2>/dev/null || true
-      CAFE_BACKEND_PID=
-      cleanup_active_state
-      return 1
-    fi
-    sleep 0.02
-  done
-  if [[ ! -e "${CAFE_READY_FILE}" ]]; then
-    cleanup_active_state
-    die "Windows sleep inhibition could not be started"
-  fi
-  print_active_status \
-    "Windows display and system execution state set; F15 activity sent" \
-    "powercfg /requests"
-
-  if [[ ${#cmd[@]} -gt 0 ]]; then
-    run_tracked "${cmd[@]}" || command_status=$?
-  elif [[ ${duration} -gt 0 ]]; then
-    run_tracked sleep "${duration}" || command_status=$?
-  elif wait_for_process "${CAFE_BACKEND_PID}"; then
-    command_status=0
-  else
-    command_status=$?
-  fi
-  : >"${CAFE_STOP_FILE}"
-  wait "${CAFE_BACKEND_PID}" 2>/dev/null || true
-  CAFE_BACKEND_PID=
-  rm -f "${CAFE_READY_FILE}" "${CAFE_STOP_FILE}"
-  CAFE_READY_FILE='' CAFE_STOP_FILE=''
-  return "${command_status}"
-}
-
-# Linux gnome-session-inhibit
-run_gnome_inhibit() {
-  local duration="$1"
-  local reason="$4"
-  shift 4
-  local cmd=("$@")
-  local inhibitors attempt command_status=0
-  local args=(
-    --app-id "${SCRIPT_NAME}"
-    --reason "${reason}"
-    --inhibit idle:suspend
-    --inhibit-only
-  )
-
-  debug "Running: gnome-session-inhibit ${args[*]}"
-  gnome-session-inhibit "${args[@]}" &
-  CAFE_BACKEND_PID=$!
-
-  for ((attempt = 0; attempt < 50; attempt++)); do
-    inhibitors=$(gnome-session-inhibit --list 2>/dev/null || true)
-    [[ ${inhibitors} == *"${SCRIPT_NAME}: ${reason}"* ]] && break
-    kill -0 "${CAFE_BACKEND_PID}" 2>/dev/null || break
-    sleep 0.02
-  done
-  if [[ ${inhibitors} != *"${SCRIPT_NAME}: ${reason}"* ]]; then
-    cleanup_active_state
-    die "GNOME idle and suspend inhibitor was not registered"
-  fi
-  print_active_status \
-    "GNOME idle and suspend inhibitor registered" \
-    "gnome-session-inhibit --list"
-
-  if [[ ${#cmd[@]} -gt 0 ]]; then
-    run_tracked "${cmd[@]}" || command_status=$?
-  elif [[ ${duration} -gt 0 ]]; then
-    run_tracked sleep "${duration}" || command_status=$?
-  else
-    wait_for_process "${CAFE_BACKEND_PID}" || command_status=$?
-  fi
-
-  kill "${CAFE_BACKEND_PID}" 2>/dev/null || true
-  wait "${CAFE_BACKEND_PID}" 2>/dev/null || true
-  CAFE_BACKEND_PID=
-  return "${command_status}"
-}
-
-run_inhibit() {
-  local duration="$1"
-  local display="$2"
-  local system="$3"
-  local reason="$4"
-  shift 4
-
-  case "${CAFE_PLATFORM}" in
-    Darwin)
-      command -v "${CAFE_CAFFEINATE_BIN}" &>/dev/null || die "caffeinate is required on macOS"
-      command -v "${CAFE_PMSET_BIN}" &>/dev/null || die "pmset is required on macOS"
-      run_caffeinate "${duration}" "${display}" "${system}" "$@"
-      ;;
-    WSL | Windows | MINGW* | MSYS* | CYGWIN*)
-      command -v powershell.exe &>/dev/null || die "powershell.exe is required on Windows"
-      run_powershell_inhibit "${duration}" "${display}" "${system}" "${reason}" "$@"
-      ;;
-    Linux)
-      command -v gnome-session-inhibit &>/dev/null || die "gnome-session-inhibit is required on Linux"
-      run_gnome_inhibit "${duration}" "${display}" "${system}" "${reason}" "$@"
-      ;;
-    *)
-      die "Unsupported platform: ${CAFE_PLATFORM}"
-      ;;
-  esac
-}
-
-# Get the first available method name (for display purposes)
-get_primary_method() {
-  case "${CAFE_PLATFORM}" in
-    Darwin)
-      command -v "${CAFE_CAFFEINATE_BIN}" &>/dev/null && {
-        printf 'caffeinate'
-        return
-      }
-      ;;
-    WSL | Windows | MINGW* | MSYS* | CYGWIN*)
-      command -v powershell.exe &>/dev/null && {
-        printf 'powershell.exe'
-        return
-      }
-      ;;
-    Linux)
-      command -v gnome-session-inhibit &>/dev/null && {
-        printf 'gnome-session-inhibit'
-        return
-      }
-      ;;
-  esac
-  printf 'unavailable'
-}
-
-# =============================================================================
-# Main
-# =============================================================================
-
-main() {
-  local duration="${CAFE_DURATION}"
-  local display=true
-  local system=true
-  local background=false
-  local reason="${CAFE_REASON}"
-
-  # Parse arguments
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      -h | --help)
-        cli_help
-        exit 0
-        ;;
-      --version)
-        cli_version
-        exit 0
-        ;;
-      --status)
-        show_status
-        exit $?
-        ;;
-      --stop)
-        stop_cafe
-        exit 0
-        ;;
-      --xfce-status)
-        show_xfce_status
-        exit 0
-        ;;
-      --xfce-toggle)
-        toggle_xfce
-        exit 0
-        ;;
-      -t | --time)
-        [[ $# -lt 2 ]] && die "Option $1 requires an argument"
-        duration=$(parse_duration "$2")
-        shift 2
-        ;;
-      -d | --display)
-        display=true
-        shift
-        ;;
-      -i | --idle)
-        # Idle-only is the default behavior, this is a no-op for compatibility
-        shift
-        ;;
-      -s | --system)
-        system=true
-        shift
-        ;;
-      -b | --background)
-        background=true
-        shift
-        ;;
-      -r | --reason)
-        [[ $# -lt 2 ]] && die "Option $1 requires an argument"
-        reason="$2"
-        shift 2
-        ;;
-      -v | --verbose)
-        CAFE_DEBUG=1
-        export CAFE_DEBUG
-        shift
-        ;;
-      --)
-        shift
-        break
-        ;;
-      -*)
-        die "Unknown option: $1 (use --help for usage)"
-        ;;
-      *)
-        break
-        ;;
-    esac
-  done
-
-  # Remaining args are the command to wrap
-  local cmd=("$@")
-
-  # Get the platform method name for display.
-  local method
-  method=$(get_primary_method)
-  CAFE_METHOD=${method}
-  export CAFE_METHOD
-  debug "Inhibit method: ${method}"
-
-  # Check for existing background process
-  if [[ "${background}" == "true" ]]; then
-    if is_running; then
-      jsh::log_warn "Cafe is already running in background"
-      show_status
-      exit 0
-    fi
-    if [[ "${method}" == unavailable && ${#cmd[@]} -eq 0 ]]; then
-      die "No supported system inhibit method is available"
-    fi
-  fi
-
-  # Background mode
-  if [[ "${background}" == "true" ]]; then
-    (
-      cleanup_background() {
-        local owner
-        owner=$(cat "${CAFE_PID_FILE}" 2>/dev/null || true)
-        [[ "${owner}" != "${BASHPID}" ]] || rm -f "${CAFE_PID_FILE}"
-      }
-      trap 'cleanup_active_state; cleanup_background' EXIT
-
-      # Daemonize
-      cd /
-      exec >/dev/null 2>&1
-      exec </dev/null
-
-      while [[ ! -e "${CAFE_PID_FILE}" ]]; do
-        sleep 0.01
-      done
-
-      # Start the platform inhibitor.
-      if [[ ${#cmd[@]} -gt 0 ]]; then
-        run_inhibit "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"
-      else
-        run_inhibit "${duration}" "${display}" "${system}" "${reason}"
-      fi
-    ) &
-
-    local bg_pid=$!
-    printf '%s' "${bg_pid}" >"${CAFE_PID_FILE}"
-    jsh::log_success "Started in background (PID: ${bg_pid})"
-    jsh_command_preview "${SCRIPT_NAME} --stop"
-    exit 0
-  fi
-
-  # Foreground mode - use cascading inhibit
-  if [[ ${#cmd[@]} -gt 0 ]]; then
-    run_inhibit "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"
-  else
-    run_inhibit "${duration}" "${display}" "${system}" "${reason}"
-  fi
-
-  if [[ ${#cmd[@]} -eq 0 && "${duration}" -gt 0 ]]; then
-    print_stopped
-  fi
-}
-
-# Handle interrupts gracefully
-trap 'handle_signal INT' INT
-trap 'handle_signal TERM' TERM
-
-if [[ "${CAFE_SOURCE_ONLY:-0}" != 1 ]]; then
-  main "$@"
-fi
+if __name__ == "__main__":
+    raise SystemExit(main())
