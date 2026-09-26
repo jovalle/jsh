@@ -303,7 +303,7 @@ EOF
 }
 
 configure_identity() {
-  local avatar="${JSH_USER_AVATAR:-${JSH_ROOT}/.github/assets/j.jpg}"
+  local avatar="${JSH_USER_AVATAR:-${JSH_ROOT}/assets/icons/j.jpg}"
 
   [[ ! -r "${avatar}" ]] || install -m 0644 "${avatar}" "${HOME}/.face"
 }

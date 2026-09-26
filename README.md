@@ -1,114 +1,84 @@
 <div align="center">
-  <img src=".github/assets/terminal.webp" alt="Jsh terminal prompt" />
+  <img src="assets/terminal.png" alt="Jsh terminal prompt" />
+
+  <p><strong>An opinionated shell environment, set of tools and configuration </br> automations for my macOS, Linux, and Windows workstations.</strong></p>
 </div>
-
-Jsh provides a portable shell runtime and two opt-in levels of workstation management. It supports macOS, Linux, and
-Windows Subsystem for Linux (WSL).
-
-![Jsh runtime architecture](assets/runtime.svg)
-
-## Contents
-
-- [Quick Start](#quick-start)
-- [Choose an Experience](#choose-an-experience)
-- [Update Jsh](#update-jsh)
-- [Included Commands](#included-commands)
-
-## Quick Start
-
-On a new machine, run the bootstrap from an interactive terminal:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/jovalle/jsh/main/j.sh | bash
 ```
 
-This opens the **bare** experience: it clones or updates `~/.jsh`, initializes the runtime submodules, and starts an
-isolated shell. It does not install a launcher, edit PATH or shell startup files, deploy managed dotfiles, install the
-broader package set, change the login shell, or configure the system. If Git and either Zsh or Bash 5.1+ are unavailable,
-the bootstrap asks before installing the missing runtime prerequisites.
+| 💚 Bare (default)            | 💙 Slim               | 💜 Full              |
+| :--------------------------- | :-------------------- | :------------------- |
+| `jsh runtime`                | `jsh install`         | `jsh setup`          |
+| Try before you buy\*         | ✓ Everything in Bare  | ✓ Everything in Slim |
+| ✓ Isolated shell             | ✓ Persistent launcher | ✓ Package installs   |
+| ✓ Curated and dynamic prompt | ✓ Essential tools     | ✓ OS configuration   |
+|                              | ✓ Managed dotfiles    | ✓ Application tweaks |
 
-Leave the runtime with `exit`. From outside Jsh, `~/.jsh/bin/jsh` and `~/.jsh/bin/jsh runtime` both open it again. Inside
-an active Jsh runtime or a shell configured by install or setup, `jsh` and `jsh runtime` show command help instead of
-nesting another shell.
-
-## Choose an Experience
-
-Jsh has three explicit installation boundaries:
-
-| Experience | Command       | Includes                                                                                  |
-| ---------- | ------------- | ----------------------------------------------------------------------------------------- |
-| Bare       | `jsh runtime` | Repository, runtime submodules, and an isolated shell                                     |
-| Slim       | `jsh install` | Bare, persistent launcher and PATH, core tools, managed dotfiles, and default-shell offer |
-| Full       | `jsh setup`   | Slim, all matching package and application layers, and detected platform configuration    |
-
-Each command is its own consent boundary. Runtime remains ephemeral, install applies only the slim shell environment,
-and setup applies the full workstation. Each phase is shown before it runs.
-
-To select a persistent experience directly from a new machine, pass its command to the bootstrap:
+Pass the command straight to the bootstrap to skip ahead, and add `--yes` to accept that level's prompts:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/jovalle/jsh/main/j.sh | bash -s -- install
 curl -fsSL https://raw.githubusercontent.com/jovalle/jsh/main/j.sh | bash -s -- setup
 ```
 
-Without `-y` or `--yes`, prerequisite installation, repository synchronization, PATH changes, shell changes, and
-configuration steps remain interactive. `--yes` accepts prompts only for the selected command; it never widens runtime
-to install or install to setup.
+Stay current with `jsh update`, preview it with `--dry-run`, and use `jsh doctor` or `jsh repair` when something drifts.
 
-```sh
-curl -fsSL https://raw.githubusercontent.com/jovalle/jsh/main/j.sh | bash -s -- --yes setup
-# From an active runtime:
-jsh --yes setup
-```
+**\* Forever free**
 
-Package selection is declared in [`conf/packages.json`](conf/packages.json). Its additive layers match the current
-operating system, Linux distribution, desktop, hostname, and architecture, then feed the native package manager,
-Homebrew, Flatpak, Cargo, uv, and npm installers. Applications with custom release or configuration requirements are
-owned by their component scripts. Installers inspect current state before changing it and verify convergence afterward.
+## Enhancements
 
-## Update Jsh
+All scripts and tools residing in [`bin/`](bin/) are globally executable via `PATH`.
 
-Run `jsh update` to update the repository and reconcile the installed experience. Bare updates only the runtime; install
-reconciles core packages and dotfiles; setup also updates all selected packages, applications, and managed configuration,
-then reapplies platform patches.
-The persistent scope is stored at `${XDG_STATE_HOME:-$HOME/.local/state}/jsh/install-profile`. When no state exists, Jsh
-defaults to bare unless deployed Jsh dotfiles identify a legacy full installation.
+### Commands
 
-Updates fetch first and report how far the checkout is ahead of or behind upstream. A diverged checkout is never pulled.
-When tracked local changes exist, Jsh offers to stash them, fast-forward, and restore them through `jgit update --stash`;
-`--yes` accepts that offer. `jsh update --dry-run` fetches, then previews repository and submodule drift, outdated
-Homebrew packages, and the planned steps without applying them.
+Everyday commands, rebuilt the way I wish they worked.
 
-`jsh doctor` reports startup dependencies, upstream drift as of the last fetch, the install profile, and stale links to
-removed dotfiles. `jsh repair` fixes submodules, the vendored fzf executable, and stale links. `jsh uninstall` removes
-the jstow-managed dotfile links.
+| Command                      | What it adds                                                                                |
+| ---------------------------- | ------------------------------------------------------------------------------------------- |
+| [`jadopt`](bin/jadopt)       | Moves any file in your home directory into the managed dotfiles.                            |
+| [`jbrew`](bin/jbrew)         | Homebrew with macOS and Linux availability in search, `whatprovides`, and adoption.         |
+| [`jfetch`](bin/jfetch)       | A fastfetch-inspired system summary.<br><img src="assets/jfetch.png" alt="jfetch output" /> |
+| [`jgit`](bin/jgit)           | Per-repo identities, timestamped commits, history rewrites, and gist-backed stashes.        |
+| [`jgraphify`](bin/jgraphify) | Converts data into graph representations for visualization and analysis.                    |
+| [`jmount`](bin/jmount)       | SMB and NFS mounts from a URL or a saved profile.                                           |
+| [`jsh`](bin/jsh)             | The Jsh launcher: runtime, install, setup, update, doctor, and repair.                      |
+| [`jssh`](bin/jssh)           | SSH that brings a portable Jsh environment to the remote host.                              |
+| [`jstow`](bin/jstow)         | GNU Stow, reimplemented in Bash, for deploying dotfile links.                               |
+| [`jventoy`](bin/jventoy)     | Initializes Ventoy drives and keeps their ISOs up to date.                                  |
+| [`jvim`](bin/jvim)           | Neovim with self-contained data and cache, falling back to Vim or Vi.                       |
 
-## Included Commands
+### Utilities
 
-The [`bin/`](bin/) directory is added to `PATH` inside Jsh.
+| Command                      | What it adds                                                                |
+| ---------------------------- | --------------------------------------------------------------------------- |
+| [`cafe`](bin/cafe)           | Keeps the screen awake on macOS, Linux, and Windows until you press Ctrl+C. |
+| [`colours`](bin/colours)     | Prints the 256-colour palette, each number in its own colour.               |
+| [`httpstat`](bin/httpstat)   | curl with a timing breakdown for DNS, connect, TLS, and transfer.           |
+| [`kubecolor`](bin/kubecolor) | Colorized interactive `kubectl` output.                                     |
+| [`kubectx`](bin/kubectx)     | Switches between `kubectl` contexts.                                        |
+| [`kubens`](bin/kubens)       | Switches between Kubernetes namespaces.                                     |
+| [`nukem`](bin/nukem)         | Removes finalizers from a namespace stuck terminating.                      |
+| [`proxy`](bin/proxy)         | Runs a command with HTTP and HTTPS proxy variables set.                     |
+| [`spotifix`](bin/spotifix)   | Configures quick play controls and enhancements for Spotify.                |
+| [`sublime`](bin/sublime)     | Opens Sublime Text and manages its patch status.                            |
 
-| Command                      | Description                                                                           |
-| ---------------------------- | ------------------------------------------------------------------------------------- |
-| [`cafe`](bin/cafe)           | Keeps the system awake for a command or a specified duration.                         |
-| [`colours`](bin/colours)     | Prints the terminal's 256-color palette.                                              |
-| [`helium`](bin/helium)       | Applies, verifies, and launches a hardened Helium browser profile.                    |
-| [`httpstat`](bin/httpstat)   | HTTP(S) request visualizer.                                                           |
-| [`jadopt`](bin/jadopt)       | Moves selected home paths into the shared dotfiles package.                           |
-| [`jbrew`](bin/jbrew)         | J-augmented {home,linux}brew command. Better cross-platform search and easy adoption. |
-| [`jfetch`](bin/jfetch)       | J-augmented fastfetch-inspired command.                                               |
-| [`jgit`](bin/jgit)           | Git identity, history, update, backup, and broken-ref workflows.                      |
-| [`jgraphify`](bin/jgraphify) | Creates or incrementally updates Graphify data for a project.                         |
-| [`jmount`](bin/jmount)       | Mounts SMB and NFS shares from URLs or local profiles.                                |
-| [`jsh`](bin/jsh)             | Opens the isolated shell and dispatches setup, repair, and adoption commands.         |
-| [`jssh`](bin/jssh)           | Opens an ephemeral Jsh shell on a Linux host over SSH.                                |
-| [`jstow`](bin/jstow)         | Provides a Bash implementation of GNU Stow for deploying and removing dotfile links.  |
-| [`jventoy`](bin/jventoy)     | Initializes and updates bootable ISO images on Ventoy drives.                         |
-| [`jvim`](bin/jvim)           | Runs Neovim with Jsh-local data and cache directories, with Vim or Vi as fallbacks.   |
-| [`kubecolor`](bin/kubecolor) | Colorizes interactive `kubectl` output while preserving machine-readable formats.     |
-| [`kubectx`](bin/kubectx)     | Lists, switches, renames, and removes Kubernetes contexts.                            |
-| [`kubens`](bin/kubens)       | Lists and switches Kubernetes namespaces for the current context.                     |
-| [`nukem`](bin/nukem)         | Helps handle those pesky Kubernetes finalizers.                                       |
-| [`proxy`](bin/proxy)         | Forces commands through proxy.                                                        |
-| [`spotifix`](bin/spotifix)   | Plays random Spotify library selections with optional shuffle modes.                  |
-| [`sublime`](bin/sublime)     | Opens files or directories in Sublime Text.                                           |
-| [`waterfix`](bin/waterfix)   | Controls Waterfox, manages add-ons, organizes bookmarks, and restores favicons.       |
+### Apps
+
+With `jsh setup`, popular apps are configured the way I like them.
+
+#### Waterfox
+
+![Waterfox](assets/waterfox.png)
+
+My daily driver. Powered by Betterfox, a slew of add-ons, a few custom tweaks, and personalized settings.
+
+[`waterfix`](bin/waterfix) manages it all including add-ons, placement, and layout. It also tidies bookmarks, and loads favicons to address the emptiness of a fresh install.
+
+#### Helium
+
+![Helium](assets/helium.png)
+
+Contingency to [Waterfox](#waterfox) in a growing world of Chromium. Hardened profile with Bitwarden, Proton VPN, and Privacy Badger alongside the built-in uBlock Origin.
+
+Launch and verify it with [`helium`](bin/helium).
