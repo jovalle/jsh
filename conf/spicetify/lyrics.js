@@ -15,6 +15,37 @@
   let synced = false;
   let fontSize = 28;
   let viewport, list, status;
+  const boundsKey = 'jsh:lyrics-window-bounds';
+  let bounds;
+  try {
+    bounds = JSON.parse(window.localStorage.getItem(boundsKey));
+  } catch {
+    // Storage can be unavailable or contain an older, invalid value.
+  }
+  if (
+    !bounds ||
+    !['width', 'height', 'left', 'top'].every((key) => Number.isFinite(bounds[key])) ||
+    bounds.width <= 0 ||
+    bounds.height <= 0
+  )
+    bounds = null;
+
+  function saveBounds() {
+    if (!popup || popup.closed || popup.innerWidth <= 0 || popup.innerHeight <= 0) return;
+    const next = {
+      width: popup.innerWidth,
+      height: popup.innerHeight,
+      left: popup.screenX,
+      top: popup.screenY,
+    };
+    if (JSON.stringify(next) === JSON.stringify(bounds)) return;
+    bounds = next;
+    try {
+      window.localStorage.setItem(boundsKey, JSON.stringify(bounds));
+    } catch {
+      // Keep session placement even when persistent storage is unavailable.
+    }
+  }
 
   function resync() {
     following = true;
@@ -42,6 +73,7 @@
 
   function tick() {
     if (!popup || popup.closed) return;
+    saveBounds();
     if (Spicetify.Player.data?.item?.uri !== trackUri) {
       load();
       return;
@@ -133,6 +165,7 @@
   }
 
   function close() {
+    saveBounds();
     generation += 1;
     popup?.clearInterval(timer);
     timer = null;
@@ -150,11 +183,16 @@
     opening = true;
     try {
       popup = window.documentPictureInPicture
-        ? await window.documentPictureInPicture.requestWindow({ width: 460, height: 640 })
+        ? await window.documentPictureInPicture.requestWindow({
+            width: bounds?.width || 460,
+            height: bounds?.height || 640,
+            preferInitialWindowPlacement: false,
+          })
         : window.open(
             'about:blank',
             'jsh-live-lyrics',
-            'popup=yes,width=460,height=640,resizable=yes,scrollbars=yes',
+            `popup=yes,width=${bounds?.width || 460},height=${bounds?.height || 640},resizable=yes,scrollbars=yes` +
+              (bounds ? `,left=${bounds.left},top=${bounds.top}` : ''),
           );
     } catch (error) {
       console.error('[lyrics] Failed to open window', error);
@@ -164,6 +202,18 @@
     if (!popup) {
       Spicetify.showNotification('Spotify could not open the lyrics window.', true);
       return;
+    }
+    if (bounds) {
+      try {
+        popup.resizeTo(
+          bounds.width + popup.outerWidth - popup.innerWidth,
+          bounds.height + popup.outerHeight - popup.innerHeight,
+        );
+        // Spotify permits PiP positioning, unlike standard browser implementations.
+        popup.moveTo(bounds.left, bounds.top);
+      } catch (error) {
+        console.warn('[lyrics] Could not restore window placement', error);
+      }
     }
     const doc = popup.document;
     doc.documentElement.lang = document.documentElement.lang || 'en';
@@ -175,9 +225,10 @@
       * { box-sizing: border-box; }
       body { margin: 0; height: 100vh; display: flex; flex-direction: column; }
       body { -webkit-app-region: no-drag; }
+      header { flex: 0 0 28px; -webkit-app-region: drag; user-select: none; cursor: grab; }
       span { user-select: text; cursor: text; }
 
-      :focus-visible { outline: 2px solid #1ed760; outline-offset: 3px; }
+      :focus-visible { outline: 2px solid #767676; outline-offset: -2px; }
       main { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 0 24px; position: relative; scrollbar-gutter: stable; }
       #lines { padding-block: 50vh; }
       #lines:empty { display: none; }
@@ -188,6 +239,8 @@
       footer { color: #b3b3b3; font-size: 12px; padding-bottom: 24px; }
     `;
     doc.head.append(style);
+    const drag = doc.createElement('header');
+    drag.setAttribute('aria-label', 'Drag to move lyrics window');
     viewport = doc.createElement('main');
     viewport.tabIndex = 0;
     viewport.setAttribute('aria-label', 'Lyrics');
@@ -235,8 +288,8 @@
         resizeBy(...delta);
       }
     };
-    doc.body.append(viewport, resize);
-    // Native drag regions consume right-clicks, so the entire panel stays client content.
+    doc.body.append(drag, viewport, resize);
+    // Only the top strip is a native drag region; lyrics still receive right-clicks.
     popup.addEventListener('contextmenu', (event) => {
       event.preventDefault();
       resync();
@@ -254,7 +307,10 @@
       if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key))
         stopFollowing();
     });
-    popup.addEventListener('resize', center);
+    popup.addEventListener('resize', () => {
+      saveBounds();
+      center();
+    });
     popup.addEventListener('pagehide', close, { once: true });
     popup.addEventListener(
       'keydown',
@@ -292,7 +348,6 @@
     load();
     timer = popup.setInterval(tick, 100);
     popup.focus();
-    viewport.focus();
   }
 
   const handled = new WeakSet();

@@ -3,7 +3,14 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
-test('lyrics window follows playback, allows browsing, resyncs and rejects stale track responses', async () => {
+for (const pip of [true, false]) {
+  for (const persisted of [false, true]) {
+    test(`lyrics window (${pip ? 'PiP' : 'popup'}, saved: ${persisted}) follows playback and remembers geometry`, () =>
+      checkLyricsWindow(pip, persisted));
+  }
+}
+
+async function checkLyricsWindow(pip, persisted) {
   class Element extends EventTarget {
     children = [];
     attributes = {};
@@ -51,6 +58,18 @@ test('lyrics window follows playback, allows browsing, resyncs and rejects stale
     };
   }
   const window = new EventTarget();
+  let stored = persisted
+    ? JSON.stringify({ width: 460, height: 680, left: -300, top: 50 })
+    : '{invalid json';
+  let writes = 0;
+  window.localStorage = {
+    getItem: () => stored,
+    setItem: (key, value) => {
+      assert.equal(key, 'jsh:lyrics-window-bounds');
+      stored = value;
+      writes++;
+    },
+  };
   let popup,
     tick,
     progress = 0,
@@ -76,16 +95,28 @@ test('lyrics window follows playback, allows browsing, resyncs and rejects stale
   };
   window.Spicetify = Spicetify;
   window.documentPictureInPicture = {
-    async requestWindow() {
+    requestWindow(options) {
+      if (pip) assert.equal(options.preferInitialWindowPlacement, false);
       opens++;
       popup = new EventTarget();
       popup.document = document();
       popup.focus = () => {};
-      popup.outerWidth = 460;
-      popup.outerHeight = 640;
+      // Native PiP may reuse its own geometry instead of the requested dimensions.
+      popup.outerWidth = pip ? 460 : Number(options.width);
+      popup.outerHeight = pip ? 640 : Number(options.height);
+      popup.screenX = Number(options.left ?? 100);
+      popup.screenY = Number(options.top ?? 100);
+      Object.defineProperties(popup, {
+        innerWidth: { get: () => popup.outerWidth },
+        innerHeight: { get: () => popup.outerHeight },
+      });
       popup.resizeTo = (width, height) => {
         popup.outerWidth = width;
         popup.outerHeight = height;
+      };
+      popup.moveTo = (left, top) => {
+        popup.screenX = left;
+        popup.screenY = top;
       };
       popup.setInterval = (callback) => {
         tick = callback;
@@ -99,14 +130,22 @@ test('lyrics window follows playback, allows browsing, resyncs and rejects stale
       return popup;
     },
   };
-  vm.runInNewContext(fs.readFileSync('conf/spicetify/lyrics.js', 'utf8'), {
-    window,
-    document: document(),
-    Spicetify,
-    navigator: { platform: 'MacIntel' },
-    console,
-    setTimeout,
-  });
+  if (!pip) {
+    const create = window.documentPictureInPicture.requestWindow;
+    delete window.documentPictureInPicture;
+    window.open = (url, name, features) =>
+      create(Object.fromEntries(features.split(',').map((entry) => entry.split('='))));
+  }
+  const run = () =>
+    vm.runInNewContext(fs.readFileSync('conf/spicetify/lyrics.js', 'utf8'), {
+      window,
+      document: document(),
+      Spicetify,
+      navigator: { platform: 'MacIntel' },
+      console,
+      setTimeout,
+    });
+  run();
   const flush = () => new Promise((resolve) => setImmediate(resolve));
   function shortcut() {
     const event = new Event('keydown');
@@ -125,17 +164,26 @@ test('lyrics window follows playback, allows browsing, resyncs and rejects stale
     },
   });
   shortcut();
-  shortcut();
+  if (pip) shortcut();
   await flush();
   assert.equal(opens, 1);
+  assert.equal(popup.innerHeight, persisted ? 680 : 640);
+  if (persisted) {
+    assert.equal(popup.screenX, -300);
+    assert.equal(popup.screenY, 50);
+  }
   requests.shift()(response('first'));
   await flush();
   const list = popup.document.getElementById('lines');
-  const viewport = popup.document.body.children[0];
+  const [drag, viewport, grip] = popup.document.body.children;
+  assert.equal(drag.tag, 'header');
+  assert.equal(drag.attributes['aria-label'], 'Drag to move lyrics window');
+  const css = popup.document.head.children[0].textContent;
+  assert.match(css, /header\s*\{[^}]*-webkit-app-region: drag;/);
+  assert.match(css, /body\s*\{[^}]*-webkit-app-region: no-drag;/);
   assert.equal(viewport.tag, 'main');
-  assert.equal(popup.document.body.children.length, 2);
-  assert.ok(!popup.document.body.children.some((node) => node.tag === 'header'));
-  assert.equal(popup.document.body.children[1].textContent, undefined);
+  assert.equal(popup.document.body.children.length, 3);
+  assert.equal(grip.attributes['aria-label'], 'Resize lyrics window');
   assert.equal(list.children[0].attributes['aria-current'], 'true');
   const zoom = new Event('keydown', { cancelable: true });
   Object.assign(zoom, { key: '+', ctrlKey: true });
@@ -186,11 +234,18 @@ test('lyrics window follows playback, allows browsing, resyncs and rejects stale
   requests.shift()(response('second'));
   await flush();
   assert.equal(list.children[0].children[0].textContent, 'third0');
-  const grip = popup.document.body.children[1];
   grip.onkeydown({ key: 'ArrowLeft', preventDefault() {} });
   assert.equal(popup.outerWidth, 440);
-  for (let n = 0; n < 20; n++) grip.onkeydown({ key: 'ArrowUp', preventDefault() {} });
+  for (let n = 0; n < 30; n++) grip.onkeydown({ key: 'ArrowUp', preventDefault() {} });
   assert.equal(popup.outerHeight, 240);
+  popup.screenX = -500;
+  popup.screenY = 80;
+  tick();
+  const saved = JSON.parse(stored);
+  assert.deepEqual(saved, { width: 440, height: 240, left: -500, top: 80 });
+  const beforeTick = writes;
+  tick();
+  assert.equal(writes, beforeTick, 'unchanged bounds do not rewrite storage');
   const escape = new Event('keydown');
   Object.assign(escape, { key: 'Escape' });
   popup.dispatchEvent(escape);
@@ -199,6 +254,10 @@ test('lyrics window follows playback, allows browsing, resyncs and rejects stale
   shortcut();
   await flush();
   assert.equal(opens, 2);
+  assert.equal(popup.innerWidth, 440);
+  assert.equal(popup.innerHeight, 240);
+  assert.equal(popup.screenX, -500);
+  assert.equal(popup.screenY, 80);
   shortcut();
   assert.equal(popup.closed, true);
   requests.shift()(response('closed'));
@@ -212,7 +271,7 @@ test('lyrics window follows playback, allows browsing, resyncs and rejects stale
   popup.dispatchEvent(toggle);
   assert.equal(popup.closed, true);
   assert.equal(clears, 3);
-});
+}
 
 const patch = fs.readFileSync(
   require('node:path').join(__dirname, '../conf/spicetify/lyrics.ini'),
