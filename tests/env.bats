@@ -810,3 +810,39 @@ EOF
 
   [[ ${status} -eq 0 ]]
 }
+
+@test "stale link scan reports only broken managed links under POSIX sh" {
+  command -v dash > /dev/null || skip 'dash is unavailable'
+  local root="${BATS_TEST_TMPDIR}/stale-root" home="${BATS_TEST_TMPDIR}/stale-home"
+  mkdir -p "${root}/dotfiles" "${home}"
+  touch "${root}/dotfiles/.present"
+  ln -s "${root}/dotfiles/.present" "${home}/.present"
+  ln -s "${root}/dotfiles/.gone" "${home}/.gone"
+  ln -s /nonexistent/dotfiles/.other "${home}/.other"
+
+  run env HOME="${home}" dash "${JSH_ROOT}/lib/unix/links.sh" "${root}"
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == "${home}/.gone" ]]
+}
+
+@test "banner embeds a centred label without shifting the graffiti" {
+  local plain labelled fallback
+  plain=$(JSH_COLOR=never bash -c '. "$1/lib/output.sh"; jsh_banner' _ "${JSH_ROOT}")
+  labelled=$(JSH_COLOR=never bash -c '. "$1/lib/output.sh"; jsh_banner update' _ "${JSH_ROOT}")
+  fallback=$(JSH_COLOR=never bash -c '
+    . "$1/lib/output.sh"
+    unset -f jsh_banner
+    eval "$(sed -n "/^if ! declare -F jsh_banner/,/^fi$/p" "$1/j.sh")"
+    jsh_banner update
+  ' _ "${JSH_ROOT}")
+
+  [[ ${plain##*$'\n'} == ' =   :-=-:                          -:' ]]
+  [[ ${labelled##*$'\n'} == ' =   :-=-:          update          -:' ]]
+  [[ ${labelled%$'\n'*} == "${plain%$'\n'*}" ]]
+  [[ ${fallback} == "${labelled}" ]]
+
+  if command -v dash > /dev/null; then
+    [[ $(JSH_COLOR=never dash -c '. "$1/lib/output.sh"; jsh_banner update' _ "${JSH_ROOT}") == "${labelled}" ]]
+  fi
+}

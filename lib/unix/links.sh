@@ -3,7 +3,7 @@
 
 set -eu
 
-root=$(CDPATH='' cd -P "${1:?usage: stale-links.sh JSH_ROOT}" && pwd -P)
+root=$(CDPATH='' cd -P "${1:?usage: links.sh JSH_ROOT}" && pwd -P)
 home=${HOME:?}
 
 candidates() {

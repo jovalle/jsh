@@ -35,6 +35,7 @@ export CLICOLORS=1                               # Colorize output
 export EDITOR=vim                                # Default CLI editor
 export VISUAL=vim                                # Default full-screen editor
 export SH=${SHELL##*/}                           # Shell type reference
+export VIRTUAL_ENV_DISABLE_PROMPT=1              # Python environment appears in prompt info
 
 # Project/work directories
 export GIT_BASE=${HOME}/Projects                 # Git projects base

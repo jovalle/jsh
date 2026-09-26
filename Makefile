@@ -134,7 +134,7 @@ setup: ## Discover and run the current platform setup
 	$(call run_scripts,install deploy configure patch)
 
 hooks: ## Install repository hooks
-	@"$(JSH_ROOT)/scripts/development/hooks.sh"
+	@"$(JSH_ROOT)/scripts/hooks.sh"
 
 uninstall: ## Remove dotfile links managed by jstow
 	@$(OUTPUT) if ! jsh::confirm "Remove managed dotfile links from $(HOME)?" --default no; then \
@@ -488,11 +488,12 @@ test-reconciliation: ## Test planning, completions, idempotency and platform ada
 	@$(BATS) tests/jgit.bats
 	@$(BATS) tests/jgraphify.bats
 	@$(BATS) tests/jmount.bats
+	@$(BATS) tests/jssh.bats
 	@$(BATS) tests/kubectx.bats
 	@$(BATS) tests/linux.bats
 	@$(BATS) tests/spotify.bats
 	@$(BATS) tests/syncthing.bats
 	@$(BATS) tests/ui.bats
 	@$(BATS) tests/waterfox.bats
-	@node --test tests/spotifix.test.js
+	@node --test tests/*.test.js
 	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m unittest discover -s tests -p 'test_*.py'

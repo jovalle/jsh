@@ -85,7 +85,16 @@ jsh_blank() {
   printf '\n'
 }
 
+# Usage: jsh_banner [LABEL]; LABEL is centred in the gap on the last banner line.
 jsh_banner() {
+  jsh_banner_label=${1:-}
+  if [[ -n "${SSH_CONNECTION:-}" ]]; then
+    [[ -z "${jsh_banner_label}" ]] || jsh_info "jsh ${jsh_banner_label}"
+    unset jsh_banner_label
+    return 0
+  fi
+  jsh_banner_left=$(((26 - ${#jsh_banner_label}) / 2))
+  jsh_banner_right=$((26 - ${#jsh_banner_label} - jsh_banner_left))
   jsh_banner_text='   :%@@@@@@@@@#*#@%-              +-:##
   :#    -#%%+=#:@#                :@@%:
    %@@     +@++@@-            *-   @@%:
@@ -98,9 +107,9 @@ jsh_banner() {
           +@+:%*     *@@@@@%@%-   #@@@+  *@@-
    :==--::*#:#-     -:   -*:        +   =@@=
  :@@@@@@@@#@-                         +@#:
- =   :-=-:                          -:'
+'"$(printf " =   :-=-:%${jsh_banner_left}s%s%${jsh_banner_right}s-:" '' "${jsh_banner_label}" '')"
   jsh_blank
   jsh_stdout '1;36' '' "${jsh_banner_text}"
   jsh_blank
-  unset jsh_banner_text
+  unset jsh_banner_text jsh_banner_label jsh_banner_left jsh_banner_right
 }

@@ -492,6 +492,7 @@ jsh::spinner_static() {
 jsh::spinner_start() {
   local spinner_color spinner_reset=''
   jsh::spinner_stop
+  JSH_SPINNER_MESSAGE=$*
 
   if [[ ! -t ${JSH_UI_OUTPUT_FD} || ${TERM:-} == dumb || ${JSH_PLAIN_OUTPUT:-0} == 1 ]]; then
     jsh::log_info "$*" >&"${JSH_UI_OUTPUT_FD}"
@@ -499,21 +500,26 @@ jsh::spinner_start() {
   fi
 
   spinner_color=$(ui::ansi_fg ACCENT_SECONDARY)
-  [[ -z ${spinner_color} ]] || spinner_reset=$'\033[0m'
+  if [[ -n ${spinner_color} ]]; then
+    spinner_color+=$'\033[1m'
+    spinner_reset=$'\033[0m'
+  fi
   JSH_SPINNER_VISIBLE=1
   (
     trap 'exit 0' INT TERM
     while :; do
       while IFS= read -r frame; do
         printf '\r%s%s%s %s' "${spinner_color}" "${frame}" "${spinner_reset}" "$*" >&"${JSH_UI_OUTPUT_FD}"
-        sleep 0.1
+        sleep "${UI_SPINNER_INTERVAL:-0.08}"
       done < <(ui::spinner_frames)
     done
   ) &
   JSH_SPINNER_PID=$!
 }
 
+# An optional exit status replaces the spinner with a ✓ or ✗ result line.
 jsh::spinner_stop() {
+  local exit_status=${1:-}
   if [[ -n ${JSH_SPINNER_PID:-} ]]; then
     kill "${JSH_SPINNER_PID}" 2>/dev/null || true
     wait "${JSH_SPINNER_PID}" 2>/dev/null || true
@@ -521,8 +527,16 @@ jsh::spinner_stop() {
   if [[ ${JSH_SPINNER_VISIBLE:-0} == 1 ]]; then
     printf '\r\033[2K' >&"${JSH_UI_OUTPUT_FD}"
   fi
+  if [[ -n ${exit_status} && -n ${JSH_SPINNER_MESSAGE:-} ]]; then
+    if [[ ${exit_status} == 0 ]]; then
+      jsh::log_success "${JSH_SPINNER_MESSAGE}" >&"${JSH_UI_OUTPUT_FD}"
+    else
+      jsh::log_error "${JSH_SPINNER_MESSAGE}" 2>&"${JSH_UI_OUTPUT_FD}"
+    fi
+  fi
   JSH_SPINNER_PID=
   JSH_SPINNER_VISIBLE=0
+  JSH_SPINNER_MESSAGE=
 }
 
 jsh::cleanup() {

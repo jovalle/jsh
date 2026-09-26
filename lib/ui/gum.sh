@@ -361,7 +361,7 @@ ui::spin() {
     while ui::_job_running "${target_pid}" && ((interrupted == 0)); do
       for frame in "${frames[@]}"; do
         ui::_job_running "${target_pid}" || break
-        printf '\r\033[2K%s %s' "$(ui::style --fg ACCENT_SECONDARY -- "${frame}")" "${message}" >&"${UI_OUTPUT_FD}"
+        printf '\r\033[2K%s %s' "$(ui::style --fg ACCENT_SECONDARY --bold -- "${frame}")" "${message}" >&"${UI_OUTPUT_FD}"
         ui::_spinner_pause
         ((interrupted == 0)) || break
       done

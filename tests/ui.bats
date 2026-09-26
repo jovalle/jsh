@@ -245,6 +245,34 @@ if os.path.exists("/usr/bin/zsh"):
   [[ ${status} -eq 7 ]]
 }
 
+@test "spinner stop reports the outcome only when given a status" {
+  run env JSH_PLAIN_OUTPUT=1 bash -c '
+    source "$1/lib/output.sh"
+    source "$1/lib/ui.sh"
+    jsh::spinner_start "Syncing"
+    jsh::spinner_stop 0
+    jsh::spinner_start "Pulling"
+    jsh::spinner_stop 3
+    jsh::spinner_start "Cancelled"
+    jsh::spinner_stop
+  ' _ "${JSH_ROOT}"
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == $'Syncing\n✓ Syncing\nPulling\n✗ Pulling\nCancelled' ]]
+}
+
+@test "key-value rows align labels and hints keep their text" {
+  run bash -c '
+    source "$1/lib/ui/lipgloss.sh"
+    ui::kv local http://localhost:3000 7
+    ui::kv network http://10.0.0.2:3000 7
+    ui::_strip_ansi "$(ui::hint "press " ctrl+c " to exit")"
+  ' _ "${JSH_ROOT}"
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == $'  local   → http://localhost:3000\n  network → http://10.0.0.2:3000\npress ctrl+c to exit' ]]
+}
+
 @test "all modules parse and render consistently in Zsh" {
   command -v zsh > /dev/null || skip 'zsh is unavailable'
 

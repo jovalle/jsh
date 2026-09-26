@@ -15,6 +15,77 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class DesktopPreferenceTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("zsh"), "Zsh required")
+    def test_prompt_moves_long_info_to_one_overflow_line(self):
+        result = subprocess.run(
+            [
+                "zsh",
+                "-fc",
+                'COLUMNS=65; source "$1"; '
+                "_JSH_PROMPT_GIT_BRANCH=main; _JSH_PROMPT_DURATION=4200; "
+                "AWS_PROFILE=very-long-production-profile; "
+                "VIRTUAL_ENV=/tmp/long-virtual-environment; "
+                'print -rn -- "$(_jsh_prompt_expand)"',
+                "test",
+                str(ROOT / "lib/zsh/prompt.zsh"),
+            ],
+            env=dict(
+                os.environ, JSH_PLAIN_OUTPUT="1", JSH_PROMPT_ASYNC="0", JSH_PROMPT_MODE="ascii"
+            ),
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        lines = result.stdout.splitlines()
+        self.assertEqual(len(lines), 2)
+        self.assertTrue(all(len(line) < 65 for line in lines))
+        self.assertIn("4s", lines[0])
+        self.assertRegex(lines[0], r"\d\d:\d\d(:\d\d)?$")
+        self.assertIn("aws:very-long-production-profile", lines[1])
+        self.assertIn("py:long-virtual-environment", lines[1])
+
+        narrow = subprocess.run(
+            [
+                "zsh",
+                "-fc",
+                'COLUMNS=10; source "$1"; _JSH_PROMPT_DURATION=4200; '
+                "AWS_PROFILE=very-long-production-profile; "
+                'print -rn -- "$(_jsh_prompt_expand)"',
+                "test",
+                str(ROOT / "lib/zsh/prompt.zsh"),
+            ],
+            env=dict(
+                os.environ, JSH_PLAIN_OUTPUT="1", JSH_PROMPT_ASYNC="0", JSH_PROMPT_MODE="ascii"
+            ),
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertTrue(all(len(line) < 10 for line in narrow.stdout.splitlines()))
+        self.assertRegex(narrow.stdout.splitlines()[0], r"4s  \d\d:\d\d$")
+
+        tight = subprocess.run(
+            [
+                "zsh",
+                "-fc",
+                'COLUMNS=42; source "$1"; _JSH_PROMPT_GIT_BRANCH=main; '
+                "_JSH_PROMPT_DURATION=4200; VIRTUAL_ENV=/tmp/.venv; "
+                'print -rn -- "$(_jsh_prompt_expand)"',
+                "test",
+                str(ROOT / "lib/zsh/prompt.zsh"),
+            ],
+            env=dict(
+                os.environ, JSH_PLAIN_OUTPUT="1", JSH_PROMPT_ASYNC="0", JSH_PROMPT_MODE="ascii"
+            ),
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        first, second = tight.stdout.splitlines()
+        self.assertIn("git:main ", first)
+        self.assertIn("4s", first)
+        self.assertEqual(second, "py:.venv")
+
+    @unittest.skipUnless(shutil.which("zsh"), "Zsh required")
     def test_prompt_leaves_final_terminal_column_clear(self):
         env = dict(
             os.environ,

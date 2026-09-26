@@ -113,6 +113,14 @@ _jssh_required_sources() {
     dotfiles/.zshrc \
     dotfiles/.zsh/completions/_jsh \
     dotfiles/.zsh/completions/_make \
+    lib/env.sh \
+    lib/output.sh \
+    lib/ui.sh \
+    lib/ui/cli.sh \
+    lib/ui/gum.sh \
+    lib/ui/lipgloss.sh \
+    lib/ui/theme.sh \
+    lib/unix/links.sh \
     lib/zsh/j.zsh \
     lib/zsh/prompt.zsh \
     local/vendor/zsh-autosuggestions/LICENSE \
@@ -171,12 +179,17 @@ _jssh_build_payload() {
   mkdir -p \
     "${root}/bin" \
     "${root}/dotfiles/.zsh" \
-    "${root}/lib" \
+    "${root}/lib/ui" \
+    "${root}/lib/unix" \
     "${root}/local/vendor"
 
   cp "${JSH_ROOT}/bin/jsh" "${root}/bin/jsh"
   cp "${JSH_ROOT}/dotfiles/.zshrc" "${root}/dotfiles/.zshrc"
   cp -R "${JSH_ROOT}/dotfiles/.zsh/completions" "${root}/dotfiles/.zsh/completions"
+  cp "${JSH_ROOT}/lib/env.sh" "${JSH_ROOT}/lib/output.sh" "${JSH_ROOT}/lib/ui.sh" "${root}/lib/"
+  cp "${JSH_ROOT}/lib/ui/cli.sh" "${JSH_ROOT}/lib/ui/gum.sh" \
+    "${JSH_ROOT}/lib/ui/lipgloss.sh" "${JSH_ROOT}/lib/ui/theme.sh" "${root}/lib/ui/"
+  cp "${JSH_ROOT}/lib/unix/links.sh" "${root}/lib/unix/"
   cp -R "${JSH_ROOT}/lib/zsh" "${root}/lib/zsh"
   mkdir -p \
     "${root}/local/vendor/zsh-autosuggestions" \
@@ -297,6 +310,7 @@ done
 PATH="\${JSH_ROOT}/bin:\${PATH}"
 export JSH_ROOT JSH_RUNTIME_DIR JSH_LOAD_CONFIG JSH_LANG PATH
 mkdir -p "\${JSH_RUNTIME_DIR}"
+[ ! -t 1 ] || printf '\033[2J\033[H'
 case '${JSSH_REMOTE_SHELL}' in
   zsh)
     JSH_ZSH=\$(command -v zsh) || exit 127
