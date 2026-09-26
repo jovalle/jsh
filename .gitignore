@@ -3,6 +3,7 @@
 # https://git-scm.com/docs/gitignore
 # https://prettier.io/docs/en/ignore.html
 
+!/local/vendor/
 *.cache*
 *.db
 *.gpg
@@ -42,13 +43,13 @@
 .Trashes
 .VolumeIcon.icns
 ._*
+.agents/skills/
 .apdisk
 .com.apple.timemachine.donotpresent
 .envrc
 .fseventsd
 .history
 .idea
-.agents/skills/archify/
 .kube
 .oh-my-zsh
 .sops
@@ -61,7 +62,6 @@
 .zsh_history
 .zsh_history.*
 /local/*
-!/local/vendor/
 /tmp/
 AppSupport
 GitHub.sublime-settings
@@ -87,7 +87,6 @@ dotfiles/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-keyboard-shortcuts.xml
 dotfiles/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml
 dotfiles/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-screenshooter.xml
 dotfiles/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-taskmanager.xml
-docs/architecture/
 git.json
 graphify-out/
 mounts.json

@@ -281,7 +281,7 @@ jsh_repair() {
     fi
   fi
 
-  if repair_links=$("${JSH_ROOT}/lib/unix/stale-links.sh" "${JSH_ROOT}"); then
+  if repair_links=$("${JSH_ROOT}/lib/unix/links.sh" "${JSH_ROOT}"); then
     if [ -n "${repair_links}" ]; then
       jsh_info 'Removing stale managed symlinks...'
       printf '%s\n' "${repair_links}" | while IFS= read -r repair_link; do
@@ -351,7 +351,7 @@ jsh_doctor() {
   else
     jsh_health_status skip 'Launcher: not installed.'
   fi
-  if doctor_links=$("${JSH_ROOT}/lib/unix/stale-links.sh" "${JSH_ROOT}"); then
+  if doctor_links=$("${JSH_ROOT}/lib/unix/links.sh" "${JSH_ROOT}"); then
     if [ -n "${doctor_links}" ]; then
       while IFS= read -r doctor_link; do
         jsh_health_issue "Stale managed symlink: ${doctor_link}"

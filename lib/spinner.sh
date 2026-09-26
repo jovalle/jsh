@@ -9,5 +9,5 @@ jsh_spinner_start() {
 }
 
 jsh_spinner_stop() {
-  jsh::spinner_stop
+  jsh::spinner_stop "$@"
 }

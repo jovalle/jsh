@@ -303,3 +303,17 @@ ui::badge() {
 ui::tag() {
   ui::style --fg SURFACE --bg "${2:-ACCENT_SECONDARY}" -- " ${1:-} "
 }
+
+# Usage: ui::kv LABEL VALUE [LABEL_WIDTH]; share a width to align several rows.
+ui::kv() {
+  local label=${1:-} value=${2:-} label_width=${3:-0}
+  ((label_width >= ${#label})) || label_width=${#label}
+  printf '  %s%s %s %s\n' "${label}" "$(ui::_repeat ' ' "$((label_width - ${#label}))")" \
+    "$(ui::style --fg TEXT_MUTED -- '→')" "${value}"
+}
+
+# Usage: ui::hint BEFORE KEY [AFTER], e.g. ui::hint 'press ' ctrl+c ' to exit'.
+ui::hint() {
+  printf '%s%s%s\n' "$(ui::style --fg TEXT_MUTED -- "${1:-}")" \
+    "$(ui::style --fg TEXT_MUTED --bold -- "${2:-}")" "$(ui::style --fg TEXT_MUTED -- "${3:-}")"
+}

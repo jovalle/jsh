@@ -72,7 +72,7 @@ fi
 typeset -ga JSH_PROMPT_LEFT JSH_PROMPT_RIGHT
 (( ${#JSH_PROMPT_LEFT} )) || JSH_PROMPT_LEFT=(os directory git)
 (( ${#JSH_PROMPT_RIGHT} )) || \
-	JSH_PROMPT_RIGHT=(status duration jobs direnv node python kube aws context time)
+	JSH_PROMPT_RIGHT=(status duration jobs direnv node python kube aws time)
 [[ ${JSH_PROMPT_ASYNC:-1} == (0|1) ]] || JSH_PROMPT_ASYNC=1
 [[ ${JSH_PROMPT_DURATION_MS:-3000} == <-> ]] || JSH_PROMPT_DURATION_MS=3000
 [[ ${JSH_PROMPT_DIR_MIN:-14} == <-> ]] || JSH_PROMPT_DIR_MIN=14
@@ -98,7 +98,7 @@ if [[ ${JSH_PLAIN_OUTPUT:-0} != 1 && ${JSH_COLOR:-auto} != never && \
 	typeset -g _JSH_C_AWS=$'%{\e[38;2;255;149;0m%}'
 	typeset -g _JSH_C_CONTEXT=$'%{\e[38;2;255;215;175m%}'
 	typeset -g _JSH_C_CONTEXT_ROOT=$'%{\e[38;2;255;215;0m%}'
-	typeset -g _JSH_C_TIME=$'%{\e[38;2;41;184;219m%}'
+	typeset -g _JSH_C_TIME=$'%{\e[38;2;128;128;128m%}'
 else
 	typeset -g _JSH_C_RESET='' _JSH_C_OS='' _JSH_C_DIR='' _JSH_C_CLEAN=''
 	typeset -g _JSH_C_MODIFIED='' _JSH_C_UNTRACKED='' _JSH_C_ERROR=''
@@ -117,9 +117,6 @@ typeset -g _JSH_PROMPT_NODE='' _JSH_PROMPT_NODE_PWD='' _JSH_PROMPT_KUBE_CACHE=''
 typeset -g _JSH_PROMPT_KUBE_SIGNATURE=''
 typeset -gi _JSH_PROMPT_KUBE_DIRTY=1 _JSH_PROMPT_DIR_MAX=0 _JSH_PROMPT_BRANCH_MAX=0
 typeset -gi _JSH_PROMPT_HIDE_OS=0 _JSH_PROMPT_HIDE_GIT=0
-typeset -gi _JSH_PROMPT_HIDE_DURATION=0 _JSH_PROMPT_HIDE_JOBS=0
-typeset -gi _JSH_PROMPT_HIDE_NODE=0 _JSH_PROMPT_HIDE_PYTHON=0
-typeset -gi _JSH_PROMPT_HIDE_KUBE=0 _JSH_PROMPT_HIDE_CONTEXT=0
 typeset -g _JSH_PROMPT_TIME_MODE=full
 
 _jsh_prompt_escape() {
@@ -133,6 +130,19 @@ _jsh_prompt_visible_length() {
 	text=${text//$'\e'\[[0-9;]##m/}
 	text=${text//\%\%/\%}
 	REPLY=${#text}
+}
+
+_jsh_prompt_clip() {
+	emulate -L zsh -o extended_glob
+	local text=$1 max=$2
+	_jsh_prompt_visible_length "${text}"
+	(( REPLY <= max )) && { REPLY=${text}; return; }
+	text=${text//\%\{/}
+	text=${text//\%\}/}
+	text=${text//$'\e'\[[0-9;]##m/}
+	text=${text//\%\%/\%}
+	(( max > 1 )) && text="${text[1,$((max - 1))]}…" || text=''
+	_jsh_prompt_escape "${text}"
 }
 
 _jsh_prompt_directory() {
@@ -183,15 +193,21 @@ _jsh_prompt_segment_os() {
 }
 
 _jsh_prompt_segment_directory() {
-	local directory
+	local directory context=''
+	local -i max=${_JSH_PROMPT_DIR_MAX}
+	if _jsh_prompt_segment_context; then
+		context="${REPLY}:"
+		_jsh_prompt_visible_length "${context}"
+		(( max == 0 )) || { max=$((max - REPLY)); (( max > 0 )) || max=1; }
+	fi
 	_jsh_prompt_directory
 	directory=${REPLY}
-	(( _JSH_PROMPT_DIR_MAX == 0 )) || {
-		_jsh_prompt_abbreviate "${directory}" ${_JSH_PROMPT_DIR_MAX}
+	(( max == 0 )) || {
+		_jsh_prompt_abbreviate "${directory}" ${max}
 		directory=${REPLY}
 	}
 	_jsh_prompt_escape "${directory}"
-	REPLY="${_JSH_C_DIR}${REPLY}${_JSH_C_RESET}"
+	REPLY="${context}${_JSH_C_DIR}${REPLY}${_JSH_C_RESET}"
 }
 
 _jsh_prompt_segment_git() {
@@ -238,7 +254,7 @@ _jsh_prompt_segment_status() {
 _jsh_prompt_segment_duration() {
 	local milliseconds=${_JSH_PROMPT_DURATION} seconds result=''
 	REPLY=''
-	(( !_JSH_PROMPT_HIDE_DURATION && milliseconds >= JSH_PROMPT_DURATION_MS )) || return
+	(( milliseconds >= JSH_PROMPT_DURATION_MS )) || return
 	seconds=$((milliseconds / 1000))
 	(( seconds < 86400 )) || { result+="$((seconds / 86400))d"; seconds=$((seconds % 86400)); }
 	(( seconds < 3600 )) || { result+="$((seconds / 3600))h"; seconds=$((seconds % 3600)); }
@@ -249,7 +265,7 @@ _jsh_prompt_segment_duration() {
 
 _jsh_prompt_segment_jobs() {
 	REPLY=''
-	(( !_JSH_PROMPT_HIDE_JOBS && ${#jobstates} )) || return
+	(( ${#jobstates} )) || return
 	REPLY="${_JSH_C_JOBS}${_JSH_PROMPT_ICON[jobs]} ${#jobstates}${_JSH_C_RESET}"
 }
 
@@ -261,7 +277,7 @@ _jsh_prompt_segment_direnv() {
 
 _jsh_prompt_segment_node() {
 	REPLY=''
-	(( !_JSH_PROMPT_HIDE_NODE )) && [[ -n ${_JSH_PROMPT_NODE} ]] || return
+	[[ -n ${_JSH_PROMPT_NODE} ]] || return
 	_jsh_prompt_escape "${_JSH_PROMPT_NODE}"
 	REPLY="${_JSH_C_CLEAN}${_JSH_PROMPT_ICON[node]}${REPLY}${_JSH_C_RESET}"
 }
@@ -269,7 +285,7 @@ _jsh_prompt_segment_node() {
 _jsh_prompt_segment_python() {
 	local environment=${VIRTUAL_ENV:-${CONDA_DEFAULT_ENV:-}}
 	REPLY=''
-	(( !_JSH_PROMPT_HIDE_PYTHON )) && [[ -n ${environment} ]] || return
+	[[ -n ${environment} ]] || return
 	environment=${environment:t}
 	_jsh_prompt_escape "${environment}"
 	REPLY="${_JSH_C_ENV}${_JSH_PROMPT_ICON[python]}${REPLY}${_JSH_C_RESET}"
@@ -277,7 +293,7 @@ _jsh_prompt_segment_python() {
 
 _jsh_prompt_segment_kube() {
 	REPLY=''
-	(( !_JSH_PROMPT_HIDE_KUBE )) && [[ -n ${_JSH_PROMPT_KUBE_CACHE} ]] || return
+	[[ -n ${_JSH_PROMPT_KUBE_CACHE} ]] || return
 	_jsh_prompt_escape "${_JSH_PROMPT_KUBE_CACHE}"
 	REPLY="${_JSH_C_KUBE}${_JSH_PROMPT_ICON[kube]} ${REPLY}${_JSH_C_RESET}"
 }
@@ -293,7 +309,6 @@ _jsh_prompt_segment_aws() {
 _jsh_prompt_segment_context() {
 	local color=${_JSH_C_CONTEXT}
 	REPLY=''
-	(( !_JSH_PROMPT_HIDE_CONTEXT )) || return
 	[[ -n ${SSH_CONNECTION:-} || ${EUID} == 0 ]] || return
 	(( EUID != 0 )) || color=${_JSH_C_CONTEXT_ROOT}
 	_jsh_prompt_escape "${USER:-?}@${HOST%%.*}"
@@ -365,31 +380,6 @@ _jsh_prompt_build_left() {
 		_jsh_prompt_join ' ' ${JSH_PROMPT_LEFT}; full=${REPLY}
 	fi
 	REPLY=${full}
-}
-
-_jsh_prompt_build_right() {
-	local width=$1 value length name
-	_JSH_PROMPT_TIME_MODE=full _JSH_PROMPT_HIDE_DURATION=0 _JSH_PROMPT_HIDE_JOBS=0
-	_JSH_PROMPT_HIDE_NODE=0 _JSH_PROMPT_HIDE_PYTHON=0 _JSH_PROMPT_HIDE_KUBE=0
-	_JSH_PROMPT_HIDE_CONTEXT=0
-	_jsh_prompt_join '  ' ${JSH_PROMPT_RIGHT}; value=${REPLY}
-	_jsh_prompt_visible_length "${value}"; length=${REPLY}
-	(( length + 4 < width )) || {
-		_JSH_PROMPT_TIME_MODE=compact
-		_jsh_prompt_join '  ' ${JSH_PROMPT_RIGHT}; value=${REPLY}
-	}
-	for name in jobs context kube node python duration; do
-		_jsh_prompt_visible_length "${value}"; length=${REPLY}
-		(( length + 4 < width )) && break
-		typeset -g "_JSH_PROMPT_HIDE_${(U)name}=1"
-		_jsh_prompt_join '  ' ${JSH_PROMPT_RIGHT}; value=${REPLY}
-	done
-	_jsh_prompt_visible_length "${value}"; length=${REPLY}
-	if (( length + 4 >= width )); then
-		_JSH_PROMPT_TIME_MODE=none
-		_jsh_prompt_join '  ' ${JSH_PROMPT_RIGHT}; value=${REPLY}
-	fi
-	REPLY=${value}
 }
 
 _jsh_prompt_git_clear() {
@@ -609,21 +599,55 @@ _jsh_prompt_precmd() {
 }
 
 _jsh_prompt_expand() {
-	local width=${COLUMNS:-80} left right padding
-	local -i left_length right_length spaces right_budget left_budget
+	local width=${COLUMNS:-80} left right overflow padding name
+	local -a pinned extras
+	local -i left_length right_length spaces left_budget max
 	[[ ${width} == <-> && ${width} -gt 0 ]] || width=80
-	right_budget=$((width / 2))
-	(( right_budget >= 8 )) || right_budget=8
-	_jsh_prompt_build_right ${right_budget}; right=${REPLY}
+	max=$((width - 1))
+	_JSH_PROMPT_TIME_MODE=full
+	for name in ${JSH_PROMPT_RIGHT}; do
+		case ${name} in
+			duration|time) pinned+=(${name}) ;;
+			*) extras+=(${name}) ;;
+		esac
+	done
+	_jsh_prompt_join '  ' ${JSH_PROMPT_RIGHT}; right=${REPLY}
 	_jsh_prompt_visible_length "${right}"; right_length=${REPLY}
 	left_budget=$((width - right_length - 1))
 	(( left_budget > 0 )) || left_budget=1
 	_jsh_prompt_build_left ${left_budget}; left=${REPLY}
 	_jsh_prompt_visible_length "${left}"; left_length=${REPLY}
+	if (( left_length + right_length >= max )); then
+		_jsh_prompt_join '  ' ${pinned}; right=${REPLY}
+		_jsh_prompt_visible_length "${right}"; right_length=${REPLY}
+		if (( right_length > max )); then
+			_JSH_PROMPT_TIME_MODE=compact
+			_jsh_prompt_join '  ' ${pinned}; right=${REPLY}
+			_jsh_prompt_visible_length "${right}"; right_length=${REPLY}
+		fi
+		if (( right_length > max && ${pinned[(Ie)duration]} )); then
+			pinned=(${pinned:#duration})
+			extras=(duration ${extras})
+			_jsh_prompt_join '  ' ${pinned}; right=${REPLY}
+			_jsh_prompt_visible_length "${right}"; right_length=${REPLY}
+		fi
+		if (( right_length > max )); then
+			_jsh_prompt_clip "${right}" ${max}; right=${REPLY}
+			_jsh_prompt_visible_length "${right}"; right_length=${REPLY}
+		fi
+		left_budget=$((max - right_length - 1))
+		(( left_budget > 0 )) || left_budget=1
+		_jsh_prompt_build_left ${left_budget}; left=${REPLY}
+		_jsh_prompt_clip "${left}" ${left_budget}; left=${REPLY}
+		_jsh_prompt_join '  ' ${extras}; overflow=${REPLY}
+		_jsh_prompt_clip "${overflow}" ${max}; overflow=${REPLY}
+	fi
+	_jsh_prompt_visible_length "${left}"; left_length=${REPLY}
 	spaces=$((width - left_length - right_length - 1))
-	(( spaces > 0 )) || spaces=1
+	(( spaces > 0 )) || spaces=0
 	printf -v padding '%*s' ${spaces} ''
 	print -rn -- "${left}${padding}${right}"
+	[[ -z ${overflow} ]] || print -rn -- $'\n'"${overflow}"
 }
 
 _jsh_prompt_character() {

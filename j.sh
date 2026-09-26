@@ -70,7 +70,13 @@ fi
 
 if ! declare -F jsh_banner > /dev/null; then
   jsh_banner() {
-    local banner
+    local banner label=${1:-} left right
+    if [[ -n ${SSH_CONNECTION:-} ]]; then
+      [[ -z ${label} ]] || jsh_info "jsh ${label}"
+      return 0
+    fi
+    left=$(((26 - ${#label}) / 2))
+    right=$((26 - ${#label} - left))
     banner=$(
       cat << 'BANNER'
    :%@@@@@@@@@#*#@%-              +-:##
@@ -85,9 +91,9 @@ if ! declare -F jsh_banner > /dev/null; then
           +@+:%*     *@@@@@%@%-   #@@@+  *@@-
    :==--::*#:#-     -:   -*:        +   =@@=
  :@@@@@@@@#@-                         +@#:
- =   :-=-:                          -:
 BANNER
     )
+    printf -v banner '%s\n =   :-=-:%*s%s%*s-:' "${banner}" "${left}" '' "${label}" "${right}" ''
     jsh_blank
     jsh_stdout '1;36' '' "${banner}"
     jsh_blank
@@ -715,9 +721,8 @@ print_update_summary() {
   jsh_detail "${#UPDATE_SUCCEEDED[@]} succeeded, ${#UPDATE_WARNINGS[@]} skipped, ${#UPDATE_ERRORS[@]} failed."
 }
 
-jsh_banner
+jsh_banner "${mode}"
 if [[ ${mode} == runtime ]]; then
-  if declare -F jsh::title > /dev/null; then jsh::title "jsh runtime"; else jsh_info "jsh runtime"; fi
   jsh_detail "Install directory: ${JSH_DIR}"
   jsh_detail "This opens an isolated J shell without installing a launcher, deploying dotfiles, or configuring the system."
 
@@ -748,10 +753,18 @@ fi
 
 if [[ ${mode} == update ]]; then
   declare -a UPDATE_SUCCEEDED=() UPDATE_WARNINGS=() UPDATE_ERRORS=()
-  if declare -F jsh::title > /dev/null; then jsh::title "jsh update"; else jsh_info "jsh update"; fi
   jsh_detail "Install directory: ${JSH_DIR}"
   install_profile=$(read_install_profile)
-  jsh_detail "Installed experience: ${install_profile}"
+  case ${install_profile} in
+    bare) profile_color=32 ;;
+    slim) profile_color=34 ;;
+    *) profile_color=35 ;;
+  esac
+  if jsh_color_enabled 1; then
+    jsh_detail "Installed experience: "$'\033['"${profile_color}m${install_profile}"$'\033[0m'
+  else
+    jsh_detail "Installed experience: ${install_profile}"
+  fi
   if ((update_dry_run)); then
     exit_status=0
     preview_update "${install_profile}" || exit_status=$?
@@ -766,7 +779,6 @@ if [[ ${mode} == update ]]; then
   exit
 fi
 
-if declare -F jsh::title > /dev/null; then jsh::title "jsh ${mode}"; else jsh_info "jsh ${mode}"; fi
 jsh_detail "Install directory: ${JSH_DIR}"
 jsh_detail "This command applies the ${install_profile} managed experience."
 
