@@ -185,6 +185,8 @@ else
   commands_link_created=1
 fi
 
+# Keep installer-managed skills out of the repo by linking each skill, not the directory.
+mkdir -p -- "${HOME}/.agents/skills"
 "${commands_dir}/jstow" "${jstow_args[@]}" dotfiles
 
 if [[ -n "${recovery_dir}" ]]; then
