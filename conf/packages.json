@@ -90,7 +90,7 @@
             "xz"
           ]
         },
-        "uv": ["pre-commit-hooks", "tmail-cli"],
+        "uv": ["graphifyy", "pre-commit-hooks", "tmail-cli"],
         "npm": {}
       }
     },
