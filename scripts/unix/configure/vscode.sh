@@ -44,13 +44,16 @@ configure_vscode() {
     printf '{}\n' > "${temporary}.input"
     current=${temporary}.input
   fi
-  if ! jq --arg platform "${platform}" --arg shell "${shell_path}" '
+  if ! jq --arg platform "${platform}" --arg shell "${shell_path}" \
+    --arg font "'JetBrainsMono Nerd Font', 'JetBrainsMono Nerd Font Mono', 'FiraCode Nerd Font', 'Hack Nerd Font', 'MesloLGS Nerd Font', 'JetBrains Mono', Menlo, 'DejaVu Sans Mono', 'Symbols Nerd Font', monospace" '
     ("terminal.integrated.profiles." + $platform) as $profiles
     | ("terminal.integrated.defaultProfile." + $platform) as $default
     | .[$profiles] = ((.[$profiles] // {})
       | .zsh = ((.zsh // {})
         | if (.path != "zsh" and .path != $shell) then .path = $shell else . end))
     | .[$default] = "zsh"
+    | .["editor.fontFamily"] = $font
+    | .["terminal.integrated.fontFamily"] = $font
   ' "${current}" > "${temporary}"; then
     rm -f -- "${temporary}" "${temporary}.input"
     jsh::log_error "Invalid VS Code settings JSON: ${settings}"

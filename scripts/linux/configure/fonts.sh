@@ -16,72 +16,82 @@ unset library_file
 install_fonts() {
   local manifest=${JSH_FONT_MANIFEST:-${JSH_ROOT}/conf/fonts.json}
   local destination=${JSH_FONT_DIR:-${XDG_DATA_HOME:-${HOME}/.local/share}/fonts/jsh}
-  local id version url expected archive name digest temporary
-  local -a missing=()
+  local id repository asset metadata version url expected archive name temporary
+  local -i changed=0 ensure_status
+  local -a files=()
 
   jq -e '
-    .id | type == "string" and length > 0
-  ' "${manifest}" >/dev/null
-  jq -e '
-    (.kind == "tar")
-    and (.url | type == "string" and startswith("https://"))
-    and (.sha256 | type == "string" and test("^[0-9a-f]{64}$"))
-    and (.files | type == "object" and length > 0)
-    and all(.files | to_entries[];
-      (.key | test("^[^/]+[.]ttf$"))
-      and (.value | test("^[0-9a-f]{64}$")))
+    (.id | type == "string" and test("^[A-Za-z0-9._-]+$"))
+    and (.repository | type == "string" and test("^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"))
+    and (.asset | type == "string" and test("^[^/]+[.]tar[.]xz$"))
+    and (.files | type == "array" and length > 0)
+    and all(.files[]; type == "string" and test("^[^/]+[.]ttf$"))
   ' "${manifest}" >/dev/null || {
     jsh::log_error "Invalid font manifest: ${manifest}"
     return 1
   }
-
-  while IFS=$'\t' read -r name digest; do
-    if [[ ! -f ${destination}/${name} ]] ||
-      [[ $(jsh_sha256_file "${destination}/${name}") != "${digest}" ]]; then
-      missing+=("${name}")
-    fi
-  done < <(jq -r '.files | to_entries[] | [.key, .value] | @tsv' "${manifest}")
-  if ((${#missing[@]} == 0)); then
-    jsh::log_note 'JetBrains Mono Nerd Font is current.'
-    return
-  fi
-  if [[ ${JSH_CONFIGURE_DRY_RUN:-0} == 1 ]]; then
-    jsh::log_detail "Would install font files: ${missing[*]}"
-    return
-  fi
-
   id=$(jq -r '.id' "${manifest}")
-  url=$(jq -r '.url' "${manifest}")
-  expected=$(jq -r '.sha256' "${manifest}")
-  version=$(sed -nE 's#.+/download/v?([^/]+)/.+#\1#p' <<< "${url}")
-  [[ -n ${version} ]] || version=${expected:0:12}
-  archive=$(jsh_download_artifact "${id}" "${version}" "${url}" .tar.xz "${expected}")
+  repository=$(jq -r '.repository' "${manifest}")
+  asset=$(jq -r '.asset' "${manifest}")
+  mapfile -t files < <(jq -r '.files[]' "${manifest}")
+
+  if [[ ${JSH_CONFIGURE_DRY_RUN:-0} == 1 ]]; then
+    jsh::log_detail "Would install the latest ${asset} from ${repository}: ${files[*]}"
+    return
+  fi
+
+  if ! metadata=$(curl -fsSL -H 'Accept: application/vnd.github+json' \
+    "https://api.github.com/repos/${repository}/releases/latest"); then
+    for name in "${files[@]}"; do
+      [[ -f ${destination}/${name} ]] || {
+        jsh::log_error "Could not resolve the latest ${repository} release."
+        return 1
+      }
+    done
+    jsh::log_warn "Could not check ${repository} for updates; keeping installed fonts."
+    return
+  fi
+  version=$(jq -r '.tag_name // empty' <<< "${metadata}")
+  url=$(jq -r --arg asset "${asset}" '.assets[] | select(.name == $asset) | .browser_download_url' <<< "${metadata}")
+  expected=$(jq -r --arg asset "${asset}" '.assets[] | select(.name == $asset) | .digest // empty' <<< "${metadata}")
+  expected=${expected#sha256:}
+  if [[ -z ${expected} ]]; then
+    expected=$(curl -fsSL "https://github.com/${repository}/releases/download/${version}/SHA-256.txt" |
+      awk -v asset="${asset}" '$2 == asset { print $1 }' || true)
+  fi
+  [[ -n ${version} && ${url} == https://* && ${expected} =~ ^[0-9a-f]{64}$ ]] || {
+    jsh::log_error "Could not resolve a verifiable ${asset} in the latest ${repository} release."
+    return 1
+  }
+  archive=$(jsh_download_artifact "${id}" "${version#v}" "${url}" .tar.xz "${expected}")
 
   mkdir -p "${JSH_ROOT}/tmp"
   temporary=$(mktemp -d "${JSH_ROOT}/tmp/fonts.XXXXXXXXXX")
   jsh_interrupt_cleanup_path "${temporary}"
-  for name in "${missing[@]}"; do
+  for name in "${files[@]}"; do
     if ! tar -xOf "${archive}" "${name}" > "${temporary}/${name}"; then
+      jsh::log_error "${asset} ${version} does not contain ${name}."
       rm -rf -- "${temporary}"
       return 1
     fi
-    digest=$(jq -r --arg name "${name}" '.files[$name]' "${manifest}")
-    [[ $(jsh_sha256_file "${temporary}/${name}") == "${digest}" ]] || {
-      jsh::log_error "Font checksum mismatch: ${name}"
-      rm -rf -- "${temporary}"
-      return 1
-    }
-    jsh_ensure_file "${destination}/${name}" "${temporary}/${name}" 0644 || {
-      local ensure_status=$?
-      if [[ ${ensure_status} != 1 ]]; then
+    ensure_status=0
+    jsh_ensure_file "${destination}/${name}" "${temporary}/${name}" 0644 || ensure_status=$?
+    case ${ensure_status} in
+      0) changed=1 ;;
+      1) ;;
+      *)
         rm -rf -- "${temporary}"
         return "${ensure_status}"
-      fi
-    }
+        ;;
+    esac
   done
   rm -rf -- "${temporary}"
+  if ((changed == 0)); then
+    jsh::log_note "JetBrains Mono Nerd Font ${version} is current."
+    return
+  fi
   fc-cache "${destination}"
-  jsh::log_success 'JetBrains Mono Nerd Font installed.'
+  jsh::log_success "JetBrains Mono Nerd Font ${version} installed."
 }
 
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then

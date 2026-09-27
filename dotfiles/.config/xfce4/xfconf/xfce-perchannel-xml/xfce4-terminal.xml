@@ -11,6 +11,6 @@
   <property name="custom-command" type="string" value="/usr/bin/zsh"/>
   <property name="run-custom-command" type="bool" value="true"/>
   <property name="command-login-shell" type="bool" value="true"/>
-  <property name="font-name" type="string" value="JetBrainsMono Nerd Font Mono 11"/>
+  <property name="font-name" type="string" value="JetBrainsMono Nerd Font, JetBrainsMono Nerd Font Mono, FiraCode Nerd Font, Hack Nerd Font, MesloLGS Nerd Font, JetBrains Mono, DejaVu Sans Mono, Symbols Nerd Font, monospace 11"/>
   <property name="misc-confirm-close" type="bool" value="false"/>
 </channel>
