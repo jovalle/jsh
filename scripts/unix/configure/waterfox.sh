@@ -25,6 +25,9 @@ readonly BETTERFOX_RAW_BASE=${BETTERFOX_RAW_BASE:-https://raw.githubusercontent.
 readonly BETTERFOX_API_URL=${BETTERFOX_API_URL:-https://api.github.com/repos/yokoffing/Betterfox/releases/latest}
 readonly STATE_DIR="${XDG_STATE_HOME:-${HOME}/.local/state}/jsh/backups/waterfox"
 readonly CACHE_DIR="${XDG_CACHE_HOME:-${HOME}/.cache}/jsh/betterfox"
+readonly WATERFOX_INSTALL_DIR=${JSH_WATERFOX_INSTALL_DIR:-/opt/jsh/waterfox}
+# Gecko's CityHash64 of the UTF-16 install path above; verified against Waterfox 6.7.4.
+readonly WATERFOX_INSTALL_HASH=${JSH_WATERFOX_INSTALL_HASH:-3B0DE487671C311F}
 
 TEMP_DIR=
 BETTERFOX_SOURCE=
@@ -150,34 +153,37 @@ waterfox_root() {
   fi
 }
 
-configure_linux_entry_points() {
-  local binary=$1 applications=${XDG_DATA_HOME:-${HOME}/.local/share}/applications
+migrate_flatpak_profile() {
   local flatpak_profile=${HOME}/.var/app/net.waterfox.waterfox/.waterfox
-  local temporary ensure_status resolved_binary icon
+  [[ $(uname -s) == Linux && ! -e ${HOME}/.waterfox && -d ${flatpak_profile} ]] || return 0
+  if [[ ${JSH_CONFIGURE_DRY_RUN:-0} == 1 ]]; then
+    jsh::log_detail 'Would copy the existing Flatpak Waterfox profile to the native location.'
+  else
+    jsh::log_info 'Copying existing Flatpak Waterfox profile to the native location...'
+    mkdir -p "${HOME}/.waterfox"
+    tar -C "${flatpak_profile}" \
+      --exclude=lock --exclude=.parentlock --exclude=parent.lock -cf - . |
+      tar -C "${HOME}/.waterfox" -xf -
+  fi
+}
+
+configure_linux_entry_points() {
+  local binary=$1 profile_name=${2:-} applications=${XDG_DATA_HOME:-${HOME}/.local/share}/applications
+  local temporary ensure_status resolved_binary icon profile_argument=
   [[ $(uname -s) == Linux ]] || return 0
+  # Keeps launches on the managed profile before the install hash has registered it.
+  [[ -z ${profile_name} ]] || profile_argument=" -P $(jsh_desktop_executable "${profile_name}")"
 
   resolved_binary=$(readlink -f -- "${binary}" 2> /dev/null || printf '%s\n' "${binary}")
   icon=${resolved_binary%/waterfox}/browser/chrome/icons/default/default128.png
   [[ -r ${icon} ]] || icon=waterfox
-
-  if [[ ! -e ${HOME}/.waterfox && -d ${flatpak_profile} ]]; then
-    if [[ ${JSH_CONFIGURE_DRY_RUN:-0} == 1 ]]; then
-      jsh::log_detail 'Would copy the existing Flatpak Waterfox profile to the native location.'
-    else
-      jsh::log_info 'Copying existing Flatpak Waterfox profile to the native location...'
-      mkdir -p "${HOME}/.waterfox"
-      tar -C "${flatpak_profile}" \
-        --exclude=lock --exclude=.parentlock --exclude=parent.lock -cf - . |
-        tar -C "${HOME}/.waterfox" -xf -
-    fi
-  fi
 
   mkdir -p "${JSH_ROOT}/tmp"
   temporary=$(mktemp "${JSH_ROOT}/tmp/waterfox.desktop.XXXXXXXXXX")
   jsh_interrupt_cleanup_path "${temporary}"
   {
     printf '[Desktop Entry]\nType=Application\nName=Waterfox\n'
-    printf 'Exec=%s %%u\n' "$(jsh_desktop_executable "${binary}")"
+    printf 'Exec=%s%s %%u\n' "$(jsh_desktop_executable "${binary}")" "${profile_argument}"
     printf 'Icon=%s\n' "${icon}"
     printf 'Categories=Network;WebBrowser;\n'
     printf 'MimeType=text/html;x-scheme-handler/http;x-scheme-handler/https;\n'
@@ -213,9 +219,29 @@ validate_profile_path() {
   esac
 }
 
+ini_value() {
+  [[ -r $1 ]] || return 0
+  awk -F= -v section="[$2]" -v key="$3" '
+    /^\[/ { in_section=($0 == section); next }
+    in_section && $1 == key { print substr($0, index($0, "=") + 1); exit }
+  ' "$1"
+}
+
+waterfox_install_hash() {
+  local resolved
+  [[ $(uname -s) == Linux && -n ${1:-} ]] || return 1
+  resolved=$(readlink -f -- "$1" 2> /dev/null) || return 1
+  [[ ${resolved} == "${WATERFOX_INSTALL_DIR}/waterfox" ]] || return 1
+  printf '%s\n' "${WATERFOX_INSTALL_HASH}"
+}
+
 install_default_path() {
-  local root=$1 ini=$2 install_path=
-  if [[ -r ${root}/installs.ini ]]; then
+  local root=$1 ini=$2 hash=${3:-} install_path=
+  if [[ -n ${hash} ]]; then
+    install_path=$(ini_value "${root}/installs.ini" "${hash}" Default)
+    [[ -n ${install_path} ]] || install_path=$(ini_value "${ini}" "Install${hash}" Default)
+  fi
+  if [[ -z ${install_path} && -r ${root}/installs.ini ]]; then
     install_path=$(awk -F= '$1 == "Default" { print substr($0, index($0, "=") + 1); exit }' \
       "${root}/installs.ini")
   fi
@@ -265,10 +291,10 @@ registered_profile_path() {
 }
 
 selected_profile() {
-  local root=$1 ini="${1}/profiles.ini" install_path relative path profile
+  local root=$1 ini="${1}/profiles.ini" hash=${2:-} install_path relative path profile
   [[ -r ${ini} ]] || return 1
 
-  if install_path=$(install_default_path "${root}" "${ini}"); then
+  if install_path=$(install_default_path "${root}" "${ini}" "${hash}"); then
     [[ ${install_path} == /* ]] || install_path="${root}/${install_path}"
     if [[ -d ${install_path} ]]; then
       validate_profile_path "${root}" "${install_path}"
@@ -284,6 +310,54 @@ selected_profile() {
     profile="${root}/${path}"
   fi
   validate_profile_path "${root}" "${profile}"
+}
+
+profile_name() {
+  local root profile=$2
+  root=$(cd -P -- "$1" && pwd)
+  awk -F= -v root="${root%/}" -v profile="${profile}" '
+    function emit() {
+      if (in_profile && name != "" && (relative == 0 ? path : root "/" path) == profile) {
+        print name
+        found=1
+        exit
+      }
+    }
+    /^\[/ {
+      emit()
+      in_profile=($0 ~ /^\[Profile[0-9]+\]$/)
+      name=""
+      path=""
+      relative=1
+      next
+    }
+    in_profile && $1 == "Name" { name=substr($0, index($0, "=") + 1) }
+    in_profile && $1 == "Path" { path=substr($0, index($0, "=") + 1) }
+    in_profile && $1 == "IsRelative" { relative=$2 }
+    END { if (!found) emit() }
+  ' "${root}/profiles.ini"
+}
+
+register_install_profile() {
+  local root=$1 relative=$2 hash=$3 file section temporary
+  for file in installs.ini profiles.ini; do
+    section=${hash}
+    [[ ${file} == installs.ini ]] || section=Install${hash}
+    [[ $(ini_value "${root}/${file}" "${section}" Default) != "${relative}" ]] || continue
+    backup_file "${root}/${file}" "${file}"
+    temporary=$(mktemp "${root}/${file}.jsh.XXXXXX")
+    jsh_interrupt_cleanup_path "${temporary}"
+    {
+      [[ ! -r ${root}/${file} ]] || awk -v section="[${section}]" '
+        /^\[/ { skip=($0 == section) }
+        !skip
+      ' "${root}/${file}"
+      printf '\n[%s]\nDefault=%s\nLocked=1\n' "${section}" "${relative}"
+    } > "${temporary}"
+    chmod 0644 "${temporary}"
+    mv -f -- "${temporary}" "${root}/${file}"
+  done
+  jsh::log_success "Registered Waterfox profile ${relative} for ${WATERFOX_INSTALL_DIR}."
 }
 
 bootstrap_profile() {
@@ -599,7 +673,7 @@ update_betterfox() {
 }
 
 apply_configuration() {
-  local binary root profile profile_status composed
+  local binary root profile profile_status composed install_hash relative='' register=0
   require_command curl
   require_command jq
   require_command unzip
@@ -607,6 +681,7 @@ apply_configuration() {
   validate_waterfox_config
   binary=$(waterfox_binary 2> /dev/null || true)
   root=$(waterfox_root)
+  install_hash=$(waterfox_install_hash "${binary}" || true)
   if [[ -z ${binary} && ! -d ${root} ]]; then
     jsh::log_note "Skipping Waterfox configuration: Waterfox is not installed."
     return
@@ -615,12 +690,12 @@ apply_configuration() {
     jsh::log_detail 'Would reconcile the Waterfox profile, policy, launcher, and associations.'
     return
   fi
-  [[ -z ${binary} ]] || configure_linux_entry_points "${binary}"
+  [[ -z ${binary} ]] || migrate_flatpak_profile
   mkdir -p "${JSH_ROOT}/tmp"
   TEMP_DIR=$(mktemp -d "${JSH_ROOT}/tmp/waterfox.XXXXXX")
   jsh_interrupt_cleanup_path "${TEMP_DIR}"
 
-  if profile=$(selected_profile "${root}"); then
+  if profile=$(selected_profile "${root}" "${install_hash}"); then
     :
   else
     profile_status=$?
@@ -630,8 +705,17 @@ apply_configuration() {
       return 1
     }
     bootstrap_profile "${root}" "${binary}"
-    profile=$(selected_profile "${root}")
+    profile=$(selected_profile "${root}" "${install_hash}")
   fi
+  if [[ -n ${install_hash} ]]; then
+    relative=${profile#"$(cd -P -- "${root}" && pwd)"/}
+    [[ $(ini_value "${root}/installs.ini" "${install_hash}" Default) == "${relative}" &&
+      $(ini_value "${root}/profiles.ini" "Install${install_hash}" Default) == "${relative}" ]] || {
+      register=1
+      jsh::log_info "Waterfox profile ${relative} will be registered for ${WATERFOX_INSTALL_DIR}."
+    }
+  fi
+  [[ -z ${binary} ]] || configure_linux_entry_points "${binary}" "$(profile_name "${root}" "${profile}")"
   validate_configured_addons "${profile}"
   prepare_waterfox_review "${profile}"
   show_waterfox_review apply
@@ -639,7 +723,7 @@ apply_configuration() {
   prepare_policy
   composed="${TEMP_DIR}/user.js"
   compose_preferences "${profile}" "${composed}"
-  if ((!WATERFOX_SETTINGS_DIFFER && !POLICY_CHANGED)) && cmp -s -- "${composed}" "${profile}/user.js"; then
+  if ((!WATERFOX_SETTINGS_DIFFER && !POLICY_CHANGED && !register)) && cmp -s -- "${composed}" "${profile}/user.js"; then
     configure_associations
     jsh::log_note "Waterfox configuration is current; leaving the browser open."
     return
@@ -664,6 +748,7 @@ apply_configuration() {
 
   # Shutdown can flush live toolbar/add-on state; compose again before editing.
   compose_preferences "${profile}" "${composed}"
+  ((!register)) || register_install_profile "${root}" "${relative}" "${install_hash}"
   reconcile_addon_state "${profile}"
   reconcile_addon_permissions "${profile}"
   install_preferences "${profile}" "${composed}"

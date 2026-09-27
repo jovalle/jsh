@@ -75,8 +75,8 @@ extract_waterfox_archive() {
 }
 
 confirm_waterfox_shutdown() {
-  local process
-  pgrep -x waterfox >/dev/null 2>&1 || pgrep -x waterfox-bin >/dev/null 2>&1 || return
+  local process attempt
+  pgrep -x waterfox >/dev/null 2>&1 || pgrep -x waterfox-bin >/dev/null 2>&1 || return 0
   if [[ ${JSH_ASSUME_YES:-0} != 1 && ! -t 0 ]]; then
     jsh::log_warn 'Skipping Waterfox update while the browser is running.'
     return 1
@@ -85,13 +85,20 @@ confirm_waterfox_shutdown() {
   for process in waterfox waterfox-bin; do
     pkill -TERM -x "${process}" >/dev/null 2>&1 || true
   done
+  for ((attempt = 0; attempt < 50; attempt++)); do
+    pgrep -x waterfox >/dev/null 2>&1 || pgrep -x waterfox-bin >/dev/null 2>&1 || return 0
+    sleep 0.2
+  done
+  jsh::log_warn 'Skipping Waterfox update because the browser did not close.'
+  return 1
 }
 
 install_waterfox() {
-  local installed destination launcher artifact temporary staging actual checksum
+  local installed destination launcher artifact temporary staging previous='' actual checksum
   [[ $(jsh_linux_family) == debian && $(uname -m) == x86_64 ]] || return 0
   waterfox_latest_release
-  destination=/opt/jsh/waterfox-${WATERFOX_VERSION}
+  # A stable directory keeps Gecko's install hash, and so the default profile, across updates.
+  destination=${JSH_WATERFOX_INSTALL_DIR:-/opt/jsh/waterfox}
   launcher=${JSH_WATERFOX_SYSTEM_BIN:-/usr/local/bin/waterfox}
   installed=$(waterfox_installed_version || true)
   if [[ ${installed} == "${WATERFOX_VERSION}" && -x ${destination}/waterfox &&
@@ -126,13 +133,17 @@ install_waterfox() {
     return 1
   }
   jsh_run_root install -d -m 0755 /opt/jsh /usr/local/bin
-  if [[ ! -e ${destination} ]]; then
-    staging=${destination}.stage-$$
-    jsh_interrupt_cleanup_root_path "${staging}"
-    jsh_run_root cp -a "${temporary}/waterfox" "${staging}"
-    jsh_run_root chown -R root:root "${staging}"
-    jsh_run_root mv "${staging}" "${destination}"
+  staging=${destination}.stage-$$
+  jsh_interrupt_cleanup_root_path "${staging}"
+  jsh_run_root rm -rf -- "${staging}"
+  jsh_run_root cp -a "${temporary}/waterfox" "${staging}"
+  jsh_run_root chown -R root:root "${staging}"
+  if [[ -e ${destination} ]]; then
+    previous=${destination}.previous-$$
+    jsh_run_root mv -T "${destination}" "${previous}"
   fi
+  jsh_run_root mv -T "${staging}" "${destination}"
+  [[ -z ${previous} ]] || jsh_run_root rm -rf -- "${previous}"
   jsh_run_root ln -sfn "${destination}/waterfox" "${launcher}"
   rm -rf -- "${temporary}"
   actual=$(waterfox_installed_version || true)
