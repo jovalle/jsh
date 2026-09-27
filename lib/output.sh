@@ -9,14 +9,14 @@
 jsh_color_enabled() {
   jsh_output_descriptor=$1
 
-  [[ "${JSH_PLAIN_OUTPUT:-0}" != 1 ]] || return 1
-  [[ "${TERM:-}" != dumb ]] || return 1
-  [[ -z "${NO_COLOR+x}" ]] || return 1
+  [ "${JSH_PLAIN_OUTPUT:-0}" != 1 ] || return 1
+  [ "${TERM:-}" != dumb ] || return 1
+  [ -z "${NO_COLOR+x}" ] || return 1
 
   case ${JSH_COLOR:-auto} in
     always) return 0 ;;
     never) return 1 ;;
-    auto | '') [[ -t "${jsh_output_descriptor}" ]] ;;
+    auto | '') [ -t "${jsh_output_descriptor}" ] ;;
     *) return 1 ;;
   esac
 }
@@ -88,8 +88,8 @@ jsh_blank() {
 # Usage: jsh_banner [LABEL]; LABEL is centred in the gap on the last banner line.
 jsh_banner() {
   jsh_banner_label=${1:-}
-  if [[ -n "${SSH_CONNECTION:-}" ]]; then
-    [[ -z "${jsh_banner_label}" ]] || jsh_info "jsh ${jsh_banner_label}"
+  if [ -n "${SSH_CONNECTION:-}" ]; then
+    [ -z "${jsh_banner_label}" ] || jsh_info "jsh ${jsh_banner_label}"
     unset jsh_banner_label
     return 0
   fi
