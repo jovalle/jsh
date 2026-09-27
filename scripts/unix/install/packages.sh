@@ -197,17 +197,19 @@ update_brew() {
 
 exclude_blocked_formulae() {
   local brewfile=$1 present info name reason formula kept
+  local installed declared other conflict_desc
   local -a missing=() patterns=()
 
-  present=$(brew list --formula -1 --full-name 2> /dev/null) || return 0
+  installed=$(brew list --formula -1 --full-name 2> /dev/null) || return 0
+  declared=$(sed -nE 's/^brew "([^"]+)".*/\1/p' "${brewfile}")
   while IFS= read -r formula; do
-    grep -Fxq -- "${formula}" <<< "${present}" || missing+=("${formula}")
-  done < <(sed -nE 's/^brew "([^"]+)".*/\1/p' "${brewfile}")
+    grep -Fxq -- "${formula}" <<< "${installed}" || missing+=("${formula}")
+  done <<< "${declared}"
   ((${#missing[@]} > 0)) || return 0
 
   # Unknown names make brew info fail; brew bundle reports those itself.
   info=$(HOMEBREW_NO_AUTO_UPDATE=1 brew info --json=v2 --formula "${missing[@]}" 2> /dev/null) || return 0
-  present+=$'\n'$(sed -nE 's/^brew "([^"]+)".*/\1/p' "${brewfile}")
+  present="${installed}"$'\n'"${declared}"
 
   while IFS=$'\t' read -r name reason; do
     jsh::log_warn "${name} is deprecated (${reason})."
@@ -218,14 +220,43 @@ exclude_blocked_formulae() {
     jsh::log_error "Skipping ${name}: ${reason}."
     BLOCKED_FORMULAE+=("${name}")
     patterns+=(-e "brew \"${name}\"")
+  done < <(jq -r '.formulae[] | select(.disabled)
+    | [.full_name, "disabled (\(.disable_reason // "no reason given"))"] | @tsv' <<< "${info}")
+
+  while IFS=$'\t' read -r name conflicts_str; do
+    local -a conflict_candidates=() unhandled=()
+    read -r -a conflict_candidates <<< "${conflicts_str}"
+    for other in "${conflict_candidates[@]}"; do
+      if grep -Fxq -- "${other}" <<< "${declared}"; then
+        unhandled+=("${other}")
+      elif grep -Fxq -- "${other}" <<< "${installed}"; then
+        if jsh::confirm "Replace installed ${other} with ${name}?" --default no; then
+          jsh::log_info "Replacing ${other} with ${name}..."
+          if HOMEBREW_NO_AUTO_UPDATE=1 brew uninstall --formula "${other}"; then
+            installed=$(grep -vFx -- "${other}" <<< "${installed}" || true)
+          else
+            unhandled+=("${other}")
+          fi
+        else
+          unhandled+=("${other}")
+        fi
+      fi
+    done
+    if ((${#unhandled[@]} > 0)); then
+      conflict_desc=$(IFS=', '; echo "${unhandled[*]}")
+      jsh::log_error "Skipping ${name}: conflicts with ${conflict_desc}."
+      BLOCKED_FORMULAE+=("${name}")
+      patterns+=(-e "brew \"${name}\"")
+    fi
   done < <(jq -r --arg present "${present}" '
     ($present | split("\n")) as $present
     | .formulae[]
+    | select(.disabled | not)
     | [.conflicts_with[] as $other | select($present | index($other)) | $other] as $conflicts
-    | if .disabled then [.full_name, "disabled (\(.disable_reason // "no reason given"))"]
-      elif ($conflicts | length) > 0 then [.full_name, "conflicts with \($conflicts | join(", "))"]
-      else empty end
+    | select(($conflicts | length) > 0)
+    | [.full_name, ($conflicts | join(" "))]
     | @tsv' <<< "${info}")
+
   ((${#patterns[@]} > 0)) || return 0
 
   kept=$(grep -vFx "${patterns[@]}" "${brewfile}" || true)
