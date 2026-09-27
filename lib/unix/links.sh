@@ -16,16 +16,16 @@ candidates() {
     awk -F/ '{ directory = ""; for (i = 1; i < NF; i++) { directory = directory (i > 1 ? "/" : "") $i; print directory } }' |
     sort -u |
     while IFS= read -r directory; do
-      [[ -d "${home}/${directory}" ]] && [[ ! -L "${home}/${directory}" ]] || continue
+      [ -d "${home}/${directory}" ] && [ ! -L "${home}/${directory}" ] || continue
       find "${home}/${directory}" -mindepth 1 -maxdepth 2 -type l -print 2> /dev/null || :
     done
 }
 
 candidates | sort -u | while IFS= read -r link; do
-  [[ ! -e "${link}" ]] || continue
+  [ ! -e "${link}" ] || continue
   relative=${link#"${home}/"}
   source="${root}/dotfiles/${relative}"
-  [[ ! -e "${source}" ]] && [[ ! -L "${source}" ]] || continue
+  [ ! -e "${source}" ] && [ ! -L "${source}" ] || continue
   target=$(readlink "${link}") || continue
   case ${target} in
     */dotfiles/"${relative}") prefix=${target%/dotfiles/"${relative}"} ;;
@@ -36,7 +36,7 @@ candidates | sort -u | while IFS= read -r link; do
     *) prefix=${link%/*}/${prefix} ;;
   esac
   prefix=$(CDPATH='' cd -P "${prefix}" 2> /dev/null && pwd -P) || continue
-  if [[ "${prefix}" = "${root}" ]]; then
+  if [ "${prefix}" = "${root}" ]; then
     printf '%s\n' "${link}"
   fi
 done
