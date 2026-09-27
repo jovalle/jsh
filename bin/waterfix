@@ -45,6 +45,9 @@ BLOAT_FOLDERS = {"Mozilla Firefox", "Waterfox"}
 IMPORT_BUTTON = "import-button"
 CUSTOMIZATION_PREFERENCE = "browser.uiCustomization.state"
 WATERFOX_PROCESS_NAMES = ("waterfox", "waterfox-bin")
+WATERFOX_INSTALL_DIR = Path(os.environ.get("JSH_WATERFOX_INSTALL_DIR", "/opt/jsh/waterfox"))
+# Gecko's CityHash64 of the UTF-16 install path above; verified against Waterfox 6.7.4.
+WATERFOX_INSTALL_HASH = os.environ.get("JSH_WATERFOX_INSTALL_HASH", "3B0DE487671C311F")
 JSH_ROOT = Path(__file__).resolve().parents[1]
 WATERFOX_CONFIGURATOR = JSH_ROOT / "scripts/unix/configure/waterfox.sh"
 WATERFOX_CONFIG = JSH_ROOT / "conf/gecko/waterfox.json"
@@ -257,8 +260,9 @@ def resolve_profile(profile_arg: Optional[Path]) -> Path:
         config = configparser.RawConfigParser()
         config.read(profiles_ini, encoding="utf-8")
         selected = None
+        install_sections = [f"Install{h}" for h in [waterfox_install_hash()] if h]
 
-        for section in config.sections():
+        for section in install_sections + config.sections():
             if section.startswith("Install") and config.has_option(section, "Default"):
                 candidate = root / config.get(section, "Default")
                 if candidate.is_dir():
@@ -384,17 +388,27 @@ def waterfox_is_running() -> bool:
         return False
 
 
+def waterfox_install_hash() -> Optional[str]:
+    if not sys.platform.startswith("linux"):
+        return None
+    binary = waterfox_native_binary()
+    if binary is None or binary.resolve() != WATERFOX_INSTALL_DIR / "waterfox":
+        return None
+    return WATERFOX_INSTALL_HASH
+
+
 def default_waterfox_profile_name() -> Optional[str]:
     root = waterfox_root()
     registry = configparser.ConfigParser()
     registry.read(root / "profiles.ini")
     installs = configparser.ConfigParser()
     installs.read(root / "installs.ini")
+    install_hash = waterfox_install_hash()
     preferred = next(
         (
-            installs[section].get("Default")
-            for section in installs.sections()
-            if installs[section].get("Default")
+            installs.get(section, "Default")
+            for section in ([install_hash] if install_hash else []) + installs.sections()
+            if installs.get(section, "Default", fallback=None)
         ),
         None,
     )
