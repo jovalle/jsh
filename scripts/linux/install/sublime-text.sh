@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install Sublime Text from its signed native Linux repository.
+# Install Sublime Text Build 4200, the build bin/sublime patches.
 # shellcheck disable=SC2310
 
 set -euo pipefail
@@ -16,6 +16,7 @@ unset library_file
 
 readonly SUBLIME_KEY_URL=https://download.sublimetext.com/sublimehq-pub.gpg
 readonly SUBLIME_KEY_FINGERPRINT=1EDDE2CDFC025D17F6DA9EC0ADAE6AD28A8F901A
+readonly SUBLIME_BUILD=4200
 readonly SUBLIME_APT_KEY_PATH=${SUBLIME_APT_KEY_PATH:-/etc/apt/keyrings/sublimehq-pub.gpg}
 readonly SUBLIME_APT_SOURCE_PATH=${SUBLIME_APT_SOURCE_PATH:-/etc/apt/sources.list.d/sublime-text.sources}
 readonly SUBLIME_RPM_KEY_PATH=${SUBLIME_RPM_KEY_PATH:-/etc/pki/rpm-gpg/RPM-GPG-KEY-sublimehq}
@@ -26,13 +27,26 @@ sublime_dry_run() {
   [[ ${JSH_INSTALL_DRY_RUN:-${JSH_CONFIGURE_DRY_RUN:-0}} == 1 ]]
 }
 
-sublime_package_installed() {
+sublime_package_version() {
   case $1 in
-    arch) pacman -Q sublime-text > /dev/null 2>&1 ;;
-    fedora) rpm -q sublime-text > /dev/null 2>&1 ;;
-    debian) dpkg-query -W -f='${db:Status-Status}' sublime-text 2> /dev/null | grep -Fxq installed ;;
+    arch) pacman -Q sublime-text 2> /dev/null | awk '{ print $2 }' ;;
+    fedora) rpm -q --qf '%{VERSION}-%{RELEASE}\n' sublime-text 2> /dev/null ;;
+    debian) dpkg-query -W -f='${Version}\n' sublime-text 2> /dev/null ;;
     *) return 1 ;;
   esac
+}
+
+sublime_target_version() {
+  case $1 in
+    debian) printf '%s\n' "${SUBLIME_BUILD}" ;;
+    arch | fedora) printf '%s-1\n' "${SUBLIME_BUILD}" ;;
+    *) return 1 ;;
+  esac
+}
+
+sublime_hold_debian_package() {
+  apt-mark showhold 2> /dev/null | grep -Fxq sublime-text && return 0
+  jsh_run_root apt-mark hold sublime-text
 }
 
 sublime_verify_key() {
@@ -158,7 +172,7 @@ sublime_ensure_pacman_repo() {
 }
 
 install_sublime_text() {
-  local architecture family manager
+  local architecture current_version family manager target_version
   family=$(jsh_linux_family) || return 0
   case ${family} in
     debian)
@@ -180,7 +194,10 @@ install_sublime_text() {
       architecture=$(uname -m)
       case ${architecture} in
         x86_64 | aarch64) ;;
-        *) jsh::log_note "Sublime Text is unavailable for architecture ${architecture}."; return 0 ;;
+        *)
+          jsh::log_note "Sublime Text is unavailable for architecture ${architecture}."
+          return 0
+          ;;
       esac
       sublime_ensure_pacman_key
       sublime_ensure_pacman_repo "${architecture}"
@@ -189,22 +206,43 @@ install_sublime_text() {
     *) return 0 ;;
   esac
 
-  if sublime_package_installed "${family}"; then
-    if [[ ${JSH_UPDATE:-0} != 1 ]]; then
-      jsh::log_note 'Sublime Text is already installed.'
-      return 0
+  target_version=$(sublime_target_version "${family}")
+  current_version=$(sublime_package_version "${family}" || true)
+  if [[ ${current_version} == "${target_version}" ]]; then
+    if [[ ${family} == debian ]]; then
+      sublime_hold_debian_package
     fi
+    jsh::log_note "Sublime Text Build ${SUBLIME_BUILD} is already installed."
+    return 0
   fi
+
+  if [[ -n ${current_version} ]]; then
+    jsh::log_info "Replacing Sublime Text ${current_version} with Build ${SUBLIME_BUILD}..."
+  fi
+
   case ${family} in
     debian)
       jsh_run_root apt-get update
-      jsh_run_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -- sublime-text
+      if apt-mark showhold 2> /dev/null | grep -Fxq sublime-text; then
+        jsh_run_root apt-mark unhold sublime-text
+      fi
+      jsh_run_root env DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-downgrades -- "sublime-text=${SUBLIME_BUILD}"
+      sublime_hold_debian_package
       ;;
-    fedora) jsh_run_root "${manager}" install -y -- sublime-text ;;
-    arch) jsh_run_root pacman -Syu --needed --noconfirm -- sublime-text ;;
+    fedora)
+      if [[ -n ${current_version} ]]; then
+        jsh_run_root "${manager}" downgrade -y -- "sublime-text-${target_version}"
+      else
+        jsh_run_root "${manager}" install -y -- "sublime-text-${target_version}"
+      fi
+      ;;
+    arch)
+      jsh_run_root pacman -U --needed --noconfirm -- \
+        "https://download.sublimetext.com/sublime-text-${target_version}-${architecture}.pkg.tar.xz"
+      ;;
     *) return 1 ;;
   esac
-  jsh::log_success 'Sublime Text is installed.'
+  jsh::log_success "Sublime Text Build ${SUBLIME_BUILD} is installed."
 }
 
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then

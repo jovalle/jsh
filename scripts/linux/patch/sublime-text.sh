@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Patch Sublime Text 4 on Linux.
+# Reconcile and patch Sublime Text Build 4200 on Linux.
 
 set -euo pipefail
 
@@ -12,5 +12,9 @@ for library_file in "${JSH_ROOT}"/lib/*; do
   . "${library_file}"
 done
 unset library_file
+
+if [[ -z ${SUBLIME_BINARY:-} && -z ${SUBLIME_APP_PATH:-} ]]; then
+  "${JSH_ROOT}/scripts/linux/install/sublime-text.sh"
+fi
 
 exec "${JSH_ROOT}/bin/sublime" apply "$@"

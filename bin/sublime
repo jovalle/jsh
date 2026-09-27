@@ -336,10 +336,7 @@ apply() {
   jsh::log_info "Detected Sublime Text Build ${build} at ${app_path}."
 
   if [[ "${build}" != "${TARGET_BUILD}" && "${force}" != true ]]; then
-    jsh::log_warn "Patch is designed for Build ${TARGET_BUILD}, but detected Build ${build}."
-    if [[ ${JSH_ASSUME_YES:-0} != 1 ]]; then
-      jsh::confirm "Proceed with patching Build ${build}?" --default no || die 1 "Patch cancelled."
-    fi
+    die 1 "Patch supports only Build ${TARGET_BUILD}; detected Build ${build}. Run the platform Sublime Text installer first."
   fi
 
   status_output=$(run_python_helper status "${binary_path}" 2> /dev/null) || status_code=$?

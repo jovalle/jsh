@@ -369,6 +369,7 @@ WantedBy=default.target' > "${HOME}/.config/systemd/user/ssh-agent.service"
       source "$1"
       jsh_linux_family() { printf "debian\n"; }
       dpkg-query() { return 1; }
+      apt-mark() { return 1; }
       install_sublime_text
     ' _ "${JSH_ROOT}/scripts/linux/install/sublime-text.sh"
 
@@ -376,7 +377,8 @@ WantedBy=default.target' > "${HOME}/.config/systemd/user/ssh-agent.service"
   [[ ${output} == *"Would install ${BATS_TEST_TMPDIR}/apt/sublimehq-pub.gpg"* ]]
   [[ ${output} == *"Would install ${BATS_TEST_TMPDIR}/apt/sublime-text.sources"* ]]
   [[ ${output} == *'Would run as root: apt-get update'* ]]
-  [[ ${output} == *'Would run as root: env DEBIAN_FRONTEND=noninteractive apt-get install -y -- sublime-text'* ]]
+  [[ ${output} == *'Would run as root: env DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-downgrades -- sublime-text=4200'* ]]
+  [[ ${output} == *'Would run as root: apt-mark hold sublime-text'* ]]
 }
 
 @test "plans Sublime Text from the official Fedora repository" {
@@ -395,7 +397,7 @@ WantedBy=default.target' > "${HOME}/.config/systemd/user/ssh-agent.service"
   [[ ${output} == *"Would install ${BATS_TEST_TMPDIR}/dnf/RPM-GPG-KEY-sublimehq"* ]]
   [[ ${output} == *'Would import the Sublime Text RPM signing key.'* ]]
   [[ ${output} == *"Would install ${BATS_TEST_TMPDIR}/dnf/sublime-text.repo"* ]]
-  [[ ${output} == *'Would run as root: dnf install -y -- sublime-text'* ]]
+  [[ ${output} == *'Would run as root: dnf install -y -- sublime-text-4200-1'* ]]
 }
 
 @test "plans Sublime Text from the official Arch repository" {
@@ -413,7 +415,29 @@ WantedBy=default.target' > "${HOME}/.config/systemd/user/ssh-agent.service"
   [[ ${status} -eq 0 ]]
   [[ ${output} == *'Would import and locally sign the Sublime Text pacman key.'* ]]
   [[ ${output} == *"Would add the Sublime Text repository to ${BATS_TEST_TMPDIR}/pacman.conf"* ]]
-  [[ ${output} == *'Would run as root: pacman -Syu --needed --noconfirm -- sublime-text'* ]]
+  [[ ${output} == *'Would run as root: pacman -U --needed --noconfirm -- https://download.sublimetext.com/sublime-text-4200-1-x86_64.pkg.tar.xz'* ]]
+}
+
+@test "downgrades an installed Debian Sublime Text build to 4200" {
+  local calls="${BATS_TEST_TMPDIR}/root-calls"
+  touch "${BATS_TEST_TMPDIR}/sublimehq-pub.gpg" "${BATS_TEST_TMPDIR}/sublime-text.sources"
+
+  run env JSH_INSTALL_DRY_RUN=1 \
+    SUBLIME_APT_KEY_PATH="${BATS_TEST_TMPDIR}/sublimehq-pub.gpg" \
+    SUBLIME_APT_SOURCE_PATH="${BATS_TEST_TMPDIR}/sublime-text.sources" \
+    CALLS="${calls}" bash -c '
+      source "$1"
+      jsh_linux_family() { printf "debian\n"; }
+      sublime_ensure_apt_key() { :; }
+      sublime_install_root_file() { :; }
+      dpkg-query() { printf "4215\n"; }
+      apt-mark() { return 0; }
+      jsh_run_root() { printf "%s\n" "$*" >> "${CALLS}"; }
+      install_sublime_text
+    ' _ "${JSH_ROOT}/scripts/linux/install/sublime-text.sh"
+
+  [[ ${status} -eq 0 ]]
+  grep -Fxq 'env DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-downgrades -- sublime-text=4200' "${calls}"
 }
 
 @test "rejects an invalid existing Sublime Text apt signing key" {
