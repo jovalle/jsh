@@ -76,6 +76,13 @@ unset _jsh_brew_bin
 
 # Terminal optimizations
 export LESS="-RXE"                          # No wrapping, no clearing, exit on EOF
+# AI agent terminals cannot answer interactive pager or confirmation prompts.
+typeset -i _jsh_agent_shell=0
+if [[ -n ${COPILOT_AGENT:-}${CLAUDECODE:-}${GEMINI_CLI:-} ]]; then
+  _jsh_agent_shell=1
+  export PAGER=cat GIT_PAGER=cat BAT_PAGING=never
+  setopt RM_STAR_SILENT
+fi
 setopt PROMPT_CR                            # Required for clean multiline prompt redraws
 
 # ============================================================================
@@ -341,11 +348,12 @@ fi
 
 # ---- File Operations ----
 
-alias cp='cp -iv'
-alias mv='mv -iv'
-alias rm='rm -i'
+if (( _jsh_agent_shell )); then
+  alias cp='cp -v' mv='mv -v' ln='ln -v'
+else
+  alias cp='cp -iv' mv='mv -iv' rm='rm -i' ln='ln -iv'
+fi
 alias mkdir='mkdir -p'
-alias ln='ln -iv'
 alias t='touch'
 alias dud='du -d 1 -h' duf='du -sh *'
 if ! has eza; then
@@ -824,9 +832,9 @@ fi
 # ---- File Viewing and Development ----
 
 if has bat; then
-  alias cat='bat'
+  alias cat='bat --paging=never'
 elif has batcat; then
-  alias cat='batcat'
+  alias cat='batcat --paging=never'
 fi
 if has nvim || has vim; then
   alias edit='vim' vz='vim ~/.zshrc'
