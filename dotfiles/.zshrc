@@ -1780,13 +1780,13 @@ jgit() {
 
 jsh() {
   case ${1:-} in
-    install|setup|update|repair)
+    setup|update|repair)
       JSH_INSTALL_RETURN=1 command "${JSH}/bin/jsh" "$@" || return
       jsh reload
       ;;
     --yes)
       case ${2:-} in
-        install|setup|update|repair)
+        setup|update|repair)
           JSH_INSTALL_RETURN=1 command "${JSH}/bin/jsh" "$@" || return
           jsh reload
           ;;

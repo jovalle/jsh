@@ -1,5 +1,4 @@
 (?d).cache
-.git
 (?d)*.ipc
 (?d)*.sock
 (?d).DS_Store

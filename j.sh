@@ -102,64 +102,106 @@ fi
 
 usage() {
   cat <<'EOF'
-Usage: j.sh [-y|--yes] [runtime|install|setup|update [--dry-run]]
+Usage: j.sh [-y|--yes] [runtime | setup [bare|lite|full] [OPTIONS] | update [--dry-run]]
 
 With no arguments, prepare and open the isolated Jsh runtime.
-Run with runtime for the same minimal, ephemeral experience.
-Run with install to add the launcher, core shell tools, and managed dotfiles.
-Run with setup to install and configure the complete managed workstation.
-Run with update to update Jsh and reapply the managed environment.
-Use update --dry-run to fetch and preview the update without changing anything else.
+
+Commands:
+  runtime               Open the minimal, ephemeral runtime (default)
+  setup PROFILE         Apply a persistent profile:
+                          bare  launcher only
+                          lite  bare plus managed dotfiles and default shell
+                          full  lite plus packages, configuration, and patches
+  update                Update Jsh and reapply the recorded profile
+
+Setup options:
+  --resume, --retry     Continue the last setup from its unfinished phases
+  --from PHASE          Run PHASE and every phase after it
+  --phase PHASE[,...]   Run only the named phases
+  --list                Show the profile's phases and their last status
+  --dry-run             Show what would run without changing anything (also for update)
+
+Phases: prerequisites, repository, launcher, dotfiles, shell, packages, configure, patch
+Runtime, bare, and lite never install packages; missing tools are reported instead.
+Without a profile, setup reuses the recorded profile or asks for one.
 Use -y or --yes to accept prompts for the selected command without interactive input.
 EOF
 }
 
+usage_error() {
+  jsh_error "$1"
+  usage >&2
+  exit 2
+}
+
+select_setup_mode() {
+  [[ -z ${setup_selector} ]] || usage_error "Use only one of --resume, --from, or --phase."
+  setup_selector=$1
+  setup_phase_argument=${2:-}
+}
+
 mode=runtime
 command_seen=0
-update_dry_run=0
+dry_run=0
+list_phases=0
+install_profile=
+setup_selector=
+setup_phase_argument=
+setup_option=
 while (($#)); do
   case $1 in
     -y | --yes)
       export JSH_ASSUME_YES=1 JSH_CONFIGURE_ASSUME_YES=1 JSH_UPDATE_ASSUME_YES=1
       export JSH_NON_INTERACTIVE=1
       ;;
-    --dry-run) update_dry_run=1 ;;
-    runtime | install | setup | update)
-      if ((command_seen)); then
-        jsh_error "Too many commands."
-        usage >&2
-        exit 2
-      fi
+    --dry-run) dry_run=1 ;;
+    --list)
+      list_phases=1
+      setup_option=${setup_option:-$1}
+      ;;
+    --resume | --retry)
+      select_setup_mode resume
+      setup_option=${setup_option:-$1}
+      ;;
+    --from | --phase)
+      (($# > 1)) && [[ -n $2 && $2 != -* ]] || usage_error "$1 requires a phase name."
+      select_setup_mode "${1#--}" "$2"
+      setup_option=${setup_option:-$1}
+      shift
+      ;;
+    --from=* | --phase=*)
+      [[ -n ${1#*=} ]] || usage_error "${1%%=*} requires a phase name."
+      setup_option=${setup_option:-${1%%=*}}
+      option_name=${1%%=*}
+      select_setup_mode "${option_name#--}" "${1#*=}"
+      ;;
+    runtime | setup | update)
+      ((!command_seen)) || usage_error "Too many commands."
       mode=$1
       command_seen=1
+      ;;
+    bare | lite | full)
+      [[ ${mode} == setup && -z ${install_profile} ]] || usage_error "Unknown argument: $1"
+      install_profile=$1
       ;;
     -h | --help)
       usage
       exit 0
       ;;
-    *)
-      jsh_error "Unknown argument: $1"
-      usage >&2
-      exit 2
-      ;;
+    *) usage_error "Unknown argument: $1" ;;
   esac
   shift
 done
 
-if ((update_dry_run)); then
-  if [[ ${mode} != update ]]; then
-    jsh_error "--dry-run is only supported by update."
-    usage >&2
-    exit 2
-  fi
+if [[ ${mode} != setup && -n ${setup_option} ]]; then
+  usage_error "${setup_option} is only supported by setup."
+fi
+if ((dry_run)) && [[ ${mode} != setup && ${mode} != update ]]; then
+  usage_error "--dry-run is only supported by setup and update."
+fi
+if ((dry_run || list_phases)); then
   export JSH_NON_INTERACTIVE=1
 fi
-
-install_profile=
-case ${mode} in
-  install) install_profile=slim ;;
-  setup) install_profile=full ;;
-esac
 
 declare -F jsh_env_detect > /dev/null && jsh_env_detect
 
@@ -178,7 +220,7 @@ if declare -F jsh::init > /dev/null; then
 fi
 
 if [[ -r /proc/self/status ]] && grep -Eq '^NoNewPrivs:[[:space:]]+1$' /proc/self/status; then
-  if [[ ${mode} == install || ${mode} == setup || ${mode} == update ]] && ((!update_dry_run)); then
+  if [[ ${mode} == setup || ${mode} == update ]] && ((!dry_run && !list_phases)); then
     jsh_error "This session prohibits privilege elevation. Run Jsh from a regular terminal."
     exit 1
   fi
@@ -279,38 +321,56 @@ install_linux_prerequisites() {
   fi
 }
 
+modern_bash_available() {
+  command -v bash > /dev/null 2>&1 &&
+    bash -c '((BASH_VERSINFO[0] > 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 1)))' 2> /dev/null
+}
+
+# Only the full profile installs missing tools; runtime, bare, and lite report them.
 install_prerequisites() {
-  local install_mode=$1 prompt_for_install=$2 manager package
+  local profile=$1 manager package
   local -a packages=()
+  linux_package_manager > /dev/null || load_brew
   command -v git > /dev/null 2>&1 || packages+=(git)
-  if [[ ${install_mode} == install ]]; then
-    command -v zsh > /dev/null 2>&1 || packages+=(zsh)
-    command -v make > /dev/null 2>&1 || packages+=(make)
-    command -v jq > /dev/null 2>&1 || packages+=(jq)
-    command -v curl > /dev/null 2>&1 || packages+=(curl)
-    if ! command -v bash > /dev/null 2>&1 ||
-      ! bash -c '((BASH_VERSINFO[0] > 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 1)))' 2> /dev/null; then
-      packages+=(bash)
-    fi
-    if ! command -v python3 > /dev/null 2>&1; then
-      package=python
-      if manager=$(linux_package_manager) && [[ ${manager} != pacman ]]; then
-        package=python3
+  case ${profile} in
+    full)
+      command -v zsh > /dev/null 2>&1 || packages+=(zsh)
+      command -v make > /dev/null 2>&1 || packages+=(make)
+      command -v jq > /dev/null 2>&1 || packages+=(jq)
+      command -v curl > /dev/null 2>&1 || packages+=(curl)
+      modern_bash_available || packages+=(bash)
+      if ! command -v python3 > /dev/null 2>&1; then
+        package=python
+        if manager=$(linux_package_manager) && [[ ${manager} != pacman ]]; then
+          package=python3
+        fi
+        packages+=("${package}")
       fi
-      packages+=("${package}")
+      ;;
+    lite)
+      command -v zsh > /dev/null 2>&1 || packages+=(zsh)
+      command -v make > /dev/null 2>&1 || command -v gmake > /dev/null 2>&1 || packages+=(make)
+      ;;
+    *)
+      command -v zsh > /dev/null 2>&1 || modern_bash_available || packages+=(zsh)
+      ;;
+  esac
+
+  if ((${#packages[@]} > 0)) && [[ ${profile} != full ]]; then
+    jsh_error "Missing required tools: ${packages[*]}"
+    if manager=$(linux_package_manager); then
+      jsh_detail "Install them with your package manager (${manager}), then run this command again."
+    elif command -v brew > /dev/null 2>&1; then
+      jsh_detail "Install them with: brew install ${packages[*]}"
+    else
+      jsh_detail "Install them with your system package manager, then run this command again."
     fi
-  elif ! command -v zsh > /dev/null 2>&1 &&
-    { ! command -v bash > /dev/null 2>&1 ||
-      ! bash -c '((BASH_VERSINFO[0] > 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 1)))' 2> /dev/null; }; then
-    packages+=(zsh)
+    jsh_detail "Only the full profile installs missing tools automatically."
+    return 1
   fi
 
   if ((${#packages[@]} > 0)); then
     jsh_warn "Missing required tools: ${packages[*]}"
-    if [[ ${prompt_for_install} == 1 ]] && ! confirm "Install them now?"; then
-      jsh_error "Git and either Zsh or Bash 5.1+ are required to try Jsh."
-      return 1
-    fi
     if linux_package_manager > /dev/null; then
       install_linux_prerequisites "${packages[@]}" || return
     else
@@ -416,7 +476,7 @@ sync_repository() {
   local -a clone_options=()
   if ! command -v git > /dev/null 2>&1; then
     jsh_error "Git is required. Run the prerequisite phase first."
-    exit 1
+    return 1
   fi
 
   if [[ -d "${JSH_DIR}/.git" ]]; then
@@ -428,13 +488,13 @@ sync_repository() {
 
   if [[ -e "${JSH_DIR}" ]]; then
     jsh_error "Install path exists but is not a Git checkout: ${JSH_DIR}"
-    exit 1
+    return 1
   fi
 
   # The runtime needs only the current tree; history blobs download on demand.
   [[ ${mode} != runtime ]] || clone_options=(--filter=blob:none)
-  mkdir -p "$(dirname "${JSH_DIR}")"
-  git clone ${clone_options[@]+"${clone_options[@]}"} "${JSH_REPO}" "${JSH_DIR}"
+  mkdir -p "$(dirname "${JSH_DIR}")" || return
+  git clone ${clone_options[@]+"${clone_options[@]}"} "${JSH_REPO}" "${JSH_DIR}" || return
   sync_submodules
 }
 
@@ -514,36 +574,286 @@ preview_update() {
   UPDATE_PREVIEW=1 update_environment "${profile}"
 }
 
-setup_system() {
-  local profile=${1:-full}
-  if [[ ! -f "${JSH_DIR}/Makefile" ]]; then
-    jsh_error "Repository is unavailable at ${JSH_DIR}. Run the repository phase first."
-    exit 1
-  fi
+# Each profile runs a prefix of this list: bare 3, lite 5, full all.
+SETUP_PHASES=(prerequisites repository launcher dotfiles shell packages configure patch)
 
-  case ${profile} in
-    slim)
-      install_core_packages
-      run_make_target deploy
-      if [[ -x "${JSH_DIR}/scripts/unix/configure/shell.sh" ]]; then
-        "${JSH_DIR}/scripts/unix/configure/shell.sh" < "${TTY}"
-      fi
+profile_phase_count() {
+  case $1 in
+    bare) printf '3\n' ;;
+    lite) printf '5\n' ;;
+    full) printf '%s\n' "${#SETUP_PHASES[@]}" ;;
+    *) return 2 ;;
+  esac
+}
+
+phase_index() {
+  local index
+  for index in "${!SETUP_PHASES[@]}"; do
+    if [[ ${SETUP_PHASES[index]} == "$1" ]]; then
+      printf '%s\n' "${index}"
+      return
+    fi
+  done
+  return 1
+}
+
+profile_phase_position() {
+  local index count
+  count=$(profile_phase_count "${install_profile}")
+  if index=$(phase_index "$1") && ((index < count)); then
+    printf '%s\n' "${index}"
+    return
+  fi
+  jsh_error "Unknown ${install_profile} setup phase: $1"
+  jsh_detail "Phases: ${SETUP_PHASES[*]:0:count}" >&2
+  return 2
+}
+
+# Sets PHASE_TITLE and PHASE_DETAIL.
+describe_phase() {
+  case $1 in
+    prerequisites)
+      PHASE_TITLE=Prerequisites
+      case ${install_profile} in
+        full) PHASE_DETAIL='Install missing Git, Zsh, Make, jq, curl, Bash 5.1+, and Python 3.' ;;
+        lite) PHASE_DETAIL='Check that Git, Zsh, and Make are available.' ;;
+        *) PHASE_DETAIL='Check that Git and either Zsh or Bash 5.1+ are available.' ;;
+      esac
       ;;
-    full)
-      JSH_UPDATE=1 run_make_target install
-      run_make_target deploy
-      run_make_target configure
-      run_make_target patch
+    repository)
+      PHASE_TITLE=Repository
+      PHASE_DETAIL="Clone ${JSH_REPO}, or fast-forward an existing clean checkout."
       ;;
-    *)
-      jsh_error "Unknown install profile: ${profile}"
-      return 2
+    launcher)
+      PHASE_TITLE=Launcher
+      PHASE_DETAIL='Link the jsh command into ~/.local/bin and add it to PATH.'
+      ;;
+    dotfiles)
+      PHASE_TITLE=Dotfiles
+      PHASE_DETAIL='Link managed dotfiles into your home directory.'
+      ;;
+    shell)
+      PHASE_TITLE=Shell
+      PHASE_DETAIL='Offer Zsh as your default login shell.'
+      ;;
+    packages)
+      PHASE_TITLE=Packages
+      PHASE_DETAIL='Install and upgrade packages and platform applications.'
+      ;;
+    configure)
+      PHASE_TITLE=Configure
+      PHASE_DETAIL='Apply platform and application settings.'
+      ;;
+    patch)
+      PHASE_TITLE=Patch
+      PHASE_DETAIL='Apply application patches.'
       ;;
   esac
 }
 
-install_core_packages() {
-  run_make_target essentials
+phase_prerequisites() { install_prerequisites "${install_profile}"; }
+phase_repository() { sync_repository; }
+phase_launcher() { install_runtime_launcher && configure_runtime_path; }
+phase_dotfiles() { run_make_target deploy; }
+phase_shell() { "${JSH_DIR}/scripts/unix/configure/shell.sh" < "${TTY}"; }
+phase_packages() { update_full_packages; }
+phase_configure() { run_make_target configure; }
+phase_patch() { run_make_target patch; }
+
+setup_state_file() {
+  printf '%s\n' "${JSH_SETUP_STATE_FILE:-${XDG_STATE_HOME:-${HOME}/.local/state}/jsh/setup-state}"
+}
+
+# Sets SETUP_STATE_PROFILE and PHASE_STATUS from the last setup run.
+load_setup_state() {
+  local state_file key value index
+  SETUP_STATE_PROFILE=
+  PHASE_STATUS=()
+  state_file=$(setup_state_file)
+  [[ -r ${state_file} ]] || return 1
+  while IFS='=' read -r key value; do
+    if [[ ${key} == profile ]]; then
+      SETUP_STATE_PROFILE=${value}
+    elif index=$(phase_index "${key}"); then
+      PHASE_STATUS[index]=${value}
+    fi
+  done < "${state_file}"
+  case ${SETUP_STATE_PROFILE} in
+    bare | lite | full) ;;
+    *)
+      jsh_warn "Ignoring invalid setup progress in ${state_file}."
+      SETUP_STATE_PROFILE=
+      PHASE_STATUS=()
+      return 1
+      ;;
+  esac
+}
+
+save_setup_state() {
+  local state_file state_dir temporary index count
+  state_file=$(setup_state_file)
+  state_dir=${state_file%/*}
+  count=$(profile_phase_count "${install_profile}")
+  mkdir -p -- "${state_dir}" || return
+  temporary=$(mktemp "${state_dir}/.setup-state.XXXXXX") || return
+  {
+    printf 'profile=%s\n' "${install_profile}"
+    for ((index = 0; index < count; index++)); do
+      printf '%s=%s\n' "${SETUP_PHASES[index]}" "${PHASE_STATUS[index]:-pending}"
+    done
+  } > "${temporary}" && chmod 0600 "${temporary}" && mv -f -- "${temporary}" "${state_file}"
+}
+
+# Sets PHASE_SELECTED from the setup selector; returns 2 for an invalid phase.
+select_setup_phases() {
+  local count index start name
+  local -a names=()
+  count=$(profile_phase_count "${install_profile}")
+  PHASE_SELECTED=()
+  case ${setup_selector} in
+    resume)
+      for ((index = 0; index < count; index++)); do
+        [[ ${PHASE_STATUS[index]:-pending} == "done" ]] || PHASE_SELECTED[index]=1
+      done
+      ;;
+    from)
+      start=$(profile_phase_position "${setup_phase_argument}") || return
+      for ((index = start; index < count; index++)); do
+        PHASE_SELECTED[index]=1
+      done
+      ;;
+    phase)
+      IFS=, read -r -a names <<< "${setup_phase_argument}"
+      for name in ${names[@]+"${names[@]}"}; do
+        index=$(profile_phase_position "${name}") || return
+        PHASE_SELECTED[index]=1
+      done
+      ;;
+    *)
+      for ((index = 0; index < count; index++)); do
+        PHASE_SELECTED[index]=1
+      done
+      ;;
+  esac
+}
+
+setup_phases_selected() {
+  local index count
+  count=$(profile_phase_count "${install_profile}")
+  for ((index = 0; index < count; index++)); do
+    [[ ${PHASE_SELECTED[index]:-0} != 1 ]] || return 0
+  done
+  return 1
+}
+
+setup_complete() {
+  local index count
+  count=$(profile_phase_count "${install_profile}")
+  for ((index = 0; index < count; index++)); do
+    [[ ${PHASE_STATUS[index]:-pending} == "done" ]] || return 1
+  done
+}
+
+print_setup_phases() {
+  local only_selected=${1:-0} index count
+  count=$(profile_phase_count "${install_profile}")
+  for ((index = 0; index < count; index++)); do
+    ((!only_selected)) || [[ ${PHASE_SELECTED[index]:-0} == 1 ]] || continue
+    describe_phase "${SETUP_PHASES[index]}"
+    printf '  %d/%d  %-13s  %-11s  %s\n' "$((index + 1))" "${count}" \
+      "${SETUP_PHASES[index]}" "${PHASE_STATUS[index]:-pending}" "${PHASE_DETAIL}"
+  done
+}
+
+setup_command_hint() {
+  if [[ ${HOME}/.local/bin/jsh -ef ${JSH_DIR}/bin/jsh ]]; then
+    printf 'jsh setup'
+  elif [[ -x ${JSH_DIR}/bin/jsh ]]; then
+    printf '%s setup' "${JSH_DIR}/bin/jsh"
+  else
+    printf 'curl -fsSL https://raw.githubusercontent.com/jovalle/jsh/main/j.sh | bash -s -- setup'
+  fi
+}
+
+report_setup_failure() {
+  local phase=$1 result=$2 index count completed='' remaining='' command
+  count=$(profile_phase_count "${install_profile}")
+  for ((index = 0; index < count; index++)); do
+    if [[ ${PHASE_STATUS[index]:-pending} == "done" ]]; then
+      completed+=", ${SETUP_PHASES[index]}"
+    else
+      remaining+=", ${SETUP_PHASES[index]}"
+    fi
+  done
+  command=$(setup_command_hint)
+  jsh_blank
+  jsh_error "Setup phase ${phase} failed (exit ${result})."
+  [[ -z ${completed} ]] || jsh_detail "Done:      ${completed#, }"
+  jsh_detail "Remaining: ${remaining#, }"
+  jsh_detail "Resume:    ${command} --resume"
+  jsh_detail "Only this: ${command} ${install_profile} --phase ${phase}"
+}
+
+run_setup_phases() {
+  local index count phase result
+  count=$(profile_phase_count "${install_profile}")
+  save_setup_state || jsh_warn "Could not save setup progress."
+  for ((index = 0; index < count; index++)); do
+    phase=${SETUP_PHASES[index]}
+    if [[ ${PHASE_SELECTED[index]:-0} == 1 ]]; then
+      describe_phase "${phase}"
+      heading "$((index + 1))/${count}" "${PHASE_TITLE}" "${PHASE_DETAIL}"
+      if ! confirm "Run this phase?"; then
+        jsh_note "Skipped ${phase}."
+        PHASE_STATUS[index]=skipped
+        save_setup_state || :
+      else
+        result=0
+        if ((index > 1)) && [[ ! -f ${JSH_DIR}/Makefile ]]; then
+          jsh_error "Repository is unavailable at ${JSH_DIR}. Run the repository phase first."
+          result=1
+        else
+          # Remains recorded as interrupted if Jsh is killed mid-phase.
+          PHASE_STATUS[index]=interrupted
+          save_setup_state || :
+          "phase_${phase}" || result=$?
+        fi
+        case ${result} in
+          0) PHASE_STATUS[index]="done" ;;
+          129 | 130 | 143) PHASE_STATUS[index]=interrupted ;;
+          *) PHASE_STATUS[index]=failed ;;
+        esac
+        save_setup_state || :
+        if ((result != 0)); then
+          report_setup_failure "${phase}" "${result}"
+          return "${result}"
+        fi
+      fi
+    fi
+    if [[ ${phase} == repository ]]; then
+      load_repository_ui
+      [[ ${install_profile} != full ]] || promote_workstation_ui
+    fi
+  done
+}
+
+# Recorded profile, legacy full dotfiles, or an interactive choice; --yes never picks one.
+default_setup_profile() {
+  local profile
+  if [[ -r $(install_profile_state_file) || ${HOME}/.zshrc -ef ${JSH_DIR}/dotfiles/.zshrc ]]; then
+    read_install_profile
+    return
+  fi
+  if [[ ${JSH_ASSUME_YES:-0} != 1 ]] && declare -F jsh::choose_one > /dev/null &&
+    profile=$(jsh::choose_one "Setup profile" \
+      bare 'bare: launcher only' \
+      lite 'lite: bare plus managed dotfiles and default shell' \
+      full 'full: lite plus packages, configuration, and patches'); then
+    printf '%s\n' "${profile}"
+    return
+  fi
+  jsh_error "Choose a setup profile: setup bare, setup lite, or setup full."
+  return 2
 }
 
 update_full_packages() {
@@ -560,7 +870,8 @@ read_install_profile() {
   if [[ -r ${state_file} ]]; then
     IFS= read -r profile < "${state_file}" || true
     case ${profile} in
-      bare | slim | full) printf '%s\n' "${profile}"; return ;;
+      bare | lite | full) printf '%s\n' "${profile}"; return ;;
+      slim) printf '%s\n' lite; return ;;
       *) jsh_error "Invalid Jsh install profile in ${state_file}: ${profile}"; return 1 ;;
     esac
   fi
@@ -573,7 +884,7 @@ read_install_profile() {
 
 record_install_profile() {
   local profile=$1 state_file state_dir temporary
-  case ${profile} in bare | slim | full) ;; *) return 2 ;; esac
+  case ${profile} in bare | lite | full) ;; *) return 2 ;; esac
   state_file=$(install_profile_state_file)
   state_dir=${state_file%/*}
   mkdir -p -- "${state_dir}"
@@ -588,15 +899,14 @@ update_environment() {
   run_update_step "Repository and submodules" update_repository
   case ${profile} in
     bare)
-      run_update_step "Runtime prerequisites" install_prerequisites shell 0
+      run_update_step "Prerequisites" install_prerequisites bare
       ;;
-    slim)
-      run_update_step "Prerequisites" install_prerequisites install 0
-      run_update_step "Core shell packages" install_core_packages
+    lite)
+      run_update_step "Prerequisites" install_prerequisites lite
       run_update_step "Dotfiles" run_make_target deploy
       ;;
     full)
-      run_update_step "Prerequisites" install_prerequisites install 0
+      run_update_step "Prerequisites" install_prerequisites full
       run_update_step "Packages and dependencies" update_full_packages
       run_update_step "Betterfox" "${JSH_DIR}/scripts/unix/configure/waterfox.sh" update
       run_update_step "Dotfiles" run_make_target deploy
@@ -726,9 +1036,9 @@ if [[ ${mode} == runtime ]]; then
   jsh_detail "Install directory: ${JSH_DIR}"
   jsh_detail "This opens an isolated J shell without installing a launcher, deploying dotfiles, or configuring the system."
 
-  heading "1/2" "Prerequisites" "Ensure Git and either Zsh or Bash 5.1+ are available."
+  heading "1/2" "Prerequisites" "Check that Git and either Zsh or Bash 5.1+ are available."
   if confirm "Run this phase?"; then
-    install_prerequisites shell 0
+    install_prerequisites runtime
   else
     jsh_note "Skipped prerequisites."
   fi
@@ -757,7 +1067,7 @@ if [[ ${mode} == update ]]; then
   install_profile=$(read_install_profile)
   case ${install_profile} in
     bare) profile_color=32 ;;
-    slim) profile_color=34 ;;
+    lite) profile_color=34 ;;
     *) profile_color=35 ;;
   esac
   if jsh_color_enabled 1; then
@@ -765,7 +1075,7 @@ if [[ ${mode} == update ]]; then
   else
     jsh_detail "Installed experience: ${install_profile}"
   fi
-  if ((update_dry_run)); then
+  if ((dry_run)); then
     exit_status=0
     preview_update "${install_profile}" || exit_status=$?
     declare -F jsh::cleanup > /dev/null && jsh::cleanup
@@ -779,47 +1089,72 @@ if [[ ${mode} == update ]]; then
   exit
 fi
 
-jsh_detail "Install directory: ${JSH_DIR}"
-jsh_detail "This command applies the ${install_profile} managed experience."
+finish_setup() {
+  declare -F jsh::cleanup > /dev/null && jsh::cleanup
+  exit "$1"
+}
 
-heading "1/3" "Runtime prerequisites" "Ensure Git and either Zsh or Bash 5.1+ are available."
-if confirm "Run this phase?"; then
-  install_prerequisites shell 0
-else
-  jsh_note "Skipped prerequisites."
-fi
-
-heading "2/3" "Repository" "Clone ${JSH_REPO}, or fast-forward an existing clean checkout."
-if confirm "Run this phase?"; then
-  sync_repository
-else
-  jsh_note "Skipped repository sync."
-fi
-
-load_repository_ui
-if [[ ${install_profile} == full ]]; then
-  promote_workstation_ui
-fi
-
-heading "3/3" "Apply ${install_profile}" "Install only the components included in this command."
-if confirm "Run this phase?"; then
-  jsh_blank
-  install_runtime_launcher
-  configure_runtime_path
-  if [[ ${install_profile} == slim || ${install_profile} == full ]]; then
-    install_prerequisites install 0
-    setup_system "${install_profile}"
+declare -a PHASE_STATUS=() PHASE_SELECTED=()
+SETUP_STATE_PROFILE=
+setup_state_loaded=0
+load_setup_state && setup_state_loaded=1
+if [[ ${setup_selector} == resume ]]; then
+  if ((!setup_state_loaded)); then
+    jsh_note "Nothing to resume."
+    finish_setup 0
   fi
-  record_install_profile "${install_profile}"
-else
-  jsh_note "Skipped ${install_profile} setup."
+  if [[ -n ${install_profile} && ${install_profile} != "${SETUP_STATE_PROFILE}" ]]; then
+    jsh_error "The last setup run used ${SETUP_STATE_PROFILE}, not ${install_profile}."
+    jsh_detail "Resume it with: $(setup_command_hint) --resume"
+    jsh_detail "Start over with: $(setup_command_hint) ${install_profile}"
+    finish_setup 2
+  fi
+  install_profile=${SETUP_STATE_PROFILE}
+elif [[ -z ${install_profile} ]]; then
+  install_profile=$(default_setup_profile) || finish_setup 2
 fi
+# Selectors and --list build on the last run of the same profile; a plain run starts fresh.
+if [[ ${SETUP_STATE_PROFILE} != "${install_profile}" ]] || { [[ -z ${setup_selector} ]] && ((!list_phases)); }; then
+  PHASE_STATUS=()
+fi
+select_setup_phases || finish_setup 2
+
+jsh_detail "Install directory: ${JSH_DIR}"
+jsh_detail "This command applies the ${install_profile} profile."
+if ((list_phases)); then
+  jsh_blank
+  print_setup_phases
+  finish_setup 0
+fi
+if ! setup_phases_selected; then
+  if [[ ${setup_selector} == resume ]]; then
+    jsh_note "Nothing to resume; the ${install_profile} setup is complete."
+    finish_setup 0
+  fi
+  jsh_error "No setup phases selected."
+  finish_setup 2
+fi
+if ((dry_run)); then
+  jsh_blank
+  jsh_info "Planned phases"
+  print_setup_phases 1
+  finish_setup 0
+fi
+
+setup_status=0
+run_setup_phases || setup_status=$?
+((setup_status == 0)) || finish_setup "${setup_status}"
 
 jsh_blank
-jsh_success "Jsh ${mode} finished."
+if setup_complete; then
+  record_install_profile "${install_profile}"
+  jsh_success "Jsh ${install_profile} setup finished."
+else
+  jsh_note "Jsh ${install_profile} setup is incomplete; skipped phases remain."
+  jsh_detail "Finish with: $(setup_command_hint) --resume"
+fi
 if [[ ${JSH_INSTALL_RETURN:-0} == 1 || ${TTY} == /dev/null || ${JSH_ASSUME_YES:-0} == 1 ]]; then
-  declare -F jsh::cleanup > /dev/null && jsh::cleanup
-  exit 0
+  finish_setup 0
 fi
 jsh_blank
 declare -F jsh::cleanup > /dev/null && jsh::cleanup
