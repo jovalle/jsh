@@ -1,21 +1,27 @@
 #!/usr/bin/env python3
 
 import ctypes
+import getpass
 import os
 import platform
 import shutil
+import signal
 import subprocess
 import sys
 import time
 from ctypes import wintypes
 from pathlib import Path
 
-
 APP_NAME = "caffeine"
 LINUX_CHILD_ARGUMENT = "--linux-inhibited"
+LINUX_INHIBITORS = ("gnome-session-inhibit", "systemd-inhibit")
 MACOS_CHILD_ARGUMENT = "--macos-inhibited"
 REASON = "Keep the screen active"
 WINDOWS_ACTIVITY_INTERVAL_SECONDS = 30
+SCRIPT = Path(__file__).resolve()
+PID_FILE = Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / (
+    f"cafe.{os.environ.get('USER') or getpass.getuser()}.pid"
+)
 
 
 def print_validation(summary: str, inspection_command: str) -> None:
@@ -36,23 +42,37 @@ def wait_until_stopped(status: str, on_interval=None) -> None:
         print("\nCaffeine stopped.", flush=True)
 
 
-def run_linux() -> None:
-    if sys.argv[1:] == [LINUX_CHILD_ARGUMENT]:
-        inhibitor = shutil.which("gnome-session-inhibit")
-        if inhibitor is None:
-            raise RuntimeError("gnome-session-inhibit is required on Linux")
+def linux_inhibitor() -> tuple[str, str]:
+    for name in LINUX_INHIBITORS:
+        inhibitor = shutil.which(name)
+        if inhibitor is not None:
+            return name, inhibitor
+    raise RuntimeError("gnome-session-inhibit or systemd-inhibit is required on Linux")
 
+
+def run_linux() -> None:
+    name, inhibitor = linux_inhibitor()
+    is_gnome = name == "gnome-session-inhibit"
+    label = "GNOME" if is_gnome else "systemd"
+
+    if sys.argv[1:] == [LINUX_CHILD_ARGUMENT]:
         result = subprocess.run(
             [inhibitor, "--list"],
             check=True,
             capture_output=True,
             text=True,
         )
-        if f"{APP_NAME}: {REASON}" not in result.stdout:
-            raise RuntimeError("GNOME idle and suspend inhibitor was not registered")
+        if is_gnome:
+            registered = f"{APP_NAME}: {REASON}" in result.stdout
+        else:
+            registered = any(
+                APP_NAME in line and REASON in line for line in result.stdout.splitlines()
+            )
+        if not registered:
+            raise RuntimeError(f"{label} idle and suspend inhibitor was not registered")
         print_validation(
-            "GNOME idle and suspend inhibitor registered",
-            "gnome-session-inhibit --list",
+            f"{label} idle and suspend inhibitor registered",
+            f"{name} --list",
         )
         wait_until_stopped("idle lock, display sleep, and system sleep are inhibited")
         return
@@ -60,23 +80,112 @@ def run_linux() -> None:
     if sys.argv[1:]:
         raise RuntimeError(f"usage: {Path(sys.argv[0]).name}")
 
-    inhibitor = shutil.which("gnome-session-inhibit")
-    if inhibitor is None:
-        raise RuntimeError("gnome-session-inhibit is required on Linux")
-
-    command = [
-        inhibitor,
-        "--app-id",
-        APP_NAME,
-        "--reason",
-        REASON,
-        "--inhibit",
-        "idle:suspend",
-        sys.executable,
-        str(Path(__file__).resolve()),
-        LINUX_CHILD_ARGUMENT,
-    ]
+    if is_gnome:
+        options = ["--app-id", APP_NAME, "--reason", REASON, "--inhibit", "idle:suspend"]
+    else:
+        options = [
+            f"--who={APP_NAME}",
+            f"--why={REASON}",
+            "--what=idle:sleep",
+            "--mode=block",
+        ]
+    command = [inhibitor, *options, sys.executable, str(SCRIPT), LINUX_CHILD_ARGUMENT]
     os.execv(inhibitor, command)
+
+
+def running_pid() -> int | None:
+    try:
+        pid = int(PID_FILE.read_text().strip())
+        os.kill(pid, 0)
+    except (OSError, ValueError):
+        PID_FILE.unlink(missing_ok=True)
+        return None
+    return pid
+
+
+def run_quietly(*command: str) -> None:
+    try:
+        subprocess.run(
+            command,
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError:
+        pass
+
+
+def set_xfce_sleep(allowed: bool) -> None:
+    enabled = "true" if allowed else "false"
+    for channel, setting in (
+        ("xfce4-screensaver", "/saver/enabled"),
+        ("xfce4-screensaver", "/lock/enabled"),
+        ("xfce4-power-manager", "/xfce4-power-manager/dpms-enabled"),
+    ):
+        run_quietly("xfconf-query", "-c", channel, "-p", setting, "-s", enabled)
+    run_quietly(
+        "xfconf-query",
+        "-c",
+        "xfce4-power-manager",
+        "-p",
+        "/xfce4-power-manager/presentation-mode",
+        "-n",
+        "-t",
+        "bool",
+        "-s",
+        "false" if allowed else "true",
+    )
+    run_quietly("xset", "+dpms" if allowed else "-dpms")
+    run_quietly("xset", "s", "on" if allowed else "off")
+    if not allowed:
+        run_quietly("xfce4-screensaver-command", "-d")
+
+
+def show_xfce_status() -> None:
+    if running_pid() is None:
+        icon = "cafe-off.svg"
+        tip = "Cafe: Inactive (Normal sleep - Click to disable sleep)"
+    else:
+        icon = "cafe-on.svg"
+        tip = "Cafe: Active (Sleep disabled - Click to allow sleep)"
+    icon_path = SCRIPT.parents[1] / "assets" / "icons" / icon
+    print(f"<img>{icon_path}</img><tool>{tip}</tool><click>{SCRIPT} --xfce-toggle</click>")
+
+
+def toggle_xfce() -> None:
+    os.environ.setdefault("DISPLAY", ":0")
+    pid = running_pid()
+    if pid is None:
+        linux_inhibitor()
+        process = subprocess.Popen(
+            [sys.executable, str(SCRIPT)],
+            cwd="/",
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        PID_FILE.write_text(str(process.pid))
+        set_xfce_sleep(allowed=False)
+    else:
+        try:
+            if os.getpgid(pid) == pid:
+                os.killpg(pid, signal.SIGTERM)
+            else:
+                os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        PID_FILE.unlink(missing_ok=True)
+        set_xfce_sleep(allowed=True)
+
+    for plugin_file in sorted((Path.home() / ".config/xfce4/panel").glob("genmon-*.rc")):
+        try:
+            if "--xfce-status" not in plugin_file.read_text():
+                continue
+        except OSError:
+            continue
+        run_quietly("xfce4-panel", f"--plugin-event={plugin_file.stem}:refresh:bool:true")
 
 
 def run_macos() -> None:
@@ -110,7 +219,7 @@ def run_macos() -> None:
         "-s",
         "-u",
         sys.executable,
-        str(Path(__file__).resolve()),
+        str(SCRIPT),
         MACOS_CHILD_ARGUMENT,
     ]
     os.execv(inhibitor, command)
@@ -224,7 +333,11 @@ def run_windows() -> None:
 def main() -> int:
     system = platform.system()
     try:
-        if system == "Linux":
+        if sys.argv[1:] == ["--xfce-status"]:
+            show_xfce_status()
+        elif sys.argv[1:] == ["--xfce-toggle"]:
+            toggle_xfce()
+        elif system == "Linux":
             run_linux()
         elif system == "Darwin":
             run_macos()
