@@ -85,6 +85,8 @@ dotfiles/.config/xfce4/xfconf/xfce-perchannel-xml/thunar.xml
 dotfiles/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml
 dotfiles/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-keyboard-shortcuts.xml
 dotfiles/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-panel.xml
+dotfiles/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-power-manager.xml
+dotfiles/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-screensaver.xml
 dotfiles/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-screenshooter.xml
 dotfiles/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-taskmanager.xml
 git.json

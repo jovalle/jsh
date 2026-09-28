@@ -2,8 +2,8 @@
 ##% jsh
 ## runtime ## Open the same minimal, ephemeral J shell as jsh with no arguments
 ## adopt ## Move selected home paths into Jsh dotfiles
-## install ## Install the launcher, core shell tools, and managed dotfiles
-## setup ## Install and configure the complete managed workstation
+## setup ## Apply the bare, lite, or full persistent profile
+##? @setup ## Setup profile, option, or phase
 ## update ## Update Jsh, dependencies, packages, and managed configuration
 ##? update --dry-run ## Fetch and preview the update without applying it
 ## doctor ## Report dependencies, repository drift, and managed links
@@ -35,7 +35,7 @@ if [ "${JSH_BASH_RUNTIME:-0}" = 1 ]; then
 
   jsh() {
     case ${1:-} in
-      install | setup | update | repair)
+      setup | update | repair)
         JSH_INSTALL_RETURN=1 JSH_BASH_RUNTIME=0 command "${JSH_ROOT}/bin/jsh" "$@" || return
         JSH_RELOADING=1 JSH_BASH_RUNTIME=1 exec "${JSH_BASH}" --noprofile --rcfile "${JSH_ROOT}/bin/jsh" -i
         ;;
@@ -44,7 +44,7 @@ if [ "${JSH_BASH_RUNTIME:-0}" = 1 ]; then
         ;;
       --yes)
         case ${2:-} in
-          install | setup | update | repair)
+          setup | update | repair)
             JSH_INSTALL_RETURN=1 JSH_BASH_RUNTIME=0 command "${JSH_ROOT}/bin/jsh" "$@" || return
             JSH_RELOADING=1 JSH_BASH_RUNTIME=1 exec "${JSH_BASH}" --noprofile --rcfile "${JSH_ROOT}/bin/jsh" -i
             ;;
@@ -342,6 +342,7 @@ jsh_doctor() {
   jsh_info 'Installation'
   doctor_profile_file=${JSH_PROFILE_STATE_FILE:-${XDG_STATE_HOME:-${HOME}/.local/state}/jsh/install-profile}
   if [ -r "${doctor_profile_file}" ] && IFS= read -r doctor_profile < "${doctor_profile_file}"; then
+    [ "${doctor_profile}" != slim ] || doctor_profile=lite
     jsh_health_status ok "Install profile: ${doctor_profile}"
   else
     jsh_health_status skip 'Install profile: not recorded (runtime only).'
@@ -371,6 +372,44 @@ EOF
   return 1
 }
 
+if [ "${1:-}" = __complete ]; then
+  [ "${2:-}" = setup ] || exit 0
+  shift 2
+  case ${1:-} in -y | --yes) shift ;; esac
+  [ "${1:-}" = setup ] || exit 0
+  complete_previous=
+  complete_profile=
+  for complete_word do
+    case ${complete_word} in bare | lite | full) complete_profile=${complete_word} ;; esac
+    complete_previous=${complete_word}
+  done
+  case ${complete_previous} in
+    --from | --phase)
+      printf '%s\t%s\n' \
+        prerequisites 'Check required tools; full installs them' \
+        repository 'Clone or fast-forward the Jsh checkout' \
+        launcher 'Link the jsh command into ~/.local/bin' \
+        dotfiles 'Link managed dotfiles (lite, full)' \
+        shell 'Offer Zsh as the default shell (lite, full)' \
+        packages 'Install and upgrade packages (full)' \
+        configure 'Apply platform and application settings (full)' \
+        patch 'Apply application patches (full)'
+      exit 0
+      ;;
+  esac
+  [ -n "${complete_profile}" ] || printf '%s\t%s\n' \
+    bare 'Launcher only; installs nothing' \
+    lite 'Bare plus managed dotfiles and default shell; installs nothing' \
+    full 'Lite plus packages, configuration, and patches'
+  printf '%s\t%s\n' \
+    --resume 'Continue the last setup from its unfinished phases' \
+    --from 'Run a phase and every phase after it' \
+    --phase 'Run only the named phases' \
+    --list 'Show phases and their last status' \
+    --dry-run 'Show what would run without changing anything'
+  exit 0
+fi
+
 assume_yes=
 if [ "${1:-}" = --yes ] || [ "${1:-}" = -y ]; then
   assume_yes=$1
@@ -385,7 +424,7 @@ if [ "${1:-}" = adopt ]; then
   exec "${JSH_ROOT}/bin/jadopt" "$@"
 fi
 
-if [ "${1:-}" = install ] || [ "${1:-}" = setup ] || [ "${1:-}" = update ]; then
+if [ "${1:-}" = setup ] || [ "${1:-}" = update ]; then
   action=$1
   shift
   JSH_DIR=${JSH_ROOT}
@@ -444,8 +483,7 @@ ${usage_heading}Usage${usage_reset}
 
 ${usage_heading}Commands${usage_reset}
   ${usage_command}runtime${usage_reset}                    Open the minimal, ephemeral shell (default)
-  ${usage_command}install${usage_reset}                    Add the launcher, core tools, and managed dotfiles
-  ${usage_command}setup${usage_reset}                      Install and configure the managed workstation
+  ${usage_command}setup${usage_reset} [bare|lite|full]     Apply a persistent profile; see \`jsh setup --help\`
   ${usage_command}update${usage_reset} [--dry-run]         Update Jsh, packages, and configuration
   ${usage_command}adopt${usage_reset} [--dry-run] PATH...  Move home paths into the shared dotfiles package
   ${usage_command}doctor${usage_reset}                     Report dependencies, repository drift, and links

@@ -132,7 +132,7 @@ parse_bootstrap_command() {
 
   [[ ${status} -eq 0 ]]
   [[ ${output} == *'Usage: j.sh [-y|--yes]'* ]]
-  [[ ${output} == *'runtime|install|setup|update'* ]]
+  [[ ${output} == *'setup [bare|lite|full]'* ]]
 }
 
 @test "assume yes never widens the selected command" {
@@ -140,13 +140,31 @@ parse_bootstrap_command() {
   [[ ${status} -eq 0 ]]
   [[ ${output} == 'runtime|none' ]]
 
-  run parse_bootstrap_command --yes install
-  [[ ${status} -eq 0 ]]
-  [[ ${output} == 'install|slim' ]]
-
   run parse_bootstrap_command --yes setup
   [[ ${status} -eq 0 ]]
-  [[ ${output} == 'setup|full' ]]
+  [[ ${output} == 'setup|none' ]]
+
+  run parse_bootstrap_command --yes setup lite
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == 'setup|lite' ]]
+}
+
+@test "bootstrap rejects conflicting or misplaced setup options" {
+  run parse_bootstrap_command setup full --resume --phase packages
+  [[ ${status} -eq 2 ]]
+  [[ ${output} == *'Use only one of --resume, --from, or --phase.'* ]]
+
+  run parse_bootstrap_command setup --from
+  [[ ${status} -eq 2 ]]
+  [[ ${output} == *'--from requires a phase name.'* ]]
+
+  run parse_bootstrap_command update --list
+  [[ ${status} -eq 2 ]]
+  [[ ${output} == *'--list is only supported by setup.'* ]]
+
+  run parse_bootstrap_command setup --phase=patch --retry
+  [[ ${status} -eq 2 ]]
+  [[ ${output} == *'Use only one of'* ]]
 }
 
 @test "launcher shows help instead of nesting inside an active Jsh shell" {
@@ -229,16 +247,26 @@ parse_bootstrap_command() {
   [[ ${output} != *':%@@@@@@@@@#*#@%-'* ]]
 }
 
-@test "launcher dispatches setup and rejects removed install profiles" {
+@test "launcher dispatches setup and rejects removed install commands" {
   run "${JSH_ROOT}/bin/jsh" setup --help
 
   [[ ${status} -eq 0 ]]
-  [[ ${output} == *'Run with setup to install and configure'* ]]
+  [[ ${output} == *'setup PROFILE         Apply a persistent profile'* ]]
 
-  run "${JSH_ROOT}/j.sh" install slim
+  run "${JSH_ROOT}/j.sh" install
+
+  [[ ${status} -eq 2 ]]
+  [[ ${output} == *'Unknown argument: install'* ]]
+
+  run "${JSH_ROOT}/j.sh" setup slim
 
   [[ ${status} -eq 2 ]]
   [[ ${output} == *'Unknown argument: slim'* ]]
+
+  run env -u JSH JSH_ZSH=sh "${JSH_ROOT}/bin/jsh" install
+
+  [[ ${status} -eq 2 ]]
+  [[ ${output} == *'unknown command: install'* ]]
 }
 
 @test "launcher enters the Bash runtime when Zsh is unavailable" {

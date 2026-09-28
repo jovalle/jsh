@@ -23,6 +23,7 @@
 		<key>autoQuitExceptions</key>
 		<array>
 			<string>com.apple.finder</string>
+			<string>com.apple.mobilephone</string>
 		</array>
 		<key>batteryLimitPercent</key>
 		<integer>10</integer>
@@ -409,9 +410,9 @@
 		<key>monitorAlertBatteryPercent</key>
 		<integer>15</integer>
 		<key>monitorAlertCPU</key>
-		<true/>
+		<false/>
 		<key>monitorAlertCPUTemperature</key>
-		<true/>
+		<false/>
 		<key>monitorAlertCPUTemperatureThreshold</key>
 		<integer>90</integer>
 		<key>monitorAlertCPUThreshold</key>
@@ -928,7 +929,7 @@
 		<array/>
 	</dict>
 	<key>vorssaintBackupAppVersion</key>
-	<string>3.3.5</string>
+	<string>3.4.0</string>
 	<key>vorssaintBackupVersion</key>
 	<integer>1</integer>
 </dict>

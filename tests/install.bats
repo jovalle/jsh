@@ -23,8 +23,12 @@ setup() {
   source "${JSH_ROOT}/lib/debian.sh"
   # shellcheck source=/dev/null
   source "${JSH_ROOT}/lib/manifest.sh"
-  eval "$(sed -n '/^install_core_packages() {$/,/^}$/p' "${JSH_DIR}/j.sh")"
-  eval "$(sed -n '/^setup_system() {$/,/^}$/p' "${JSH_DIR}/j.sh")"
+  eval "$(sed -n '/^# Each profile runs a prefix/,/^update_full_packages() {$/{/^update_full_packages() {$/!p;}' "${JSH_DIR}/j.sh")"
+  eval "$(sed -n '/^update_full_packages() {$/,/^}$/p' "${JSH_DIR}/j.sh")"
+  eval "$(sed -n '/^modern_bash_available() {$/,/^}$/p' "${JSH_DIR}/j.sh")"
+  eval "$(sed -n '/^install_prerequisites() {$/,/^}$/p' "${JSH_DIR}/j.sh")"
+  eval "$(sed -n '/^linux_package_manager() {$/,/^}$/p' "${JSH_DIR}/j.sh")"
+  eval "$(sed -n '/^load_brew() {$/,/^}$/p' "${JSH_DIR}/j.sh")"
   eval "$(sed -n '/^install_profile_state_file() {$/,/^}$/p' "${JSH_DIR}/j.sh")"
   eval "$(sed -n '/^read_install_profile() {$/,/^}$/p' "${JSH_DIR}/j.sh")"
   eval "$(sed -n '/^record_install_profile() {$/,/^}$/p' "${JSH_DIR}/j.sh")"
@@ -102,53 +106,154 @@ EOF
   [[ $(grep -Foc 'Interrupted.' <<< "${output}") -eq 1 ]]
 }
 
-@test "full setup updates packages without changing deploy or configure mode" {
+@test "full setup phases update packages without changing deploy or configure mode" {
   local calls="${BATS_TEST_TMPDIR}/make-targets"
   run_make_target() {
     JSH_TARGET=$1 bash -c 'printf "%s\t%s\n" "${JSH_TARGET}" "${JSH_UPDATE:-0}"' >> "${calls}"
   }
 
-  setup_system
+  phase_packages
+  phase_dotfiles
+  phase_configure
+  phase_patch
 
   diff -u <(printf 'install\t1\ndeploy\t0\nconfigure\t0\npatch\t0\n') "${calls}"
 }
 
-@test "slim install limits packages to core and skips platform configuration" {
-  local calls="${BATS_TEST_TMPDIR}/slim-make-targets"
-  export TTY=/dev/null
-  touch "${BATS_TEST_TMPDIR}/Makefile"
-  run_make_target() {
-    JSH_TARGET=$1 bash -c 'printf "%s\t%s\t%s\n" "${JSH_TARGET}" "${JSH_UPDATE:-0}" "${JSH_PACKAGE_LAYERS:-all}"' >> "${calls}"
-  }
+@test "runtime, bare, and lite report missing tools without installing them" {
+  local bin_dir="${BATS_TEST_TMPDIR}/bin" calls="${BATS_TEST_TMPDIR}/installer-calls" profile
+  mkdir -p "${bin_dir}"
+  ln -s "$(command -v uname)" "${bin_dir}/uname"
+  brew() { printf 'brew %s\n' "$*" >> "${calls}"; return 1; }
+  sudo() { printf 'sudo %s\n' "$*" >> "${calls}"; return 1; }
+  export JSH_OS_RELEASE="${BATS_TEST_TMPDIR}/missing-os-release" TTY=/dev/null
 
-  JSH_DIR=${BATS_TEST_TMPDIR} setup_system slim
+  for profile in runtime bare lite; do
+    PATH=${bin_dir} run install_prerequisites "${profile}"
+    [[ ${status} -eq 1 ]]
+    [[ ${output} == *'Missing required tools: git'* ]]
+    [[ ${output} == *'Only the full profile installs missing tools automatically.'* ]]
+  done
+  [[ ! -e ${calls} ]]
 
-  diff -u <(printf 'essentials\t0\tall\ndeploy\t0\tall\n') "${calls}"
+  PATH=${bin_dir} run install_prerequisites full
+  [[ ${status} -ne 0 ]]
+  [[ $(head -n 1 "${calls}") == 'brew list git' ]]
 }
 
-@test "essentials target excludes custom application installers" {
-  local root="${BATS_TEST_TMPDIR}/essentials-root" events="${BATS_TEST_TMPDIR}/essentials-events"
-  mkdir -p "${root}/lib" "${root}/scripts/unix/install"
-  cat > "${root}/lib/ui.sh" <<'EOF'
-jsh_blank() { :; }
-jsh::status() { :; }
-EOF
-  cat > "${root}/scripts/unix/install/packages.sh" <<EOF
-#!/bin/sh
-printf 'packages\t%s\n' "\${JSH_PACKAGE_LAYERS:-}" >> "${events}"
-EOF
-  cat > "${root}/scripts/unix/install/application.sh" <<EOF
-#!/bin/sh
-printf 'application\n' >> "${events}"
-EOF
-  chmod +x "${root}/scripts/unix/install/"*.sh
-
-  make --no-print-directory -f "${JSH_ROOT}/Makefile" essentials JSH_ROOT="${root}" PLATFORM=darwin
-
-  diff -u <(printf 'packages\tcore\n') "${events}"
+# Globals below are shared with the setup engine evaluated from j.sh.
+# shellcheck disable=SC2034,SC2154
+setup_phase_fixture() {
+  local phase
+  export JSH_SETUP_STATE_FILE="${BATS_TEST_TMPDIR}/state/jsh/setup-state"
+  export HOME="${BATS_TEST_TMPDIR}/home" TTY=/dev/null
+  export PHASE_EVENTS="${BATS_TEST_TMPDIR}/phase-events"
+  JSH_DIR="${BATS_TEST_TMPDIR}/checkout"
+  mkdir -p "${HOME}" "${JSH_DIR}"
+  touch "${JSH_DIR}/Makefile"
+  heading() { :; }
+  confirm() { return 0; }
+  load_repository_ui() { :; }
+  promote_workstation_ui() { :; }
+  for phase in "${SETUP_PHASES[@]}"; do
+    eval "phase_${phase}() { printf '%s\n' ${phase} >> \"\${PHASE_EVENTS}\"; [[ \${FAIL_PHASE:-} != ${phase} ]] || return \${FAIL_STATUS:-1}; }"
+  done
+  PHASE_STATUS=()
+  PHASE_SELECTED=()
+  setup_selector=
+  setup_phase_argument=
 }
 
-@test "install profile state defaults bare and recognizes legacy full dotfiles" {
+# shellcheck disable=SC2154
+@test "failed setup records progress and resumes from the failed phase" {
+  setup_phase_fixture
+  install_profile=lite
+  select_setup_phases
+
+  FAIL_PHASE=dotfiles run run_setup_phases
+
+  [[ ${status} -eq 1 ]]
+  [[ ${output} == *'Setup phase dotfiles failed (exit 1).'* ]]
+  [[ ${output} == *'Done:      prerequisites, repository, launcher'* ]]
+  [[ ${output} == *'Remaining: dotfiles, shell'* ]]
+  [[ ${output} == *'setup --resume'* ]]
+  diff -u <(printf 'profile=lite\nprerequisites=done\nrepository=done\nlauncher=done\ndotfiles=failed\nshell=pending\n') \
+    "${JSH_SETUP_STATE_FILE}"
+
+  : > "${PHASE_EVENTS}"
+  install_profile=
+  load_setup_state
+  install_profile=${SETUP_STATE_PROFILE}
+  setup_selector=resume
+  select_setup_phases
+  run_setup_phases
+
+  diff -u <(printf 'dotfiles\nshell\n') "${PHASE_EVENTS}"
+  setup_complete
+}
+
+@test "interrupted setup phases stay pending for resume" {
+  setup_phase_fixture
+  install_profile=bare
+  select_setup_phases
+
+  FAIL_PHASE=launcher FAIL_STATUS=130 run run_setup_phases
+
+  [[ ${status} -eq 130 ]]
+  grep -qx 'launcher=interrupted' "${JSH_SETUP_STATE_FILE}"
+  load_setup_state
+  setup_selector=resume
+  select_setup_phases
+  [[ ${!PHASE_SELECTED[*]} == 2 ]]
+}
+
+# shellcheck disable=SC2034
+@test "setup selectors choose phases within the profile" {
+  setup_phase_fixture
+  install_profile=full
+
+  setup_selector=from setup_phase_argument=configure
+  select_setup_phases
+  [[ ${!PHASE_SELECTED[*]} == '6 7' ]]
+
+  setup_selector=phase setup_phase_argument=patch,dotfiles
+  select_setup_phases
+  [[ ${!PHASE_SELECTED[*]} == '3 7' ]]
+
+  install_profile=bare setup_phase_argument=packages
+  run select_setup_phases
+  [[ ${status} -eq 2 ]]
+  [[ ${output} == *'Unknown bare setup phase: packages'* ]]
+  [[ ${output} == *'Phases: prerequisites repository launcher'* ]]
+}
+
+@test "setup lists recorded progress and has nothing to resume without it" {
+  export JSH_SETUP_STATE_FILE="${BATS_TEST_TMPDIR}/state/setup-state"
+
+  run env JSH_COLOR=never "${JSH_ROOT}/j.sh" -y setup --resume
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == *'Nothing to resume.'* ]]
+
+  mkdir -p "${JSH_SETUP_STATE_FILE%/*}"
+  printf 'profile=lite\nprerequisites=done\nrepository=done\nlauncher=done\ndotfiles=failed\nshell=pending\n' \
+    > "${JSH_SETUP_STATE_FILE}"
+  run env JSH_COLOR=never "${JSH_ROOT}/j.sh" setup lite --list
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == *'4/5  dotfiles       failed '* ]]
+  [[ ${output} == *'5/5  shell          pending '* ]]
+
+  run env JSH_COLOR=never "${JSH_ROOT}/j.sh" -y setup full --resume
+  [[ ${status} -eq 2 ]]
+  [[ ${output} == *'The last setup run used lite, not full.'* ]]
+
+  run env JSH_COLOR=never "${JSH_ROOT}/j.sh" setup --resume --dry-run
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == *'Planned phases'* ]]
+  [[ ${output} == *'4/5  dotfiles'* && ${output} == *'5/5  shell'* ]]
+  [[ ${output} != *'1/5  prerequisites'* ]]
+}
+
+@test "install profile state defaults bare and recognizes legacy profiles" {
   export JSH_PROFILE_STATE_FILE="${BATS_TEST_TMPDIR}/state/jsh/install-profile"
   export HOME="${BATS_TEST_TMPDIR}/home"
   mkdir -p "${HOME}"
@@ -156,23 +261,27 @@ EOF
   [[ $(read_install_profile) == bare ]]
   ln -s "${JSH_DIR}/dotfiles/.zshrc" "${HOME}/.zshrc"
   [[ $(read_install_profile) == full ]]
-  record_install_profile slim
-  [[ $(read_install_profile) == slim ]]
+  record_install_profile lite
+  [[ $(read_install_profile) == lite ]]
+  printf 'slim\n' > "${JSH_PROFILE_STATE_FILE}"
+  [[ $(read_install_profile) == lite ]]
+  run record_install_profile slim
+  [[ ${status} -eq 2 ]]
 }
 
-@test "slim update reconciles only core packages and dotfiles" {
-  local calls="${BATS_TEST_TMPDIR}/slim-update-targets"
+@test "lite update reconciles only dotfiles without installing packages" {
+  local calls="${BATS_TEST_TMPDIR}/lite-update-targets"
   run_update_step() {
     shift
     "$@"
   }
   update_repository() { printf 'repository\n' >> "${calls}"; }
   install_prerequisites() { printf 'prerequisites\t%s\n' "$*" >> "${calls}"; }
-  run_make_target() { printf 'make\t%s\t%s\n' "$1" "${JSH_PACKAGE_LAYERS:-all}" >> "${calls}"; }
+  run_make_target() { printf 'make\t%s\n' "$1" >> "${calls}"; }
 
-  update_environment slim
+  update_environment lite
 
-  diff -u <(printf 'repository\nprerequisites\tinstall 0\nmake\tessentials\tall\nmake\tdeploy\tall\n') "${calls}"
+  diff -u <(printf 'repository\nprerequisites\tlite\nmake\tdeploy\n') "${calls}"
 }
 
 @test "Homebrew update upgrades formulae and casks after bundle installs" {

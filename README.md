@@ -8,19 +8,21 @@
 curl -fsSL https://raw.githubusercontent.com/jovalle/jsh/main/j.sh | bash
 ```
 
-| 💚 Bare (default)            | 💙 Slim               | 💜 Full              |
-| :--------------------------- | :-------------------- | :------------------- |
-| `jsh runtime`                | `jsh install`         | `jsh setup`          |
-| Try before you buy\*         | ✓ Everything in Bare  | ✓ Everything in Slim |
-| ✓ Isolated shell             | ✓ Persistent launcher | ✓ Package installs   |
-| ✓ Curated and dynamic prompt | ✓ Essential tools     | ✓ OS configuration   |
-|                              | ✓ Managed dotfiles    | ✓ Application tweaks |
+| 💚 Bare               | 💙 Lite              | 💜 Full              |
+| :-------------------- | :------------------- | :------------------- |
+| `jsh setup bare`      | `jsh setup lite`     | `jsh setup full`     |
+| ✓ Persistent launcher | ✓ Everything in Bare | ✓ Everything in Lite |
+| ✓ Isolated shell      | ✓ Managed dotfiles   | ✓ Package installs   |
+| ✓ Installs nothing    | ✓ Zsh as login shell | ✓ OS configuration   |
+|                       | ✓ Installs nothing   | ✓ Application tweaks |
 
-Pass the command straight to the bootstrap to skip ahead, and add `--yes` to accept that level's prompts:
+With no arguments, the bootstrap opens the isolated runtime to try before you buy\*. Pass a setup profile to skip ahead, and add `--yes` to accept that profile's prompts:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/jovalle/jsh/main/j.sh | bash -s -- setup
+curl -fsSL https://raw.githubusercontent.com/jovalle/jsh/main/j.sh | bash -s -- setup full
 ```
+
+Setup runs in phases and records its progress. Continue an interrupted or failed run with `jsh setup --resume`, rerun from a phase with `--from PHASE`, run specific phases with `--phase PHASE[,PHASE]`, and see them all with `--list`.
 
 Stay current with `jsh update`, preview it with `--dry-run`, and use `jsh doctor` or `jsh repair` when something drifts.
 
@@ -42,7 +44,7 @@ Everyday commands, rebuilt the way I wish they worked.
 | [`jgit`](bin/jgit)           | Per-repo identities, timestamped commits, history rewrites, and gist-backed stashes.        |
 | [`jgraphify`](bin/jgraphify) | Converts data into graph representations for visualization and analysis.                    |
 | [`jmount`](bin/jmount)       | SMB and NFS mounts from a URL or a saved profile.                                           |
-| [`jsh`](bin/jsh)             | The Jsh launcher: runtime, install, setup, update, doctor, and repair.                      |
+| [`jsh`](bin/jsh)             | The Jsh launcher: runtime, setup, update, doctor, and repair.                               |
 | [`jssh`](bin/jssh)           | SSH that brings a portable Jsh environment to the remote host.                              |
 | [`jstow`](bin/jstow)         | GNU Stow, reimplemented in Bash, for deploying dotfile links.                               |
 | [`jventoy`](bin/jventoy)     | Initializes Ventoy drives and keeps their ISOs up to date.                                  |
@@ -65,7 +67,7 @@ Everyday commands, rebuilt the way I wish they worked.
 
 ### Apps
 
-With `jsh setup`, popular apps are configured the way I like them.
+With `jsh setup full`, popular apps are configured the way I like them.
 
 #### Spotify
 
