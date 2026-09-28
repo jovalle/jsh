@@ -6,6 +6,15 @@ const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'conf', 'spicetify', 'add.js'), 'utf8');
 
+test('playlist overlay backgrounds survive missing Spicetify theme variables', () => {
+  assert.match(
+    source,
+    /--adder-surface: var\(--background-elevated-base, var\(--spice-main, #282828\)\)/,
+  );
+  assert.match(source, /\.panel \{ background-color: var\(--adder-surface\)/);
+  assert.match(source, /\.item-card \{[^}]*background-color: var\(--adder-fill\)/);
+});
+
 test('native plus opens the playlist menu on macOS', () => {
   const listeners = {};
   const shortcuts = [];

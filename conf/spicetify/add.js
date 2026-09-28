@@ -241,39 +241,39 @@
     root.id = OVERLAY_ID;
     root.innerHTML = `
       <style>
-        #${OVERLAY_ID} { align-items: center; background: rgb(0 0 0 / 72%); box-sizing: border-box; color: var(--spice-text); display: flex; inset: 0; justify-content: center; padding: 24px; position: fixed; z-index: 1000; }
+        #${OVERLAY_ID} { --adder-accent: var(--essential-bright-accent, var(--spice-button, #1ed760)); --adder-fill: var(--background-tinted-base, var(--spice-card, #3e3e3e)); --adder-subtext: var(--text-subdued, var(--spice-subtext, #b3b3b3)); --adder-surface: var(--background-elevated-base, var(--spice-main, #282828)); --adder-text: var(--text-base, var(--spice-text, #fff)); align-items: center; background-color: rgb(0 0 0 / 72%); box-sizing: border-box; color: var(--adder-text); display: flex; inset: 0; justify-content: center; padding: 24px; position: fixed; z-index: 1000; }
         #${OVERLAY_ID} * { box-sizing: border-box; }
-        #${OVERLAY_ID} .panel { background: var(--spice-main); border: 1px solid rgb(255 255 255 / 8%); border-radius: 8px; box-shadow: 0 20px 64px rgb(0 0 0 / 55%); display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr); height: min(620px, calc(100vh - 48px)); min-height: 300px; overflow: hidden; width: min(560px, 100%); }
-        #${OVERLAY_ID} .item-card { align-items: center; background: var(--spice-card); border-radius: 6px; display: grid; gap: 16px; grid-template-columns: 112px minmax(0, 1fr); min-height: 136px; margin: 16px; padding: 12px; }
+        #${OVERLAY_ID} .panel { background-color: var(--adder-surface); border: 1px solid rgb(255 255 255 / 8%); border-radius: 8px; box-shadow: 0 20px 64px rgb(0 0 0 / 55%); display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr); height: min(620px, calc(100vh - 48px)); min-height: 300px; overflow: hidden; width: min(560px, 100%); }
+        #${OVERLAY_ID} .item-card { align-items: center; background-color: var(--adder-fill); border-radius: 6px; display: grid; gap: 16px; grid-template-columns: 112px minmax(0, 1fr); min-height: 136px; margin: 16px; padding: 12px; }
         #${OVERLAY_ID} .artwork-link { border-radius: 4px; display: block; height: 112px; overflow: hidden; width: 112px; }
-        #${OVERLAY_ID} .artwork { background: var(--spice-main); display: block; height: 100%; object-fit: cover; width: 100%; }
-        #${OVERLAY_ID} .artwork-fallback { align-items: center; color: var(--spice-subtext); display: flex; justify-content: center; }
+        #${OVERLAY_ID} .artwork { background-color: var(--adder-surface); display: block; height: 100%; object-fit: cover; width: 100%; }
+        #${OVERLAY_ID} .artwork-fallback { align-items: center; color: var(--adder-subtext); display: flex; justify-content: center; }
         #${OVERLAY_ID} .artwork-fallback svg { height: 34px; width: 34px; }
         #${OVERLAY_ID} .track-info { min-width: 0; }
-        #${OVERLAY_ID} .track-title { color: var(--spice-text); display: block; font-size: 22px; font-weight: 700; line-height: 27px; margin-bottom: 7px; overflow: hidden; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
-        #${OVERLAY_ID} .artists { color: var(--spice-subtext); font-size: 14px; font-weight: 600; line-height: 20px; margin-bottom: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        #${OVERLAY_ID} .release { color: var(--spice-subtext); font-size: 12px; line-height: 18px; overflow-wrap: anywhere; white-space: normal; }
+        #${OVERLAY_ID} .track-title { color: var(--adder-text); display: block; font-size: 22px; font-weight: 700; line-height: 27px; margin-bottom: 7px; overflow: hidden; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
+        #${OVERLAY_ID} .artists { color: var(--adder-subtext); font-size: 14px; font-weight: 600; line-height: 20px; margin-bottom: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        #${OVERLAY_ID} .release { color: var(--adder-subtext); font-size: 12px; line-height: 18px; overflow-wrap: anywhere; white-space: normal; }
         #${OVERLAY_ID} .metadata-link { color: inherit; text-decoration: none; }
         #${OVERLAY_ID} .track-title:hover, #${OVERLAY_ID} .metadata-link:hover { text-decoration: underline; }
         #${OVERLAY_ID} .search { margin: 0 16px 12px; position: relative; }
-        #${OVERLAY_ID} .search svg { color: var(--spice-subtext); height: 18px; left: 14px; pointer-events: none; position: absolute; top: 50%; transform: translateY(-50%); width: 18px; }
-        #${OVERLAY_ID} input { background: var(--spice-card); border: 1px solid transparent; border-radius: 6px; color: inherit; font: inherit; font-size: 16px; min-height: 44px; outline: none; padding: 10px 14px 10px 42px; transition: border-color 120ms ease, box-shadow 120ms ease; width: 100%; }
-        #${OVERLAY_ID} input::placeholder { color: var(--spice-subtext); opacity: 1; }
-        #${OVERLAY_ID} input:focus-visible { border-color: var(--spice-button); box-shadow: inset 0 0 0 1px var(--spice-button); }
+        #${OVERLAY_ID} .search svg { color: var(--adder-subtext); height: 18px; left: 14px; pointer-events: none; position: absolute; top: 50%; transform: translateY(-50%); width: 18px; }
+        #${OVERLAY_ID} input { background-color: var(--adder-fill); border: 1px solid transparent; border-radius: 6px; color: inherit; font: inherit; font-size: 16px; min-height: 44px; outline: none; padding: 10px 14px 10px 42px; transition: border-color 120ms ease, box-shadow 120ms ease; width: 100%; }
+        #${OVERLAY_ID} input::placeholder { color: var(--adder-subtext); opacity: 1; }
+        #${OVERLAY_ID} input:focus-visible { border-color: var(--adder-accent); box-shadow: inset 0 0 0 1px var(--adder-accent); }
         #${OVERLAY_ID} [role="listbox"] { min-height: 0; overflow: auto; padding: 0 8px 8px; scroll-padding: 4px; scrollbar-gutter: stable; }
         #${OVERLAY_ID} [role="option"] { align-items: center; border-radius: 6px; cursor: pointer; display: grid; gap: 10px; grid-template-columns: 40px minmax(0, 1fr) 28px; min-height: 52px; padding: 6px 8px; transition: background-color 100ms ease; }
-        #${OVERLAY_ID} [role="option"]:hover, #${OVERLAY_ID} [role="option"].active { background: var(--spice-card); }
+        #${OVERLAY_ID} [role="option"]:hover, #${OVERLAY_ID} [role="option"].active { background-color: var(--adder-fill); }
         #${OVERLAY_ID} [role="option"].busy { opacity: 0.7; }
-        #${OVERLAY_ID} [role="option"] img, #${OVERLAY_ID} [role="option"] .cover { align-items: center; background: var(--spice-card); border-radius: 4px; display: flex; height: 40px; justify-content: center; object-fit: cover; width: 40px; }
-        #${OVERLAY_ID} .cover svg { color: var(--spice-subtext); height: 18px; width: 18px; }
+        #${OVERLAY_ID} [role="option"] img, #${OVERLAY_ID} [role="option"] .cover { align-items: center; background-color: var(--adder-fill); border-radius: 4px; display: flex; height: 40px; justify-content: center; object-fit: cover; width: 40px; }
+        #${OVERLAY_ID} .cover svg { color: var(--adder-subtext); height: 18px; width: 18px; }
         #${OVERLAY_ID} .details { min-width: 0; }
         #${OVERLAY_ID} .name { font-size: 14px; font-weight: 600; line-height: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        #${OVERLAY_ID} .meta { color: var(--spice-subtext); font-size: 12px; line-height: 18px; }
-        #${OVERLAY_ID} .status { align-items: center; border: 1px solid var(--spice-subtext); border-radius: 50%; color: transparent; display: flex; height: 18px; justify-content: center; width: 18px; }
+        #${OVERLAY_ID} .meta { color: var(--adder-subtext); font-size: 12px; line-height: 18px; }
+        #${OVERLAY_ID} .status { align-items: center; border: 1px solid var(--adder-subtext); border-radius: 50%; color: transparent; display: flex; height: 18px; justify-content: center; width: 18px; }
         #${OVERLAY_ID} .status svg { height: 12px; width: 12px; }
         #${OVERLAY_ID} .status.saved { background: #1ed760; border-color: #1ed760; color: #000; }
-        #${OVERLAY_ID} .status.busy { animation: adder-spin 700ms linear infinite; border-color: var(--spice-subtext); border-top-color: #1ed760; }
-        #${OVERLAY_ID} .empty { color: var(--spice-subtext); padding: 40px 16px; text-align: center; }
+        #${OVERLAY_ID} .status.busy { animation: adder-spin 700ms linear infinite; border-color: var(--adder-subtext); border-top-color: #1ed760; }
+        #${OVERLAY_ID} .empty { color: var(--adder-subtext); padding: 40px 16px; text-align: center; }
         #${OVERLAY_ID} .sr-only { clip: rect(0, 0, 0, 0); clip-path: inset(50%); height: 1px; overflow: hidden; position: absolute; white-space: nowrap; width: 1px; }
         @keyframes adder-spin { to { transform: rotate(360deg); } }
         @media (max-width: 480px) { #${OVERLAY_ID} { padding: 12px; } #${OVERLAY_ID} .panel { height: min(620px, calc(100vh - 24px)); } #${OVERLAY_ID} .item-card { gap: 12px; grid-template-columns: 88px minmax(0, 1fr); min-height: 112px; margin: 12px; padding: 12px; } #${OVERLAY_ID} .artwork-link { height: 88px; width: 88px; } #${OVERLAY_ID} .track-title { font-size: 19px; line-height: 24px; } }
