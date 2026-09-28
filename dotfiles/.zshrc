@@ -206,6 +206,7 @@ command -v task &>/dev/null && source <(task --completion zsh)
 [[ -r "${GIT_BASE}/technis/scripts/completions/task.zsh" ]] && \
   source "${GIT_BASE}/technis/scripts/completions/task.zsh"
 command -v zoxide &>/dev/null && eval "$(zoxide init zsh)"
+command -v atuin &>/dev/null && eval "$(atuin init zsh)"
 
 # ============================================================================
 # 5. HELPER FUNCTIONS
