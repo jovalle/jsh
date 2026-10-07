@@ -51,3 +51,23 @@ setup() {
   [[ ${status} -eq 0 ]]
   [[ ${output} == /projects/two ]]
 }
+
+@test "j prefers literal paths and dot-directory names over higher-scored children" {
+  mkdir -p -- "${TEST_HOME}/.jsh/lib"
+  local expected
+  expected="$(cd -- "${TEST_HOME}" && pwd -P)/.jsh"
+
+  run env HOME="${TEST_HOME}" JSH_LOAD_CONFIG=0 JSH_RUNTIME_DIR="${TEST_RUNTIME}" \
+    zsh -f -c '
+      source "$1/dotfiles/.zshrc" >/dev/null 2>&1
+      J_NO_HOOK=1 J_DATA=$HOME/j.db J_PATHS=
+      now=$(_j_now)
+      print -rl -- "$HOME/.jsh|35|$now" "$HOME/.jsh/lib|40|$now" >"$J_DATA"
+      cd / && j jsh && print -r -- "${PWD:A}"
+      cd / && j "$HOME/.jsh" && print -r -- "${PWD:A}"
+    ' _ "${JSH_ROOT}"
+
+  [[ ${status} -eq 0 ]]
+  [[ ${lines[0]} == "${expected}" ]]
+  [[ ${lines[1]} == "${expected}" ]]
+}
