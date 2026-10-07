@@ -1320,7 +1320,7 @@ _jgit_rewrite() {
   jsh::log_success "Rewrote ${count} commit$([[ ${count} == 1 ]] || printf s)"
 }
 
-_jgit_update_restore_stash() {
+_jgit_update_stash_ref() {
   local repo=$1 stash_oid=$2 stash_ref
   stash_ref=$(git -C "${repo}" stash list --format='%gd %H' |
     awk -v wanted="${stash_oid}" '$2 == wanted { print $1; exit }') || {
@@ -1331,10 +1331,106 @@ _jgit_update_restore_stash() {
     jsh::log_error "Created stash not found for ${repo}: ${stash_oid}"
     return 1
   fi
+  printf '%s\n' "${stash_ref}"
+}
+
+_jgit_update_restore_stash() {
+  local repo=$1 stash_oid=$2 stash_ref
+  stash_ref=$(_jgit_update_stash_ref "${repo}" "${stash_oid}") || return 1
   if ! git -C "${repo}" stash pop --index --quiet "${stash_ref}"; then
     jsh::log_error "Could not restore local changes in ${repo}; stash retained as ${stash_ref}"
     return 1
   fi
+}
+
+# Test-merges a stash onto a fast-forward target. Sets JGIT_UPDATE_TREE to the expected
+# worktree and JGIT_UPDATE_KEEP to upstream-deleted paths whose local edits stay untracked.
+_jgit_update_preflight() {
+  local repo=$1 stash_oid=$2 target=$3 output entry stage path blocked_path merge_status=0 is_blocked
+  local -a modified=() blocked=()
+  JGIT_UPDATE_TREE=
+  JGIT_UPDATE_KEEP=()
+  output=$(git -C "${repo}" rev-parse --path-format=absolute --git-path "jgit-update-merge.$$") || return 1
+  git -C "${repo}" merge-tree --write-tree --no-messages -z "${target}" "${stash_oid}" \
+    > "${output}" || merge_status=$?
+  if ((merge_status > 1)); then
+    rm -f "${output}"
+    jsh::log_error "Could not test local changes against upstream in ${repo}"
+    return 1
+  fi
+  {
+    IFS= read -r -d '' JGIT_UPDATE_TREE || true
+    while IFS= read -r -d '' entry && [[ -n ${entry} ]]; do
+      path=${entry#*$'\t'}
+      stage=${entry%%$'\t'*}
+      case ${stage##* } in
+        2) blocked+=("${path}") ;;
+        3) modified+=("${path}") ;;
+      esac
+    done
+  } < "${output}"
+  rm -f "${output}"
+
+  if git -C "${repo}" rev-parse --quiet --verify "${stash_oid}^3" > /dev/null; then
+    while IFS= read -r -d '' path; do
+      blocked+=("${path}")
+    done < <(git -C "${repo}" diff-tree -r -z --no-renames --name-only --diff-filter=MT \
+      "${stash_oid}^3" "${target}")
+  fi
+
+  for path in ${modified[@]+"${modified[@]}"}; do
+    is_blocked=0
+    for blocked_path in ${blocked[@]+"${blocked[@]}"}; do
+      [[ ${blocked_path} != "${path}" ]] || is_blocked=1
+    done
+    ((is_blocked)) || JGIT_UPDATE_KEEP+=("${path}")
+  done
+  if ((${#blocked[@]} > 0)); then
+    jsh::log_error "Local changes conflict with upstream in ${repo}:"
+    printf '  %s\n' "${blocked[@]}" >&2
+    return 1
+  fi
+}
+
+_jgit_update_worktree_matches() {
+  local repo=$1 tree=$2 index result=0
+  index=$(git -C "${repo}" rev-parse --path-format=absolute --git-path "jgit-update-index.$$") || return 1
+  GIT_INDEX_FILE=${index} git -C "${repo}" read-tree "${tree}" || result=$?
+  if ((result == 0)); then
+    GIT_INDEX_FILE=${index} git -C "${repo}" update-index -q --refresh --ignore-submodules > /dev/null || true
+    GIT_INDEX_FILE=${index} git -C "${repo}" diff-files --quiet --ignore-submodules || result=$?
+  fi
+  rm -f "${index}"
+  return "${result}"
+}
+
+# Applies a preflighted stash after a fast-forward, keeping upstream-deleted local edits untracked.
+_jgit_update_apply_stash() {
+  local repo=$1 stash_oid=$2 stash_ref messages path
+  stash_ref=$(_jgit_update_stash_ref "${repo}" "${stash_oid}") || return 1
+  messages=$(git -C "${repo}" stash apply --quiet "${stash_ref}" 2>&1) || true
+  if ((${#JGIT_UPDATE_KEEP[@]} > 0)); then
+    git --literal-pathspecs -C "${repo}" rm --cached --quiet --ignore-unmatch -- "${JGIT_UPDATE_KEEP[@]}" || true
+  fi
+  if [[ -n $(git -C "${repo}" ls-files --unmerged) ]] ||
+    ! _jgit_update_worktree_matches "${repo}" "${JGIT_UPDATE_TREE}" ||
+    { git -C "${repo}" rev-parse --quiet --verify "${stash_oid}^3" > /dev/null &&
+      ! _jgit_update_worktree_matches "${repo}" "${stash_oid}^3"; }; then
+    [[ -z ${messages} ]] || printf '%s\n' "${messages}" >&2
+    jsh::log_error "Could not restore local changes in ${repo}; stash retained as ${stash_ref}"
+    return 1
+  fi
+
+  git -C "${repo}" reset --quiet
+  if ! git -C "${repo}" diff --quiet "${stash_oid}^1" "${stash_oid}^2" &&
+    ! git -C "${repo}" diff --binary "${stash_oid}^1" "${stash_oid}^2" |
+    git -C "${repo}" apply --cached 2> /dev/null; then
+    jsh::log_warn "Staged changes in ${repo} were restored as unstaged changes"
+  fi
+  git -C "${repo}" stash drop --quiet "${stash_ref}"
+  for path in ${JGIT_UPDATE_KEEP[@]+"${JGIT_UPDATE_KEEP[@]}"}; do
+    jsh::log_warn "Upstream deleted ${path}; kept local copy as an untracked file"
+  done
 }
 
 _jgit_rewrite_stash_worktree() {
@@ -1395,7 +1491,7 @@ _jgit_stash() {
 }
 
 _jgit_update_repository() {
-  local repo=$1 use_stash=$2 status previous_stash='' stash_oid='' pull_status=0
+  local repo=$1 use_stash=$2 status previous_stash='' stash_oid='' merge_status=0 target
   if ! git -C "${repo}" symbolic-ref --quiet HEAD > /dev/null; then
     jsh::log_error "Detached HEAD, skipped ${repo}"
     return 1
@@ -1406,6 +1502,19 @@ _jgit_update_repository() {
   fi
   if [[ -n $(git -C "${repo}" diff --name-only --diff-filter=U) ]]; then
     jsh::log_error "Unresolved conflicts, skipped ${repo}"
+    return 1
+  fi
+  if ! git -C "${repo}" fetch --quiet; then
+    jsh::log_error "Could not fetch upstream for ${repo}"
+    return 1
+  fi
+  target=$(git -C "${repo}" rev-parse --verify '@{upstream}') || return 1
+  if git -C "${repo}" merge-base --is-ancestor "${target}" HEAD; then
+    jsh::log_success "Up to date: ${repo}"
+    return 0
+  fi
+  if ! git -C "${repo}" merge-base --is-ancestor HEAD "${target}"; then
+    jsh::log_error "Cannot fast-forward ${repo}; rebase or merge manually"
     return 1
   fi
 
@@ -1441,12 +1550,20 @@ _jgit_update_repository() {
     fi
   fi
 
-  git -C "${repo}" pull --ff-only --quiet || pull_status=$?
-  if [[ -n ${stash_oid} ]] && ! _jgit_update_restore_stash "${repo}" "${stash_oid}"; then
+  if [[ -n ${stash_oid} ]] && ! _jgit_update_preflight "${repo}" "${stash_oid}" "${target}"; then
+    _jgit_update_restore_stash "${repo}" "${stash_oid}" || return 1
+    jsh::log_error "Update skipped for ${repo}; local changes restored"
     return 1
   fi
-  if ((pull_status != 0)); then
+  git -C "${repo}" merge --ff-only --quiet "${target}" || merge_status=$?
+  if ((merge_status != 0)); then
+    if [[ -n ${stash_oid} ]]; then
+      _jgit_update_restore_stash "${repo}" "${stash_oid}" || return 1
+    fi
     jsh::log_error "Update failed for ${repo}; local changes restored"
+    return 1
+  fi
+  if [[ -n ${stash_oid} ]] && ! _jgit_update_apply_stash "${repo}" "${stash_oid}"; then
     return 1
   fi
   jsh::log_success "Updated ${repo}"
