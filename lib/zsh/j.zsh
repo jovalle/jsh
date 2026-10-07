@@ -434,6 +434,11 @@ j() {
     return
   fi
 
+  if (( $# == 1 )) && [[ $1 == */* || $1 == .* ]] && [[ -d $1 ]]; then
+    [[ ${open_code} == true ]] && _j_open_code_path "${1:A}" || builtin cd -- "${1:A}"
+    return
+  fi
+
   if (( $# == 0 )); then
     selected=$(_j_interactive)
     [[ -n ${selected} ]] || return 0
