@@ -528,6 +528,74 @@ EOF
   [[ $(git -C "${second}" rev-parse HEAD) == $(git -C "${seed}" rev-parse HEAD) ]]
 }
 
+setup_update_clone() {
+  local remote="${BATS_TEST_TMPDIR}/remote.git"
+  UPDATE_SEED="${BATS_TEST_TMPDIR}/seed"
+  UPDATE_CLONE="${BATS_TEST_TMPDIR}/clone"
+  git init -q --bare "${remote}"
+  init_repo "${UPDATE_SEED}"
+  commit_file "${UPDATE_SEED}" volatile.xml original Initial '2026-09-15 10:00:00 +0000'
+  commit_file "${UPDATE_SEED}" shared $'one\ntwo\nthree' Shared '2026-09-15 10:00:00 +0000'
+  git -C "${UPDATE_SEED}" remote add origin "${remote}"
+  git -C "${UPDATE_SEED}" push -q -u origin main
+  git -C "${remote}" symbolic-ref HEAD refs/heads/main
+  git clone -q "${remote}" "${UPDATE_CLONE}"
+  git -C "${UPDATE_CLONE}" config user.name 'Test User'
+  git -C "${UPDATE_CLONE}" config user.email test@example.com
+}
+
+@test "update stash keeps upstream-deleted edits and accepts identical new files" {
+  setup_update_clone
+  git -C "${UPDATE_SEED}" rm -q volatile.xml
+  printf 'volatile.xml\n' > "${UPDATE_SEED}/.gitignore"
+  printf 'config\n' > "${UPDATE_SEED}/config.toml"
+  git -C "${UPDATE_SEED}" add .gitignore config.toml
+  git -C "${UPDATE_SEED}" commit -q -m 'Stop tracking volatile state'
+  git -C "${UPDATE_SEED}" push -q
+  printf 'local\n' > "${UPDATE_CLONE}/volatile.xml"
+  printf 'config\n' > "${UPDATE_CLONE}/config.toml"
+  printf 'notes\n' > "${UPDATE_CLONE}/notes.txt"
+  printf 'one\ntwo\nthree\nfour\n' > "${UPDATE_CLONE}/shared"
+  git -C "${UPDATE_CLONE}" add shared
+
+  cd "${UPDATE_CLONE}"
+  run run_jgit update --stash
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == *'kept local copy as an untracked file'* ]]
+  [[ $(git rev-parse HEAD) == $(git -C "${UPDATE_SEED}" rev-parse HEAD) ]]
+  [[ $(< volatile.xml) == local ]]
+  [[ $(< notes.txt) == notes ]]
+  [[ $(git status --porcelain=v1) == $'M  shared\n?? notes.txt' ]]
+  [[ -z $(git stash list) ]]
+}
+
+@test "update stash skips the pull and restores changes on real conflicts" {
+  local before_head before_status
+  setup_update_clone
+  commit_file "${UPDATE_SEED}" shared $'one\nupstream\nthree' Upstream '2026-09-15 11:00:00 +0000'
+  printf 'different\n' > "${UPDATE_SEED}/config.toml"
+  git -C "${UPDATE_SEED}" add config.toml
+  git -C "${UPDATE_SEED}" commit -q -m 'Add config'
+  git -C "${UPDATE_SEED}" push -q
+  printf 'one\nlocal\nthree\n' > "${UPDATE_CLONE}/shared"
+  printf 'config\n' > "${UPDATE_CLONE}/config.toml"
+  before_head=$(git -C "${UPDATE_CLONE}" rev-parse HEAD)
+  before_status=$(git -C "${UPDATE_CLONE}" status --porcelain=v1)
+
+  cd "${UPDATE_CLONE}"
+  run run_jgit update --stash
+
+  [[ ${status} -ne 0 ]]
+  [[ ${output} == *'Local changes conflict with upstream'* ]]
+  [[ ${output} == *'  shared'* && ${output} == *'  config.toml'* ]]
+  [[ ${output} == *'Update skipped'* ]]
+  [[ $(git rev-parse HEAD) == "${before_head}" ]]
+  [[ $(git status --porcelain=v1) == "${before_status}" ]]
+  [[ $(< shared) == $'one\nlocal\nthree' ]]
+  [[ -z $(git stash list) ]]
+}
+
 @test "save backup load and restore expose offline-safe help" {
   local repository="${BATS_TEST_TMPDIR}/repository" command canonical
   init_repo "${repository}"
