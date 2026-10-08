@@ -140,6 +140,9 @@ MAILCHECK=0                         # Disable mail checking
 # 4. COMPLETION SYSTEM
 # ============================================================================
 
+# brew shellenv prepends site-functions to fpath, so run it before the repo entries.
+command -v brew &>/dev/null && eval "$(brew shellenv)"
+
 # Add repository, user, and vendored completions to fpath.
 fpath=("${JSH}/dotfiles/.zsh/completions" ~/.zsh/completions \
   "${JSH_VENDOR}/zsh-completions/src" "${fpath[@]}")
@@ -193,7 +196,6 @@ zstyle ':fzf-tab:complete:cd:*' fzf-preview "ls --color \$realpath"
 
 # ---- Tool Completions ----
 
-command -v brew &>/dev/null && eval "$(brew shellenv)"
 command -v direnv &>/dev/null && eval "$(direnv hook zsh)"
 command -v docker &>/dev/null && eval "$(docker completion zsh)"
 # shellcheck disable=SC1090  # Dynamic source from fzf
