@@ -11,6 +11,249 @@
   let hoveredAddButton = null;
   let addScanQueued = false;
 
+  function account() {
+    return Spicetify.Platform?.LocalStorageAPI?.namespace || '';
+  }
+
+  // One undo record follows the active playback occurrence, including pause/resume.
+  let removalIdentity = '';
+  let removal = null;
+  let restoredUid = '';
+  let removalBusy = false;
+  let capabilities = null;
+  let removalSequence = 0;
+
+  function playingSelection() {
+    const data = Spicetify.Player.data;
+    const item = data?.item;
+    return {
+      account: account(),
+      context: data?.context?.uri || '',
+      uri: item?.uri || '',
+      itemUid: item?.uid || '',
+      provider: item?.provider || '',
+    };
+  }
+
+  function observeRemoval() {
+    const playing = playingSelection();
+    const identity = JSON.stringify(playing);
+    if (identity !== removalIdentity) {
+      removalIdentity = identity;
+      removal = null;
+      restoredUid = '';
+    }
+    return playing;
+  }
+
+  function validSelection(playing) {
+    return (
+      playing.account &&
+      /^spotify:playlist:[a-zA-Z0-9]+$/.test(playing.context) &&
+      isTrack(playing.uri) &&
+      typeof playing.itemUid === 'string' &&
+      playing.itemUid &&
+      !['queue', 'autoplay'].includes(playing.provider) &&
+      !Spicetify.Player.data?.item?.metadata?.is_advertisement
+    );
+  }
+
+  function removalState() {
+    const playing = observeRemoval();
+    const api = Spicetify.Platform?.PlaylistAPI;
+    const key = `${playing.account}:${playing.context}`;
+    if (
+      validSelection(playing) &&
+      api?.getMetadata &&
+      (!capabilities || capabilities.key !== key || Date.now() - capabilities.time > 30000)
+    ) {
+      const request = { key, time: Date.now(), value: null };
+      capabilities = request;
+      api
+        .getMetadata(playing.context)
+        .then((value) => {
+          request.value = value;
+        })
+        .catch(() => {});
+    }
+    const permissions = capabilities?.key === key ? capabilities.value : null;
+    return {
+      ...playing,
+      action: removal ? 'undo' : 'remove',
+      id: removal?.id || '',
+      enabled: Boolean(
+        validSelection(playing) &&
+        api?.getContents &&
+        api?.remove &&
+        api?.add &&
+        permissions?.canAdd === true &&
+        permissions?.canRemove === true &&
+        !removalBusy,
+      ),
+      playlistName: permissions?.name || 'playing playlist',
+      reason: !validSelection(playing)
+        ? 'Play an entry from a writable playlist'
+        : removalBusy
+          ? 'Playlist update in progress'
+          : 'Playlist permissions unavailable',
+    };
+  }
+
+  function assertPlaying(expected) {
+    const current = observeRemoval();
+    if (
+      !validSelection(current) ||
+      ['account', 'context', 'uri', 'itemUid', 'provider'].some(
+        (key) => expected[key] !== current[key],
+      )
+    )
+      throw new Error('Playing playlist entry changed; try again');
+  }
+
+  async function playlistRows(context) {
+    const api = Spicetify.Platform?.PlaylistAPI;
+    const rows = [];
+    let total;
+    for (let offset = 0; offset <= 10000; offset += 100) {
+      const page = await api.getContents(context, { offset, limit: 100 });
+      if (!Array.isArray(page?.items)) throw new Error('Cannot verify playlist contents');
+      if (offset && page.items[0]?.uid && page.items[0].uid === rows[offset - 100]?.uid)
+        throw new Error('Spotify did not paginate playlist contents');
+      if (Number.isInteger(page.totalLength)) {
+        if (total !== undefined && total !== page.totalLength)
+          throw new Error('Playlist changed during lookup; try again');
+        total = page.totalLength;
+      }
+      rows.push(...page.items);
+      if (page.items.length < 100) {
+        if (total !== undefined && total !== rows.length)
+          throw new Error('Playlist contents are incomplete');
+        return rows;
+      }
+    }
+    throw new Error('Cannot verify the entire playlist');
+  }
+
+  const sameRow = (row, target) =>
+    Boolean(row?.uid && target.uid && row.uid === target.uid && row.uri === target.uri);
+  const trackUids = (rows, uri) => rows.filter((row) => row?.uri === uri).map((row) => row.uid);
+
+  function undoPosition(rows, record) {
+    const previous = rows.findIndex((row) => sameRow(row, record.previous || {}));
+    const next = rows.findIndex((row) => sameRow(row, record.next || {}));
+    let position;
+    if (previous >= 0 && next >= 0 && previous >= next)
+      throw new Error('Playlist order changed; cannot restore the original position');
+    if (next >= 0) position = { before: record.next };
+    else if (previous >= 0) position = { after: record.previous };
+    else if (record.count === 1 && rows.length === 0) position = { before: 'start' };
+    else throw new Error('Original playlist neighbors are gone; cannot restore the position');
+    return position;
+  }
+
+  function restoredInPosition(rows, row, record) {
+    const position = undoPosition(
+      rows.filter((item) => item !== row),
+      record,
+    );
+    const index = rows.indexOf(row);
+    if (position.before === 'start') return index === 0;
+    if (position.before)
+      return index + 1 === rows.findIndex((item) => sameRow(item, position.before));
+    return index === rows.findIndex((item) => sameRow(item, position.after)) + 1;
+  }
+
+  async function changePlayingPlaylist(action, expected) {
+    if (removalBusy) return { ok: false, message: 'Playlist update in progress' };
+    removalBusy = true;
+    let wrote = false;
+    try {
+      assertPlaying(expected);
+      if ((removal ? 'undo' : 'remove') !== action || (removal?.id || '') !== expected.id)
+        throw new Error('Remove/Undo state changed; try again');
+      const api = Spicetify.Platform.PlaylistAPI;
+      const permissions = await api.getMetadata(expected.context);
+      if (permissions?.canRemove !== true || permissions?.canAdd !== true)
+        throw new Error('Playing playlist does not allow Remove and Undo');
+      const rows = await playlistRows(expected.context);
+      assertPlaying(expected);
+      if (action === 'remove') {
+        const target = { uri: expected.uri, uid: restoredUid || expected.itemUid };
+        const index = rows.findIndex((row) => sameRow(row, target));
+        if (rows.some((row) => row?.uri === expected.uri && !row.uid))
+          throw new Error('Playlist entry identity unavailable');
+        if (index < 0) throw new Error('Playing entry is no longer in this playlist');
+        removal = {
+          id: String(++removalSequence),
+          target,
+          index,
+          count: rows.length,
+          previous: rows[index - 1] || null,
+          next: rows[index + 1] || null,
+          remaining: trackUids(
+            rows.filter((_, i) => i !== index),
+            expected.uri,
+          ),
+          attemptedUndo: false,
+        };
+        wrote = true;
+        await api.remove(expected.context, [target]);
+        const after = await playlistRows(expected.context);
+        assertPlaying(expected);
+        if (after.some((row) => sameRow(row, target))) {
+          removal = null;
+          throw new Error('Spotify did not remove the playing entry');
+        }
+        return {
+          ok: true,
+          message: `Removed from ${permissions.name || 'playing playlist'} — Undo available`,
+        };
+      }
+
+      const record = removal;
+      // After a lost response, establish membership before considering another write.
+      const original = rows.find((row) => sameRow(row, record.target));
+      const recreated = rows.filter(
+        (row) =>
+          row?.uri === expected.uri &&
+          !record.remaining.includes(row.uid) &&
+          row.uid !== record.target.uid,
+      );
+      if (original || recreated.length === 1) {
+        if (!original && !restoredInPosition(rows, recreated[0], record))
+          throw new Error('A matching entry appeared elsewhere; Undo position is uncertain');
+        // Only our own verified add may replace the active occurrence for another Remove.
+        restoredUid = original?.uid || (record.attemptedUndo ? recreated[0].uid : '');
+        removal = null;
+        return { ok: true, message: 'Entry already restored; no change made' };
+      }
+      if (recreated.length || record.attemptedUndo)
+        throw new Error('Undo outcome uncertain; check this playlist in Spotify');
+      const position = undoPosition(rows, record);
+      const before = trackUids(rows, expected.uri);
+      assertPlaying(expected);
+      record.attemptedUndo = true;
+      wrote = true;
+      await api.add(expected.context, [expected.uri], position);
+      const after = await playlistRows(expected.context);
+      assertPlaying(expected);
+      const added = after.filter((row) => row?.uri === expected.uri && !before.includes(row.uid));
+      if (added.length !== 1 || !added[0].uid)
+        throw new Error('Cannot verify Undo; check this playlist in Spotify');
+      if (!restoredInPosition(after, added[0], record))
+        throw new Error('Track was added but the original position was not restored');
+      restoredUid = added[0].uid;
+      removal = null;
+      return { ok: true, message: `Restored to ${permissions.name || 'playing playlist'}` };
+    } catch (error) {
+      const message = `${error.message || 'Playlist update failed'}${wrote ? '; check playlist before retrying' : ''}`;
+      return { ok: false, message };
+    } finally {
+      removalBusy = false;
+      observeRemoval();
+    }
+  }
+
   const addStyle = document.createElement('style');
   addStyle.textContent = '.jsh-like-button + button[aria-checked] { opacity: 1 !important; }';
   document.head.append(addStyle);
@@ -907,4 +1150,6 @@
     // The native listener below remains the portable fallback.
   }
   window.addEventListener('keydown', handleShortcut, true);
+  window.JshMusic ||= {};
+  window.JshMusic.add = { toggle: toggleOverlay, removalState, changePlayingPlaylist };
 })();
