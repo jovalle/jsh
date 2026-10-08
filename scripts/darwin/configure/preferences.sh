@@ -73,14 +73,8 @@ apply_preferences() {
 defaults write com.apple.AdLib allowApplePersonalizedAdvertising -bool false
 # Use of the Apple advertising identifier is disabled
 defaults write com.apple.AdLib allowIdentifierForAdvertising -bool false
-# Siri is disabled
-defaults write com.apple.assistant.support Assistant\ Enabled -bool false
 # Dictation is disabled
 defaults write com.apple.assistant.support Dictation\ Enabled -bool false
-# The Siri menu item is hidden
-defaults write com.apple.Siri StatusMenuVisible -bool false
-# Siri setup remains declined
-defaults write com.apple.Siri UserHasDeclinedEnable -bool true
 # Lookup suggestions are disabled
 defaults write com.apple.lookup.shared LookupSuggestionsDisabled -bool true
 # Handoff activity advertising is enabled
