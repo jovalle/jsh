@@ -53,11 +53,14 @@ WATERFOX_CONFIGURATOR = JSH_ROOT / "scripts/unix/configure/waterfox.sh"
 WATERFOX_CONFIG = JSH_ROOT / "conf/gecko/waterfox.json"
 JSH_UI = JSH_ROOT / "lib/ui/cli.sh"
 sys.path.insert(0, str(JSH_ROOT))
-from lib.ui.progress import Progress, clear_progress, print_status  # pylint: disable=wrong-import-position,import-error
+from lib.ui.progress import (
+    Progress,
+    clear_progress,
+    print_status,
+)  # pylint: disable=wrong-import-position,import-error
 
 Bookmark = Tuple[str, int]
 DEAD_STATUSES = {404, 410, -1}
-
 
 
 class FaviconFetchError(Exception):
@@ -844,15 +847,20 @@ def read_processing_cache(profile: Path) -> Dict[str, Dict[str, str]]:
         ).fetchone():
             return cache
         for kind, url, verdict in connection.execute("SELECT kind, url, verdict FROM checks"):
-            if ((kind == "health" and verdict in ("alive", "dead", "inconclusive", "redirect"))
-                    or (kind == "favicon" and verdict == "missing")
-                    or kind in ("reason", "redirect")):
+            if (
+                (kind == "health" and verdict in ("alive", "dead", "inconclusive", "redirect"))
+                or (kind == "favicon" and verdict == "missing")
+                or kind in ("reason", "redirect")
+            ):
                 cache[kind][url] = verdict
     return cache
 
 
 def save_processed_check(
-    profile: Path, kind: str, url: str, verdict: str,
+    profile: Path,
+    kind: str,
+    url: str,
+    verdict: str,
     details: Optional[Dict[str, str]] = None,
 ) -> None:
     database = profile / "waterfix.sqlite"
@@ -870,11 +878,14 @@ def save_processed_check(
             records.extend((key, url, value) for key, value in (details or {}).items())
             if kind == "health" and verdict == "redirect" and details:
                 records.append(("health", details["redirect"], "alive"))
-            connection.executemany("""
+            connection.executemany(
+                """
                 INSERT INTO checks VALUES (?, ?, ?)
                 ON CONFLICT(kind, url) DO UPDATE SET verdict = excluded.verdict
                 WHERE checks.verdict != excluded.verdict
-                """, records)
+                """,
+                records,
+            )
 
 
 def read_bookmarks(profile: Path) -> List[Bookmark]:
@@ -899,7 +910,8 @@ def read_bookmarks(profile: Path) -> List[Bookmark]:
 
 
 def read_cached_page_urls(
-    profile: Path, bookmarks: Optional[Iterable[Bookmark]] = None,
+    profile: Path,
+    bookmarks: Optional[Iterable[Bookmark]] = None,
 ) -> set[str]:
     with closing(connect_read_only(profile / "favicons.sqlite")) as connection:
         rows = connection.execute("""
@@ -915,7 +927,8 @@ def read_cached_page_urls(
             """).fetchall()
     root_hosts = {normalized_hostname(str(row[0])) for row in roots}
     return {str(row[0]) for row in rows} | {
-        url for url, _ in (read_bookmarks(profile) if bookmarks is None else bookmarks)
+        url
+        for url, _ in (read_bookmarks(profile) if bookmarks is None else bookmarks)
         if normalized_hostname(url) in root_hosts
     }
 
@@ -1115,7 +1128,11 @@ def download_error_reason(error: BaseException) -> str:
     if isinstance(error, urllib.error.HTTPError):
         return f"HTTP {error.code}: {error.reason}"
     if isinstance(error, urllib.error.URLError):
-        return download_error_reason(error.reason) if isinstance(error.reason, BaseException) else str(error.reason)
+        return (
+            download_error_reason(error.reason)
+            if isinstance(error.reason, BaseException)
+            else str(error.reason)
+        )
     if isinstance(error, TimeoutError):
         return "Timed out"
     if isinstance(error, ssl.SSLCertVerificationError):
@@ -1125,14 +1142,16 @@ def download_error_reason(error: BaseException) -> str:
     return str(error)
 
 
-
 def log_failure(hostname: str) -> None:
     clear_progress()
     print_status("No favicon", hostname)
 
 
 def fetch_icons(
-    grouped: Dict[str, List[Bookmark]], timeout: float, delay: float, workers: int,
+    grouped: Dict[str, List[Bookmark]],
+    timeout: float,
+    delay: float,
+    workers: int,
     on_failure: Callable[[str], None] = lambda hostname: None,
 ) -> Tuple[Dict[str, Tuple[str, bytes]], List[Tuple[str, str]]]:
     hostname_list = list(grouped)
@@ -1201,7 +1220,8 @@ def check_page(url: str, timeout: float) -> Tuple[Optional[int], str, Optional[s
 
 
 def assess_redirect(
-    url: str, result: Tuple[Optional[int], str, Optional[str]],
+    url: str,
+    result: Tuple[Optional[int], str, Optional[str]],
 ) -> Tuple[Optional[int], str, Optional[str]]:
     status, destination, reason = result
     if destination == url or status is None or status >= 400:
@@ -1216,12 +1236,19 @@ def assess_redirect(
         reason = "Redirect has an unsupported or authenticated destination"
     elif source.scheme == "https" and target.scheme != "https":
         reason = "Redirect downgrades HTTPS to HTTP"
-    elif re.search(r"(?:^|/)(?:404|not-found|error|login|signin|sign-in|auth|oauth)(?:[./-]|$)",
-                   target_path, re.IGNORECASE):
+    elif re.search(
+        r"(?:^|/)(?:404|not-found|error|login|signin|sign-in|auth|oauth)(?:[./-]|$)",
+        target_path,
+        re.IGNORECASE,
+    ):
         reason = "Redirect leads to a login or error page"
-    elif (source.scheme == "http" and target.scheme == "https"
-          and source.hostname == target.hostname and source_path == target_path
-          and source.query == target.query):
+    elif (
+        source.scheme == "http"
+        and target.scheme == "https"
+        and source.hostname == target.hostname
+        and source_path == target_path
+        and source.query == target.query
+    ):
         return status, destination, "HTTPS upgrade"
     elif target_path.lower() in ("/", "/index.html", "/index.htm", "/index.php", "/default.aspx"):
         reason = "Redirect leads to a homepage instead of a specific page"
@@ -1249,7 +1276,6 @@ def assess_page(
         if retry[0] in DEAD_STATUSES and status not in DEAD_STATUSES:
             return None, retry[1], f"{retry[2]}; not confirmed on both checks"
         return assess_redirect(url, retry)
-    # ponytail: local DNS plus a control lookup; use authoritative DNS if split DNS needs support.
     if reason == retry[2] == "DNS name not found":
         hostname = normalized_hostname(url)
         report(f"{url} DNS {hostname}...")
@@ -1294,7 +1320,10 @@ def assess_page(
 
 
 def log_health_result(
-    url: str, final_url: str, status: Optional[int], reason: str = "",
+    url: str,
+    final_url: str,
+    status: Optional[int],
+    reason: str = "",
 ) -> None:
     clear_progress()
     state = "error" if status in DEAD_STATUSES else "warn"
@@ -1307,7 +1336,9 @@ def log_health_result(
 
 
 def check_pages(
-    bookmarks: Iterable[Bookmark], timeout: float, workers: int,
+    bookmarks: Iterable[Bookmark],
+    timeout: float,
+    workers: int,
     on_result: Callable[[str, str, str, str], None] = lambda url, verdict, target, reason: None,
 ) -> Tuple[set[str], List[Tuple[str, str]]]:
     urls = list(dict.fromkeys(url for url, _ in bookmarks))
@@ -1338,9 +1369,13 @@ def check_pages(
                     elif final_url != url:
                         log_health_result(url, final_url, status, reason or "Update planned")
                     verdict = (
-                        "dead" if status in DEAD_STATUSES else
-                        "inconclusive" if status is None or status >= 400 else
-                        "redirect" if final_url != url else "alive"
+                        "dead"
+                        if status in DEAD_STATUSES
+                        else (
+                            "inconclusive"
+                            if status is None or status >= 400
+                            else "redirect" if final_url != url else "alive"
+                        )
                     )
                     on_result(url, verdict, final_url, reason or "")
                     progress.failed = len(dead) + len(inconclusive)
@@ -1396,8 +1431,11 @@ def folder_is_sorted(rows: Iterable[sqlite3.Row]) -> bool:
 
 
 def plan_organization(
-    profile: Path, dead_urls: set[str], icon_urls: Optional[set[str]] = None,
-    review_urls: Optional[set[str]] = None, redirects: Optional[Dict[str, str]] = None,
+    profile: Path,
+    dead_urls: set[str],
+    icon_urls: Optional[set[str]] = None,
+    review_urls: Optional[set[str]] = None,
+    redirects: Optional[Dict[str, str]] = None,
 ) -> OrganizationPlan:
     rows = read_bookmark_rows(profile)
     toolbar_id = folder_id(rows, "toolbar_____")
@@ -1464,15 +1502,22 @@ def plan_organization(
     }
 
     review_ids = {
-        int(row["id"]) for row in rows
-        if row["type"] == 1 and row["url"] in (review_urls or set())
-        and row["parent"] != review_id and row["parent"] not in tag_folder_ids
+        int(row["id"])
+        for row in rows
+        if row["type"] == 1
+        and row["url"] in (review_urls or set())
+        and row["parent"] != review_id
+        and row["parent"] not in tag_folder_ids
         and int(row["id"]) not in reviewed_ids | dead_ids | delete_ids
     }
     url_updates = {
-        int(row["id"]): redirects[row["url"]] for row in rows
-        if redirects and row["type"] == 1 and row["url"] in redirects
-        and redirects[row["url"]] != row["url"] and row["parent"] not in tag_folder_ids
+        int(row["id"]): redirects[row["url"]]
+        for row in rows
+        if redirects
+        and row["type"] == 1
+        and row["url"] in redirects
+        and redirects[row["url"]] != row["url"]
+        and row["parent"] not in tag_folder_ids
         and int(row["id"]) not in reviewed_ids | dead_ids | review_ids | delete_ids
     }
 
@@ -1560,7 +1605,15 @@ def plan_organization(
         for parent in folder_ids
         if parent not in delete_ids and not folder_is_sorted(children.get(parent, []))
     ]
-    if dead_ids or review_ids or url_updates or duplicate_ids or no_icon_ids or title_ids or delete_ids:
+    if (
+        dead_ids
+        or review_ids
+        or url_updates
+        or duplicate_ids
+        or no_icon_ids
+        or title_ids
+        or delete_ids
+    ):
         sortable_folders = [parent for parent in folder_ids if parent not in delete_ids]
     return OrganizationPlan(
         dead_ids,
@@ -1783,16 +1836,20 @@ def places_url_hash(url: str) -> int:
 
 
 def update_bookmark_urls(
-    connection: sqlite3.Connection, updates: Dict[int, str], timestamp: int,
+    connection: sqlite3.Connection,
+    updates: Dict[int, str],
+    timestamp: int,
 ) -> None:
     columns = {row[1] for row in connection.execute("PRAGMA table_info(moz_places)")}
     recalc = "".join(
-        f", {column} = 1" for column in ("recalc_frecency", "recalc_alt_frecency")
+        f", {column} = 1"
+        for column in ("recalc_frecency", "recalc_alt_frecency")
         if column in columns
     )
     for bookmark_id, url in updates.items():
         bookmark = connection.execute(
-            "SELECT fk, parent FROM moz_bookmarks WHERE id = ?", (bookmark_id,),
+            "SELECT fk, parent FROM moz_bookmarks WHERE id = ?",
+            (bookmark_id,),
         ).fetchone()
         if bookmark is None:
             continue
@@ -1810,20 +1867,31 @@ def update_bookmark_urls(
                 "SELECT id FROM moz_origins WHERE prefix = ? AND host = ?",
                 (prefix, parsed.netloc),
             ).fetchone()[0]
-            cursor = connection.execute("""
+            cursor = connection.execute(
+                """
                 INSERT INTO moz_places (url, url_hash, rev_host, guid, origin_id)
                 VALUES (?, ?, ?, ?, ?)
-                """, (url, places_url_hash(url), normalized_hostname(url)[::-1] + ".",
-                       secrets.token_urlsafe(9), origin))
+                """,
+                (
+                    url,
+                    places_url_hash(url),
+                    normalized_hostname(url)[::-1] + ".",
+                    secrets.token_urlsafe(9),
+                    origin,
+                ),
+            )
             target_id = cursor.lastrowid
         else:
             target_id = target[0]
         if target_id == bookmark[0]:
             continue
-        connection.execute("""
+        connection.execute(
+            """
             UPDATE moz_bookmarks SET fk = ?, lastModified = ?,
                 syncChangeCounter = syncChangeCounter + 1 WHERE id = ?
-            """, (target_id, timestamp, bookmark_id))
+            """,
+            (target_id, timestamp, bookmark_id),
+        )
         # Browser connection TEMP triggers are absent when editing an offline profile.
         connection.execute(
             f"UPDATE moz_places SET foreign_count = MAX(0, foreign_count - 1){recalc} WHERE id = ?",
@@ -2127,29 +2195,42 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             unchecked = [bookmark for bookmark in bookmarks if bookmark[0] not in health]
             dead_urls = {url for url, _ in bookmarks if health.get(url) == "dead"}
             inconclusive = [
-                (url, processing_cache["reason"].get(url) or
-                 "Previous check saved no reason; use --refresh to retry")
-                for url, _ in bookmarks if health.get(url) == "inconclusive"
+                (
+                    url,
+                    processing_cache["reason"].get(url)
+                    or "Previous check saved no reason; use --refresh to retry",
+                )
+                for url, _ in bookmarks
+                if health.get(url) == "inconclusive"
             ]
             redirects = {
-                url: processing_cache["redirect"][url] for url, _ in bookmarks
+                url: processing_cache["redirect"][url]
+                for url, _ in bookmarks
                 if health.get(url) == "redirect" and processing_cache["redirect"].get(url)
             }
             ui_status("note", f"Using {len(bookmarks) - len(unchecked)} saved bookmark checks")
             for url, detail in inconclusive:
                 log_health_result(url, url, None, detail)
             for url in sorted(dead_urls):
-                log_health_result(url, url, 404, processing_cache["reason"].get(url) or "Previously dead")
+                log_health_result(
+                    url, url, 404, processing_cache["reason"].get(url) or "Previously dead"
+                )
             if unchecked:
                 new_dead, new_inconclusive = check_pages(
-                    unchecked, args.timeout, args.workers,
+                    unchecked,
+                    args.timeout,
+                    args.workers,
                     remember_health,
                 )
                 dead_urls.update(new_dead)
                 inconclusive.extend(new_inconclusive)
 
         network_bookmarks = [
-            (redirects[url], places_url_hash(redirects[url])) if url in redirects else (url, url_hash)
+            (
+                (redirects[url], places_url_hash(redirects[url]))
+                if url in redirects
+                else (url, url_hash)
+            )
             for url, url_hash in bookmarks
         ]
         existing_cached_urls = read_cached_page_urls(profile, network_bookmarks)
@@ -2157,7 +2238,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         pending_bookmarks = [
             bookmark
             for bookmark in network_bookmarks
-            if bookmark[0] not in cached_urls and bookmark[0] not in dead_urls
+            if bookmark[0] not in cached_urls
+            and bookmark[0] not in dead_urls
             and (args.refresh or bookmark[0] not in processing_cache["favicon"])
         ]
         grouped = group_by_hostname(pending_bookmarks)
@@ -2176,19 +2258,28 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         downloaded: Dict[str, Tuple[str, bytes]] = {}
         failures: List[Tuple[str, str]] = []
         if grouped:
+
             def remember_missing_icon(hostname: str) -> None:
                 for url, _ in grouped[hostname]:
                     remember("favicon", url, "missing")
 
             downloaded, failures = fetch_icons(
-                grouped, args.timeout, args.delay, args.workers, remember_missing_icon,
+                grouped,
+                args.timeout,
+                args.delay,
+                args.workers,
+                remember_missing_icon,
             )
 
         downloaded_urls = {url for hostname in downloaded for url, _ in grouped[hostname]}
         icon_urls = existing_cached_urls | downloaded_urls
         icon_urls |= {source for source, target in redirects.items() if target in icon_urls}
         plan = plan_organization(
-            profile, dead_urls, icon_urls, {url for url, _ in inconclusive}, redirects,
+            profile,
+            dead_urls,
+            icon_urls,
+            {url for url, _ in inconclusive},
+            redirects,
         )
         print_organization_plan(plan, inconclusive, bool(preference_updates))
         organization_changes = bool(
