@@ -272,12 +272,14 @@
         #${OVERLAY_ID} .status { align-items: center; border: 1px solid var(--adder-subtext); border-radius: 50%; color: transparent; display: flex; height: 18px; justify-content: center; width: 18px; }
         #${OVERLAY_ID} .status svg { height: 12px; width: 12px; }
         #${OVERLAY_ID} .status.saved { background: #1ed760; border-color: #1ed760; color: #000; }
+        #${OVERLAY_ID} .status.changed { animation: adder-pop 240ms ease-out; }
         #${OVERLAY_ID} .status.busy { animation: adder-spin 700ms linear infinite; border-color: var(--adder-subtext); border-top-color: #1ed760; }
         #${OVERLAY_ID} .empty { color: var(--adder-subtext); padding: 40px 16px; text-align: center; }
         #${OVERLAY_ID} .sr-only { clip: rect(0, 0, 0, 0); clip-path: inset(50%); height: 1px; overflow: hidden; position: absolute; white-space: nowrap; width: 1px; }
+        @keyframes adder-pop { 50% { transform: scale(1.28); } }
         @keyframes adder-spin { to { transform: rotate(360deg); } }
         @media (max-width: 480px) { #${OVERLAY_ID} { padding: 12px; } #${OVERLAY_ID} .panel { height: min(620px, calc(100vh - 24px)); } #${OVERLAY_ID} .item-card { gap: 12px; grid-template-columns: 88px minmax(0, 1fr); min-height: 112px; margin: 12px; padding: 12px; } #${OVERLAY_ID} .artwork-link { height: 88px; width: 88px; } #${OVERLAY_ID} .track-title { font-size: 19px; line-height: 24px; } }
-        @media (prefers-reduced-motion: reduce) { #${OVERLAY_ID} * { scroll-behavior: auto !important; transition: none !important; } #${OVERLAY_ID} .status.busy { animation: none; } }
+        @media (prefers-reduced-motion: reduce) { #${OVERLAY_ID} * { scroll-behavior: auto !important; transition: none !important; } #${OVERLAY_ID} .status { animation: none !important; } }
       </style>
     `;
 
@@ -345,14 +347,13 @@
 
       const artists = document.createElement('div');
       artists.className = 'artists';
-      const creditedArtists = targetItem.artists?.length
-        ? targetItem.artists
-        : [
-            {
-              name: targetItem.metadata?.artist_name || 'Unknown artist',
-              uri: targetItem.metadata?.artist_uri,
-            },
-          ];
+      const fallbackArtists = [
+        {
+          name: targetItem.metadata?.artist_name || 'Unknown artist',
+          uri: targetItem.metadata?.artist_uri,
+        },
+      ];
+      const creditedArtists = targetItem.artists?.length ? targetItem.artists : fallbackArtists;
       creditedArtists.forEach((artist, index) => {
         if (index) artists.append(document.createTextNode(', '));
         artists.append(createSpotifyLink(artist.name, artist.uri, 'metadata-link'));
@@ -444,10 +445,10 @@
       if (scroll) row.scrollIntoView({ block: 'nearest' });
     }
 
-    function updateRow(playlist) {
+    function updateRow(playlist, changed = false) {
       if (!playlist.row?.isConnected) return;
       const status = playlist.row.querySelector('.status');
-      status.className = `status${playlist.busy ? ' busy' : playlist.saved ? ' saved' : ''}`;
+      status.className = `status${playlist.busy ? ' busy' : playlist.saved ? ' saved' : ''}${changed ? ' changed' : ''}`;
       status.innerHTML =
         playlist.saved && !playlist.busy
           ? '<svg aria-hidden="true" fill="none" viewBox="0 0 16 16" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.25"><path d="m3.5 8.2 2.8 2.8 6.2-6.2"></path></svg>'
@@ -474,14 +475,13 @@
         playlist.saved = !wasSaved;
         const message = `${playlist.saved ? 'Saved to' : 'Removed from'} ${playlist.name}`;
         live.textContent = message;
-        Spicetify.showNotification(message);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         live.textContent = `Could not update ${playlist.name}. ${message}`;
         Spicetify.showNotification(`Could not update ${playlist.name}`, true);
       } finally {
         playlist.busy = false;
-        updateRow(playlist);
+        updateRow(playlist, currentItemUri === targetItemUri && playlist.saved !== wasSaved);
       }
     }
 
@@ -613,6 +613,7 @@
         return;
       }
       if (!root.isConnected || !visiblePlaylists.length) return;
+      if (event.target?.closest?.('select, button')) return;
 
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault();
@@ -777,6 +778,7 @@
       if (!target?.openMenu) return;
       event.preventDefault();
       event.stopPropagation();
+      window.JshMusic?.feedback?.(button, 'press');
       target.openMenu({
         clientX: event.clientX,
         clientY: event.clientY,
