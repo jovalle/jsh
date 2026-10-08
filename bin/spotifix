@@ -107,6 +107,16 @@ stop_spotify() {
   case ${platform} in
     Darwin) osascript -e 'tell application "Spotify" to quit' > /dev/null ;;
     Linux)
+      # Ask Spotify to quit so it can save its current window bounds.
+      if command -v gdbus > /dev/null 2>&1 &&
+        gdbus call --session --dest "${SPOTIFY_MPRIS_SERVICE}" \
+          --object-path "${SPOTIFY_MPRIS_PATH}" \
+          --method org.mpris.MediaPlayer2.Quit > /dev/null 2>&1; then
+        for ((attempt = 0; attempt < 25; attempt++)); do
+          spotify_is_running || return 0
+          sleep 0.2
+        done
+      fi
       # shellcheck disable=SC2310 # Backend detection is intentionally used as a predicate.
       if spotify_flatpak_is_running && command -v flatpak > /dev/null 2>&1; then
         flatpak kill com.spotify.Client > /dev/null 2>&1
