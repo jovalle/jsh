@@ -7,6 +7,8 @@
   const STAR_CLASS = 'jsh-like-button';
   const STAR_PATH = 'M8 1.5l1.9 4.1 4.5.5-3.4 3 1 4.4L8 11.3l-3.9 2.2 1-4.4-3.4-3 4.5-.5z';
   const likedTracks = new Map();
+  const likeReads = new Map();
+  const curationJobs = [];
   let scanQueued = false;
 
   const starStyle = document.createElement('style');
@@ -15,9 +17,12 @@
     .${STAR_CLASS}:focus-visible { outline: 2px solid var(--spice-text); outline-offset: 2px; }
     .${STAR_CLASS}:hover { color: var(--spice-text); }
     .${STAR_CLASS}[aria-pressed="true"] { color: #ffc324; }
-    .${STAR_CLASS} svg { flex-shrink: 0; height: var(--jsh-icon-height, 16px); width: var(--jsh-icon-width, 16px); }
-    .${STAR_CLASS} path { fill: none; stroke: currentColor; stroke-linejoin: round; stroke-width: 1.5; }
+    .${STAR_CLASS} svg { transform-origin: center; transition: transform 100ms ease-out; flex-shrink: 0; height: var(--jsh-icon-height, 16px); width: var(--jsh-icon-width, 16px); }
+    .${STAR_CLASS} path { fill: transparent; stroke: currentColor; stroke-linejoin: round; stroke-width: 1.5; }
     .${STAR_CLASS}[aria-pressed="true"] path { fill: currentColor; }
+    .${STAR_CLASS}:hover svg { transform: scale(1.1); }
+    .${STAR_CLASS}:active svg { transform: scale(0.92); }
+    @media (prefers-reduced-motion: reduce) { .${STAR_CLASS} path, .${STAR_CLASS} svg { transition: none; } .${STAR_CLASS}:hover svg, .${STAR_CLASS}:active svg { transform: none; } }
     .jsh-tooltip { animation: jsh-tooltip-in 0.2s ease-in-out; background-color: var(--spice-card, #282828); border-radius: 4px; box-shadow: 0 16px 24px #0000004d, 0 6px 8px #0003; color: var(--spice-text, #fff); font-size: 14px; max-width: 50ch; padding: 4px 8px; }
     @keyframes jsh-tooltip-in { from { opacity: 0; } }
   `;
@@ -84,20 +89,101 @@
     }
   }
 
-  async function toggleLiked(uri) {
+  function renderCuration() {
+    scheduleScan();
+    window.JshMusic?.love?.render();
+  }
+
+  function curationPreview(uri) {
+    const state = { liked: likedState(uri), loved: window.JshMusic?.love?.state(uri) };
+    for (const job of curationJobs) {
+      if (job.uri !== uri) continue;
+      if (typeof job.value !== 'boolean') continue;
+      if (job.action === 'like') {
+        state.liked = job.value;
+        if (!job.value) state.loved = false;
+      } else {
+        state.loved = job.value;
+        if (job.value) state.liked = true;
+      }
+    }
+    return state;
+  }
+
+  // Every click has an explicit target; writes run in order without dropping later clicks.
+  function enqueueCuration(uri, action, value, apply, validate) {
+    const account = Spicetify.Platform.LocalStorageAPI?.namespace;
+    const known = curationPreview(uri)[action === 'like' ? 'liked' : 'loved'];
+    const jobs = curationJobs;
+    return new Promise((resolve) => {
+      const job = {
+        uri,
+        action,
+        value: typeof value === 'boolean' ? value : typeof known === 'boolean' ? !known : undefined,
+        apply,
+        resolve,
+        check() {
+          if (account !== Spicetify.Platform.LocalStorageAPI?.namespace)
+            throw new Error('Spotify account changed');
+          validate?.();
+        },
+      };
+      jobs.push(job);
+      renderCuration();
+      if (jobs.length === 1) drain();
+      async function drain() {
+        while (jobs.length) {
+          const current = jobs[0];
+          const result = await current.apply(current);
+          jobs.shift();
+          renderCuration();
+          if (!jobs.length) window.JshMusic?.love?.refresh();
+          current.resolve(result);
+        }
+      }
+    });
+  }
+
+  async function toggleLiked(uri, value, validate) {
     if (!isTrack(uri)) {
       Spicetify.showNotification('Play a track before toggling Liked Songs', true);
-      return;
+      return { ok: false, message: 'Play a track before toggling Liked Songs' };
     }
-
-    try {
-      const library = Spicetify.Platform.LibraryAPI;
-      const [liked] = await library.contains(uri);
-      await library[liked ? 'remove' : 'add']({ silent: true, uris: [uri] });
-      Spicetify.showNotification(liked ? 'Removed from Liked Songs' : 'Added to Liked Songs');
-    } catch {
-      Spicetify.showNotification('Could not update Liked Songs', true);
-    }
+    return enqueueCuration(
+      uri,
+      'like',
+      value,
+      async (job) => {
+        let loveRemoved = false;
+        try {
+          job.check();
+          const library = Spicetify.Platform.LibraryAPI;
+          const [liked] = await library.contains(uri);
+          job.check();
+          likeReads.delete(uri);
+          likedTracks.set(uri, Boolean(liked));
+          job.value ??= !liked;
+          renderCuration();
+          if (!job.value) loveRemoved = await window.JshMusic.love.clear(uri, job.check);
+          job.check();
+          if (Boolean(liked) !== job.value)
+            await library[job.value ? 'add' : 'remove']({ silent: true, uris: [uri] });
+          likeReads.delete(uri);
+          likedTracks.set(uri, job.value);
+          return {
+            ok: true,
+            message: job.value ? 'Added to Liked Songs' : 'Removed from Liked Songs',
+          };
+        } catch {
+          const message = loveRemoved
+            ? 'Removed from Loved Songs; could not update Liked Songs. Check Spotify'
+            : 'Could not update Liked/Loved Songs';
+          Spicetify.showNotification(message, true);
+          return { ok: false, message };
+        }
+      },
+      validate,
+    );
   }
 
   // Spotify strips data-testid, so recognize its curation button by the React props above it.
@@ -118,8 +204,12 @@
   function likedState(uri) {
     if (!likedTracks.has(uri)) {
       likedTracks.set(uri, undefined);
+      const request = Symbol();
+      likeReads.set(uri, request);
       Spicetify.Platform.LibraryAPI.contains(uri).then(
         ([liked]) => {
+          if (likeReads.get(uri) !== request) return;
+          likeReads.delete(uri);
           likedTracks.set(uri, Boolean(liked));
           scheduleScan();
         },
@@ -145,8 +235,18 @@
       button.before(star);
     }
     sizeLikeNative(star, button);
+    const previousUri = star.dataset.uri;
     star.dataset.uri = uri;
-    const liked = String(likedState(uri) === true);
+    const value = curationPreview(uri).liked;
+    const busy = curationJobs.some((job) => job.uri === uri);
+    star.setAttribute('aria-busy', String(busy));
+    star.setAttribute('aria-disabled', 'false');
+    const liked =
+      typeof value === 'boolean'
+        ? String(value)
+        : previousUri === uri
+          ? star.getAttribute('aria-pressed') || 'false'
+          : 'false';
     if (star.getAttribute('aria-pressed') !== liked) {
       star.setAttribute('aria-pressed', liked);
       setTooltip(star, liked === 'true' ? 'Remove from Liked Songs' : 'Add to Liked Songs');
@@ -201,6 +301,7 @@
   Spicetify.Platform.LibraryAPI.getEvents?.()?.addListener?.('update_item', ({ data }) => {
     if (!likedTracks.has(data?.uri) || typeof data.isInLibrary !== 'boolean') return;
     likedTracks.set(data.uri, data.isInLibrary);
+    likeReads.delete(data.uri);
     scheduleScan();
   });
   Spicetify.Player.addEventListener('songchange', scheduleScan);
@@ -218,7 +319,7 @@
     handledEvents.add(event);
     event.preventDefault();
     event.stopPropagation();
-    toggleLiked(Spicetify.Player.data?.item?.uri);
+    if (!event.repeat) toggleLiked(Spicetify.Player.data?.item?.uri);
   };
 
   // Mirror add.js: register with Spicetify's keymap and listen natively as a fallback.
@@ -234,4 +335,39 @@
     // The native listener below remains the portable fallback.
   }
   window.addEventListener('keydown', handleShortcut, true);
+  function feedback(button) {
+    const icon = button.querySelector('svg');
+    if (!icon?.animate || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    icon.getAnimations().forEach((animation) => animation.cancel());
+    const base = button.matches(':hover') ? 1.1 : 1;
+    icon.animate([{ transform: `scale(${0.92 * base})` }, { transform: `scale(${base})` }], {
+      duration: 100,
+      easing: 'ease-out',
+    });
+  }
+
+  window.JshMusic ||= {};
+  window.JshMusic.feedback = feedback;
+  window.JshMusic.curation = {
+    enqueue: enqueueCuration,
+    preview: curationPreview,
+    busy: (uri) =>
+      uri === undefined ? curationJobs.length > 0 : curationJobs.some((job) => job.uri === uri),
+    render: renderCuration,
+  };
+  window.JshMusic.like = {
+    toggle: toggleLiked,
+    state: likedState,
+    render: scheduleScan,
+    refresh: (uri, confirmed) => {
+      likeReads.delete(uri);
+      if (typeof confirmed === 'boolean') {
+        likedTracks.set(uri, confirmed);
+        scheduleScan();
+        return confirmed;
+      }
+      likedTracks.delete(uri);
+      return likedState(uri);
+    },
+  };
 })();
