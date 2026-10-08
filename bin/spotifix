@@ -19,13 +19,18 @@ readonly SPOTIFY_CONFIGURE_SCRIPT=${SPOTIFY_CONFIGURE_SCRIPT:-"${SCRIPT_DIR}/../
 readonly SPOTIFY_PLAY_ROUTE=spotify:search:spotifix-play
 readonly SPOTIFY_MPRIS_SERVICE=org.mpris.MediaPlayer2.spotify
 readonly SPOTIFY_MPRIS_PATH=/org/mpris/MediaPlayer2
+readonly MINI_DIR=${JSH_MINI_DIR:-"${JSH_ROOT}/local/mini"}
+readonly MINI_APP="${MINI_DIR}/Mini Player.app"
+readonly MINI_BINARY="${MINI_APP}/Contents/MacOS/mini"
+readonly MINI_CONFIG="${MINI_DIR}/config.json"
+readonly MINI_AGENT="${HOME}/Library/LaunchAgents/dev.jsh.mini.plist"
 # shellcheck source=../lib/ui.sh
 . "${JSH_ROOT}/lib/ui.sh"
 jsh::init
 
 usage() {
   cat << 'EOF'
-Usage: spotifix [apply|restart|stop|open|play [180g|liked|playlist] [options]]
+Usage: spotifix [apply|restart|stop|open|play [180g|liked|playlist] [options]|mini [command]]
 
 Commands:
   apply    Reapply the managed Spicetify configuration
@@ -38,6 +43,13 @@ Commands:
            playlist   random saved playlist
            --shuffle, --smart-shuffle select the playback mode
            -y, --yes skips the existing-playback confirmation
+  mini     Control the macOS mini player (default: start)
+           start      build if needed and open the menu bar companion
+           stop       stop the companion
+           install    enable Spotify integration and login startup
+           uninstall  disable startup and the bridge, keeping preferences
+           status     show companion status
+           prepare    build and self-test without starting
 
 With no command, update Spicetify and configure Spotify.
 EOF
@@ -271,6 +283,118 @@ configure_spotify() {
   "${SPOTIFY_CONFIGURE_SCRIPT}" --yes "$@"
 }
 
+mini_prepare() {
+  mkdir -p -- "${MINI_DIR}"
+  chmod 700 "${MINI_DIR}"
+  python3 - "${MINI_CONFIG}" << 'PY'
+import json, os, secrets, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+disabled = path.with_name('config.disabled.json')
+if not path.exists() and disabled.exists():
+    disabled.rename(path)
+if not path.exists():
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    with os.fdopen(os.open(path, flags, 0o600), 'w') as stream:
+        json.dump({'token': secrets.token_hex(32), 'port': 47683,
+                   'keys': ['m', 'h', 'l', 'p', 'r'], 'modifiers': 6400}, stream)
+os.chmod(path, 0o600)
+PY
+  mkdir -p -- "${MINI_APP}/Contents/MacOS"
+  if [[ ! -x ${MINI_BINARY} || ${JSH_ROOT}/lib/darwin/mini.swift -nt ${MINI_BINARY} ]]; then
+    xcrun swiftc -module-cache-path "${MINI_DIR}/swift-cache" \
+      "${JSH_ROOT}/lib/darwin/mini.swift" -o "${MINI_BINARY}"
+    rm -f -- "${MINI_APP}/Contents/MacOS/spotimini"
+    cat > "${MINI_APP}/Contents/Info.plist" << 'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>dev.jsh.mini</string>
+<key>CFBundleName</key><string>Mini Player</string>
+<key>CFBundleExecutable</key><string>mini</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleVersion</key><string>1</string>
+<key>LSUIElement</key><true/>
+<key>NSHighResolutionCapable</key><true/>
+</dict></plist>
+PLIST
+  fi
+  "${MINI_BINARY}" --self-test
+}
+
+mini_stop() {
+  launchctl bootout "gui/$(id -u)/dev.jsh.mini" 2> /dev/null || true
+  pkill -f "${MINI_APP}/Contents/MacOS/" 2> /dev/null || true
+}
+
+mini_install() {
+  mini_prepare
+  JSH_MINI_CONFIG="${MINI_CONFIG}" configure_spotify
+  mkdir -p -- "${MINI_AGENT%/*}"
+  python3 - "${MINI_AGENT}" "${MINI_BINARY}" "${MINI_CONFIG}" "${MINI_DIR}" << 'PY'
+import plistlib, sys
+from pathlib import Path
+path, binary, config, directory = sys.argv[1:]
+with Path(path).open('wb') as stream:
+    plistlib.dump({'Label': 'dev.jsh.mini', 'ProgramArguments': [binary, config],
+                  'RunAtLoad': True, 'StandardOutPath': directory + '/stdout.log',
+                  'StandardErrorPath': directory + '/stderr.log'}, stream)
+PY
+  mini_stop
+  launchctl bootstrap "gui/$(id -u)" "${MINI_AGENT}"
+  printf 'Mini Player installed. Toggle with Control+Option+Command+M.\n'
+}
+
+mini_uninstall() {
+  local config_file spotify_path
+  mini_stop
+  rm -f -- "${MINI_AGENT}"
+  config_file=$(spicetify -c)
+  spotify_path=$(awk -F= '$1 ~ /^[[:space:]]*spotify_path[[:space:]]*$/ {sub(/^[[:space:]]*/, "", $2); sub(/[[:space:]]*$/, "", $2); print $2; exit}' "${config_file}")
+  rm -f -- "${config_file%/*}/Extensions/mini-bridge.json" \
+    "${spotify_path}/Apps/xpui/extensions/mini-bridge.json"
+  if [[ -f ${MINI_CONFIG} ]]; then mv -- "${MINI_CONFIG}" "${MINI_DIR}/config.disabled.json"; fi
+  printf 'Companion disabled; preferences retained.\n'
+}
+
+mini_status() {
+  python3 - "${MINI_CONFIG}" << 'PY'
+import json, sys, urllib.request
+from pathlib import Path
+try:
+    config = json.loads(Path(sys.argv[1]).read_text())
+    request = urllib.request.Request(f"http://127.0.0.1:{config['port']}/status",
+                                    headers={'Authorization': 'Bearer ' + config['token']})
+    with urllib.request.urlopen(request, timeout=3) as response:
+        print(json.dumps(json.load(response), indent=2))
+except (OSError, ValueError, KeyError):
+    print('Mini Player companion is stopped or unavailable.', file=sys.stderr)
+    sys.exit(1)
+PY
+}
+
+mini_command() {
+  [[ ${SPOTIFY_PLATFORM:-$(uname -s)} == Darwin ]] || {
+    printf 'spotifix: mini requires macOS.\n' >&2
+    return 1
+  }
+  case ${1:-start} in
+    prepare) mini_prepare ;;
+    start)
+      mini_prepare
+      open -a "${MINI_APP}" --args "${MINI_CONFIG}"
+      ;;
+    stop) mini_stop ;;
+    install) mini_install ;;
+    uninstall) mini_uninstall ;;
+    status) mini_status ;;
+    *)
+      printf 'spotifix: unknown mini command: %s\n' "$1" >&2
+      return 2
+      ;;
+  esac
+}
+
 update_spicetify() {
   command -v spicetify > /dev/null 2>&1 || {
     printf 'spotifix: spicetify is not installed.\n' >&2
@@ -292,6 +416,10 @@ main() {
     play)
       shift
       play_command "$@"
+      ;;
+    mini)
+      shift
+      mini_command "$@"
       ;;
     -h | --help | help) usage ;;
     *)

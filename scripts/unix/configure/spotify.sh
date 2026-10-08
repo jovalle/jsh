@@ -17,7 +17,8 @@ readonly SPICETIFY_FORMULA=spicetify-cli
 readonly SPICETIFY_EXTENSION_DIR="${JSH_ROOT}/conf/spicetify"
 readonly SPICETIFY_LEGACY_SETTINGS_EXTENSION=jsh-settings.js
 readonly -a SPICETIFY_LEGACY_COMMAND_EXTENSIONS=(spotifi.js spotify.js spotifix.js adder.js shuffle.js lyrics-window.js)
-readonly -a SPICETIFY_EXTENSIONS=(settings.js add.js play.js like.js love.js lyrics.js)
+readonly -a SPICETIFY_EXTENSIONS=(settings.js add.js play.js like.js love.js lyrics.js mini.js)
+readonly SPICETIFY_RETIRED_EXTENSION=harmonic.js
 
 SPICETIFY_BIN=
 
@@ -313,7 +314,8 @@ EOF
       "${xpui_path}/extensions/${extension}"
     extension_tags+="<script defer src='extensions/${extension}'></script>"$'\n'
   done
-  version=$("${binary}" -v 2> /dev/null || true)
+  rm -f -- "${xpui_path}/extensions/${SPICETIFY_RETIRED_EXTENSION}"
+  version=$("${binary}" -v 2>/dev/null || true)
 
   cleaned_index=${index_file}.tmp
   perl -0pe '
@@ -326,7 +328,7 @@ EOF
   repaired_index=${index_file}.new
   SPICETIFY_HEAD="${helper_tags}" SPICETIFY_TAIL="${extension_tags}" \
     SPICETIFY_VERSION="${version}" perl -0pe '
-      s{<body>}{<body>\n$ENV{SPICETIFY_HEAD}\n<script>\nSpicetify.Config={};\nSpicetify.Config["version"]="$ENV{SPICETIFY_VERSION}";\nSpicetify.Config["extensions"]=["settings.js","add.js","play.js","like.js","love.js","lyrics.js"];\nSpicetify.Config["custom_apps"]=[];\n</script>\n};
+      s{<body>}{<body>\n$ENV{SPICETIFY_HEAD}\n<script>\nSpicetify.Config={};\nSpicetify.Config["version"]="$ENV{SPICETIFY_VERSION}";\nSpicetify.Config["extensions"]=["settings.js","add.js","play.js","like.js","love.js","lyrics.js","mini.js"];\nSpicetify.Config["custom_apps"]=[];\n</script>\n};
       s{</body>}{$ENV{SPICETIFY_TAIL}</body>};
     ' "${cleaned_index}" >"${repaired_index}" || return 1
   mv -- "${repaired_index}" "${index_file}"
@@ -466,6 +468,9 @@ spicetify_is_applied() {
   [[ -r ${spotify_path}/Apps/xpui/index.html ]] || return 1
   [[ -r ${spotify_path}/Apps/xpui/helper/spicetifyWrapper.js ]] || return 1
   grep -Fq 'spicetifyWrapper.js' "${spotify_path}/Apps/xpui/index.html" || return 1
+  grep -Fq "extensions/${SPICETIFY_RETIRED_EXTENSION}" \
+    "${spotify_path}/Apps/xpui/index.html" && return 1
+  [[ ! -e ${spotify_path}/Apps/xpui/extensions/${SPICETIFY_RETIRED_EXTENSION} ]] || return 1
   for extension in "${SPICETIFY_EXTENSIONS[@]}"; do
     [[ -r ${spotify_path}/Apps/xpui/extensions/${extension} ]] || return 1
     grep -Fq "extensions/${extension}" "${spotify_path}/Apps/xpui/index.html" || return 1
@@ -499,10 +504,44 @@ spotify_configuration_is_current() {
     spicetify_has_extension "${config_file}" "${legacy_extension}" && return 1
     [[ ! -e ${config_dir}/Extensions/${legacy_extension} ]] || return 1
   done
+  spicetify_has_extension "${config_file}" "${SPICETIFY_RETIRED_EXTENSION}" && return 1
+  [[ ! -e ${config_dir}/Extensions/${SPICETIFY_RETIRED_EXTENSION} ]] || return 1
+  # shellcheck disable=SC2310 # Retired shortcut state is checked before deciding to skip configuration.
+  spicetify_has_extension "${config_file}" spotifai-quick-save.js && return 1
 
   # shellcheck disable=SC2310 # State queries are used as predicates.
   spicetify_is_applied "${spotify_path}" || return 1
+  # shellcheck disable=SC2310 # Optional native integration is checked without changing files.
+  spicetify_mini_bridge check "${config_dir}" "${spotify_path}" || return 1
   return 0
+}
+
+spicetify_mini_bridge() {
+  local operation=$1 config_dir=$2 spotify_path=$3
+  local mini_config=${JSH_MINI_CONFIG:-"${JSH_ROOT}/local/mini/config.json"} platform
+  platform=${JSH_SPOTIFY_PLATFORM:-}
+  [[ -n ${platform} ]] || platform=$(uname -s)
+  [[ ${platform} == Darwin && -f ${mini_config} ]] || return 0
+  python3 - "${operation}" "${mini_config}" "${config_dir}" "${spotify_path}" <<'PY'
+import json, os, sys
+from pathlib import Path
+operation, config, directory, spotify = sys.argv[1:]
+source = json.loads(Path(config).read_text())
+bridge = {'token': source['token'], 'port': source['port']}
+targets = [Path(directory) / 'Extensions/mini-bridge.json',
+           Path(spotify) / 'Apps/xpui/extensions/mini-bridge.json']
+if operation == 'check':
+    try:
+        assert all(json.loads(path.read_text()) == bridge for path in targets)
+    except (OSError, ValueError, AssertionError):
+        sys.exit(1)
+else:
+    for path in targets:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), 'w') as stream:
+            json.dump(bridge, stream)
+        os.chmod(path, 0o600)
+PY
 }
 
 configure_spicetify() {
@@ -553,6 +592,17 @@ configure_spicetify() {
     fi
   done
 
+  # Keep a recoverable copy of the older picker before retiring its duplicate shortcut.
+  if spicetify_has_extension "${config_file}" spotifai-quick-save.js; then
+    if [[ -f ${extension_dir}/spotifai-quick-save.js ]]; then
+      install -d -m 0700 -- "${config_dir}/retired-extensions"
+      cp -n -- "${extension_dir}/spotifai-quick-save.js" \
+        "${config_dir}/retired-extensions/spotifai-quick-save.js"
+    fi
+    "${binary}" config extensions spotifai-quick-save.js- >/dev/null || return 1
+    needs_apply=1
+  fi
+
   # shellcheck disable=SC2310 # Legacy state is used as a predicate.
   if spicetify_has_extension "${config_file}" "${SPICETIFY_LEGACY_SETTINGS_EXTENSION}"; then
     if ! output=$("${binary}" config extensions "${SPICETIFY_LEGACY_SETTINGS_EXTENSION}-" 2>&1); then
@@ -577,6 +627,20 @@ configure_spicetify() {
     rm -f -- "${extension_dir}/${legacy_extension}"
   done
 
+  # Retire Harmonic from both the Spicetify configuration and installed files.
+  if spicetify_has_extension "${config_file}" "${SPICETIFY_RETIRED_EXTENSION}"; then
+    if ! output=$("${binary}" config extensions "${SPICETIFY_RETIRED_EXTENSION}-" 2>&1); then
+      jsh::log_error "Failed to disable Spicetify extension ${SPICETIFY_RETIRED_EXTENSION}."
+      spicetify_failure_details "${output}"
+      return 1
+    fi
+    needs_apply=1
+  fi
+  if [[ -e ${extension_dir}/${SPICETIFY_RETIRED_EXTENSION} ]]; then
+    rm -f -- "${extension_dir}/${SPICETIFY_RETIRED_EXTENSION}"
+    needs_apply=1
+  fi
+
   if [[ -r ${config_file} ]]; then
     backup_version=$(spicetify_backup_version "${config_file}")
   fi
@@ -588,13 +652,16 @@ configure_spicetify() {
   [[ -z ${backup_version:-} ]] || apply_command=(apply)
 
   # shellcheck disable=SC2310 # State queries are used as predicates.
-  if ((!force_apply && !needs_apply)) && spicetify_is_applied "${spotify_path}"; then
+  if ((! force_apply && ! needs_apply)) && spicetify_is_applied "${spotify_path}"; then
+    spicetify_mini_bridge install "${config_dir}" "${spotify_path}" || return 1
     jsh::log_note "Spicetify is applied."
     return 0
   fi
 
   jsh::log_info "Applying Spicetify..."
   apply_spicetify "${binary}" "${apply_command[@]}" || return 1
+  spicetify_mini_bridge install "${config_dir}" "${spotify_path}" || return 1
+  rm -f -- "${spotify_path}/Apps/xpui/extensions/${SPICETIFY_RETIRED_EXTENSION}"
   jsh::log_success "Spicetify applied."
 
   # Validate extensions are in the Spotify bundle.
