@@ -16,13 +16,15 @@ curl -fsSL https://raw.githubusercontent.com/jovalle/jsh/main/j.sh | bash
 | ✓ Installs nothing    | ✓ Zsh as login shell | ✓ OS configuration   |
 |                       | ✓ Installs nothing   | ✓ Application tweaks |
 
-With no arguments, the bootstrap opens the isolated runtime to try before you buy\*. Pass a setup profile to skip ahead, and add `--yes` to accept that profile's prompts:
+With no arguments, the bootstrap opens the isolated runtime to try before you buy\*. Pass a setup profile to skip ahead,
+and add `--yes` to accept that profile's prompts:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/jovalle/jsh/main/j.sh | bash -s -- setup full
 ```
 
-Setup runs in phases and records its progress. Continue an interrupted or failed run with `jsh setup --resume`, rerun from a phase with `--from PHASE`, run specific phases with `--phase PHASE[,PHASE]`, and see them all with `--list`.
+Setup runs in phases and records its progress. Continue an interrupted or failed run with `jsh setup --resume`, rerun
+from a phase with `--from PHASE`, run specific phases with `--phase PHASE[,PHASE]`, and see them all with `--list`.
 
 Stay current with `jsh update`, preview it with `--dry-run`, and use `jsh doctor` or `jsh repair` when something drifts.
 
@@ -81,12 +83,14 @@ Augmented with Spicetify and [my own enhancements](conf/spicetify/README.md), mo
 
 My daily driver. Powered by Betterfox, a slew of add-ons, a few custom tweaks, and personalized settings.
 
-[`waterfix`](bin/waterfix) manages it all including add-ons, placement, and layout. It also tidies bookmarks, and loads favicons to address the emptiness of a fresh install.
+[`waterfix`](bin/waterfix) manages it all including add-ons, placement, and layout. It also tidies bookmarks, and loads
+favicons to address the emptiness of a fresh install.
 
 #### Helium
 
 ![Helium](assets/helium.png)
 
-Contingency to [Waterfox](#waterfox) in a growing world of Chromium. Hardened profile with Bitwarden, Proton VPN, and Privacy Badger alongside the built-in uBlock Origin.
+Contingency to [Waterfox](#waterfox) in a growing world of Chromium. Hardened profile with Bitwarden, Proton VPN, and
+Privacy Badger alongside the built-in uBlock Origin.
 
 Launch and verify it with [`helium`](bin/helium).
