@@ -159,18 +159,28 @@ confirm_spotify_close() {
 close_spotify() {
   local platform=${JSH_SPOTIFY_PLATFORM:-$(uname -s)} attempt
   case ${platform} in
-    Darwin)
-      osascript -e 'tell application "Spotify" to quit' > /dev/null || return
-      ;;
-    Linux)
-      # shellcheck disable=SC2310 # spotify_flatpak_is_running is intentionally used as a predicate.
-      if spotify_flatpak_is_running && command -v flatpak > /dev/null 2>&1; then
-        flatpak kill com.spotify.Client 2> /dev/null || return
-      else
-        pkill -TERM -f '/spotify( |$)' 2> /dev/null || return
-      fi
-      ;;
-    *) return 1 ;;
+  Darwin)
+    osascript -e 'tell application "Spotify" to quit' >/dev/null || return
+    ;;
+  Linux)
+    # A graceful quit lets Spotify persist its current window bounds.
+    if command -v gdbus >/dev/null 2>&1 &&
+      gdbus call --session --dest org.mpris.MediaPlayer2.spotify \
+        --object-path /org/mpris/MediaPlayer2 \
+        --method org.mpris.MediaPlayer2.Quit >/dev/null 2>&1; then
+      for ((attempt = 0; attempt < 25; attempt++)); do
+        spotify_is_running || return 0
+        sleep 0.2
+      done
+    fi
+    # shellcheck disable=SC2310 # spotify_flatpak_is_running is intentionally used as a predicate.
+    if spotify_flatpak_is_running && command -v flatpak >/dev/null 2>&1; then
+      flatpak kill com.spotify.Client 2>/dev/null || return
+    else
+      pkill -TERM -f '/spotify( |$)' 2>/dev/null || return
+    fi
+    ;;
+  *) return 1 ;;
   esac
 
   for ((attempt = 0; attempt < 50; attempt++)); do
