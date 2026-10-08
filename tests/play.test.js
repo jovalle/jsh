@@ -80,6 +80,7 @@ async function runRoute(pathname, randomValues, options = {}) {
   };
   const window = {
     Spicetify,
+    addEventListener() {},
     crypto: {
       getRandomValues(value) {
         value[0] = randomValues.shift();
@@ -88,7 +89,7 @@ async function runRoute(pathname, randomValues, options = {}) {
     },
   };
 
-  vm.runInNewContext(source, { console, Spicetify, Uint32Array, window });
+  vm.runInNewContext(source, { console, Spicetify, Uint32Array, URLSearchParams, window });
   for (let attempt = 0; attempt < 20 && !calls.play; attempt += 1) {
     await new Promise((resolve) => setImmediate(resolve));
   }
@@ -173,4 +174,158 @@ test('smart-shuffle modifier enables contextual smart shuffle', async () => {
 
   assert.deepEqual(calls.shuffle, [false]);
   assert.deepEqual(calls.contextualShuffle, { mode: 2, uri: 'spotify:collection:tracks' });
+});
+
+class Element {
+  constructor(selector) {
+    this.selector = selector;
+  }
+
+  closest(selector) {
+    return selector.split(', ').includes(this.selector) ? this : null;
+  }
+}
+
+const barTitle = '.main-nowPlayingWidget-trackInfo .main-trackInfo-name a';
+
+function clickTitle(playerData, eventOverrides = {}) {
+  const pushed = [];
+  const listeners = [];
+  const Spicetify = {
+    Platform: {
+      History: {
+        listen() {},
+        location: { pathname: '/' },
+        push(value) {
+          pushed.push({ pathname: value.pathname, search: value.search });
+        },
+      },
+    },
+    Player: { data: playerData, playUri() {} },
+    URI: {
+      fromString(uri) {
+        const [, type, id] = uri.split(':');
+        return { toURLPath: () => `/${type}/${id}` };
+      },
+    },
+  };
+  const window = {
+    Spicetify,
+    addEventListener(type, listener, capture) {
+      listeners.push({ capture, listener, type });
+    },
+  };
+  vm.runInNewContext(source, { console, Element, Spicetify, URLSearchParams, window });
+
+  const event = {
+    button: 0,
+    defaultPrevented: false,
+    propagationStopped: false,
+    target: new Element(barTitle),
+    preventDefault() {
+      this.defaultPrevented = true;
+    },
+    stopPropagation() {
+      this.propagationStopped = true;
+    },
+    ...eventOverrides,
+  };
+  for (const { capture, listener, type } of listeners) {
+    if (type === 'click' && capture) listener(event);
+  }
+  return { event, pushed };
+}
+
+test('now-playing title highlights the playing row in its playlist', () => {
+  const { event, pushed } = clickTitle({
+    context: { uri: 'spotify:playlist:abc' },
+    item: { uid: 'row1', uri: 'spotify:track:t1' },
+    index: { pageIndex: 2, pageURI: 'spotify:playlist:abc:page:2', itemIndex: 37 },
+  });
+
+  assert.deepEqual(pushed, [
+    {
+      pathname: '/playlist/abc',
+      search:
+        '?uid=row1&uri=spotify%3Atrack%3At1&page=2&pageUri=spotify%3Aplaylist%3Aabc%3Apage%3A2&index=37',
+    },
+  ]);
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(event.propagationStopped, true);
+});
+
+test('now-playing view title also opens the playing context', () => {
+  const { pushed } = clickTitle(
+    {
+      context: { uri: 'spotify:collection:tracks' },
+      item: { uid: 'row2', uri: 'spotify:track:t2' },
+      index: { pageIndex: 0, pageURI: 'spotify:collection:tracks:page:0', itemIndex: 41 },
+    },
+    { target: new Element('.main-nowPlayingView-trackInfo .main-trackInfo-name a') },
+  );
+
+  assert.deepEqual(pushed, [
+    {
+      pathname: '/collection/tracks',
+      search:
+        '?uid=row2&uri=spotify%3Atrack%3At2&page=0&pageUri=spotify%3Acollection%3Atracks%3Apage%3A0&index=41',
+    },
+  ]);
+});
+
+test('now-playing title uses the playing item index in an album context', () => {
+  const { pushed } = clickTitle({
+    context: { uri: 'spotify:album:alb' },
+    item: { uid: 'row3', uri: 'spotify:track:t3' },
+    index: { pageIndex: 0, itemIndex: 12 },
+  });
+
+  assert.deepEqual(pushed, [
+    {
+      pathname: '/album/alb',
+      search: '?uid=row3&uri=spotify%3Atrack%3At3&page=0&index=12',
+    },
+  ]);
+});
+
+test('now-playing title opens the album when the track is its own context', () => {
+  const { event, pushed } = clickTitle({
+    context: { uri: 'spotify:track:t4' },
+    item: { uid: 'row4', uri: 'spotify:track:t4', album: { uri: 'spotify:album:alb' } },
+    index: { pageIndex: 0, itemIndex: 0 },
+  });
+
+  assert.deepEqual(pushed, [
+    {
+      pathname: '/album/alb',
+      search: '?uid=row4&uri=spotify%3Atrack%3At4&page=0&index=0&highlight=spotify%3Atrack%3At4',
+    },
+  ]);
+  assert.equal(event.defaultPrevented, true);
+});
+
+test('modified now-playing title clicks keep native behavior', () => {
+  const { event, pushed } = clickTitle(
+    {
+      context: { uri: 'spotify:playlist:abc' },
+      item: { uid: 'row1', uri: 'spotify:track:t1' },
+    },
+    { metaKey: true },
+  );
+
+  assert.deepEqual(pushed, []);
+  assert.equal(event.defaultPrevented, false);
+});
+
+test('clicks outside the now-playing title are ignored', () => {
+  const { event, pushed } = clickTitle(
+    {
+      context: { uri: 'spotify:playlist:abc' },
+      item: { uid: 'row1', uri: 'spotify:track:t1' },
+    },
+    { target: new Element('.main-trackInfo-artists a') },
+  );
+
+  assert.deepEqual(pushed, []);
+  assert.equal(event.defaultPrevented, false);
 });
