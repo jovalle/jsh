@@ -2,6 +2,10 @@
   const playRoute =
     /^\/search\/spotifix-play-(library|180g|liked|playlist)-(sequential|shuffle|smart-shuffle)-/;
   const likedSongsUri = 'spotify:collection:tracks';
+  const nowPlayingTitle = [
+    '.main-nowPlayingWidget-trackInfo .main-trackInfo-name a',
+    '.main-nowPlayingView-trackInfo .main-trackInfo-name a',
+  ].join(', ');
 
   if (!window.Spicetify || !Spicetify.Player?.playUri || !Spicetify.Platform?.History) {
     setTimeout(play, 250);
@@ -176,6 +180,52 @@
       handlingRoute = false;
     }
   }
+
+  function nowPlayingContextLocation() {
+    const { context, item, index } = Spicetify.Player.data || {};
+    if (!context?.uri || !item?.uri) return null;
+
+    // Match Spotify's Go to Now Playing shortcut, including the page and row position.
+    const trackContext = context.uri.startsWith('spotify:track:');
+    let contextUri = context.uri;
+    if (trackContext || item.provider === 'queue') contextUri = item.album?.uri || item.uri;
+    if (contextUri === 'spotify:internal:local-files' || contextUri === 'spotify:local-files') {
+      contextUri = 'spotify:collection:local-files';
+    }
+
+    let pathname;
+    try {
+      pathname = Spicetify.URI.fromString(contextUri).toURLPath(true);
+    } catch {
+      return null;
+    }
+    if (!pathname) return null;
+
+    const params = new URLSearchParams();
+    if (item.uid != null) params.set('uid', item.uid);
+    params.set('uri', item.uri);
+    if (index?.pageIndex != null) params.set('page', index.pageIndex);
+    if (index?.pageURI != null) params.set('pageUri', index.pageURI);
+    if (index?.itemIndex != null) params.set('index', index.itemIndex);
+    if (trackContext) params.set('highlight', item.uri);
+    return { pathname, search: `?${params}` };
+  }
+
+  window.addEventListener(
+    'click',
+    (event) => {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+        return;
+      }
+      if (!(event.target instanceof Element) || !event.target.closest(nowPlayingTitle)) return;
+      const location = nowPlayingContextLocation();
+      if (!location) return;
+      event.preventDefault();
+      event.stopPropagation();
+      Spicetify.Platform.History.push(location);
+    },
+    true,
+  );
 
   Spicetify.Platform.History.listen(handleRoute);
   handleRoute();
