@@ -1,6 +1,12 @@
 (function love() {
   const { LibraryAPI, PlaylistAPI, RootlistAPI } = window.Spicetify?.Platform || {};
-  if (!window.Spicetify?.Player || !LibraryAPI || !PlaylistAPI || !RootlistAPI) {
+  if (
+    !window.Spicetify?.Player ||
+    !LibraryAPI ||
+    !PlaylistAPI ||
+    !RootlistAPI ||
+    !window.JshMusic?.curation
+  ) {
     setTimeout(love, 250);
     return;
   }
@@ -13,6 +19,8 @@
   let playlistUri = null;
   let refreshTimer = null;
   let scanQueued = false;
+  let loaded = false;
+  let loveRead = 0;
 
   const loveStyle = document.createElement('style');
   loveStyle.textContent = `
@@ -20,9 +28,12 @@
     .${LOVE_CLASS}:focus-visible { outline: 2px solid var(--spice-text); outline-offset: 2px; }
     .${LOVE_CLASS}:hover { color: var(--spice-text); }
     .${LOVE_CLASS}[aria-pressed="true"] { color: #e22134; }
-    .${LOVE_CLASS} svg { flex-shrink: 0; height: var(--jsh-icon-height, 16px); width: var(--jsh-icon-width, 16px); }
-    .${LOVE_CLASS} path { fill: none; stroke: currentColor; stroke-linejoin: round; stroke-width: 1.5; }
+    .${LOVE_CLASS} svg { transform-origin: center; transition: transform 100ms ease-out; flex-shrink: 0; height: var(--jsh-icon-height, 16px); width: var(--jsh-icon-width, 16px); }
+    .${LOVE_CLASS} path { fill: transparent; stroke: currentColor; stroke-linejoin: round; stroke-width: 1.5; }
     .${LOVE_CLASS}[aria-pressed="true"] path { fill: currentColor; }
+    .${LOVE_CLASS}:hover svg { transform: scale(1.1); }
+    .${LOVE_CLASS}:active svg { transform: scale(0.92); }
+    @media (prefers-reduced-motion: reduce) { .${LOVE_CLASS} path, .${LOVE_CLASS} svg { transition: none; } .${LOVE_CLASS}:hover svg, .${LOVE_CLASS}:active svg { transform: none; } }
     .jsh-tooltip { animation: jsh-tooltip-in 0.2s ease-in-out; background-color: var(--spice-card, #282828); border-radius: 4px; box-shadow: 0 16px 24px #0000004d, 0 6px 8px #0003; color: var(--spice-text, #fff); font-size: 14px; max-width: 50ch; padding: 4px 8px; }
     @keyframes jsh-tooltip-in { from { opacity: 0; } }
   `;
@@ -121,6 +132,7 @@
   }
 
   async function loadLoved() {
+    const request = ++loveRead;
     const root = await RootlistAPI.getContents();
     const uri = findPlaylist(root?.items || root?.rows);
     const uids = new Map();
@@ -131,39 +143,89 @@
         uids.set(item.uri, [...(uids.get(item.uri) || []), item.uid]);
       }
     }
+    if (request !== loveRead) return;
     playlistUri = uri;
     lovedUids.clear();
     for (const [trackUri, trackUids] of uids) lovedUids.set(trackUri, trackUids);
+    loaded = true;
     scheduleScan();
   }
 
   function scheduleRefresh() {
     clearTimeout(refreshTimer);
-    refreshTimer = setTimeout(() => loadLoved().catch(() => {}), 250);
+    if (window.JshMusic.curation.busy()) return;
+    refreshTimer = setTimeout(() => {
+      if (!window.JshMusic.curation.busy()) loadLoved().catch(() => {});
+    }, 250);
   }
 
-  async function toggleLoved(uri) {
-    try {
-      await loadLoved();
-      if (lovedUids.has(uri)) {
-        const items = lovedUids.get(uri).map((uid) => ({ uid, uri }));
-        await PlaylistAPI.remove(playlistUri, items);
-        lovedUids.delete(uri);
-        Spicetify.showNotification(`Removed from ${PLAYLIST_NAME}`);
-      } else {
-        playlistUri ||= await RootlistAPI.createPlaylist(PLAYLIST_NAME, { after: 'end' });
-        if (!playlistUri) throw new Error(`Could not create ${PLAYLIST_NAME}`);
-        await PlaylistAPI.add(playlistUri, [uri], { after: 'end' });
-        lovedUids.set(uri, []);
-        const [liked] = await LibraryAPI.contains(uri);
-        if (!liked) await LibraryAPI.add({ silent: true, uris: [uri] });
-        Spicetify.showNotification(`Added to ${PLAYLIST_NAME}`);
-      }
-    } catch {
-      Spicetify.showNotification(`Could not update ${PLAYLIST_NAME}`, true);
-    }
+  async function removeLoadedLove(uri, check) {
+    if (!lovedUids.has(uri)) return false;
+    check();
+    const items = lovedUids.get(uri).map((uid) => ({ uid, uri }));
+    await PlaylistAPI.remove(playlistUri, items);
+    loveRead += 1;
+    lovedUids.delete(uri);
     scheduleScan();
-    scheduleRefresh();
+    return true;
+  }
+
+  async function clearLoved(uri, check) {
+    check();
+    await loadLoved();
+    check();
+    return removeLoadedLove(uri, check);
+  }
+
+  async function toggleLoved(uri, value, validate) {
+    if (!isTrack(uri)) return { ok: false, message: 'Play a track before toggling Love' };
+    return window.JshMusic.curation.enqueue(
+      uri,
+      'love',
+      value,
+      async (job) => {
+        let likedAdded = false;
+        try {
+          job.check();
+          await loadLoved();
+          job.check();
+          job.value ??= !lovedUids.has(uri);
+          window.JshMusic.curation.render();
+          if (!job.value) {
+            await removeLoadedLove(uri, job.check);
+            return { ok: true, message: `Removed from ${PLAYLIST_NAME}` };
+          }
+          const [liked] = await LibraryAPI.contains(uri);
+          job.check();
+          if (!liked) {
+            await LibraryAPI.add({ silent: true, uris: [uri] });
+            likedAdded = true;
+          }
+          window.JshMusic.like.refresh(uri, true);
+          job.check();
+          if (!playlistUri)
+            playlistUri = await RootlistAPI.createPlaylist(PLAYLIST_NAME, { after: 'end' });
+          if (!playlistUri) throw new Error(`Could not create ${PLAYLIST_NAME}`);
+          job.check();
+          if (!lovedUids.has(uri)) {
+            await PlaylistAPI.add(playlistUri, [uri], { after: 'end' });
+            // Read actual UIDs before the next queued click can remove this entry.
+            await loadLoved();
+            if (!lovedUids.has(uri)) throw new Error(`Could not confirm ${PLAYLIST_NAME}`);
+          }
+          return { ok: true, message: `Added to ${PLAYLIST_NAME}` };
+        } catch {
+          const message = likedAdded
+            ? `Added to Liked Songs; could not update ${PLAYLIST_NAME}. Check Spotify`
+            : `Could not update ${PLAYLIST_NAME}; check Spotify`;
+          Spicetify.showNotification(message, true);
+          return { ok: false, message };
+        } finally {
+          scheduleRefresh();
+        }
+      },
+      validate,
+    );
   }
 
   function decorateCurationButton(button) {
@@ -186,8 +248,18 @@
       anchor.before(heart);
     }
     sizeLikeNative(heart, button);
+    const previousUri = heart.dataset.uri;
     heart.dataset.uri = uri;
-    const loved = String(lovedUids.has(uri));
+    const value = window.JshMusic.curation.preview(uri).loved;
+    const busy = window.JshMusic.curation.busy(uri);
+    heart.setAttribute('aria-busy', String(busy));
+    heart.setAttribute('aria-disabled', 'false');
+    const loved =
+      typeof value === 'boolean'
+        ? String(value)
+        : previousUri === uri
+          ? heart.getAttribute('aria-pressed') || 'false'
+          : 'false';
     if (heart.getAttribute('aria-pressed') !== loved) {
       heart.setAttribute('aria-pressed', loved);
       setTooltip(
@@ -217,6 +289,7 @@
     if (scanQueued) return;
     scanQueued = true;
     requestAnimationFrame(scanCurationButtons);
+    window.JshMusic?.like?.render();
   }
 
   window.addEventListener(
@@ -285,4 +358,12 @@
     // The native listener below remains the portable fallback.
   }
   window.addEventListener('keydown', handleShortcut, true);
+  window.JshMusic ||= {};
+  window.JshMusic.love = {
+    toggle: toggleLoved,
+    clear: clearLoved,
+    render: scheduleScan,
+    refresh: scheduleRefresh,
+    state: (uri) => (loaded ? lovedUids.has(uri) : undefined),
+  };
 })();
