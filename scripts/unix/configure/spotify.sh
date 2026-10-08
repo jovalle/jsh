@@ -37,36 +37,36 @@ spotify_paths() {
   fi
 
   case ${platform} in
-    Darwin)
-      spotify_path=/Applications/Spotify.app/Contents/Resources
-      [[ -d ${spotify_path} ]] || spotify_path="${HOME}/Applications/Spotify.app/Contents/Resources"
-      prefs_path="${HOME}/Library/Application Support/Spotify/prefs"
-      ;;
-    Linux)
-      if command -v flatpak > /dev/null 2>&1; then
-        flatpak_deployment=$(flatpak info --show-location com.spotify.Client 2> /dev/null || true)
-        if [[ -d ${flatpak_deployment}/files/extra/share/spotify ]]; then
-          spotify_path=${flatpak_deployment}/files/extra/share/spotify
-        fi
+  Darwin)
+    spotify_path=/Applications/Spotify.app/Contents/Resources
+    [[ -d ${spotify_path} ]] || spotify_path="${HOME}/Applications/Spotify.app/Contents/Resources"
+    prefs_path="${HOME}/Library/Application Support/Spotify/prefs"
+    ;;
+  Linux)
+    if command -v flatpak >/dev/null 2>&1; then
+      flatpak_deployment=$(flatpak info --show-location com.spotify.Client 2>/dev/null || true)
+      if [[ -d ${flatpak_deployment}/files/extra/share/spotify ]]; then
+        spotify_path=${flatpak_deployment}/files/extra/share/spotify
       fi
-      if [[ -z ${spotify_path} ]]; then
-        for spotify_path in \
-          "${HOME}/.local/share/flatpak/app/com.spotify.Client/"*/stable/active/files/extra/share/spotify \
-          /var/lib/flatpak/app/com.spotify.Client/*/stable/active/files/extra/share/spotify \
-          /usr/share/spotify; do
-          [[ -d ${spotify_path} ]] && break
-        done
-      fi
-      if [[ -r ${HOME}/.var/app/com.spotify.Client/config/spotify/prefs ]]; then
-        prefs_path="${HOME}/.var/app/com.spotify.Client/config/spotify/prefs"
-      else
-        prefs_path="${HOME}/.config/spotify/prefs"
-      fi
-      ;;
-    *)
-      jsh::log_note "Skipping Spotify configuration: unsupported platform ${platform}."
-      return 1
-      ;;
+    fi
+    if [[ -z ${spotify_path} ]]; then
+      for spotify_path in \
+        "${HOME}/.local/share/flatpak/app/com.spotify.Client/"*/stable/active/files/extra/share/spotify \
+        /var/lib/flatpak/app/com.spotify.Client/*/stable/active/files/extra/share/spotify \
+        /usr/share/spotify; do
+        [[ -d ${spotify_path} ]] && break
+      done
+    fi
+    if [[ -r ${HOME}/.var/app/com.spotify.Client/config/spotify/prefs ]]; then
+      prefs_path="${HOME}/.var/app/com.spotify.Client/config/spotify/prefs"
+    else
+      prefs_path="${HOME}/.config/spotify/prefs"
+    fi
+    ;;
+  *)
+    jsh::log_note "Skipping Spotify configuration: unsupported platform ${platform}."
+    return 1
+    ;;
   esac
 
   [[ -d ${spotify_path} ]] || {
@@ -92,7 +92,7 @@ ensure_spotify_writable() {
 }
 
 spicetify_binary() {
-  if command -v spicetify > /dev/null 2>&1; then
+  if command -v spicetify >/dev/null 2>&1; then
     command -v spicetify
   elif [[ -x ${HOME}/.spicetify/spicetify ]]; then
     printf '%s\n' "${HOME}/.spicetify/spicetify"
@@ -109,7 +109,7 @@ ensure_spicetify() {
     return
   fi
 
-  command -v brew > /dev/null 2>&1 || {
+  command -v brew >/dev/null 2>&1 || {
     jsh::log_error "Homebrew is required to install ${SPICETIFY_FORMULA}."
     return 1
   }
@@ -128,11 +128,11 @@ ensure_spicetify() {
 }
 
 spotify_is_running() {
-  pgrep -f '/spotify( |$)|Spotify.app/Contents/MacOS/Spotify' > /dev/null 2>&1
+  pgrep -f '/spotify( |$)|Spotify.app/Contents/MacOS/Spotify' >/dev/null 2>&1
 }
 
 spotify_flatpak_is_running() {
-  pgrep -f '/app/extra/share/spotify/spotify' > /dev/null 2>&1
+  pgrep -f '/app/extra/share/spotify/spotify' >/dev/null 2>&1
 }
 
 confirm_spotify_close() {
@@ -143,7 +143,7 @@ confirm_spotify_close() {
     jsh::log_error "Could not confirm closing Spotify: no interactive input is available."
     return 1
   }
-  exec {input_fd}< "${tty}" || {
+  exec {input_fd}<"${tty}" || {
     jsh::log_error "Could not confirm closing Spotify: no interactive input is available."
     return 1
   }
@@ -200,20 +200,20 @@ close_spotify_if_running() {
 reopen_spotify() {
   local was_flatpak=${1:-0} platform=${JSH_SPOTIFY_PLATFORM:-$(uname -s)}
   case ${platform} in
-    Darwin)
-      open -a Spotify > /dev/null 2>&1
-      ;;
-    Linux)
-      if ((was_flatpak)); then
-        flatpak run com.spotify.Client > /dev/null 2>&1 &
-      elif command -v spotify > /dev/null 2>&1; then
-        spotify > /dev/null 2>&1 &
-      else
-        jsh::log_error "Spotify was closed but could not be reopened."
-        return 1
-      fi
-      ;;
-    *) return 1 ;;
+  Darwin)
+    open -a Spotify >/dev/null 2>&1
+    ;;
+  Linux)
+    if ((was_flatpak)); then
+      flatpak run com.spotify.Client >/dev/null 2>&1 &
+    elif command -v spotify >/dev/null 2>&1; then
+      spotify >/dev/null 2>&1 &
+    else
+      jsh::log_error "Spotify was closed but could not be reopened."
+      return 1
+    fi
+    ;;
+  *) return 1 ;;
   esac
 }
 
@@ -258,7 +258,7 @@ spicetify_bundle_is_applied() {
     [[ -d ${entry} ]] && has_directory=1
     [[ -f ${entry} && ${entry} == *.spa ]] && has_spa=1
   done
-  ((has_directory && !has_spa)) || return 1
+  ((has_directory && ! has_spa)) || return 1
 
   for marker_file in xpui-modules.js xpui-snapshot.js xpui.js; do
     [[ -r ${apps_path}/xpui/${marker_file} ]] || continue
@@ -273,7 +273,7 @@ spicetify_repair_applied_bundle() {
   local index_file cleaned_index repaired_index extension option helper version
   local helper_tags='' extension_tags=''
 
-  config_file=$("${binary}" -c 2> /dev/null) || return 1
+  config_file=$("${binary}" -c 2>/dev/null) || return 1
   [[ -r ${config_file} ]] || return 1
   spotify_path=$(spicetify_config_value "${config_file}" "spotify_path") || return 1
   apps_path=${spotify_path}/Apps
@@ -312,13 +312,13 @@ EOF
     s{\n?<!-- spicetify helpers -->\n?}{}g;
     s{\n?<script>\s*Spicetify\.Config=.*?</script>\n?}{}gs;
     s{\n?<script>\s*</script>\n?}{}gs;
-  ' "${index_file}" > "${cleaned_index}" || return 1
+  ' "${index_file}" >"${cleaned_index}" || return 1
   repaired_index=${index_file}.new
   SPICETIFY_HEAD="${helper_tags}" SPICETIFY_TAIL="${extension_tags}" \
     SPICETIFY_VERSION="${version}" perl -0pe '
       s{<body>}{<body>\n$ENV{SPICETIFY_HEAD}\n<script>\nSpicetify.Config={};\nSpicetify.Config["version"]="$ENV{SPICETIFY_VERSION}";\nSpicetify.Config["extensions"]=["settings.js","add.js","play.js","like.js","love.js","lyrics.js"];\nSpicetify.Config["custom_apps"]=[];\n</script>\n};
       s{</body>}{$ENV{SPICETIFY_TAIL}</body>};
-    ' "${cleaned_index}" > "${repaired_index}" || return 1
+    ' "${cleaned_index}" >"${repaired_index}" || return 1
   mv -- "${repaired_index}" "${index_file}"
   rm -f -- "${cleaned_index}"
 }
@@ -469,7 +469,7 @@ spotify_configuration_is_current() {
   local config_file config_dir extension legacy_extension
 
   [[ -x ${binary} ]] || return 1
-  config_file=$("${binary}" -c 2> /dev/null) || return 1
+  config_file=$("${binary}" -c 2>/dev/null) || return 1
   [[ -r ${config_file} ]] || return 1
   config_dir=${config_file%/*}
 
@@ -572,7 +572,7 @@ configure_spicetify() {
   fi
   if [[ -z ${backup_version:-} ]]; then
     if output=$(NO_COLOR=1 "${binary}" config 2>&1); then
-      backup_version=$(spicetify_backup_version <<< "${output}")
+      backup_version=$(spicetify_backup_version <<<"${output}")
     fi
   fi
   [[ -z ${backup_version:-} ]] || apply_command=(apply)
@@ -594,7 +594,7 @@ configure_spicetify() {
       jsh::log_error "Extension ${extension} is missing from the Spotify bundle."
       validation_failed=1
     elif ! cmp -s -- "${SPICETIFY_EXTENSION_DIR}/${extension}" \
-        "${spotify_path}/Apps/xpui/extensions/${extension}"; then
+      "${spotify_path}/Apps/xpui/extensions/${extension}"; then
       jsh::log_error "Extension ${extension} in the Spotify bundle does not match the source."
       validation_failed=1
     fi
@@ -611,19 +611,19 @@ main() {
   local -a spotify_locations=()
   while (($#)); do
     case $1 in
-      -y | --yes) JSH_ASSUME_YES=1 ;;
-      --force) force_apply=1 ;;
-      *)
-        jsh::log_error "Unknown option: $1"
-        return 2
-        ;;
+    -y | --yes) JSH_ASSUME_YES=1 ;;
+    --force) force_apply=1 ;;
+    *)
+      jsh::log_error "Unknown option: $1"
+      return 2
+      ;;
     esac
     shift
   done
 
   # shellcheck disable=SC2310 # Missing Spotify state is a supported skip.
   locations=$(spotify_paths) || return 0
-  mapfile -t spotify_locations <<< "${locations}"
+  mapfile -t spotify_locations <<<"${locations}"
   spotify_path=${spotify_locations[0]}
   prefs_path=${spotify_locations[1]}
 
@@ -631,7 +631,7 @@ main() {
   ensure_spicetify
 
   # shellcheck disable=SC2310 # State check is used as a predicate.
-  if ((!force_apply)) && spotify_configuration_is_current "${SPICETIFY_BIN}" "${spotify_path}" "${prefs_path}"; then
+  if ((! force_apply)) && spotify_configuration_is_current "${SPICETIFY_BIN}" "${spotify_path}" "${prefs_path}"; then
     # shellcheck disable=SC2310 # Status check is used as a predicate.
     if spotify_is_running; then
       jsh::log_note "Spotify configuration is current; leaving Spotify open."
