@@ -64,7 +64,7 @@ Everyday commands, rebuilt the way I wish they worked.
 | [`kubens`](bin/kubens)       | Switches between Kubernetes namespaces.                                     |
 | [`nukem`](bin/nukem)         | Removes finalizers from a namespace stuck terminating.                      |
 | [`proxy`](bin/proxy)         | Runs a command with HTTP and HTTPS proxy variables set.                     |
-| [`spotifix`](bin/spotifix)   | Configures quick play controls and enhancements for Spotify.                |
+| [`spotifix`](bin/spotifix)   | Configures Spotify enhancements, quick play, and the macOS mini player.     |
 | [`sublime`](bin/sublime)     | Opens Sublime Text and manages its patch status.                            |
 
 ### Apps
