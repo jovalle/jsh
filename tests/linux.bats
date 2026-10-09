@@ -629,7 +629,7 @@ WantedBy=default.target' > "${HOME}/.config/systemd/user/ssh-agent.service"
 @test "VS Code configuration preserves personal JSON settings" {
   local home="${BATS_TEST_TMPDIR}/vscode-home" config="${BATS_TEST_TMPDIR}/vscode-config"
   mkdir -p "${config}/Code/User"
-  printf '%s\n' '{"editor.fontSize":15,"terminal.integrated.profiles.linux":{"bash":{"path":"/bin/bash"}}}' \
+  printf '%s\n' '{"editor.fontSize":15,"terminal.integrated.profiles.linux":{"bash":{"path":"/bin/bash"}},"terminal.integrated.env.linux":{"KEEP":"1","LESS":"-RXE"}}' \
     > "${config}/Code/User/settings.json"
   printf '%s\n' '[{"key":"ctrl+x","command":"test.keep"}]' \
     > "${config}/Code/User/keybindings.json"
@@ -645,6 +645,8 @@ WantedBy=default.target' > "${HOME}/.config/systemd/user/ssh-agent.service"
 
   [[ ${status} -eq 0 ]]
   jq -e '."editor.fontSize" == 15 and ."terminal.integrated.profiles.linux".bash.path == "/bin/bash" and ."terminal.integrated.defaultProfile.linux" == "zsh"' \
+    "${config}/Code/User/settings.json" > /dev/null
+  jq -e '."terminal.integrated.env.linux" == {"KEEP": "1", "LESS": "-FR"}' \
     "${config}/Code/User/settings.json" > /dev/null
   jq -e 'any(.[]; .command == "test.keep")' "${config}/Code/User/keybindings.json" > /dev/null
 }

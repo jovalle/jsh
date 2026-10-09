@@ -52,6 +52,8 @@ configure_vscode() {
       | .zsh = ((.zsh // {})
         | if (.path != "zsh" and .path != $shell) then .path = $shell else . end))
     | .[$default] = "zsh"
+    | ("terminal.integrated.env." + $platform) as $env
+    | .[$env] = ((.[$env] // {}) | .LESS = "-FR")
     | .["editor.fontFamily"] = $font
     | .["terminal.integrated.fontFamily"] = $font
   ' "${current}" > "${temporary}"; then
