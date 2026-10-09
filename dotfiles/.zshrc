@@ -75,7 +75,8 @@ unset _jsh_brew_bin
 
 
 # Terminal optimizations
-export LESS="-RXE"                          # No wrapping, no clearing, exit on EOF
+# Without -X, less uses the alternate screen, so VS Code passes PageUp/PageDown to it.
+export LESS="-FR"                           # Colors, skip paging when output fits
 # AI agent terminals cannot answer interactive pager or confirmation prompts.
 typeset -i _jsh_agent_shell=0
 if [[ -n ${COPILOT_AGENT:-}${CLAUDECODE:-}${GEMINI_CLI:-} ]]; then
