@@ -7,7 +7,8 @@
 ## profiles ## List configured identities
 ## create NAME ## Create a Git project and select its identity
 ## commit [-t TIME] [ARGS...] ## Commit with an optional timestamp
-## amend [REF] -t TIME [--dry-run] [--yes] ## Move a commit timestamp and following commits
+## commits [N] [--reverse] [--all] [LOG ARGS...] ## List commits with full timestamps, newest first
+## amend [REF] [-t TIME] [--only] [--dry-run] [--yes] ## Move a commit timestamp and following commits, or edit dates without -t
 ## rewrite [--last N|REF...] ## Rewrite commit messages and timestamps
 ## stash [push options] ## Stash tracked and untracked changes, excluding ignored files
 ## update [--stash] [--all [DIR]] ## Fast-forward repositories from their upstreams
@@ -23,6 +24,9 @@
 ##? identity @profile ## Configured identity
 ##? profile @profile ## Configured identity
 ##? amend --dry-run ## Preview timestamp changes without rewriting history
+##? amend --only ## Move only REF and keep following timestamps
+##? commits --reverse ## List oldest first
+##? commits --all ## List the whole branch history
 ##? update --stash ## Stash and restore local changes
 ##? update --all ## Update the base directory and immediate child repositories
 ##? update --all @directory ## Repository base directory
@@ -74,7 +78,11 @@ Commands:
   profiles              Alias for identity list
   create NAME           Create a Git project and select its identity
   commit [-t TIME]      Commit with a relative or absolute timestamp
+  commits [N|ARGS...]   List unpushed or last N commits with full timestamps
+  commits --all         List the whole branch history, newest first
+  commits --reverse     List commits oldest first
   amend [REF] -t TIME   Move a commit timestamp and following commits
+  amend [REF]           Edit commit dates in the Git editor
   rewrite REF...        Rewrite selected commits by hash, tag, or other ref
   rewrite --last N      Rewrite the last N first-parent commits
   stash [push options]  Stash tracked and untracked changes, excluding ignored files
@@ -99,6 +107,9 @@ relative offsets, for example +5h0m0s.
 
 Amending an older first-parent commit shifts every following first-parent commit
 by the same effective delta while preserving trees, messages, and merge parents.
+With amend, signed offsets count from REF's own timestamp, and --only moves REF
+alone while following commits keep their timestamps. Without REF, an interactive
+terminal picks the commit from a list.
 
 Backup examples:
   jgit save --exclude .env --exclude build
@@ -786,6 +797,17 @@ _jgit_resolve_timestamp_from() {
   esac
 }
 
+_jgit_timestamp_precision() {
+  local input=$1 parsed
+  case ${input} in
+    now) parsed='0 1' ;;
+    now+* | now-*) parsed=$(_jgit_parse_offset "${input#now}") ;;
+    +* | -*) parsed=$(_jgit_parse_offset "${input}") ;;
+    *) parsed=$(_jgit_parse_offset "+${input}") || parsed=$(_jgit_parse_absolute_with_precision "${input}") ;;
+  esac || return 1
+  printf '%s\n' "${parsed#* }"
+}
+
 _jgit_git_date() {
   if _jgit_is_gnu_date; then
     date -d "@$1" '+%Y-%m-%d %H:%M:%S %z'
@@ -828,6 +850,54 @@ _jgit_commit() {
     git commit --date="${git_date}" "${GIT_ARGS[@]}"
 }
 
+_jgit_commits() {
+  local reverse=0 all=0
+  local -a args=() order=()
+  while (($#)); do
+    case $1 in
+      -h | --help)
+        printf '%s\n' \
+          'Usage: jgit commits [N] [-n N] [-r|--reverse] [-a|--all] [LOG ARGS...]' \
+          '' \
+          'Lists commits newest first as hash, committer date, and subject.' \
+          'Without a count, range, or --all, shows unpushed commits, or the last' \
+          '20 when none are unpushed.' \
+          '' \
+          '  N, -n N        Show the last N commits' \
+          '  -a, --all      Show the whole current branch history' \
+          '  -r, --reverse  Show oldest first' \
+          '' \
+          'Other arguments, such as ranges and paths, are passed to git log.'
+        return
+        ;;
+      -r | --reverse) reverse=1 ;;
+      -a | --all) all=1 ;;
+      -n)
+        [[ ${2:-} =~ ^[0-9]+$ ]] || _jgit_die 'option -n requires a count'
+        args+=("-$2")
+        shift
+        ;;
+      *)
+        if [[ $1 =~ ^[0-9]+$ ]]; then
+          args+=("-$1")
+        else
+          args+=("$1")
+        fi
+        ;;
+    esac
+    shift
+  done
+  ((reverse == 0)) || order=(--reverse)
+  if ((${#args[@]} == 0 && all == 0)); then
+    args=(-20)
+    if [[ -n $(git rev-list -1 '@{upstream}..HEAD' 2> /dev/null) ]]; then
+      args=('@{upstream}..HEAD')
+    fi
+  fi
+  git log ${order[@]+"${order[@]}"} --abbrev=12 --date='format:%Y-%m-%d %H:%M:%S %z' \
+    --format='%h  %cd  %s' ${args[@]+"${args[@]}"}
+}
+
 _jgit_amend_map_parent() {
   local parent=$1 index
   for ((index = 0; index < ${#AMEND_OLD_COMMITS[@]}; index++)); do
@@ -849,20 +919,104 @@ _jgit_amend_reject_extra_headers() {
   done < <(git cat-file commit "${commit}" | awk '/^$/{exit} /^[^ ]/{print $1}')
 }
 
+_jgit_amend_range() {
+  if [[ -n $(git rev-list -1 '@{upstream}..HEAD' 2> /dev/null) ]]; then
+    printf '%s\n' '@{upstream}..HEAD'
+  else
+    printf '%s\n' -20
+  fi
+}
+
+_jgit_amend_pick() {
+  local commit label
+  local -a choices=()
+  while IFS=$'\t' read -r commit label; do
+    choices+=("${commit}" "${label}")
+  done < <(git log --first-parent --abbrev=12 --date='format:%Y-%m-%d %H:%M:%S %z' \
+    --format='%H%x09%h  %cd  %s' "$(_jgit_amend_range)")
+  jsh::choose_one 'Move which commit and every newer one?' "${choices[@]}"
+}
+
+# Fills the AMEND_* arrays from dates edited in the Git editor, starting at the first edit.
+_jgit_amend_edit() {
+  local rolling_epoch=$1 file editor commit date line found index first=-1 epoch seen=0
+  local -a dates=() inputs=()
+  file=$(git rev-parse --git-path JGIT_AMEND_DATES)
+  {
+    printf '%s\n' \
+      '# Edit dates, then save and quit. Commits are newest first, in local time.' \
+      '# Write an absolute date such as 2026-10-08 23:58 or a signed offset from' \
+      '# that commit such as -12h0m0s. Unedited lines keep their dates. Keep two' \
+      '# spaces between columns. Delete every commit line to abort.' ''
+    for ((index = ${#AMEND_OLD_COMMITS[@]} - 1; index >= 0; index--)); do
+      commit=${AMEND_OLD_COMMITS[index]}
+      date=$(git show -s --date='format-local:%Y-%m-%d %H:%M:%S' --format='%cd' "${commit}")
+      dates[index]=${date}
+      inputs[index]=${date}
+      printf '%s  %s  %s\n' "${commit:0:12}" "${date}" "$(git show -s --format='%s' "${commit}")"
+    done
+  } > "${file}" || _jgit_die "could not write ${file}"
+  editor=$(git var GIT_EDITOR) || _jgit_die 'no Git editor is configured'
+  sh -c "${editor} \"\$@\"" "${editor}" "${file}" || _jgit_die 'editor failed; no commits were changed'
+
+  while IFS= read -r line || [[ -n ${line} ]]; do
+    line=${line#"${line%%[![:space:]]*}"}
+    [[ -n ${line} && ${line} != '#'* ]] || continue
+    seen=1
+    commit=${line%%[[:space:]]*}
+    date=${line#"${commit}"}
+    date=${date#"${date%%[![:space:]]*}"}
+    date=${date%%  *}
+    date=${date%"${date##*[![:space:]]}"}
+    found=-1
+    if ((${#commit} >= 7)); then
+      for index in "${!AMEND_OLD_COMMITS[@]}"; do
+        [[ ${AMEND_OLD_COMMITS[index]} != "${commit}"* ]] || found=${index}
+      done
+    fi
+    ((found >= 0)) || _jgit_die "unknown commit in date list: ${commit}"
+    inputs[found]=${date}
+  done < "${file}"
+  ((seen)) || _jgit_die 'amend cancelled'
+
+  for index in "${!AMEND_OLD_COMMITS[@]}"; do
+    commit=${AMEND_OLD_COMMITS[index]}
+    if [[ ${inputs[index]} == "${dates[index]}" ]]; then
+      AMEND_EDITED+=(0)
+      AMEND_AUTHOR_EPOCHS+=("$(git show -s --format='%at' "${commit}")")
+      AMEND_COMMITTER_EPOCHS+=("$(git show -s --format='%ct' "${commit}")")
+      continue
+    fi
+    ((first >= 0)) || first=${index}
+    epoch=$(_jgit_resolve_timestamp_from "${inputs[index]}" "$(git show -s --format='%ct' "${commit}")" "${rolling_epoch}") ||
+      _jgit_die "invalid timestamp for ${commit:0:12}: ${inputs[index]}"
+    _jgit_git_date "${epoch}" > /dev/null 2>&1 || _jgit_die "date is out of range for ${commit:0:12}"
+    AMEND_EDITED+=(1)
+    AMEND_AUTHOR_EPOCHS+=("${epoch}")
+    AMEND_COMMITTER_EPOCHS+=("${epoch}")
+  done
+  ((first >= 0)) || first=${#AMEND_OLD_COMMITS[@]}
+  AMEND_OLD_COMMITS=(${AMEND_OLD_COMMITS[@]+"${AMEND_OLD_COMMITS[@]:first}"})
+  AMEND_EDITED=(${AMEND_EDITED[@]+"${AMEND_EDITED[@]:first}"})
+  AMEND_AUTHOR_EPOCHS=(${AMEND_AUTHOR_EPOCHS[@]+"${AMEND_AUTHOR_EPOCHS[@]:first}"})
+  AMEND_COMMITTER_EPOCHS=(${AMEND_COMMITTER_EPOCHS[@]+"${AMEND_COMMITTER_EPOCHS[@]:first}"})
+}
+
 _jgit_amend_cleanup() {
   [[ -z ${JGIT_AMEND_TEMP:-} ]] || rm -rf "${JGIT_AMEND_TEMP}"
 }
 
 _jgit_amend() {
-  local target_ref=HEAD target_set=0 timestamp='' dry_run=0 argument target old_tip branch
+  local target_ref=HEAD target_set=0 timestamp='' dry_run=0 only=0 moved argument target old_tip branch
   local target_epoch resolved_epoch delta index commit parent parent_epoch previous_epoch head_epoch now_epoch rolling_epoch
-  local new_author new_committer
+  local new_author new_committer old_committer precision
   local author_timezone committer_timezone tree message rewritten_message new_commit answer
   local -a parents parent_args
   AMEND_OLD_COMMITS=()
   AMEND_NEW_COMMITS=()
   AMEND_AUTHOR_EPOCHS=()
   AMEND_COMMITTER_EPOCHS=()
+  AMEND_EDITED=()
 
   while (($#)); do
     argument=$1
@@ -874,14 +1028,21 @@ _jgit_amend() {
         ;;
       -t=* | --timestamp=*) timestamp=${argument#*=}; shift ;;
       --dry-run) dry_run=1; shift ;;
+      --only) only=1; shift ;;
       -y | --yes) shift ;;
       -h | --help)
         printf '%s\n' \
-          'Usage: jgit amend [REF] -t TIME [--dry-run]' \
+          'Usage: jgit amend [REF] [-t TIME] [--only] [--dry-run]' \
           '' \
-          'Moves REF (default HEAD) and every following first-parent commit by' \
-          'the effective timestamp delta. Signed offsets resolve from REF^1;' \
-          'unsigned durations resolve from the later of now and HEAD.'
+          'Moves REF and every following first-parent commit by the effective' \
+          'timestamp delta. Without REF, an interactive terminal picks it from' \
+          'unpushed or recent commits; otherwise REF is HEAD. With --only,' \
+          'following commits keep their timestamps. Signed offsets such as -6m' \
+          'resolve from REF itself; unsigned durations resolve from the later of' \
+          'now and HEAD.' \
+          '' \
+          'Without -t, opens the dates of REF through HEAD, or of unpushed or' \
+          'recent commits, in the Git editor. Only edited dates change.'
         return
         ;;
       -*) _jgit_die "unknown amend option: ${argument}" ;;
@@ -894,10 +1055,14 @@ _jgit_amend() {
     esac
   done
 
-  [[ -n ${timestamp} ]] || _jgit_die 'amend requires -t or --timestamp'
   git rev-parse --git-dir > /dev/null 2>&1 || _jgit_die 'not in a Git repository'
   branch=$(git symbolic-ref --quiet HEAD 2> /dev/null) || _jgit_die 'amend requires a branch checkout'
   old_tip=$(git rev-parse --verify HEAD) || _jgit_die 'amend requires at least one commit'
+  if [[ -z ${timestamp} ]]; then
+    ((target_set)) || target_ref=$(git rev-list --first-parent "$(_jgit_amend_range)" HEAD | tail -n 1)
+  elif ((target_set == 0)) && [[ ${JSH_INTERACTIVE:-0} == 1 && -t ${JSH_UI_INPUT_FD:-0} ]]; then
+    target_ref=$(_jgit_amend_pick) || _jgit_die 'amend cancelled'
+  fi
   target=$(git rev-parse --verify "${target_ref}^{commit}" 2> /dev/null) ||
     _jgit_die "invalid commit ref: ${target_ref}"
   [[ $(git rev-parse --is-shallow-repository) == false ]] ||
@@ -923,34 +1088,53 @@ _jgit_amend() {
 
   target_epoch=$(git show -s --format='%ct' "${target}")
   previous_epoch=${target_epoch}
-  if [[ ${timestamp} == +* || ${timestamp} == -* ]]; then
-    parent=$(git rev-parse --verify "${target}^1" 2> /dev/null) ||
-      _jgit_die 'cannot use a signed offset for the root commit'
-    previous_epoch=$(git show -s --format='%ct' "${parent}")
-  fi
   now_epoch=$(_jgit_now)
   head_epoch=$(git show -s --format='%ct' HEAD)
   rolling_epoch=${head_epoch}
   ((now_epoch <= rolling_epoch)) || rolling_epoch=${now_epoch}
-  resolved_epoch=$(_jgit_resolve_timestamp_from "${timestamp}" "${previous_epoch}" "${rolling_epoch}") ||
-    _jgit_die "invalid timestamp: ${timestamp}"
-  delta=$((resolved_epoch - target_epoch))
-
-  for ((index = 0; index < ${#AMEND_OLD_COMMITS[@]}; index++)); do
-    commit=${AMEND_OLD_COMMITS[index]}
-    _jgit_amend_reject_extra_headers "${commit}"
-    if ((index == 0)); then
-      new_author=${resolved_epoch}
-      new_committer=${resolved_epoch}
-    else
-      new_author=$(($(git show -s --format='%at' "${commit}") + delta))
-      new_committer=$(($(git show -s --format='%ct' "${commit}") + delta))
+  if [[ -z ${timestamp} ]]; then
+    _jgit_amend_edit "${rolling_epoch}"
+    if ((${#AMEND_OLD_COMMITS[@]} == 0)); then
+      jsh::log_note 'No dates changed.'
+      return 0
     fi
-    _jgit_git_date "${new_author}" > /dev/null 2>&1 || _jgit_die 'author date is out of range'
-    _jgit_git_date "${new_committer}" > /dev/null 2>&1 || _jgit_die 'committer date is out of range'
-    AMEND_AUTHOR_EPOCHS+=("${new_author}")
-    AMEND_COMMITTER_EPOCHS+=("${new_committer}")
-  done
+    for commit in "${AMEND_OLD_COMMITS[@]}"; do
+      _jgit_amend_reject_extra_headers "${commit}"
+    done
+  else
+    resolved_epoch=$(_jgit_resolve_timestamp_from "${timestamp}" "${previous_epoch}" "${rolling_epoch}") ||
+      _jgit_die "invalid timestamp: ${timestamp}"
+    precision=$(_jgit_timestamp_precision "${timestamp}") || precision=1
+    delta=$((resolved_epoch - target_epoch))
+
+    for ((index = 0; index < ${#AMEND_OLD_COMMITS[@]}; index++)); do
+      commit=${AMEND_OLD_COMMITS[index]}
+      _jgit_amend_reject_extra_headers "${commit}"
+      if ((index == 0)); then
+        new_author=${resolved_epoch}
+        new_committer=${resolved_epoch}
+      elif ((only)); then
+        new_author=$(git show -s --format='%at' "${commit}")
+        new_committer=$(git show -s --format='%ct' "${commit}")
+      else
+        old_committer=$(git show -s --format='%ct' "${commit}")
+        new_committer=$((old_committer + delta))
+        # Inexact times give each shifted commit its own seconds, kept after its parent.
+        if ((precision > 1)); then
+          _jgit_random_below 60
+          new_committer=$((new_committer - new_committer % 60 + JGIT_RANDOM_RESULT))
+          ((new_committer >= AMEND_COMMITTER_EPOCHS[index - 1])) ||
+            new_committer=${AMEND_COMMITTER_EPOCHS[index - 1]}
+        fi
+        new_author=$(($(git show -s --format='%at' "${commit}") + new_committer - old_committer))
+      fi
+      _jgit_git_date "${new_author}" > /dev/null 2>&1 || _jgit_die 'author date is out of range'
+      _jgit_git_date "${new_committer}" > /dev/null 2>&1 || _jgit_die 'committer date is out of range'
+      AMEND_EDITED+=("$((index == 0))")
+      AMEND_AUTHOR_EPOCHS+=("${new_author}")
+      AMEND_COMMITTER_EPOCHS+=("${new_committer}")
+    done
+  fi
 
   for ((index = 0; index < ${#AMEND_OLD_COMMITS[@]}; index++)); do
     commit=${AMEND_OLD_COMMITS[index]}
@@ -963,13 +1147,27 @@ _jgit_amend() {
           break
         fi
       done
-      ((new_committer >= parent_epoch)) ||
+      ((new_committer >= parent_epoch)) || {
+        ((index > 0)) || [[ -z ${timestamp} || ${parent} != "$(git rev-parse "${commit}^1")" ]] ||
+          _jgit_die "timestamp would place ${commit:0:12} before parent ${parent:0:12}; amend ${parent:0:12} instead to move it and every newer commit"
         _jgit_die "timestamp would place ${commit:0:12} before parent ${parent:0:12}"
+      }
     done
   done
 
-  printf 'Commits to move by %+d seconds:\n' "${delta}"
+  moved=0
+  if [[ -n ${timestamp} ]]; then
+    printf 'Commits to move by %+d seconds:\n' "${delta}"
+  else
+    printf 'Commits to move:\n'
+  fi
   for ((index = 0; index < ${#AMEND_OLD_COMMITS[@]}; index++)); do
+    if [[ -z ${timestamp} ]]; then
+      ((AMEND_EDITED[index])) || continue
+    elif ((only && index > 0)); then
+      continue
+    fi
+    moved=$((moved + 1))
     commit=${AMEND_OLD_COMMITS[index]}
     printf '  %s  %s -> %s  %s\n' "${commit:0:12}" \
       "$(_jgit_git_date "$(git show -s --format='%ct' "${commit}")")" \
@@ -1001,7 +1199,7 @@ _jgit_amend() {
     author_timezone=${author_timezone##* }
     committer_timezone=$(git show -s --format='%ci' "${commit}")
     committer_timezone=${committer_timezone##* }
-    if ((index == 0)); then
+    if ((AMEND_EDITED[index])); then
       author_timezone=$(_jgit_git_date "${AMEND_AUTHOR_EPOCHS[index]}")
       author_timezone=${author_timezone##* }
       committer_timezone=${author_timezone}
@@ -1024,12 +1222,12 @@ _jgit_amend() {
   done
 
   new_commit=${AMEND_NEW_COMMITS[${#AMEND_NEW_COMMITS[@]} - 1]}
-  git update-ref -m "jgit amend ${target_ref} ${timestamp}" "${branch}" "${new_commit}" "${old_tip}" ||
+  git update-ref -m "jgit amend ${target_ref} ${timestamp:-(edited dates)}" "${branch}" "${new_commit}" "${old_tip}" ||
     _jgit_die 'branch changed while rewriting; no ref was updated'
   _jgit_amend_cleanup
   trap - EXIT HUP INT TERM
   unset JGIT_AMEND_TEMP
-  jsh::log_success "Moved ${#AMEND_OLD_COMMITS[@]} commit$([[ ${#AMEND_OLD_COMMITS[@]} == 1 ]] || printf s)"
+  jsh::log_success "Moved ${moved} commit$([[ ${moved} == 1 ]] || printf s)"
   jsh::log_note 'Local branch updated; no remote refs were changed.'
   printf 'Rollback: git update-ref %q %q %q\n' "${branch}" "${old_tip}" "${new_commit}"
 }
@@ -1749,6 +1947,10 @@ case ${1:-} in
   commit)
     shift
     _jgit_commit "$@"
+    ;;
+  commits)
+    shift
+    _jgit_commits "$@"
     ;;
   amend)
     shift

@@ -56,6 +56,46 @@ run_jgit() {
   "${JSH_ROOT}/bin/jgit" "$@"
 }
 
+@test "commits lists unpushed or recent commits newest first with full timestamps" {
+  local repository="${BATS_TEST_TMPDIR}/repository" base
+  init_repo "${repository}"
+  commit_file "${repository}" first one Base '2026-10-07 18:00:00 -0400'
+  base=$(git -C "${repository}" rev-parse HEAD)
+  commit_file "${repository}" second two First '2026-10-07 18:00:00 -0400' '2026-10-07 18:54:21 -0400'
+  commit_file "${repository}" third three Second '2026-10-07 19:10:36 -0400'
+  cd "${repository}"
+
+  run run_jgit commits
+  [[ ${status} -eq 0 ]]
+  [[ ${#lines[@]} -eq 3 ]]
+  [[ ${lines[2]} =~ ^[0-9a-f]{12}\ \ 2026-10-07\ 18:00:00\ -0400\ \ Base$ ]]
+
+  git remote add origin "${repository}"
+  git update-ref refs/remotes/origin/main "${base}"
+  git branch -q -u origin/main
+  run run_jgit commits
+  [[ ${status} -eq 0 ]]
+  [[ ${#lines[@]} -eq 2 ]]
+  [[ ${lines[0]} == *'  2026-10-07 19:10:36 -0400  Second' ]]
+  [[ ${lines[1]} == "$(git rev-parse --short=12 HEAD~1)  2026-10-07 18:54:21 -0400  First" ]]
+
+  run run_jgit commits --reverse
+  [[ ${status} -eq 0 ]]
+  [[ ${lines[0]} == *'  First' && ${lines[1]} == *'  Second' && ${#lines[@]} -eq 2 ]]
+
+  run run_jgit commits -a -r
+  [[ ${status} -eq 0 ]]
+  [[ ${#lines[@]} -eq 3 && ${lines[0]} == *'  Base' ]]
+
+  run run_jgit commits 1
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == *'  Second' && ${#lines[@]} -eq 1 ]]
+
+  run run_jgit commits -n 2 --reverse
+  [[ ${status} -eq 0 ]]
+  [[ ${lines[0]} == *'  First' && ${lines[1]} == *'  Second' && ${#lines[@]} -eq 2 ]]
+}
+
 @test "help version dashboard and Git passthrough are available" {
   local repository="${BATS_TEST_TMPDIR}/repository"
   init_repo "${repository}"
@@ -254,7 +294,7 @@ EOF
   [[ ${status} -eq 0 ]]
   [[ ${output} == *'Moved 3 commits'* ]]
   [[ ${output} == *"git update-ref refs/heads/"* ]]
-  [[ $(git log --reverse --format='%s %at %ct') == $'A 1789485154 1789485154\nB 1789488144 1789489374\nC 1789493584 1789493584' ]]
+  [[ $(git log --reverse --format='%s %at %ct') == $'A 1789485154 1789485154\nB 1789488124 1789489354\nC 1789493614 1789493614' ]]
   [[ $(git rev-parse 'HEAD^{tree}') == "${old_tree}" ]]
   [[ $(git log --reverse --format='%an <%ae>|%cn <%ce>|%s') == "${identities}" ]]
   [[ $(git status --porcelain) == "${status_before}" ]]
@@ -272,17 +312,17 @@ EOF
 
   run run_jgit amend -t +5h0m0s --dry-run
   [[ ${status} -eq 0 ]]
-  [[ ${output} == *'+10800 seconds'* ]]
+  [[ ${output} == *'+18000 seconds'* ]]
   [[ $(git rev-parse HEAD) == "${old_tip}" ]]
 
   run run_jgit amend -t +5h0m0s
   [[ ${status} -eq 0 ]]
   [[ ${output} == *'Local branch updated; no remote refs were changed.'* ]]
-  [[ $(git show -s --format='%ct') -eq 1789485010 ]]
+  [[ $(git show -s --format='%ct') -eq 1789492210 ]]
   [[ $(git rev-parse refs/remotes/origin/main) == "${old_tip}" ]]
 }
 
-@test "amend supports offsets relative to the previous first-parent commit" {
+@test "amend resolves signed offsets from the target commit" {
   local repository="${BATS_TEST_TMPDIR}/repository"
   init_repo "${repository}"
   commit_file "${repository}" first one Parent '2026-09-15 09:00:00 +0000'
@@ -293,23 +333,78 @@ EOF
   run env JGIT_RANDOM_VALUE=0 "${JSH_ROOT}/bin/jgit" amend HEAD~1 -t +30m --yes
 
   [[ ${status} -eq 0 ]]
-  [[ $(git log --reverse --format='%s %ct') == $'Parent 1789462800\nTarget 1789464600\nFollowing 1789468200' ]]
+  [[ $(git log --reverse --format='%s %ct') == $'Parent 1789462800\nTarget 1789471800\nFollowing 1789475400' ]]
 
-  run run_jgit amend HEAD -t -30m0s --yes
+  run run_jgit amend HEAD -t -2h0m0s --yes
+  [[ ${status} -ne 0 ]]
+  [[ ${output} == *"before parent $(git rev-parse --short=12 HEAD~1); amend $(git rev-parse --short=12 HEAD~1) instead"* ]]
+  [[ $(git log --reverse --format='%s %ct') == $'Parent 1789462800\nTarget 1789471800\nFollowing 1789475400' ]]
+}
+
+@test "amend --only moves one commit and keeps following timestamps" {
+  local repository="${BATS_TEST_TMPDIR}/repository" old_tree
+  init_repo "${repository}"
+  commit_file "${repository}" first one Parent '2026-09-15 18:00:00 +0000'
+  commit_file "${repository}" second two Target '2026-09-15 19:00:00 +0000'
+  commit_file "${repository}" third three Following '2026-09-15 19:30:00 +0000'
+  old_tree=$(git -C "${repository}" rev-parse 'HEAD^{tree}')
+  cd "${repository}"
+
+  run env JGIT_RANDOM_VALUE=17 "${JSH_ROOT}/bin/jgit" amend -t -6m HEAD~1 --only --yes
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == *'Moved 1 commit'* ]]
+  [[ $(git log --reverse --format='%s %at %ct') == $'Parent 1789495200 1789495200\nTarget 1789498457 1789498457\nFollowing 1789500600 1789500600' ]]
+  [[ $(git rev-parse 'HEAD^{tree}') == "${old_tree}" ]]
+
+  run run_jgit amend HEAD~1 -t +40m0s --only --yes
   [[ ${status} -ne 0 ]]
   [[ ${output} == *'before parent'* ]]
 }
 
-@test "amend rejects signed offsets for a root commit" {
+@test "amend without a timestamp changes only dates edited in the Git editor" {
+  local repository="${BATS_TEST_TMPDIR}/repository" base old_tree
+  init_repo "${repository}"
+  commit_file "${repository}" first one A '2026-09-15 09:00:00 +0000'
+  base=$(git -C "${repository}" rev-parse HEAD)
+  commit_file "${repository}" second two B '2026-09-15 10:00:00 +0000'
+  commit_file "${repository}" third three C '2026-09-15 11:00:00 +0000'
+  commit_file "${repository}" fourth four D '2026-09-15 12:00:00 +0000'
+  old_tree=$(git -C "${repository}" rev-parse 'HEAD^{tree}')
+  cd "${repository}"
+
+  run env GIT_EDITOR=true "${JSH_ROOT}/bin/jgit" amend
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == *'No dates changed.'* ]]
+
+  run env GIT_EDITOR="sed -i.bak -e '/ B\$/s/2026-09-15 10:00:00/-30m0s/' -e '/ C\$/s/2026-09-15 11:00:00/2026-09-15 11:15:00/'" \
+    "${JSH_ROOT}/bin/jgit" amend
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == *'Moved 2 commits'* ]]
+  [[ $(git log --reverse --format='%s %at %ct') == $'A 1789462800 1789462800\nB 1789464600 1789464600\nC 1789470900 1789470900\nD 1789473600 1789473600' ]]
+  [[ $(git rev-parse HEAD~3) == "${base}" ]]
+  [[ $(git rev-parse 'HEAD^{tree}') == "${old_tree}" ]]
+
+  run env GIT_EDITOR="sed -i.bak -e '/ D\$/s/2026-09-15 12:00:00/2026-09-15 08:00:00/'" \
+    "${JSH_ROOT}/bin/jgit" amend HEAD~1
+  [[ ${status} -ne 0 ]]
+  [[ ${output} == *'before parent'* && ${output} != *'instead'* ]]
+
+  run env GIT_EDITOR="sed -i.bak -e '/^[0-9a-f]/d'" "${JSH_ROOT}/bin/jgit" amend
+  [[ ${status} -ne 0 ]]
+  [[ ${output} == *'amend cancelled'* ]]
+}
+
+@test "amend applies signed offsets to a root commit" {
   local repository="${BATS_TEST_TMPDIR}/repository"
   init_repo "${repository}"
   commit_file "${repository}" file one Initial '2026-09-15 10:00:00 +0000'
   cd "${repository}"
 
-  run run_jgit amend -t +30m0s --yes
+  run run_jgit amend -t -30m0s --yes
 
-  [[ ${status} -ne 0 ]]
-  [[ ${output} == *'signed offset for the root commit'* ]]
+  [[ ${status} -eq 0 ]]
+  [[ $(git show -s --format='%ct') -eq 1789464600 ]]
 }
 
 @test "amend resolves unsigned durations after now or the branch tip" {
@@ -351,7 +446,7 @@ EOF
   [[ $(git rev-list --parents -n 1 HEAD | wc -w | tr -d ' ') -eq 3 ]]
   [[ $(git rev-parse HEAD^2) == "${side}" ]]
   [[ $(git rev-parse 'HEAD^{tree}') == "${old_tree}" ]]
-  [[ $(git log --first-parent --reverse --format='%s %ct' | tail -3) == $'Target 1789470000\nMain 1789473600\nMerge 1789477200' ]]
+  [[ $(git log --first-parent --reverse --format='%s %ct' | tail -3) == $'Target 1789473600\nMain 1789477200\nMerge 1789480800' ]]
 }
 
 @test "amend rejects invalid refs detached heads and non-first-parent commits" {
@@ -395,6 +490,10 @@ EOF
   run run_jgit amend HEAD~1 -t '2026-09-15 08:00:00' --yes
   [[ ${status} -ne 0 ]]
   [[ ${output} == *'before parent'* ]]
+
+  run run_jgit amend HEAD~1 -t '2026-09-15 11:30:00' --only --yes
+  [[ ${status} -ne 0 ]]
+  [[ ${output} == *'before parent'* && ${output} != *'instead'* ]]
 }
 
 @test "amend rejects signed commit metadata without moving the branch" {
