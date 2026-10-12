@@ -505,10 +505,6 @@
 		<true/>
 		<key>mouseNavigationExceptions</key>
 		<array/>
-		<key>musicBlockEnabled</key>
-		<true/>
-		<key>musicBlockReplacementPath</key>
-		<string>/Applications/Spotify.app</string>
 		<key>onboardingStep</key>
 		<integer>0</integer>
 		<key>panelCollapsedResetVersion</key>
