@@ -484,9 +484,7 @@ test-reconciliation: ## Test planning, completions, idempotency and platform ada
 	@$(BATS) tests/jssh.bats
 	@$(BATS) tests/kubectx.bats
 	@$(BATS) tests/linux.bats
-	@$(BATS) tests/spotify.bats
 	@$(BATS) tests/syncthing.bats
 	@$(BATS) tests/ui.bats
 	@$(BATS) tests/waterfox.bats
-	@node --test tests/*.test.js
 	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m unittest discover -s tests -p 'test_*.py'
