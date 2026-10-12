@@ -4,6 +4,7 @@
 ## search ## Search Homebrew with macOS and Linux availability
 ## whatprovides @command ## Find formulae that provide a command
 ## adopt ## Add packages to the matching Jsh Brewfile
+## extras ## List or remove taps, formulae, and casks missing from conf/packages.json
 
 set -euo pipefail
 
@@ -669,8 +670,77 @@ adopt_command() {
   done
 }
 
+extras_command() {
+  local remove=0 arg declared metadata tap_name kind name selected line
+  local -a choices=() pairs=() picks=()
+
+  for arg in "$@"; do
+    case ${arg} in
+      -h | --help)
+        printf 'Usage: %s extras [--remove]\n' "${SCRIPT_NAME}"
+        return 0
+        ;;
+      --remove) remove=1 ;;
+      *) die "unknown option: ${arg}" ;;
+    esac
+  done
+
+  declared=$(manifest brewfile)
+  metadata=$(HOMEBREW_NO_AUTO_UPDATE=1 "${BREW}" info --json=v2 --installed)
+  while IFS=$'\t' read -r kind name; do
+    [[ -n ${name} ]] && choices+=("${kind} ${name}")
+  done < <(jq -r --arg declared "${declared}" '
+    ($declared | split("\n")) as $declared
+    | def listed($kind; $names): any($names[]; . as $n | $declared | index("\($kind) \"\($n)\""));
+    ((.formulae[]? | select(any(.installed[]?; .installed_on_request))
+      | select(listed("brew"; [.name, .full_name]) | not) | ["brew", .full_name]),
+    (.casks[]? | select(listed("cask"; [.token, .full_token]) | not) | ["cask", .token]))
+    | @tsv
+  ' <<<"${metadata}" | LC_ALL=C sort -t $'\t' -k1,1 -k2,2)
+  while IFS= read -r tap_name; do
+    [[ -n ${tap_name} && ${tap_name} != homebrew/* ]] || continue
+    grep -Fxq "tap \"${tap_name}\"" <<<"${declared}" && continue
+    grep -Eq "^(brew|cask) \"${tap_name}/" <<<"${declared}" && continue
+    choices+=("tap ${tap_name}")
+  done < <("${BREW}" tap)
+
+  if ((${#choices[@]} == 0)); then
+    printf '%s✔%s Everything installed is in conf/packages.json\n' "${C_GREEN}" "${C_RESET}"
+    return 0
+  fi
+  heading "Installed but not in conf/packages.json"
+  printf '  %s\n' "${choices[@]}"
+  ((remove)) || {
+    printf '\nRun %s extras --remove to choose what to uninstall.\n' "${SCRIPT_NAME}"
+    return 0
+  }
+
+  for line in "${choices[@]}"; do pairs+=("${line}" "${line}"); done
+  # Nothing is preselected; cancelling removes nothing.
+  selected=$(jsh::choose_many 'Remove which? (none by default)' "${pairs[@]}") || {
+    jsh::log_note 'Nothing removed.'
+    return 0
+  }
+  [[ -n ${selected} ]] || return 0
+  mapfile -t picks <<<"${selected}"
+  for line in "${picks[@]}"; do
+    kind=${line%% *}
+    name=${line#* }
+    case ${kind} in
+      brew) "${BREW}" uninstall --formula "${name}" || jsh::log_error "Could not uninstall ${name}" ;;
+      cask) "${BREW}" uninstall --cask "${name}" || jsh::log_error "Could not uninstall ${name}" ;;
+      tap) "${BREW}" untap "${name}" || jsh::log_error "Could not untap ${name}" ;;
+    esac
+  done
+}
+
 command -v "${BREW}" >/dev/null 2>&1 || die 'brew is required'
 case ${1:-} in
+  extras)
+    shift
+    require_command jq
+    extras_command "$@"
+    ;;
   installed)
     shift
     require_command jq
