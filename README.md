@@ -38,19 +38,19 @@ All scripts and tools residing in [`bin/`](bin/) are globally executable via `PA
 
 Everyday commands, rebuilt the way I wish they worked.
 
-| Command                      | What it adds                                                                                |
-| ---------------------------- | ------------------------------------------------------------------------------------------- |
-| [`jadopt`](bin/jadopt)       | Moves any file in your home directory into the managed dotfiles.                            |
-| [`jbrew`](bin/jbrew)         | Homebrew with macOS and Linux availability in search, `whatprovides`, and adoption.         |
-| [`jfetch`](bin/jfetch)       | A fastfetch-inspired system summary.<br><img src="assets/jfetch.png" alt="jfetch output" /> |
-| [`jgit`](bin/jgit)           | Per-repo identities, timestamped commits, history rewrites, and gist-backed stashes.        |
-| [`jgraphify`](bin/jgraphify) | Converts data into graph representations for visualization and analysis.                    |
-| [`jmount`](bin/jmount)       | SMB and NFS mounts from a URL or a saved profile.                                           |
-| [`jsh`](bin/jsh)             | The Jsh launcher: runtime, setup, update, doctor, and repair.                               |
-| [`jssh`](bin/jssh)           | SSH that brings a portable Jsh environment to the remote host.                              |
-| [`jstow`](bin/jstow)         | GNU Stow, reimplemented in Bash, for deploying dotfile links.                               |
-| [`jventoy`](bin/jventoy)     | Initializes Ventoy drives and keeps their ISOs up to date.                                  |
-| [`jvim`](bin/jvim)           | Neovim with self-contained data and cache, falling back to Vim or Vi.                       |
+| Command                      | What it adds                                                                                  |
+| ---------------------------- | --------------------------------------------------------------------------------------------- |
+| [`jadopt`](bin/jadopt)       | Moves any file in your home directory into the managed dotfiles.                              |
+| [`jbrew`](bin/jbrew)         | Homebrew with macOS and Linux availability in search, `whatprovides`, adoption, and `extras`. |
+| [`jfetch`](bin/jfetch)       | A fastfetch-inspired system summary.<br><img src="assets/jfetch.png" alt="jfetch output" />   |
+| [`jgit`](bin/jgit)           | Per-repo identities, timestamped commits, history rewrites, and gist-backed stashes.          |
+| [`jgraphify`](bin/jgraphify) | Converts data into graph representations for visualization and analysis.                      |
+| [`jmount`](bin/jmount)       | SMB and NFS mounts from a URL or a saved profile.                                             |
+| [`jsh`](bin/jsh)             | The Jsh launcher: runtime, setup, update, doctor, and repair.                                 |
+| [`jssh`](bin/jssh)           | SSH that brings a portable Jsh environment to the remote host.                                |
+| [`jstow`](bin/jstow)         | GNU Stow, reimplemented in Bash, for deploying dotfile links.                                 |
+| [`jventoy`](bin/jventoy)     | Initializes Ventoy drives and keeps their ISOs up to date.                                    |
+| [`jvim`](bin/jvim)           | Neovim with self-contained data and cache, falling back to Vim or Vi.                         |
 
 ### Utilities
 
