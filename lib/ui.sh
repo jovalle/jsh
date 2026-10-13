@@ -129,7 +129,8 @@ jsh::title() {
   case ${JSH_UI_BACKEND} in
     gum)
       jsh_gum style --border rounded --padding '0 2' \
-        --border-foreground '#0039A6' --foreground '#F5F5F5' -- "${text}"
+        --border-foreground "$(ui::token ACCENT_PRIMARY)" \
+        --foreground "$(ui::token TEXT_PRIMARY)" -- "${text}"
       ;;
     shell)
       ui::box --border rounded --padding-x 2 --border-fg ACCENT_PRIMARY -- "${text}"

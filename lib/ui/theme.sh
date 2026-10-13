@@ -1,27 +1,14 @@
 #!/usr/bin/env bash
 
-# NYC subway-inspired source colors.
-UI_NYC_BLACK='#000000'
-UI_NYC_WHITE='#F5F5F5'
-UI_NYC_BLUE='#0039A6'
-UI_NYC_ORANGE='#FF6319'
-UI_NYC_LIME='#6CBE45'
-UI_NYC_BROWN='#996633'
-UI_NYC_YELLOW='#FCCC0A'
-UI_NYC_RED='#EE352E'
-UI_NYC_GREEN='#00933C'
-UI_NYC_GRAY='#A7A9AC'
-UI_NYC_CYAN='#0099AA'
-
-# Semantic application tokens.
-UI_SURFACE=${UI_SURFACE:-${UI_NYC_BLACK}}
-UI_TEXT_PRIMARY=${UI_TEXT_PRIMARY:-${UI_NYC_WHITE}}
-UI_TEXT_MUTED=${UI_TEXT_MUTED:-${UI_NYC_GRAY}}
-UI_ACCENT_PRIMARY=${UI_ACCENT_PRIMARY:-${UI_NYC_BLUE}}
-UI_ACCENT_SECONDARY=${UI_ACCENT_SECONDARY:-${UI_NYC_CYAN}}
-UI_SUCCESS=${UI_SUCCESS:-${UI_NYC_GREEN}}
-UI_WARN=${UI_WARN:-${UI_NYC_YELLOW}}
-UI_ERROR=${UI_ERROR:-${UI_NYC_RED}}
+# Match the conventional terminal colors used by Jsh output.
+UI_SURFACE=${UI_SURFACE:-'#000000'}
+UI_TEXT_PRIMARY=${UI_TEXT_PRIMARY:-'#FFFFFF'}
+UI_TEXT_MUTED=${UI_TEXT_MUTED:-'#808080'}
+UI_ACCENT_PRIMARY=${UI_ACCENT_PRIMARY:-'#00CDCD'}
+UI_ACCENT_SECONDARY=${UI_ACCENT_SECONDARY:-'#00CDCD'}
+UI_SUCCESS=${UI_SUCCESS:-'#00CD00'}
+UI_WARN=${UI_WARN:-'#CDCD00'}
+UI_ERROR=${UI_ERROR:-'#CD0000'}
 
 ui::color_mode() {
   case ${UI_COLOR_MODE:-auto} in
@@ -51,17 +38,6 @@ ui::token() {
     SUCCESS) printf '%s\n' "${UI_SUCCESS}" ;;
     WARN) printf '%s\n' "${UI_WARN}" ;;
     ERROR) printf '%s\n' "${UI_ERROR}" ;;
-    NYC_BLACK) printf '%s\n' "${UI_NYC_BLACK}" ;;
-    NYC_WHITE) printf '%s\n' "${UI_NYC_WHITE}" ;;
-    NYC_BLUE) printf '%s\n' "${UI_NYC_BLUE}" ;;
-    NYC_ORANGE) printf '%s\n' "${UI_NYC_ORANGE}" ;;
-    NYC_LIME) printf '%s\n' "${UI_NYC_LIME}" ;;
-    NYC_BROWN) printf '%s\n' "${UI_NYC_BROWN}" ;;
-    NYC_YELLOW) printf '%s\n' "${UI_NYC_YELLOW}" ;;
-    NYC_RED) printf '%s\n' "${UI_NYC_RED}" ;;
-    NYC_GREEN) printf '%s\n' "${UI_NYC_GREEN}" ;;
-    NYC_GRAY) printf '%s\n' "${UI_NYC_GRAY}" ;;
-    NYC_CYAN) printf '%s\n' "${UI_NYC_CYAN}" ;;
     \#[[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]][[:xdigit:]])
       printf '%s\n' "$1"
       ;;
