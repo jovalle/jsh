@@ -171,8 +171,8 @@ setup() {
     "${HELIUM_POLICY_PATH}" "${extension_ids[@]}" -- "${force_ids[@]}"
 
   verify_extension_policy
-  [[ $(jq '.ExtensionSettings | length' "${HELIUM_POLICY_PATH}") -eq 4 ]]
-  [[ $(jq '.ExtensionInstallForcelist | length' "${HELIUM_POLICY_PATH}") -eq 3 ]]
+  [[ $(jq '.ExtensionSettings | length' "${HELIUM_POLICY_PATH}") -eq 5 ]]
+  [[ $(jq '.ExtensionInstallForcelist | length' "${HELIUM_POLICY_PATH}") -eq 4 ]]
 }
 
 @test "reset safety accepts only the expected profile below home" {

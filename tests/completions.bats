@@ -15,7 +15,7 @@ setup() {
     zsh -f -c '
       source "$JSH/dotfiles/.zshrc" >/dev/null 2>&1
 
-      for pair in j:_j jsh:_jsh jgit:_jsh make:_make just:_just; do
+      for pair in j:_j jsh:_jsh jgit:_jsh jadb:_jsh make:_make just:_just; do
         name=${pair%%:*}
         expected=${pair#*:}
         [[ ${_comps[$name]-} == $expected ]] || {
