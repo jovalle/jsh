@@ -669,6 +669,32 @@ setup_update_clone() {
   [[ -z $(git stash list) ]]
 }
 
+@test "update stash ignores dirty submodules and untracked nested repositories" {
+  local child="${BATS_TEST_TMPDIR}/child"
+  setup_update_clone
+  init_repo "${child}"
+  commit_file "${child}" file child Child '2026-09-15 10:00:00 +0000'
+  git -c protocol.file.allow=always -C "${UPDATE_CLONE}" submodule add -q "${child}" vendor/child
+  git -C "${UPDATE_CLONE}" commit -q -m 'Add child'
+  git -C "${UPDATE_CLONE}" push -q
+  git -C "${UPDATE_SEED}" pull -q --no-recurse-submodules
+  commit_file "${UPDATE_SEED}" upstream new Upstream '2026-09-15 11:00:00 +0000'
+  git -C "${UPDATE_SEED}" push -q
+  printf 'local\n' > "${UPDATE_CLONE}/vendor/child/file"
+  init_repo "${UPDATE_CLONE}/nested"
+  printf 'one\ntwo\nthree\nfour\n' > "${UPDATE_CLONE}/shared"
+
+  cd "${UPDATE_CLONE}"
+  run run_jgit update --stash
+
+  [[ ${status} -eq 0 ]]
+  [[ $(git rev-parse HEAD) == $(git -C "${UPDATE_SEED}" rev-parse HEAD) ]]
+  [[ $(< vendor/child/file) == local ]]
+  [[ $(< shared) == $'one\ntwo\nthree\nfour' ]]
+  [[ -d nested/.git ]]
+  [[ -z $(git stash list) ]]
+}
+
 @test "update stash skips the pull and restores changes on real conflicts" {
   local before_head before_status
   setup_update_clone

@@ -406,13 +406,60 @@ refresh_vendored_fzf() {
   "${fzf_dir}/install" --bin
 }
 
+# Stashes local edits in submodules the update will move; sets SUBMODULE_STASHES to path<TAB>ref lines.
+stash_moving_submodules() {
+  local sub recorded dir ref previous
+  SUBMODULE_STASHES=()
+  while IFS=$'\t' read -r sub recorded; do
+    dir=${JSH_DIR}/${sub}
+    [[ $(git -C "${dir}" rev-parse HEAD) != "${recorded}" ]] || continue
+    [[ -n $(git -C "${dir}" status --porcelain --ignore-submodules=all) ]] || continue
+    ref=$(git -C "${dir}" symbolic-ref -q --short HEAD) || ref=$(git -C "${dir}" rev-parse HEAD)
+    previous=$(git -C "${dir}" rev-parse -q --verify refs/stash) || previous=
+    git -C "${dir}" stash push --include-untracked --quiet --message "jsh update $(date +%Y-%m-%dT%H:%M:%S)" || return
+    [[ $(git -C "${dir}" rev-parse -q --verify refs/stash) != "${previous}" ]] || continue
+    SUBMODULE_STASHES+=("${sub}"$'\t'"${ref}")
+  done < <(git -C "${JSH_DIR}" submodule foreach --recursive --quiet 'printf "%s\t%s\n" "$displaypath" "$sha1"')
+}
+
+# Succeeds when the newest stash in DIR cannot be applied cleanly on HEAD.
+submodule_stash_conflicts() {
+  local dir=$1 head=$2 path
+  git -C "${dir}" merge-tree --write-tree --merge-base='stash@{0}^1' "${head}" 'stash@{0}' > /dev/null || return 0
+  git -C "${dir}" rev-parse -q --verify 'stash@{0}^3' > /dev/null || return 1
+  while IFS= read -r -d '' path; do
+    git -C "${dir}" cat-file -e "${head}:${path}" 2> /dev/null && return 0
+  done < <(git -C "${dir}" ls-tree -r --name-only -z 'stash@{0}^3')
+  return 1
+}
+
+# Reapplies a submodule stash on the new commit, or on the previous one when it would conflict.
+restore_submodule_stash() {
+  local sub=$1 ref=$2 dir=${JSH_DIR}/$1 head
+  head=$(git -C "${dir}" rev-parse HEAD) || return
+  if submodule_stash_conflicts "${dir}" "${head}"; then
+    git -C "${dir}" checkout --quiet "${ref}" || return
+    jsh_warn "Kept ${sub} at its previous commit; its local changes conflict with upstream."
+  fi
+  git -C "${dir}" stash pop --index --quiet 2> /dev/null || git -C "${dir}" stash pop --quiet
+}
+
 sync_submodules() {
+  local entry result=0
   if ! confirm "Initialize and update Jsh submodules?"; then
     jsh_note "Skipped submodule initialization and update."
     return
   fi
   git -C "${JSH_DIR}" submodule sync --recursive || return
-  git -C "${JSH_DIR}" submodule update --init --recursive || return
+  stash_moving_submodules || result=$?
+  ((result != 0)) || git -C "${JSH_DIR}" submodule update --init --recursive || result=$?
+  for entry in ${SUBMODULE_STASHES[@]+"${SUBMODULE_STASHES[@]}"}; do
+    restore_submodule_stash "${entry%%$'\t'*}" "${entry#*$'\t'}" || {
+      jsh_error "Could not restore local changes in ${entry%%$'\t'*}; they remain in its stash."
+      result=1
+    }
+  done
+  ((result == 0)) || return "${result}"
   refresh_vendored_fzf
 }
 
@@ -434,7 +481,7 @@ inspect_repository() {
   fi
   counts=$(git -C "${JSH_DIR}" rev-list --left-right --count 'HEAD...@{upstream}') || return
   read -r REPOSITORY_AHEAD REPOSITORY_BEHIND <<< "${counts}"
-  [[ -z "$(git -C "${JSH_DIR}" status --porcelain --untracked-files=no)" ]] || REPOSITORY_DIRTY=1
+  [[ -z "$(git -C "${JSH_DIR}" status --porcelain --untracked-files=no --ignore-submodules=all)" ]] || REPOSITORY_DIRTY=1
 
   if ((REPOSITORY_AHEAD && REPOSITORY_BEHIND)); then
     jsh_warn "Jsh has diverged from upstream: ${REPOSITORY_AHEAD} ahead, ${REPOSITORY_BEHIND} behind."
