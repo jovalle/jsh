@@ -94,7 +94,7 @@ typeset -a jsh_plugins=(fzf fzf-tab zsh-autosuggestions zsh-completions zsh-synt
 if [[ ${JSH_LOAD_CONFIG:-1} == 1 ]]; then
   for plugin in ${jsh_plugins}; do
     if [[ ! -d "${JSH_VENDOR}/${plugin}" ]]; then
-      print -u2 -- "jsh submodules are missing. Run: git submodule update --init --recursive"
+      print -u2 -- "jsh vendored plugins are missing. Run: jsh repair"
       break
     fi
   done
@@ -155,7 +155,7 @@ typeset _jsh_compdump=${ZDOTDIR:-${HOME}}/.zcompdump
 autoload -Uz compinit && compinit -u -d "${_jsh_compdump}"
 unset _jsh_compdump
 
-# shellcheck disable=SC1090  # Pinned repository submodule
+# shellcheck disable=SC1090  # Vendored repository
 [[ -r "${JSH_VENDOR}/fzf-tab/fzf-tab.plugin.zsh" && -n ${commands[fzf]:-} ]] && \
   source "${JSH_VENDOR}/fzf-tab/fzf-tab.plugin.zsh"
 
@@ -1817,7 +1817,7 @@ typeset -gA ZSH_HIGHLIGHT_STYLES
 ZSH_HIGHLIGHT_STYLES[command]='fg=green'
 ZSH_HIGHLIGHT_STYLES[hashed-command]='fg=green'
 
-# shellcheck disable=SC1090  # Pinned repository submodules
+# shellcheck disable=SC1090  # Vendored repositories
 [[ -r "${JSH_VENDOR}/zsh-autosuggestions/zsh-autosuggestions.zsh" ]] && \
   source "${JSH_VENDOR}/zsh-autosuggestions/zsh-autosuggestions.zsh"
 [[ -r "${JSH_VENDOR}/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" ]] && \
