@@ -595,6 +595,36 @@ JSON
   [[ ${output} == *'Skipping update for running app: example (noninteractive).'* ]]
 }
 
+@test "Debian installer gives apt a readable temporary package" {
+  local fixture_package="${BATS_TEST_TMPDIR}/package.deb" staged_path="${BATS_TEST_TMPDIR}/apt-path"
+  local installed_flag="${BATS_TEST_TMPDIR}/installed"
+  printf 'verified package\n' > "${fixture_package}"
+  dpkg-query() { [[ -e ${installed_flag} ]] && printf 'installed\t1.0'; }
+  dpkg() { [[ $1 == --compare-versions ]]; }
+  dpkg-deb() {
+    case $3 in
+      Package) printf example ;;
+      Architecture) printf amd64 ;;
+      Version) printf 1.0 ;;
+    esac
+  }
+  jsh_download_artifact() { printf '%s\n' "${fixture_package}"; }
+  jsh_run_root() {
+    local package=${*: -1}
+    [[ $1 == env && $2 == DEBIAN_FRONTEND=noninteractive && $3 == apt-get ]] || return 1
+    [[ ${package} == /tmp/jsh-apt.*/example.deb ]] || return 1
+    [[ $(stat -c %a "$(dirname "${package}")") == 755 ]] || return 1
+    [[ $(stat -c %a "${package}") == 644 ]] || return 1
+    cmp -s "${fixture_package}" "${package}" || return 1
+    printf '%s\n' "${package}" > "${staged_path}"
+    touch "${installed_flag}"
+  }
+
+  jsh_debian_install_package example example 1.0 https://example.invalid/package.deb ''
+
+  [[ ! -e $(cat "${staged_path}") ]]
+}
+
 @test "managed file replacement uses the shared confirmation default" {
   run env JSH_INTERACTIVE=1 JSH_UI_BACKEND=plain bash -c '
     source "$1/lib/output.sh"
