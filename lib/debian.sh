@@ -11,7 +11,7 @@ jsh_debian_installed_version() {
 jsh_debian_install_package() {
   local id=$1 package_name=$2 version=$3 url=$4 expected=$5
   shift 5
-  local installed artifact field actual process running=0 attempt
+  local installed artifact field actual process running=0 attempt apt_stage apt_artifact
 
   installed=$(jsh_debian_installed_version "${package_name}" || true)
   if [[ -n ${installed} ]] && dpkg --compare-versions "${installed}" ge "${version}"; then
@@ -69,7 +69,19 @@ jsh_debian_install_package() {
       return 1
     }
   done
-  jsh_run_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -- "${artifact}"
+  # apt fetches local packages as _apt, which cannot traverse a private home directory.
+  apt_stage=$(mktemp -d /tmp/jsh-apt.XXXXXXXXXX) || return 1
+  declare -F jsh_interrupt_cleanup_path >/dev/null && jsh_interrupt_cleanup_path "${apt_stage}"
+  apt_artifact=${apt_stage}/${id}.deb
+  if ! chmod 0755 "${apt_stage}" || ! install -m 0644 -- "${artifact}" "${apt_artifact}"; then
+    rm -rf -- "${apt_stage}"
+    return 1
+  fi
+  if ! jsh_run_root env DEBIAN_FRONTEND=noninteractive apt-get install -y -- "${apt_artifact}"; then
+    rm -rf -- "${apt_stage}"
+    return 1
+  fi
+  rm -rf -- "${apt_stage}"
   installed=$(jsh_debian_installed_version "${package_name}" || true)
   [[ -n ${installed} ]] && dpkg --compare-versions "${installed}" ge "${version}" || {
     jsh::log_error "${id} package verification failed."
