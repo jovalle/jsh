@@ -524,6 +524,7 @@ main() {
   if [[ "${VORSSAINT_WAS_RUNNING}" -eq 1 ]]; then
     open -gj -a Vorssaint
   fi
+  return 0
 }
 
 trap cleanup EXIT
