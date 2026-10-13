@@ -474,18 +474,18 @@ EOF
   [[ ${output} == $'\n[2/3] Packages\nInstall selected packages.' ]]
 }
 
-@test "Gum facade applies the NYC palette and preserves stdout values" {
+@test "Gum facade applies the classic palette and preserves stdout values" {
   local gum="${BATS_TEST_TMPDIR}/gum" calls="${BATS_TEST_TMPDIR}/gum-calls"
   cat > "${gum}" << 'EOF'
 #!/bin/sh
-test "${GUM_CONFIRM_PROMPT_FOREGROUND}" = '#F5F5F5' || exit 91
-test "${GUM_CONFIRM_SELECTED_BACKGROUND}" = '#0099AA' || exit 91
-test "${GUM_CHOOSE_CURSOR_FOREGROUND}" = '#0099AA' || exit 91
-test "${GUM_CHOOSE_HEADER_FOREGROUND}" = '#F5F5F5' || exit 91
-test "${GUM_CHOOSE_ITEM_FOREGROUND}" = '#A7A9AC' || exit 91
-test "${GUM_INPUT_PROMPT_FOREGROUND}" = '#0099AA' || exit 91
-test "${GUM_INPUT_CURSOR_FOREGROUND}" = '#0099AA' || exit 91
-test "${GUM_SPIN_SPINNER_FOREGROUND}" = '#0099AA' || exit 91
+test "${GUM_CONFIRM_PROMPT_FOREGROUND}" = '#FFFFFF' || exit 91
+test "${GUM_CONFIRM_SELECTED_BACKGROUND}" = '#00CDCD' || exit 91
+test "${GUM_CHOOSE_CURSOR_FOREGROUND}" = '#00CDCD' || exit 91
+test "${GUM_CHOOSE_HEADER_FOREGROUND}" = '#FFFFFF' || exit 91
+test "${GUM_CHOOSE_ITEM_FOREGROUND}" = '#808080' || exit 91
+test "${GUM_INPUT_PROMPT_FOREGROUND}" = '#00CDCD' || exit 91
+test "${GUM_INPUT_CURSOR_FOREGROUND}" = '#00CDCD' || exit 91
+test "${GUM_SPIN_SPINNER_FOREGROUND}" = '#00CDCD' || exit 91
 printf '%s\n' "$*" >> "${GUM_CALLS}"
 case $1 in
   choose) printf '%s\n' beta ;;

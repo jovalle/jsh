@@ -13,7 +13,7 @@ setup() {
   run bash -c '
     source "$1/lib/ui/theme.sh"
     UI_COLOR_MODE=truecolor
-    [[ $(ui::ansi_fg ERROR) == $'"'"'\033[38;2;238;53;46m'"'"' ]]
+    [[ $(ui::ansi_fg ERROR) == $'"'"'\033[38;2;205;0;0m'"'"' ]]
     UI_COLOR_MODE=256
     [[ $(ui::ansi_bg SURFACE) == $'"'"'\033[48;5;16m'"'"' ]]
   ' _ "${JSH_ROOT}"
@@ -278,7 +278,7 @@ if os.path.exists("/usr/bin/zsh"):
 
   run zsh -f -c '
     source "$1/lib/ui/gum.sh"
-    [[ $(ui::token ACCENT_PRIMARY) == "#0039A6" ]]
+    [[ $(ui::token ACCENT_PRIMARY) == "#00CDCD" ]]
     [[ $(ui::box --border double --padding-x 0 --width 2 -- ok) == $'"'"'╔══╗\n║ok║\n╚══╝'"'"' ]]
     exec 3<<<$'"'"'\033[B\n'"'"'
     UI_INPUT_FD=3
@@ -292,7 +292,7 @@ if os.path.exists("/usr/bin/zsh"):
   run bash -c '
     cd "$1/lib/ui"
     source gum.sh
-    [[ $(ui::token SUCCESS) == "#00933C" ]]
+    [[ $(ui::token SUCCESS) == "#00CD00" ]]
   ' _ "${JSH_ROOT}"
 
   [[ ${status} -eq 0 ]]
