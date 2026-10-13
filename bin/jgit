@@ -1590,6 +1590,20 @@ _jgit_update_preflight() {
   fi
 }
 
+# Prints local changes a fast-forward to TARGET could touch. Git stash skips submodules and
+# nested repositories, and untracked paths absent from TARGET cannot block the merge.
+_jgit_update_changes() {
+  local repo=$1 target=$2 entry path
+  while IFS= read -r -d '' entry; do
+    path=${entry:3}
+    if [[ ${entry:0:2} == '??' ]] &&
+      [[ -z $(git --literal-pathspecs -C "${repo}" ls-tree -r --name-only "${target}" -- "${path%/}") ]]; then
+      continue
+    fi
+    printf '%s\n' "${path}"
+  done < <(git -C "${repo}" status --porcelain -z --ignore-submodules=all)
+}
+
 _jgit_update_worktree_matches() {
   local repo=$1 tree=$2 index result=0
   index=$(git -C "${repo}" rev-parse --path-format=absolute --git-path "jgit-update-index.$$") || return 1
@@ -1635,7 +1649,7 @@ _jgit_rewrite_stash_worktree() {
   local status previous_stash
   JGIT_REWRITE_REPO=$(git rev-parse --show-toplevel)
   JGIT_REWRITE_STASH_OID=
-  status=$(git status --porcelain) || _jgit_die 'could not inspect the working tree'
+  status=$(git status --porcelain --ignore-submodules=all) || _jgit_die 'could not inspect the working tree'
   [[ -n ${status} ]] || return 0
 
   previous_stash=$(git rev-parse --verify refs/stash 2> /dev/null || true)
@@ -1647,7 +1661,7 @@ _jgit_rewrite_stash_worktree() {
     _jgit_die 'could not stash local changes'
   fi
 
-  status=$(git status --porcelain) || {
+  status=$(git status --porcelain --ignore-submodules=all) || {
     _jgit_update_restore_stash "${JGIT_REWRITE_REPO}" "${JGIT_REWRITE_STASH_OID}" || true
     _jgit_die 'could not inspect the working tree after stashing'
   }
@@ -1716,7 +1730,7 @@ _jgit_update_repository() {
     return 1
   fi
 
-  status=$(git -C "${repo}" status --porcelain) || {
+  status=$(_jgit_update_changes "${repo}" "${target}") || {
     jsh::log_error "Could not inspect working tree in ${repo}"
     return 1
   }
@@ -1736,14 +1750,15 @@ _jgit_update_repository() {
       jsh::log_error "Could not stash all local changes in ${repo}"
       return 1
     fi
-    status=$(git -C "${repo}" status --porcelain) || {
+    status=$(_jgit_update_changes "${repo}" "${target}") || {
       _jgit_update_restore_stash "${repo}" "${stash_oid}" || true
       jsh::log_error "Could not inspect working tree in ${repo}"
       return 1
     }
     if [[ -n ${status} ]]; then
       _jgit_update_restore_stash "${repo}" "${stash_oid}" || return 1
-      jsh::log_error "Could not stash all local changes in ${repo}"
+      jsh::log_error "Could not stash these local changes in ${repo}:"
+      sed 's/^/  /' <<< "${status}" >&2
       return 1
     fi
   fi
