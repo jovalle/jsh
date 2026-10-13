@@ -7,7 +7,7 @@
 ## update ## Update Jsh, dependencies, packages, and managed configuration
 ##? update --dry-run ## Fetch and preview the update without applying it
 ## doctor ## Report dependencies, repository drift, and managed links
-## repair ## Initialize submodules, install fzf, and remove stale links
+## repair ## Clone vendored repositories, install fzf, and remove stale links
 ## uninstall ## Remove dotfile links managed by jstow
 ## reload ## Reload the active J shell
 ## -r ## Reload the active J shell
@@ -201,11 +201,11 @@ jsh_health_check() {
   fi
 
   jsh_health_stage 'Checking bundled plugins'
-  jsh_health_path 'fzf submodule' "${JSH_ROOT}/local/vendor/fzf/install" executable
-  jsh_health_path 'fzf-tab submodule' "${JSH_ROOT}/local/vendor/fzf-tab/fzf-tab.plugin.zsh" readable
-  jsh_health_path 'zsh-autosuggestions submodule' "${JSH_ROOT}/local/vendor/zsh-autosuggestions/zsh-autosuggestions.zsh" readable
-  jsh_health_path 'zsh-completions submodule' "${JSH_ROOT}/local/vendor/zsh-completions/src" directory
-  jsh_health_path 'zsh-syntax-highlighting submodule' "${JSH_ROOT}/local/vendor/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" readable
+  jsh_health_path 'fzf' "${JSH_ROOT}/local/vendor/fzf/install" executable
+  jsh_health_path 'fzf-tab' "${JSH_ROOT}/local/vendor/fzf-tab/fzf-tab.plugin.zsh" readable
+  jsh_health_path 'zsh-autosuggestions' "${JSH_ROOT}/local/vendor/zsh-autosuggestions/zsh-autosuggestions.zsh" readable
+  jsh_health_path 'zsh-completions' "${JSH_ROOT}/local/vendor/zsh-completions/src" directory
+  jsh_health_path 'zsh-syntax-highlighting' "${JSH_ROOT}/local/vendor/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" readable
 
   jsh_health_stage 'Checking fzf runtime'
   if health_fzf=$(command -v fzf 2> /dev/null); then
@@ -225,21 +225,6 @@ jsh_health_check() {
     fi
   else
     jsh_health_issue "The fzf executable is missing (expected ${JSH_ROOT}/local/vendor/fzf/bin/fzf or fzf in PATH)."
-  fi
-
-  jsh_health_stage 'Checking pinned revisions'
-  if command -v git > /dev/null 2>&1 && [ -e "${JSH_ROOT}/.git" ]; then
-    if submodule_status=$(git -C "${JSH_ROOT}" submodule status --recursive 2> /dev/null); then
-      if printf '%s\n' "${submodule_status}" | grep -Eq '^[-+U]'; then
-        jsh_health_issue 'One or more Jsh submodules are not at their pinned revisions.'
-      else
-        jsh_health_status ok 'Submodules match their pinned revisions.'
-      fi
-    else
-      jsh_health_issue 'Jsh submodule status could not be read.'
-    fi
-  else
-    jsh_health_status skip 'Submodule revision check skipped: Git checkout unavailable.'
   fi
   jsh_health_spinner_stop
 
@@ -262,12 +247,11 @@ jsh_health_report() {
 jsh_repair() {
   repair_failed=0
 
-  if command -v git > /dev/null 2>&1 && [ -e "${JSH_ROOT}/.git" ]; then
-    jsh_info 'Synchronizing Jsh submodules...'
-    git -C "${JSH_ROOT}" submodule sync --recursive &&
-      git -C "${JSH_ROOT}" submodule update --init --recursive || repair_failed=1
+  if command -v git > /dev/null 2>&1; then
+    jsh_info 'Cloning missing vendored repositories...'
+    "${JSH_ROOT}/lib/unix/vendor.sh" "${JSH_ROOT}" || repair_failed=1
   else
-    jsh_error 'Git is required to repair Jsh submodules. Run `jsh runtime` first.'
+    jsh_error 'Git is required to clone vendored repositories. Run `jsh runtime` first.'
     repair_failed=1
   fi
 
@@ -276,7 +260,7 @@ jsh_repair() {
       jsh_info 'Installing the vendored fzf executable...'
       "${JSH_ROOT}/local/vendor/fzf/install" --bin || repair_failed=1
     else
-      jsh_error 'fzf cannot be installed until its submodule is initialized.'
+      jsh_error 'fzf cannot be installed until local/vendor/fzf is cloned.'
       repair_failed=1
     fi
   fi
@@ -487,7 +471,7 @@ ${usage_heading}Commands${usage_reset}
   ${usage_command}update${usage_reset} [--dry-run]         Update Jsh, packages, and configuration
   ${usage_command}adopt${usage_reset} [--dry-run] PATH...  Move home paths into the shared dotfiles package
   ${usage_command}doctor${usage_reset}                     Report dependencies, repository drift, and links
-  ${usage_command}repair${usage_reset}                     Initialize submodules, install fzf, remove stale links
+  ${usage_command}repair${usage_reset}                     Clone vendored repos, install fzf, remove stale links
   ${usage_command}uninstall${usage_reset}                  Remove dotfile links managed by jstow
 
 ${usage_heading}Options${usage_reset}

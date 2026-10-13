@@ -406,61 +406,16 @@ refresh_vendored_fzf() {
   "${fzf_dir}/install" --bin
 }
 
-# Stashes local edits in submodules the update will move; sets SUBMODULE_STASHES to path<TAB>ref lines.
-stash_moving_submodules() {
-  local sub recorded dir ref previous
-  SUBMODULE_STASHES=()
-  while IFS=$'\t' read -r sub recorded; do
-    dir=${JSH_DIR}/${sub}
-    [[ $(git -C "${dir}" rev-parse HEAD) != "${recorded}" ]] || continue
-    [[ -n $(git -C "${dir}" status --porcelain --ignore-submodules=all) ]] || continue
-    ref=$(git -C "${dir}" symbolic-ref -q --short HEAD) || ref=$(git -C "${dir}" rev-parse HEAD)
-    previous=$(git -C "${dir}" rev-parse -q --verify refs/stash) || previous=
-    git -C "${dir}" stash push --include-untracked --quiet --message "jsh update $(date +%Y-%m-%dT%H:%M:%S)" || return
-    [[ $(git -C "${dir}" rev-parse -q --verify refs/stash) != "${previous}" ]] || continue
-    SUBMODULE_STASHES+=("${sub}"$'\t'"${ref}")
-  done < <(git -C "${JSH_DIR}" submodule foreach --recursive --quiet 'printf "%s\t%s\n" "$displaypath" "$sha1"')
-}
-
-# Succeeds when the newest stash in DIR cannot be applied cleanly on HEAD.
-submodule_stash_conflicts() {
-  local dir=$1 head=$2 path
-  git -C "${dir}" merge-tree --write-tree --merge-base='stash@{0}^1' "${head}" 'stash@{0}' > /dev/null || return 0
-  git -C "${dir}" rev-parse -q --verify 'stash@{0}^3' > /dev/null || return 1
-  while IFS= read -r -d '' path; do
-    git -C "${dir}" cat-file -e "${head}:${path}" 2> /dev/null && return 0
-  done < <(git -C "${dir}" ls-tree -r --name-only -z 'stash@{0}^3')
-  return 1
-}
-
-# Reapplies a submodule stash on the new commit, or on the previous one when it would conflict.
-restore_submodule_stash() {
-  local sub=$1 ref=$2 dir=${JSH_DIR}/$1 head
-  head=$(git -C "${dir}" rev-parse HEAD) || return
-  if submodule_stash_conflicts "${dir}" "${head}"; then
-    git -C "${dir}" checkout --quiet "${ref}" || return
-    jsh_warn "Kept ${sub} at its previous commit; its local changes conflict with upstream."
-  fi
-  git -C "${dir}" stash pop --index --quiet 2> /dev/null || git -C "${dir}" stash pop --quiet
-}
-
-sync_submodules() {
-  local entry result=0
-  if ! confirm "Initialize and update Jsh submodules?"; then
-    jsh_note "Skipped submodule initialization and update."
+# Clones missing vendored repositories; pass --update to also fast-forward them.
+sync_vendor() {
+  local result=0
+  if ! confirm "Clone and update vendored repositories?"; then
+    jsh_note "Skipped vendored repositories."
     return
   fi
-  git -C "${JSH_DIR}" submodule sync --recursive || return
-  stash_moving_submodules || result=$?
-  ((result != 0)) || git -C "${JSH_DIR}" submodule update --init --recursive || result=$?
-  for entry in ${SUBMODULE_STASHES[@]+"${SUBMODULE_STASHES[@]}"}; do
-    restore_submodule_stash "${entry%%$'\t'*}" "${entry#*$'\t'}" || {
-      jsh_error "Could not restore local changes in ${entry%%$'\t'*}; they remain in its stash."
-      result=1
-    }
-  done
-  ((result == 0)) || return "${result}"
-  refresh_vendored_fzf
+  "${JSH_DIR}/lib/unix/vendor.sh" "$@" "${JSH_DIR}" || result=$?
+  refresh_vendored_fzf || return
+  return "${result}"
 }
 
 plural() {
@@ -529,7 +484,7 @@ sync_repository() {
   if [[ -d "${JSH_DIR}/.git" ]]; then
     pull_repository || result=$?
     ((result == 0 || result == 10)) || return "${result}"
-    sync_submodules || return
+    sync_vendor || return
     return
   fi
 
@@ -542,7 +497,7 @@ sync_repository() {
   [[ ${mode} != runtime ]] || clone_options=(--filter=blob:none)
   mkdir -p "$(dirname "${JSH_DIR}")" || return
   git clone ${clone_options[@]+"${clone_options[@]}"} "${JSH_REPO}" "${JSH_DIR}" || return
-  sync_submodules
+  sync_vendor
 }
 
 load_repository_ui() {
@@ -580,28 +535,23 @@ update_repository() {
   local result=0
   pull_repository || result=$?
   ((result == 0 || result == 10)) || return "${result}"
-  sync_submodules || return
+  sync_vendor --update || return
   return "${result}"
 }
 
 preview_repository() {
-  local drift
   if [[ ! -d "${JSH_DIR}/.git" ]]; then
     jsh_error "Jsh is not a Git checkout: ${JSH_DIR}"
     return 1
   fi
   inspect_repository || :
-  drift=$(git -C "${JSH_DIR}" submodule status --recursive | grep -E '^[-+U]') || :
-  if [[ -n ${drift} ]]; then
-    jsh_note "Submodules that would be initialized or moved:"
-    jsh_detail "${drift}"
-  fi
+  "${JSH_DIR}/lib/unix/vendor.sh" --update --dry-run "${JSH_DIR}" || :
 }
 
 preview_update() {
   local profile=$1 outdated
   jsh_blank
-  jsh_info "Repository and submodules"
+  jsh_info "Repository and vendored repositories"
   preview_repository || return
   if [[ ${profile} != bare ]]; then
     load_brew
@@ -943,7 +893,7 @@ record_install_profile() {
 
 update_environment() {
   local profile=$1
-  run_update_step "Repository and submodules" update_repository
+  run_update_step "Repository and vendored repositories" update_repository
   case ${profile} in
     bare)
       run_update_step "Prerequisites" install_prerequisites bare

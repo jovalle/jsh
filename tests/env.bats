@@ -305,7 +305,6 @@ EOF
   [[ ${output} == *'Checking required tools'* ]]
   [[ ${output} == *'Checking bundled plugins'* ]]
   [[ ${output} == *'Checking fzf runtime'* ]]
-  [[ ${output} == *'Checking pinned revisions'* ]]
   [[ ${output} == *"${clear_screen}"*'SHELL_STARTED'* ]]
   [[ ${output} != *'✓ Git:'* ]]
 }
