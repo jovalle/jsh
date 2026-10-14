@@ -13,6 +13,7 @@
 ## rewrite [--last N|REF...] ## Rewrite commit messages and timestamps
 ## stash [push options] ## Stash tracked and untracked changes, excluding ignored files
 ## update [--stash] [--all [DIR]] ## Fast-forward repositories from their upstreams
+## rebase [ARGS...] ## Fetch the default branch from upstream/origin and rebase onto it
 ## heal [--yes] ## Repair broken tool-owned refs
 ## save [--exclude PATH]... ## Back up uncommitted changes to a secret gist
 ## backup [--exclude PATH]... ## Alias for save
@@ -91,6 +92,7 @@ Commands:
   stash [push options]  Stash tracked and untracked changes, excluding ignored files
   update [--stash]      Fast-forward the current branch from its upstream
   update --all [DIR]    Update repositories in DIR and its immediate children
+  rebase [ARGS...]      Fetch main/master from upstream (else origin) and rebase onto it
   heal [--yes]          Repair broken tool-owned refs; preview by default
   save [--exclude PATH] Back up uncommitted changes to a secret gist
   backup                 Alias for save
@@ -1889,6 +1891,35 @@ _jgit_update() {
   ((failed == 0))
 }
 
+# Rebases onto the remote default branch, never the branch's own upstream, so commits
+# removed locally (for example by `git undo`) are not pulled back from the pushed branch.
+_jgit_rebase() {
+  local remote='' base='' branch candidate
+  git rev-parse --git-dir > /dev/null 2>&1 || _jgit_die 'not in a Git repository'
+  branch=$(git symbolic-ref --quiet --short HEAD) || _jgit_die 'rebase requires a branch checkout'
+  for candidate in upstream origin; do
+    if git remote get-url "${candidate}" > /dev/null 2>&1; then
+      remote=${candidate}
+      break
+    fi
+  done
+  [[ -n ${remote} ]] || _jgit_die 'no upstream or origin remote configured'
+
+  git fetch --prune "${remote}" || _jgit_die "could not fetch ${remote}"
+  for candidate in main master; do
+    if git show-ref --verify --quiet "refs/remotes/${remote}/${candidate}"; then
+      base=${candidate}
+      break
+    fi
+  done
+  [[ -n ${base} ]] || _jgit_die "${remote} has no main or master branch"
+  [[ ${branch} != "${base}" ]] ||
+    _jgit_die "already on ${base}; rebasing onto ${remote}/${base} would restore locally removed commits (use jgit update)"
+
+  jsh::log_info "Rebasing ${branch} onto ${remote}/${base}"
+  exec git rebase --autostash "$@" "${remote}/${base}"
+}
+
 _jgit_heal() {
   local apply=0 git_dir fsck_output fsck_status=0 ref oid backup index failed=0
   local -a heal_refs=() heal_oids=() protected_refs=()
@@ -2043,6 +2074,10 @@ case ${1:-} in
   update)
     shift
     _jgit_update "$@"
+    ;;
+  rebase)
+    shift
+    _jgit_rebase "$@"
     ;;
   heal)
     shift
