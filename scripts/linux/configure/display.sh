@@ -103,7 +103,7 @@ configure_shortcut() {
   local xfce_binding='/commands/custom/<Primary><Alt><Super>m'
   local desktop
   local bindings="${HOME}/.xbindkeysrc" autostart="${HOME}/.config/autostart/jsh-keybindings.desktop"
-  local existing='' cleaned content temporary
+  local existing='' cleaned content temporary ensure_status binding_changed=0
   jsh::log_detail "This will bind Ctrl+Alt+Super+M to toggle an ultrawide display split."
   if ! jsh::confirm "Configure the display shortcut?" --default no; then
     jsh::log_note "Skipping display shortcut."
@@ -153,12 +153,28 @@ ${BLOCK_END}"
       temporary=$(mktemp "${bindings}.XXXXXX")
       jsh_interrupt_cleanup_path "${temporary}"
       printf '%s\n' "${content}" > "${temporary}"
-      install -m 0644 "${temporary}" "${bindings}"
+      ensure_status=0
+      jsh_ensure_file "${bindings}" "${temporary}" 0644 || ensure_status=$?
       rm -f "${temporary}"
+      case ${ensure_status} in
+        0) binding_changed=1 ;;
+        1) ;;
+        *) return "${ensure_status}" ;;
+      esac
       mkdir -p "$(dirname -- "${autostart}")"
+      temporary=$(mktemp "${autostart}.XXXXXX")
+      jsh_interrupt_cleanup_path "${temporary}"
       printf '%s\n' '[Desktop Entry]' 'Type=Application' 'Name=jsh global keybindings' \
-        'Exec=xbindkeys' 'X-GNOME-Autostart-enabled=true' > "${autostart}"
-      pkill -HUP -u "$(id -u)" -x xbindkeys 2> /dev/null || xbindkeys
+        'Exec=xbindkeys' 'X-GNOME-Autostart-enabled=true' > "${temporary}"
+      ensure_status=0
+      jsh_ensure_file "${autostart}" "${temporary}" 0644 || ensure_status=$?
+      rm -f "${temporary}"
+      [[ ${ensure_status} == 0 || ${ensure_status} == 1 ]] || return "${ensure_status}"
+      if ((binding_changed)); then
+        pkill -HUP -u "$(id -u)" -x xbindkeys 2> /dev/null || xbindkeys
+      elif ! pgrep -u "$(id -u)" -x xbindkeys > /dev/null 2>&1; then
+        xbindkeys
+      fi
       ;;
   esac
   jsh::log_success "Display shortcut configured."

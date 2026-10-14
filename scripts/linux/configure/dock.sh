@@ -43,7 +43,7 @@ dock_pins() {
 }
 
 managed_dock_target() {
-  local panel_dir=$1 candidate filename plugin_id managed
+  local panel_dir=$1 candidate filename plugin_id managed plugin_type
   while IFS= read -r candidate; do
     filename=${candidate##*/}
     plugin_id=${filename#docklike-}
@@ -54,6 +54,16 @@ managed_dock_target() {
     printf '%s\n' "${candidate}"
     return
   done < <(find "${panel_dir}" -maxdepth 1 -name 'docklike-*.rc' -print 2> /dev/null | sort)
+  while IFS= read -r plugin_id; do
+    [[ ${plugin_id} =~ ^[0-9]+$ ]] || continue
+    plugin_type=$(xfconf-query -c xfce4-panel -p "/plugins/plugin-${plugin_id}" 2> /dev/null || true)
+    managed=$(xfconf-query -c xfce4-panel -p "/plugins/plugin-${plugin_id}/jsh-managed" 2> /dev/null || true)
+    if [[ ${plugin_type} == docklike && ${managed} == true ]]; then
+      printf '%s/docklike-%s.rc\n' "${panel_dir}" "${plugin_id}"
+      return
+    fi
+  done < <(xfconf-query -c xfce4-panel -lv 2> /dev/null |
+    sed -n 's|^/plugins/plugin-\([0-9][0-9]*\).*|\1|p' | sort -nu)
   return 1
 }
 
@@ -73,7 +83,7 @@ find_xfce_dock_panel() {
 }
 
 write_pins() {
-  local target=$1 pins=$2 temporary
+  local target=$1 pins=$2 temporary ensure_status=0
   temporary=$(mktemp "${target}.XXXXXX")
   jsh_interrupt_cleanup_path "${temporary}"
   awk -v pins="${pins}" '
@@ -92,8 +102,13 @@ write_pins() {
       }
     }
   ' "${target}" 2> /dev/null > "${temporary}" || printf '[user]\npinned=%s\n' "${pins}" > "${temporary}"
-  install -m 0644 "${temporary}" "${target}"
+  jsh_ensure_file "${target}" "${temporary}" 0644 || ensure_status=$?
   rm -f "${temporary}"
+  case ${ensure_status} in
+    0) DOCK_FILE_CHANGED=1 ;;
+    1) ;;
+    *) return "${ensure_status}" ;;
+  esac
 }
 
 configure_gnome_dock() {
@@ -119,13 +134,17 @@ configure_gnome_dock() {
     separator=', '
   done
   serialized+=']'
-  gsettings set org.gnome.shell favorite-apps "${serialized}"
+  if [[ ${current} != "${serialized}" ]]; then
+    gsettings set org.gnome.shell favorite-apps "${serialized}"
+  fi
 }
 
 configure_xfce_dock() {
   local pins=$1
-  local panel_dir target plugin_id panel_id id temporary filename ptype
-  local -a plugin_ids=() array_args=()
+  local panel_dir target plugin_id panel_id id temporary filename ptype panel_before panel_after
+  local -a plugin_ids=() existing_plugin_ids=() array_args=()
+  DOCK_FILE_CHANGED=0
+  panel_before=$(xfconf-query -c xfce4-panel -lv 2> /dev/null || true)
 
   panel_dir="${HOME}/.config/xfce4/panel"
   mkdir -p "${panel_dir}"
@@ -152,6 +171,7 @@ configure_xfce_dock() {
   local dock_present=0
   while IFS= read -r id; do
     [[ "${id}" =~ ^[0-9]+$ ]] || continue
+    existing_plugin_ids+=("${id}")
     ptype=$(xfconf-query -c xfce4-panel -p "/plugins/plugin-${id}" 2> /dev/null || true)
     if [[ "${id}" == "${plugin_id}" ]]; then
       dock_present=1
@@ -170,7 +190,9 @@ configure_xfce_dock() {
   for id in "${plugin_ids[@]}"; do
     array_args+=(-t int -s "${id}")
   done
-  xfconf-query -c xfce4-panel -p "/panels/panel-${panel_id}/plugin-ids" -a "${array_args[@]}" > /dev/null
+  if [[ ${plugin_ids[*]} != "${existing_plugin_ids[*]}" ]]; then
+    xfconf-query -c xfce4-panel -p "/panels/panel-${panel_id}/plugin-ids" -a "${array_args[@]}" > /dev/null
+  fi
 
   # Remove docklike from any other panel (e.g. top bar)
   local other_id other_ptype
@@ -187,13 +209,22 @@ configure_xfce_dock() {
     for id in "${other_plugins[@]}"; do
       other_args+=(-t int -s "${id}")
     done
-    if ((${#other_args[@]} > 0)); then
+    local -a existing_other_plugins=()
+    while IFS= read -r id; do
+      [[ "${id}" =~ ^[0-9]+$ ]] && existing_other_plugins+=("${id}")
+    done < <(xfconf-query -c xfce4-panel -p "/panels/panel-${other_id}/plugin-ids" 2> /dev/null)
+    if ((${#other_args[@]} > 0)) &&
+      [[ ${other_plugins[*]} != "${existing_other_plugins[*]}" ]]; then
       xfconf-query -c xfce4-panel -p "/panels/panel-${other_id}/plugin-ids" -a "${other_args[@]}" > /dev/null
     fi
   done
 
-  [[ -e "${target}" ]] || printf '[user]\n' > "${target}"
   write_pins "${target}" "${pins}"
+  panel_after=$(xfconf-query -c xfce4-panel -lv 2> /dev/null || true)
+  if [[ ${panel_before} == "${panel_after}" && ${DOCK_FILE_CHANGED} == 0 ]]; then
+    jsh::log_note "XFCE dock is current; leaving the panel running."
+    return 0
+  fi
   if pgrep -x xfce4-panel > /dev/null 2>&1; then
     timeout 5 xfce4-panel -r > /dev/null 2>&1 || true
     sleep 1

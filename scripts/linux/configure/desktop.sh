@@ -23,6 +23,21 @@ xfconf_set() {
   fi
 }
 
+write_if_changed() {
+  local target=$1 mode=$2 temporary ensure_status=0
+  mkdir -p "${target%/*}"
+  temporary=$(mktemp "${target}.XXXXXX")
+  jsh_interrupt_cleanup_path "${temporary}"
+  cat > "${temporary}"
+  jsh_ensure_file "${target}" "${temporary}" "${mode}" || ensure_status=$?
+  rm -f -- "${temporary}"
+  case ${ensure_status} in
+    0) PANEL_FILES_CHANGED=1 ;;
+    1) ;;
+    *) return "${ensure_status}" ;;
+  esac
+}
+
 configure_wallpaper() {
   "${SCRIPT_DIR}/wallpaper.sh"
 }
@@ -56,8 +71,10 @@ managed_plugin() {
 }
 
 configure_panel() {
-  local panel_id cpu_id load_id net_id fs_id audio_id cafe_id id plugin_id ptype
-  local -a plugin_ids=() arguments=()
+  local panel_id cpu_id load_id net_id fs_id audio_id cafe_id id plugin_id ptype panel_before panel_after
+  local -a plugin_ids=() existing_plugin_ids=() arguments=()
+  PANEL_FILES_CHANGED=0
+  panel_before=$(xfconf-query -c xfce4-panel -lv 2> /dev/null || true)
   panel_id=$(xfconf-query -c xfce4-panel -p /panels 2> /dev/null | grep -E '^[0-9]+$' | head -n 1)
   [[ "${panel_id}" =~ ^[0-9]+$ ]] || {
     jsh::log_note "Skipping panel monitors: no XFCE panel is available."
@@ -72,12 +89,12 @@ configure_panel() {
   cafe_id=$(managed_plugin genmon cafe)
 
   while IFS= read -r id; do
-    [[ "${id}" =~ ^[0-9]+$ ]] && plugin_ids+=("${id}")
+    [[ "${id}" =~ ^[0-9]+$ ]] && existing_plugin_ids+=("${id}")
   done < <(xfconf-query -c xfce4-panel -p "/panels/panel-${panel_id}/plugin-ids" 2> /dev/null)
 
   local systray_id='' clock_id='' actions_id=''
   local -a base_ids=()
-  for plugin_id in "${plugin_ids[@]}"; do
+  for plugin_id in "${existing_plugin_ids[@]}"; do
     ptype=$(xfconf-query -c xfce4-panel -p "/plugins/plugin-${plugin_id}" 2> /dev/null || true)
     case "${ptype}" in
       docklike | netload)
@@ -110,7 +127,9 @@ configure_panel() {
   for id in "${plugin_ids[@]}"; do
     arguments+=(-t int -s "${id}")
   done
-  xfconf-query -c xfce4-panel -p "/panels/panel-${panel_id}/plugin-ids" -a "${arguments[@]}" > /dev/null
+  if [[ ${plugin_ids[*]} != "${existing_plugin_ids[*]}" ]]; then
+    xfconf-query -c xfce4-panel -p "/panels/panel-${panel_id}/plugin-ids" -a "${arguments[@]}" > /dev/null
+  fi
 
   # CPU monitor (graph)
   xfconf_set xfce4-panel "/plugins/plugin-${cpu_id}/mode" int 0
@@ -132,7 +151,7 @@ configure_panel() {
   # Storage / Filesystem monitor
   xfconf_set xfce4-panel "/plugins/plugin-${fs_id}/mountpoint" string /
   mkdir -p "${HOME}/.config/xfce4/panel"
-  cat > "${HOME}/.config/xfce4/panel/fsguard-${fs_id}.rc" << EOF
+  write_if_changed "${HOME}/.config/xfce4/panel/fsguard-${fs_id}.rc" 0644 << EOF
 yellow=8
 red=2
 lab_size_visible=false
@@ -144,7 +163,7 @@ mnt=/
 EOF
 
   # Network LED monitor
-  cat > "${HOME}/.config/xfce4/panel/net-led.sh" << 'EOF'
+  write_if_changed "${HOME}/.config/xfce4/panel/net-led.sh" 0755 << 'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -258,9 +277,7 @@ fi
 printf '<txt>net %s&#160;</txt><tool>%s: %s (Rx: %d B, Tx: %d B)</tool><txtclick>xfce4-taskmanager</txtclick><click>xfce4-taskmanager</click>\n' \
   "${led}" "${iface:-none}" "${status_str}" "${rx_delta}" "${tx_delta}"
 EOF
-  chmod +x "${HOME}/.config/xfce4/panel/net-led.sh"
-
-  cat > "${HOME}/.config/xfce4/panel/genmon-${net_id}.rc" << EOF
+  write_if_changed "${HOME}/.config/xfce4/panel/genmon-${net_id}.rc" 0644 << EOF
 Command=${HOME}/.config/xfce4/panel/net-led.sh
 UseLabel=false
 Text=
@@ -268,10 +285,14 @@ UpdatePeriod=100
 EOF
 
   # Cafe sleep / screensaver inhibition toggle
-  rm -f "${HOME}/.config/xfce4/panel/cafe-status.sh" \
-    "${HOME}/.config/xfce4/panel/cafe-toggle.sh"
+  if [[ -e ${HOME}/.config/xfce4/panel/cafe-status.sh ||
+        -e ${HOME}/.config/xfce4/panel/cafe-toggle.sh ]]; then
+    rm -f "${HOME}/.config/xfce4/panel/cafe-status.sh" \
+      "${HOME}/.config/xfce4/panel/cafe-toggle.sh"
+    PANEL_FILES_CHANGED=1
+  fi
 
-  cat > "${HOME}/.config/xfce4/panel/genmon-${cafe_id}.rc" << EOF
+  write_if_changed "${HOME}/.config/xfce4/panel/genmon-${cafe_id}.rc" 0644 << EOF
 Command=${JSH_ROOT}/bin/cafe --xfce-status
 UseLabel=false
 Text=
@@ -291,8 +312,11 @@ EOF
   xfconf_set xfce4-panel "/plugins/plugin-${clock_id}/digital-layout" int 3
   xfconf_set xfce4-panel "/plugins/plugin-${clock_id}/digital-time-format" string '%Y-%m-%d %H:%M:%S'
 
-  pkill -f "wrapper-2.0.*libfsguard.so" 2> /dev/null || true
-  pkill -f "wrapper-2.0.*libgenmon.so" 2> /dev/null || true
+  panel_after=$(xfconf-query -c xfce4-panel -lv 2> /dev/null || true)
+  if [[ ${panel_before} == "${panel_after}" && ${PANEL_FILES_CHANGED} == 0 ]]; then
+    jsh::log_note "XFCE panel is current; leaving it running."
+    return 0
+  fi
   if pgrep -x xfce4-panel > /dev/null 2>&1; then
     DISPLAY="${DISPLAY:-:0}" timeout 5 xfce4-panel -r > /dev/null 2>&1 || true
     sleep 1
@@ -304,8 +328,11 @@ EOF
 
 configure_identity() {
   local avatar="${JSH_USER_AVATAR:-${JSH_ROOT}/assets/icons/j.jpg}"
+  local ensure_status=0
 
-  [[ ! -r "${avatar}" ]] || install -m 0644 "${avatar}" "${HOME}/.face"
+  [[ ! -r "${avatar}" ]] && return 0
+  jsh_ensure_file "${HOME}/.face" "${avatar}" 0644 || ensure_status=$?
+  [[ ${ensure_status} == 0 || ${ensure_status} == 1 ]]
 }
 
 configure_xfce_screensaver() {
@@ -313,13 +340,17 @@ configure_xfce_screensaver() {
   local temporary
 
   # Disable light-locker which causes black screen and unresponsive wake on Debian
-  pkill -x light-locker 2> /dev/null || true
+  if pgrep -x light-locker > /dev/null 2>&1; then
+    pkill -x light-locker 2> /dev/null || true
+  fi
   mkdir -p "$(dirname -- "${autostart}")"
   temporary=$(mktemp "${autostart}.XXXXXX")
   jsh_interrupt_cleanup_path "${temporary}"
   printf '%s\n' '[Desktop Entry]' 'Type=Application' 'Name=Screen Locker' \
     'Exec=light-locker' 'Hidden=true' > "${temporary}"
-  install -m 0644 "${temporary}" "${autostart}"
+  if ! cmp -s "${temporary}" "${autostart}"; then
+    install -m 0644 "${temporary}" "${autostart}"
+  fi
   rm -f "${temporary}"
 
   # Configure xfce4-session lock command
@@ -393,10 +424,14 @@ configure_xfce() {
 }
 
 configure_gnome() {
-  gsettings set org.gnome.desktop.interface color-scheme prefer-dark
+  if [[ $(gsettings get org.gnome.desktop.interface color-scheme) != "'prefer-dark'" ]]; then
+    gsettings set org.gnome.desktop.interface color-scheme prefer-dark
+  fi
   if [[ "$(gsettings writable org.gnome.desktop.interface gtk-theme 2> /dev/null)" == true ]] &&
     [[ -d /usr/share/themes/Arc-Dark || -d "${HOME}/.themes/Arc-Dark" ]]; then
-    gsettings set org.gnome.desktop.interface gtk-theme Arc-Dark
+    if [[ $(gsettings get org.gnome.desktop.interface gtk-theme) != "'Arc-Dark'" ]]; then
+      gsettings set org.gnome.desktop.interface gtk-theme Arc-Dark
+    fi
   fi
 }
 

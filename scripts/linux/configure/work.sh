@@ -274,7 +274,10 @@ zoom_vdi_healthy() {
 
 register_zoom_vdi() {
   local module="${CITRIX_ROOT}/config/module.ini" temporary replacement backup
-  jsh_run_root ln -sfn "${ZOOM_VDI_LIBRARY}" "${CITRIX_ROOT}/ZoomMedia.so"
+  if [[ ! -L ${CITRIX_ROOT}/ZoomMedia.so ]] ||
+    [[ $(readlink -f "${CITRIX_ROOT}/ZoomMedia.so") != "${ZOOM_VDI_LIBRARY}" ]]; then
+    jsh_run_root ln -sfn "${ZOOM_VDI_LIBRARY}" "${CITRIX_ROOT}/ZoomMedia.so"
+  fi
   temporary=$(mktemp "${JSH_ROOT}/tmp/module.ini.XXXXXX")
   jsh_interrupt_cleanup_path "${temporary}"
   cp "${module}" "${temporary}"
@@ -293,13 +296,16 @@ register_zoom_vdi() {
       "${temporary}" > "${replacement}"
     mv "${replacement}" "${temporary}"
   fi
-  backup="${XDG_STATE_HOME:-${HOME}/.local/state}/jsh/backups/$(date +%Y%m%d%H%M%S)${module}"
-  mkdir -p "$(dirname -- "${backup}")"
-  jsh_run_root cat "${module}" > "${backup}"
-  chmod 0600 "${backup}"
-  jsh_run_root install -m 0644 "${temporary}" "${module}"
+  if ! cmp -s "${temporary}" "${module}" 2> /dev/null &&
+    ! jsh_run_root cmp -s "${temporary}" "${module}" 2> /dev/null; then
+    backup="${XDG_STATE_HOME:-${HOME}/.local/state}/jsh/backups/$(date +%Y%m%d%H%M%S)${module}"
+    mkdir -p "$(dirname -- "${backup}")"
+    jsh_run_root cat "${module}" > "${backup}"
+    chmod 0600 "${backup}"
+    jsh_run_root install -m 0644 "${temporary}" "${module}"
+    jsh::log_detail "Backup: ${backup}"
+  fi
   rm -f "${temporary}"
-  jsh::log_detail "Backup: ${backup}"
 }
 
 install_zoom_vdi() {

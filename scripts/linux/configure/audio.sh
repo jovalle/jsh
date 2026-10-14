@@ -65,13 +65,14 @@ configure_audio_shortcut() {
   local command_path="${SCRIPT_DIR}/audio.sh cycle"
   local xfce_binding='/commands/custom/<Primary><Alt><Super>a'
   local desktop
-  local bindings="${HOME}/.xbindkeysrc" existing='' cleaned content temporary
+  local bindings="${HOME}/.xbindkeysrc" existing='' cleaned content temporary ensure_status
   desktop=$(jsh_linux_desktop)
   case "${desktop}" in
     xfce)
       command -v xfconf-query > /dev/null 2>&1 || return 1
       if xfconf-query -c xfce4-keyboard-shortcuts -p "${xfce_binding}" > /dev/null 2>&1; then
-        xfconf-query -c xfce4-keyboard-shortcuts -p "${xfce_binding}" -s "${command_path}"
+        [[ $(xfconf-query -c xfce4-keyboard-shortcuts -p "${xfce_binding}") == "${command_path}" ]] ||
+          xfconf-query -c xfce4-keyboard-shortcuts -p "${xfce_binding}" -s "${command_path}"
       else
         xfconf-query -c xfce4-keyboard-shortcuts -p "${xfce_binding}" -n -t string -s "${command_path}"
       fi
@@ -95,9 +96,14 @@ ${BLOCK_END}"
       temporary=$(mktemp "${bindings}.XXXXXX")
       jsh_interrupt_cleanup_path "${temporary}"
       printf '%s\n' "${content}" > "${temporary}"
-      install -m 0644 "${temporary}" "${bindings}"
+      ensure_status=0
+      jsh_ensure_file "${bindings}" "${temporary}" 0644 || ensure_status=$?
       rm -f "${temporary}"
-      pkill -HUP -u "$(id -u)" -x xbindkeys 2> /dev/null || xbindkeys
+      case ${ensure_status} in
+        0) pkill -HUP -u "$(id -u)" -x xbindkeys 2> /dev/null || xbindkeys ;;
+        1) ;;
+        *) return "${ensure_status}" ;;
+      esac
       ;;
   esac
 }
@@ -110,7 +116,7 @@ configure_audio() {
     return
   fi
 
-  local temporary changed=0
+  local temporary changed=0 ensure_status
   if [[ ${JSH_CONFIGURE_DRY_RUN:-0} == 1 ]]; then
     jsh::log_detail "Would compare the personal audio policy and shortcut."
     return 0
@@ -126,8 +132,13 @@ configure_audio() {
   fi
   cat "${source}" > "${temporary}"
   if ! cmp -s "${temporary}" "${policy}"; then
-    jsh_ensure_file "${policy}" "${temporary}" 0644
-    changed=1
+    ensure_status=0
+    jsh_ensure_file "${policy}" "${temporary}" 0644 || ensure_status=$?
+    case ${ensure_status} in
+      0) changed=1 ;;
+      1) ;;
+      *) rm -f "${temporary}"; return "${ensure_status}" ;;
+    esac
   fi
   rm -f "${temporary}"
   configure_audio_shortcut
