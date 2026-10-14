@@ -24,9 +24,9 @@ setup() {
   jsh::log_success() { :; }
 }
 
-@test "excludes the complete Git metadata directory from Syncthing" {
-  grep -Fxq '.git' "${JSH_ROOT}/.stignore"
-  run ! grep -Fq '.git/' "${JSH_ROOT}/.stignore"
+@test "allows Syncthing to receive Git metadata from other devices" {
+  run grep -Eq '^((\(\?d\))?/)?\.git(/|$)' "${JSH_ROOT}/.stignore"
+  [[ ${status} -ne 0 ]]
 }
 
 @test "enables and starts the Linux Syncthing user service" {
@@ -78,18 +78,19 @@ setup() {
   run ! grep -Fq 'services start syncthing' "${SYNCTHING_SERVICE_CALLS}"
 }
 
-@test "merges Projects ignores without replacing custom patterns" {
+@test "merges Projects ignores and removes the old Git exclusion" {
   local -a expected_patterns=(
-    '(?d).git' '(?d)node_modules' '(?d).venv' '(?d)venv' '(?d)target' '(?d).next'
+    '(?d)node_modules' '(?d).venv' '(?d)venv' '(?d)target' '(?d).next'
     '(?d)__pycache__' '(?d).cache'
   )
   mkdir -p "${HOME}/Projects"
-  printf '%s\n' custom '(?d)node_modules' > "${HOME}/Projects/.stignore"
+  printf '%s\n' custom '(?d)node_modules' '(?d).git' > "${HOME}/Projects/.stignore"
 
   run configure_projects_ignores
 
   [[ ${status} -eq 0 ]]
   grep -Fxq custom "${HOME}/Projects/.stignore"
+  run ! grep -Fxq '(?d).git' "${HOME}/Projects/.stignore"
   for pattern in "${expected_patterns[@]}"; do
     grep -Fxq -- "${pattern}" "${HOME}/Projects/.stignore"
   done
