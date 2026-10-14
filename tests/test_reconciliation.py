@@ -338,7 +338,7 @@ set_macos_content_handler net.waterfox.waterfox public.html
             )
             self.assertFalse(events.exists())
 
-    def test_unchanged_browser_stays_open_and_edits_require_shutdown(self):
+    def test_policy_only_update_stays_open_and_profile_edits_require_shutdown(self):
         script = r"""source "$1"
 require_command() { :; }
 validate_manifest() { :; }
@@ -348,7 +348,7 @@ waterfox_root() { printf '%s' "$TEST_PROFILE"; }
 selected_profile() { printf '%s' "$TEST_PROFILE"; }
 validate_configured_addons() { :; }
 prepare_waterfox_review() { echo review >> "$TEST_EVENTS"; }
-show_waterfox_review() { WATERFOX_SETTINGS_DIFFER=0; }
+show_waterfox_review() { WATERFOX_SETTINGS_DIFFER=$TEST_PROFILE_DRIFT; }
 stage_betterfox() { :; }
 prepare_policy() { POLICY_CHANGED=$TEST_DRIFT; }
 compose_preferences() { printf managed > "$2"; }
@@ -358,7 +358,7 @@ close_waterfox() { echo close >> "$TEST_EVENTS"; }
 reconcile_addon_state() { echo edit >> "$TEST_EVENTS"; }
 reconcile_addon_permissions() { :; }
 install_preferences() { :; }
-install_policy() { :; }
+install_policy() { echo policy >> "$TEST_EVENTS"; }
 configure_associations() { :; }
 apply_configuration
 """
@@ -366,13 +366,18 @@ apply_configuration
             profile = Path(directory)
             (profile / "user.js").write_text("managed")
             events = profile / "events"
-            for drift, expected in [(0, ["review"]), (1, ["review", "close", "edit"])]:
+            for policy_drift, profile_drift, expected in [
+                (0, 0, ["review"]),
+                (1, 0, ["review", "policy"]),
+                (0, 1, ["review", "close", "edit", "policy"]),
+            ]:
                 events.unlink(missing_ok=True)
                 env = dict(
                     os.environ,
                     TEST_PROFILE=directory,
                     TEST_EVENTS=str(events),
-                    TEST_DRIFT=str(drift),
+                    TEST_DRIFT=str(policy_drift),
+                    TEST_PROFILE_DRIFT=str(profile_drift),
                     JSH_ASSUME_YES="1",
                 )
                 subprocess.run(

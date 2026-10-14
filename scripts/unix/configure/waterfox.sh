@@ -674,6 +674,7 @@ update_betterfox() {
 
 apply_configuration() {
   local binary root profile profile_status composed install_hash relative='' register=0
+  local profile_changes_needed=0
   require_command curl
   require_command jq
   require_command unzip
@@ -723,13 +724,22 @@ apply_configuration() {
   prepare_policy
   composed="${TEMP_DIR}/user.js"
   compose_preferences "${profile}" "${composed}"
-  if ((!WATERFOX_SETTINGS_DIFFER && !POLICY_CHANGED && !register)) && cmp -s -- "${composed}" "${profile}/user.js"; then
+  if ((WATERFOX_SETTINGS_DIFFER || register)) || ! cmp -s -- "${composed}" "${profile}/user.js"; then
+    profile_changes_needed=1
+  fi
+  if ((!profile_changes_needed && !POLICY_CHANGED)); then
     configure_associations
     jsh::log_note "Waterfox configuration is current; leaving the browser open."
     return
   fi
   if ! confirm_waterfox_review apply; then
     jsh::log_warn "Keeping the active Waterfox configuration."
+    return
+  fi
+  if ((!profile_changes_needed)); then
+    install_policy
+    configure_associations
+    jsh::log_success "Waterfox policy updated; changes apply on next launch."
     return
   fi
   if profile_is_locked "${profile}"; then
