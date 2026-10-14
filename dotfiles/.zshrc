@@ -1412,6 +1412,7 @@ function git+ {
     return 1
   }
 
+  git remote get-url origin >/dev/null 2>&1 || jgit publish || return 1
   _git_confirm "Push '${branch}' to origin?" || return 1
   git push --set-upstream "$@" origin "${branch}"
 }
@@ -1423,6 +1424,7 @@ function git+++ {
     return 1
   }
 
+  git remote get-url origin >/dev/null 2>&1 || jgit publish || return 1
   _git_confirm "Force-push '${branch}' to origin with --force-with-lease?" || return 1
   git push --set-upstream --force-with-lease "$@" origin "${branch}"
 }

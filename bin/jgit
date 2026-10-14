@@ -6,6 +6,7 @@
 ## profile [NAME|list] ## Choose or apply a repository identity
 ## profiles ## List configured identities
 ## create NAME ## Create a Git project and select its identity
+## publish [NAME] [--public] ## Create or link the GitHub repository as origin
 ## commit [-t TIME] [ARGS...] ## Commit with an optional timestamp
 ## commits [N] [--reverse] [--all] [LOG ARGS...] ## List commits with full timestamps, newest first
 ## amend [REF] [-t TIME] [--only] [--dry-run] [--yes] ## Move a commit timestamp and following commits, or edit dates without -t
@@ -23,6 +24,7 @@
 ##? identity set @profile ## Configured identity
 ##? identity @profile ## Configured identity
 ##? profile @profile ## Configured identity
+##? publish --public ## Create a public repository
 ##? amend --dry-run ## Preview timestamp changes without rewriting history
 ##? amend --only ## Move only REF and keep following timestamps
 ##? commits --reverse ## List oldest first
@@ -77,6 +79,7 @@ Commands:
   profile [NAME|list]   Alias for identity commands
   profiles              Alias for identity list
   create NAME           Create a Git project and select its identity
+  publish [NAME]        Create or link USER/NAME on GitHub as origin (--public)
   commit [-t TIME]      Commit with a relative or absolute timestamp
   commits [N|ARGS...]   List unpushed or last N commits with full timestamps
   commits --all         List the whole branch history, newest first
@@ -603,6 +606,52 @@ _jgit_create() {
     _jgit_profile_apply "${profile}" 0
   )
   jsh::log_success "Created Git project ${project_path}"
+}
+
+_jgit_publish() {
+  local name='' visibility=private url profile owner
+  while (($#)); do
+    case $1 in
+      --public) visibility=public ;;
+      --private) visibility=private ;;
+      -h | --help)
+        printf 'Usage: jgit publish [NAME] [--public]\n'
+        return
+        ;;
+      -*) _jgit_die "unknown publish option: $1" ;;
+      *)
+        [[ -z ${name} ]] || _jgit_die 'publish accepts one repository name'
+        name=$1
+        ;;
+    esac
+    shift
+  done
+
+  git rev-parse --git-dir > /dev/null 2>&1 || _jgit_die 'not in a Git repository'
+  if url=$(git remote get-url origin 2> /dev/null); then
+    jsh::log_info "origin is already set to ${url}"
+    return
+  fi
+
+  profile=$(_jgit_active_profile)
+  if [[ -z ${profile} ]]; then
+    _jgit_profile_select_apply || return
+    profile=$(_jgit_active_profile)
+  fi
+  owner=$(_jgit_profile_field "${profile}" user) || _jgit_die "profile '${profile}' is missing user"
+  name=${name:-$(basename "$(git rev-parse --show-toplevel)")}
+  [[ ${name} =~ ^[A-Za-z0-9._-]+$ && ${name} != . && ${name} != .. ]] || _jgit_die "invalid repository name: ${name}"
+  command -v gh > /dev/null 2>&1 || _jgit_die 'gh is required; or run git remote add origin URL'
+
+  if gh repo view "${owner}/${name}" > /dev/null 2>&1; then
+    jsh::log_info "Using existing GitHub repository ${owner}/${name}"
+  else
+    jsh::confirm "Create ${visibility} GitHub repository ${owner}/${name}?" --default yes || return 1
+    gh repo create "${owner}/${name}" "--${visibility}" > /dev/null
+    jsh::log_success "Created GitHub repository ${owner}/${name}"
+  fi
+  git remote add origin "git@github.com:${owner}/${name}.git"
+  jsh::log_success "Added origin git@github.com:${owner}/${name}.git"
 }
 
 _jgit_is_gnu_date() {
@@ -1958,6 +2007,10 @@ case ${1:-} in
   create)
     shift
     _jgit_create "$@"
+    ;;
+  publish)
+    shift
+    _jgit_publish "$@"
     ;;
   commit)
     shift
