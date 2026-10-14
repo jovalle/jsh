@@ -79,9 +79,17 @@ _jgit_backup_repository_context() {
 _jgit_backup_parse_excludes() {
   local argument exclude existing
   JGIT_BACKUP_EXCLUDES=()
+  JGIT_BACKUP_FORCE=0
   while (($#)); do
     argument=$1
     case ${argument} in
+      -f | --force)
+        [[ ${JGIT_BACKUP_ACTION} == load ]] ||
+          _jgit_die "unknown ${JGIT_BACKUP_ACTION} option: ${argument}"
+        JGIT_BACKUP_FORCE=1
+        shift
+        continue
+        ;;
       --exclude)
         (($# >= 2)) || _jgit_die '--exclude requires a path'
         exclude=$2
@@ -92,7 +100,11 @@ _jgit_backup_parse_excludes() {
         shift
         ;;
       -h | --help)
-        printf 'Usage: jgit %s [--exclude PATH]...\n' "${JGIT_BACKUP_ACTION}"
+        if [[ ${JGIT_BACKUP_ACTION} == load ]]; then
+          printf 'Usage: jgit load [--force] [--exclude PATH]...\n'
+        else
+          printf 'Usage: jgit %s [--exclude PATH]...\n' "${JGIT_BACKUP_ACTION}"
+        fi
         return 2
         ;;
       *) _jgit_die "unknown ${JGIT_BACKUP_ACTION} option: ${argument}" ;;
@@ -718,8 +730,71 @@ _jgit_backup_reconcile_gitlink() {
     jsh::log_info "Kept newer submodule ${full_path} at ${selected}"
 }
 
+_jgit_backup_stash_conflicts() {
+  local repository=$1 stash=$2 ignore=$3 output=$4
+  {
+    git -C "${repository}" diff --name-only --no-renames --ignore-submodules="${ignore}" HEAD &&
+      git -C "${repository}" diff --name-only --no-renames --ignore-submodules="${ignore}" \
+        "${stash}^1" HEAD &&
+      git -C "${repository}" ls-files --others --exclude-standard
+  } > "${output}.backup" || return 1
+  {
+    git -C "${repository}" diff --name-only --no-renames --ignore-submodules=all \
+      "${stash}^1" "${stash}" &&
+      git -C "${repository}" diff --name-only --no-renames --ignore-submodules="${ignore}" \
+        "${stash}^1" "${stash}^2" &&
+      if git -C "${repository}" rev-parse -q --verify "${stash}^3" > /dev/null; then
+        git -C "${repository}" ls-tree -r --name-only "${stash}^3"
+      fi
+  } > "${output}.local" || return 1
+  LC_ALL=C sort -u -o "${output}.backup" "${output}.backup" || return 1
+  LC_ALL=C sort -u -o "${output}.local" "${output}.local" || return 1
+  LC_ALL=C comm -12 "${output}.backup" "${output}.local" > "${output}"
+}
+
+_jgit_backup_should_override() {
+  local repository=$1 stash_oid=$2 stash_path=$3 conflicts
+  conflicts=${JGIT_BACKUP_WORK_DIR}/override-check-${RANDOM}.list
+  _jgit_backup_stash_conflicts "${repository}" "${stash_oid}" all "${conflicts}" || return 1
+  [[ -s ${conflicts} ]] || return 1
+  jsh::log_warn "Backup conflicts with local changes in ${stash_path}:"
+  sed 's/^/  /' "${conflicts}" >&2
+  ((${JGIT_BACKUP_FORCE:-0} == 1)) ||
+    _jgit_backup_confirm 'Override conflicting local files with the backup?' no
+}
+
+_jgit_backup_restore_local() {
+  local repository=$1 source=$2 target=$3 conflicts=$4 paths=$5
+  LC_ALL=C sort -u "${paths}" | LC_ALL=C comm -23 - "${conflicts}" > "${paths}.restore" ||
+    return 1
+  [[ -s ${paths}.restore ]] || return 0
+  git -C "${repository}" --literal-pathspecs restore --quiet --source="${source}" "${target}" \
+    --pathspec-from-file="${paths}.restore"
+}
+
+# Reapplies local changes except files the backup also changed; the stash keeps those.
+_jgit_backup_override_stash() {
+  local repository=$1 stash=$2 conflicts paths
+  conflicts=${JGIT_BACKUP_WORK_DIR}/override-conflicts-${RANDOM}.list
+  paths=${JGIT_BACKUP_WORK_DIR}/override-paths-${RANDOM}.list
+  _jgit_backup_stash_conflicts "${repository}" "${stash}" dirty "${conflicts}" || return 1
+  git -C "${repository}" diff --name-only --no-renames --ignore-submodules=all \
+    "${stash}^1" "${stash}" > "${paths}" || return 1
+  _jgit_backup_restore_local "${repository}" "${stash}" --worktree "${conflicts}" "${paths}" ||
+    return 1
+  if git -C "${repository}" rev-parse -q --verify "${stash}^3" > /dev/null; then
+    git -C "${repository}" ls-tree -r --name-only "${stash}^3" > "${paths}" || return 1
+    _jgit_backup_restore_local "${repository}" "${stash}^3" --worktree "${conflicts}" \
+      "${paths}" || return 1
+  fi
+  git -C "${repository}" diff --name-only --no-renames "${stash}^1" "${stash}^2" > "${paths}" ||
+    return 1
+  _jgit_backup_restore_local "${repository}" "${stash}^2" --staged "${conflicts}" "${paths}"
+}
+
 _jgit_backup_apply_stashes() {
   local index repository stash_oid stash_path stash_ref staged_patch conflicts failed=0
+  JGIT_BACKUP_KEPT_STASHES=()
   for ((index = 0; index < ${#JGIT_BACKUP_STASH_OIDS[@]}; index++)); do
     repository=${JGIT_BACKUP_STASH_REPOSITORIES[index]}
     stash_oid=${JGIT_BACKUP_STASH_OIDS[index]}
@@ -730,6 +805,15 @@ _jgit_backup_apply_stashes() {
     if [[ -z ${stash_ref} ]]; then
       jsh::log_error "Recovery stash retained for ${stash_path}: ${stash_oid}"
       failed=1
+      continue
+    fi
+    if _jgit_backup_should_override "${repository}" "${stash_oid}" "${stash_path}"; then
+      if ! _jgit_backup_override_stash "${repository}" "${stash_oid}"; then
+        jsh::log_error "Recovery stash retained for ${stash_path}: ${stash_oid}"
+        failed=1
+        continue
+      fi
+      JGIT_BACKUP_KEPT_STASHES+=("${stash_oid}")
       continue
     fi
     if ! git -C "${repository}" stash apply --quiet "${stash_ref}"; then
@@ -764,10 +848,16 @@ _jgit_backup_apply_stashes() {
 }
 
 _jgit_backup_drop_stashes() {
-  local index repository stash_oid stash_ref
+  local index repository stash_oid stash_ref kept
   for ((index = 0; index < ${#JGIT_BACKUP_STASH_OIDS[@]}; index++)); do
     repository=${JGIT_BACKUP_STASH_REPOSITORIES[index]}
     stash_oid=${JGIT_BACKUP_STASH_OIDS[index]}
+    for kept in ${JGIT_BACKUP_KEPT_STASHES[@]+"${JGIT_BACKUP_KEPT_STASHES[@]}"}; do
+      if [[ ${kept} == "${stash_oid}" ]]; then
+        jsh::log_warn "Overridden local files remain in the recovery stash for ${JGIT_BACKUP_STASH_PATHS[index]}: ${stash_oid}"
+        continue 2
+      fi
+    done
     stash_ref=$(git -C "${repository}" stash list --format='%gd %H' |
       awk -v wanted="${stash_oid}" '$2 == wanted { print $1; exit }')
     [[ -z ${stash_ref} ]] || git -C "${repository}" stash drop --quiet "${stash_ref}" || return 1

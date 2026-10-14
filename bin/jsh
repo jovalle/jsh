@@ -63,9 +63,20 @@ if [ "${JSH_BASH_RUNTIME:-0}" = 1 ]; then
   }
 
   if [ -t 1 ] && [ "${TERM:-}" != dumb ] && [ -z "${NO_COLOR+x}" ]; then
-    PS1='\[\033[36m\]jsh\[\033[0m\] \w \$ '
+    # White until a command runs; HISTCMD stays unchanged on blank input.
+    jsh_prompt_status() {
+      jsh_prompt_rc=$?
+      jsh_prompt_color=37
+      if [ -n "${jsh_prompt_histcmd:-}" ] && [ "${HISTCMD}" != "${jsh_prompt_histcmd}" ]; then
+        jsh_prompt_color=32
+        [ "${jsh_prompt_rc}" = 0 ] || jsh_prompt_color=31
+      fi
+      jsh_prompt_histcmd=${HISTCMD}
+    }
+    PROMPT_COMMAND=jsh_prompt_status
+    PS1='\[\033[32m\]\u\[\033[0m\]@\[\033[33m\]\h\[\033[0m\]:\[\033[36m\]\w\[\033[${jsh_prompt_color}m\] \$\[\033[0m\] '
   else
-    PS1='jsh \w \$ '
+    PS1='\u@\h:\w \$ '
   fi
   return
 fi

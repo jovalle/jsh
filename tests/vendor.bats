@@ -63,3 +63,26 @@ setup() {
   [[ "$(cat "${backup_file}")" = 'local data' ]]
   [[ -f "$(dirname "${backup_file}")/.git" ]]
 }
+
+@test "empty vendor Git directory does not inherit the parent repository" {
+  local backup_file
+  git init -q -b main "${fixture}"
+  mkdir -p "${fixture}/vendor/broken/.git"
+  printf 'local data\n' > "${fixture}/vendor/broken/local.txt"
+  printf 'vendor/broken %s\n' "${remote}" > "${fixture}/conf/vendor.list"
+
+  run /bin/sh "${JSH_ROOT}/lib/unix/vendor.sh" --dry-run "${fixture}"
+  [[ "${status}" -eq 0 ]]
+  [[ "${output}" = 'Would back up and reclone vendor/broken (broken Git metadata)' ]]
+  [[ -d "${fixture}/vendor/broken/.git" ]]
+  [[ "$(cat "${fixture}/vendor/broken/local.txt")" = 'local data' ]]
+
+  run /bin/sh "${JSH_ROOT}/lib/unix/vendor.sh" "${fixture}"
+  [[ "${status}" -eq 0 ]]
+  [[ "$(git -C "${fixture}/vendor/broken" rev-parse --show-toplevel)" = "${fixture}/vendor/broken" ]]
+  [[ "$(git -C "${fixture}/vendor/broken" rev-parse HEAD)" = "$(git -C "${seed}" rev-parse HEAD)" ]]
+  backup_file=$(find "${fixture}/tmp" -path '*/vendor/broken/local.txt' -print -quit)
+  [[ -n "${backup_file}" ]]
+  [[ "$(cat "${backup_file}")" = 'local data' ]]
+  [[ -d "$(dirname "${backup_file}")/.git" ]]
+}

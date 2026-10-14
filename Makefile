@@ -482,6 +482,7 @@ test-reconciliation: ## Test planning, completions, idempotency and platform ada
 	@$(BATS) tests/jgraphify.bats
 	@$(BATS) tests/jmount.bats
 	@$(BATS) tests/jssh.bats
+	@$(BATS) tests/kubecolor.bats
 	@$(BATS) tests/kubectx.bats
 	@$(BATS) tests/linux.bats
 	@$(BATS) tests/rea.bats

@@ -71,16 +71,18 @@ while read -r dir url <&3; do
     continue
   fi
 
-  if [ -f "${target}/.git" ]; then
-    if ! git -C "${target}" rev-parse --absolute-git-dir > /dev/null 2>&1; then
-      if [ "${dry_run}" -eq 1 ]; then
-        jsh_detail "Would back up and reclone ${dir} (broken Git metadata)"
-      elif ! restore_broken_checkout; then
-        jsh_error "Could not restore ${dir}; its checkout was preserved."
-        failed=1
-      fi
-      continue
+  if ! checkout_root=$(git -C "${target}" rev-parse --show-toplevel 2> /dev/null) ||
+    [ "${checkout_root}" != "$(CDPATH='' cd -P "${target}" && pwd -P)" ]; then
+    if [ "${dry_run}" -eq 1 ]; then
+      jsh_detail "Would back up and reclone ${dir} (broken Git metadata)"
+    elif ! restore_broken_checkout; then
+      jsh_error "Could not restore ${dir}; its checkout was preserved."
+      failed=1
     fi
+    continue
+  fi
+
+  if [ -f "${target}/.git" ]; then
     if [ "${dry_run}" -eq 1 ]; then
       jsh_detail "Would convert ${dir} from a submodule"
     elif ! adopt "${target}"; then

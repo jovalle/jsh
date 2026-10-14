@@ -79,6 +79,7 @@ kubecolor_detect_mode() {
   case ${KUBECOLOR_OUTPUT} in
     yaml | yml) KUBECOLOR_MODE=yaml ;;
     json) KUBECOLOR_MODE=json ;;
+    wide) KUBECOLOR_MODE=table ;;
     '')
       case ${KUBECOLOR_COMMAND} in
         get | top | api-resources) KUBECOLOR_MODE=table ;;
@@ -95,18 +96,28 @@ kubecolor_detect_mode() {
 
 kubecolor_format() {
   local mode=$1
+  local wide=${2:-}
+  local watch=${3:-0}
 
-  LC_ALL=C awk -v mode="${mode}" -v esc="$(printf '\033')" '
+  LC_ALL=C awk -v mode="${mode}" -v wide="${wide}" -v watch="${watch}" -v esc="$(printf '\033')" '
     BEGIN {
       reset = esc "[0m"
       bold = esc "[1m"
       dim = esc "[2m"
-      red = esc "[31m"
-      green = esc "[32m"
-      yellow = esc "[33m"
-      blue = esc "[34m"
-      magenta = esc "[35m"
-      cyan = esc "[36m"
+      red = esc "[91m"
+      green = esc "[92m"
+      yellow = esc "[93m"
+      blue = esc "[94m"
+      magenta = esc "[95m"
+      cyan = esc "[96m"
+      version_palette[0] = 255
+      version_palette[1] = 244
+      version_palette[2] = 238
+      version_palette[3] = 232
+      version_palette[4] = 250
+      role_palette[0] = 94
+      role_palette[1] = 95
+      role_palette[2] = 96
     }
 
     function paint(color, text) {
@@ -152,6 +163,116 @@ kubecolor_format() {
       sub(/^[[:space:]]+/, "", value)
       sub(/[[:space:]]+$/, "", value)
       return value
+    }
+
+    function clear_table_header() {
+      delete column_name
+      delete column_start
+      column_count = 0
+      ready_column = 0
+      status_column = 0
+      restarts_column = 0
+    }
+
+    function table_cell(line, column, start, length_value) {
+      if (column == 0) {
+        return ""
+      }
+      start = column_start[column]
+      length_value = column < column_count ? column_start[column + 1] - start : length(line) - start + 1
+      return cell_value(substr(line, start, length_value))
+    }
+
+    function palette_color(index_value) {
+      return sprintf("%s[38;5;%dm", esc, version_palette[index_value % 5])
+    }
+
+    function category_color(column, value, key, index_value) {
+      if (value == "") {
+        return ""
+      }
+      key = column SUBSEP value
+      if (!(key in category_index)) {
+        category_index[key] = category_count[column]++
+      }
+      index_value = category_index[key]
+      return palette_color(index_value)
+    }
+
+    function role_color(role, normalized, alphabet, index_value, hash, character) {
+      normalized = tolower(role)
+      if (normalized == "control-plane" || normalized == "master") return esc "[38;5;208m"
+      if (normalized == "node") return green
+      if (normalized == "gpu") return magenta
+      if (normalized == "worker") return blue
+      alphabet = "abcdefghijklmnopqrstuvwxyz0123456789-_."
+      hash = 0
+      for (index_value = 1; index_value <= length(normalized); index_value++) {
+        character = substr(normalized, index_value, 1)
+        hash = (hash * 33 + index(alphabet, character)) % 216
+      }
+      return sprintf("%s[38;5;%dm", esc, role_palette[hash % 3])
+    }
+
+    function role_name(role, normalized) {
+      normalized = tolower(role)
+      if (normalized == "ingress") return "ing"
+      if (normalized == "egress-gateway") return "egw"
+      if (normalized == "egress-gateway-pci") return "egwpci"
+      if (normalized == "control-plane") return "cp"
+      return role
+    }
+
+    function paint_roles(cell, value, leading, trailing, parts, count, index_value, segment, role, prefix, suffix, output, abbreviated, padding) {
+      value = cell_value(cell)
+      if (value == "") return cell
+      leading = cell
+      sub(/[^[:space:]].*$/, "", leading)
+      trailing = cell
+      sub(/^.*[^[:space:]]/, "", trailing)
+      count = split(value, parts, ",")
+      output = leading
+      for (index_value = 1; index_value <= count; index_value++) {
+        segment = parts[index_value]
+        role = segment
+        sub(/^[[:space:]]+/, "", role)
+        sub(/[[:space:]]+$/, "", role)
+        prefix = segment
+        sub(/[^[:space:]].*$/, "", prefix)
+        suffix = segment
+        sub(/^.*[^[:space:]]/, "", suffix)
+        if (role == "<none>") {
+          output = output prefix paint(dim, role) suffix
+        } else {
+          abbreviated = role_name(role)
+          padding += length(role) - length(abbreviated)
+          output = output prefix paint(role_color(role), abbreviated) suffix
+        }
+        if (index_value < count) output = output ","
+      }
+      while (padding > 0) {
+        trailing = trailing " "
+        padding--
+      }
+      return output trailing
+    }
+
+    function paint_version(column, cell, value, release, start, length_value, color, leading, trailing) {
+      value = cell_value(cell)
+      if (column == "OS-IMAGE") {
+        sub(/^Red Hat Enterprise Linux/, "RHEL", value)
+        if (!match(value, /[0-9]+([.][0-9]+)*/)) return cell
+        start = RSTART
+        length_value = RLENGTH
+        release = substr(value, start, length_value)
+        color = category_color(column, release)
+        leading = cell
+        sub(/[^[:space:]].*$/, "", leading)
+        trailing = cell
+        sub(/^.*[^[:space:]]/, "", trailing)
+        return leading substr(value, 1, start - 1) paint(color, release) substr(value, start + length_value) trailing
+      }
+      return paint_cell(category_color(column, value), cell)
     }
 
     function paint_cell(color, cell, value, leading, trailing) {
@@ -237,12 +358,7 @@ kubecolor_format() {
     }
 
     function remember_table_header(line, rest, offset, field, index_value) {
-      delete column_name
-      delete column_start
-      column_count = 0
-      ready_column = 0
-      status_column = 0
-      restarts_column = 0
+      clear_table_header()
       rest = line
       offset = 0
 
@@ -258,36 +374,33 @@ kubecolor_format() {
         rest = substr(rest, RSTART + RLENGTH)
       }
 
-      if (ready_column == 0 && restarts_column == 0) {
+      if (ready_column == 0 && restarts_column == 0 && status_column == 0) {
         column_count = 0
       }
     }
 
     function contextual_table(line, index_value, start, length_value, cell, status, readiness, color, output) {
-      status = ""
-      readiness = ""
-      if (status_column > 0) {
-        start = column_start[status_column]
-        length_value = status_column < column_count ? column_start[status_column + 1] - start : length(line) - start + 1
-        status = cell_value(substr(line, start, length_value))
-      }
-      if (ready_column > 0) {
-        start = column_start[ready_column]
-        length_value = ready_column < column_count ? column_start[ready_column + 1] - start : length(line) - start + 1
-        readiness = cell_value(substr(line, start, length_value))
-      }
+      status = table_cell(line, status_column)
+      readiness = table_cell(line, ready_column)
 
       output = substr(line, 1, column_start[1] - 1)
       for (index_value = 1; index_value <= column_count; index_value++) {
+        if (wide == "wide" && (column_name[index_value] == "EXTERNAL-IP" || column_name[index_value] == "CONTAINER-RUNTIME")) continue
         start = column_start[index_value]
         length_value = index_value < column_count ? column_start[index_value + 1] - start : length(line) - start + 1
         cell = substr(line, start, length_value)
         if (index_value == 1) {
-          output = output paint_cell(cyan, cell)
+          output = output paint_cell(esc "[97m", cell)
         } else if (index_value == ready_column) {
           output = output paint_cell(readiness_color(cell_value(cell), status), cell)
         } else if (index_value == restarts_column) {
           output = output paint_cell(restarts_color(cell_value(cell), status, readiness), cell)
+        } else if (index_value == status_column) {
+          output = output semantic(cell)
+        } else if (column_name[index_value] == "ROLES") {
+          output = output paint_roles(cell)
+        } else if (column_name[index_value] == "VERSION" || column_name[index_value] == "OS-IMAGE" || column_name[index_value] == "KERNEL-VERSION") {
+          output = output paint_version(column_name[index_value], cell)
         } else {
           output = output semantic(cell)
         }
@@ -295,10 +408,23 @@ kubecolor_format() {
       return output
     }
 
+    function table_header(line, index_value, start, length_value, cell, output) {
+      if (wide != "wide") return paint(bold cyan, line)
+      output = substr(line, 1, column_start[1] - 1)
+      for (index_value = 1; index_value <= column_count; index_value++) {
+        if (column_name[index_value] == "EXTERNAL-IP" || column_name[index_value] == "CONTAINER-RUNTIME") continue
+        start = column_start[index_value]
+        length_value = index_value < column_count ? column_start[index_value + 1] - start : length(line) - start + 1
+        cell = substr(line, start, length_value)
+        output = output paint(bold cyan, cell)
+      }
+      return output
+    }
+
     function table(line, first_end, first, rest) {
       if (line ~ /^(NAMESPACE[[:space:]]+)?NAME([[:space:]]|$)/ || line ~ /^LAST SEEN[[:space:]]+/) {
         remember_table_header(line)
-        return paint(bold cyan, line)
+        return table_header(line)
       }
       if (column_count > 0) {
         return contextual_table(line)
@@ -531,7 +657,9 @@ kubecolor_format() {
     }
 
     {
-      if (index($0, esc) > 0) {
+      if (mode == "table" && wide == "wide" && watch != 1) {
+        buffered_line[++buffered_count] = $0
+      } else if (index($0, esc) > 0) {
         print
       } else if (mode == "table") {
         print table($0)
@@ -557,6 +685,24 @@ kubecolor_format() {
         print stderr_line($0)
       } else {
         print semantic($0)
+      }
+    }
+
+    END {
+      if (mode != "table" || wide != "wide" || watch == 1) exit
+
+      for (line_index = 1; line_index <= buffered_count; line_index++) {
+        line = buffered_line[line_index]
+        if (line ~ /^(NAMESPACE[[:space:]]+)?NAME([[:space:]]|$)/) {
+          remember_table_header(line)
+        }
+      }
+
+      clear_table_header()
+      for (line_index = 1; line_index <= buffered_count; line_index++) {
+        line = buffered_line[line_index]
+        if (index(line, esc) > 0) print line
+        else print table(line)
       }
     }
   '
@@ -619,9 +765,9 @@ fi
 if ((KUBECOLOR_STDOUT)); then
   mkfifo "${KUBECOLOR_TMP}/stdout"
   if ((KUBECOLOR_PAGE)); then
-    kubecolor_format "${KUBECOLOR_MODE}" < "${KUBECOLOR_TMP}/stdout" > "${KUBECOLOR_TMP}/page" &
+    kubecolor_format "${KUBECOLOR_MODE}" "${KUBECOLOR_OUTPUT}" "${KUBECOLOR_WATCH}" < "${KUBECOLOR_TMP}/stdout" > "${KUBECOLOR_TMP}/page" &
   else
-    kubecolor_format "${KUBECOLOR_MODE}" < "${KUBECOLOR_TMP}/stdout" &
+    kubecolor_format "${KUBECOLOR_MODE}" "${KUBECOLOR_OUTPUT}" "${KUBECOLOR_WATCH}" < "${KUBECOLOR_TMP}/stdout" &
   fi
   KUBECOLOR_STDOUT_PID=$!
 fi

@@ -152,8 +152,15 @@ typeset -gUa fpath
 # Initialize completion system
 typeset _jsh_compdump=${ZDOTDIR:-${HOME}}/.zcompdump
 (( _jsh_runtime_active )) && _jsh_compdump=${JSH_RUNTIME_DIR}/cache/.zcompdump
-autoload -Uz compinit && compinit -u -d "${_jsh_compdump}"
+autoload -Uz compinit
+# Skip the fpath audit and rebuild when the dump is under a day old.
+if [[ -n ${_jsh_compdump}(#qN.mh-24) ]]; then
+  compinit -C -u -d "${_jsh_compdump}"
+else
+  compinit -u -d "${_jsh_compdump}"
+fi
 unset _jsh_compdump
+(( ${+functions[_jsh_after_compinit]} )) && _jsh_after_compinit
 
 # shellcheck disable=SC1090  # Vendored repository
 [[ -r "${JSH_VENDOR}/fzf-tab/fzf-tab.plugin.zsh" && -n ${commands[fzf]:-} ]] && \
@@ -433,9 +440,9 @@ _jsh_grep_run() {
   done
 
   if [[ -n ${mode} ]]; then
-    command "${executable}" "${mode}" --color=auto "${exclusions[@]}" "$@"
+    command "${executable}" "${mode}" -i --color=auto "${exclusions[@]}" "$@"
   else
-    command "${executable}" --color=auto "${exclusions[@]}" "$@"
+    command "${executable}" -i --color=auto "${exclusions[@]}" "$@"
   fi
 }
 
@@ -446,6 +453,9 @@ if [[ ${_jsh_grep_has_gnu} == 1 ]]; then
   ggrep() { _jsh_grep_run ggrep '' "$@"; }
 fi
 alias g='grep -i'
+has rg && alias rg='rg -i'
+has ag && alias ag='ag -i'
+has ack && alias ack='ack -i'
 
 # ---- Quick Commands ----
 
@@ -545,7 +555,7 @@ if has git; then
   alias gcpc='git cherry-pick --continue'
   alias gcpa='git cherry-pick --abort'
   alias gwip='git add -A && git commit -m "WIP"'
-  alias gunwip='git log -1 --format="%s" | grep -q "WIP" && git reset HEAD~1'
+  alias gunwip='git log -1 --format="%s" | command grep -q "WIP" && git reset HEAD~1'
   alias gundo='git reset --soft HEAD~1'
   alias gclean='git clean -fd'
   alias gremote='git remote -v'
@@ -1417,19 +1427,30 @@ function git+ {
   git push --set-upstream "$@" origin "${branch}"
 }
 
-function git+++ {
+_git_force_push() {
+  local confirm=$1
   local branch
+  shift
+
   branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null) || {
     _j_ui_message error "Detached HEAD: checkout a branch first"
     return 1
   }
 
   git remote get-url origin >/dev/null 2>&1 || jgit publish || return 1
-  _git_confirm "Force-push '${branch}' to origin with --force-with-lease?" || return 1
+  if [[ ${confirm} == 1 ]]; then
+    _git_confirm "Force-push '${branch}' to origin with --force-with-lease?" || return 1
+  fi
   git push --set-upstream --force-with-lease "$@" origin "${branch}"
 }
 
-function git++ { git+++ "$@"; }
+function git+++ {
+  _git_force_push 0 "$@"
+}
+
+function git++ {
+  _git_force_push 1 "$@"
+}
 
 function git- {
   _git_confirm "Reset HEAD to undo last commit ($(git log -1 --pretty=format:'%s'))?" || return 1
