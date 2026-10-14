@@ -10,6 +10,7 @@ local/vendor/skills/anthropics-skills        https://github.com/anthropics/skill
 local/vendor/skills/better-icons             https://github.com/better-auth/better-icons.git
 local/vendor/skills/chrome-agent             https://github.com/sderosiaux/chrome-agent.git
 local/vendor/skills/cloudflare-skills        https://github.com/cloudflare/skills.git
+local/vendor/skills/impeccable               https://github.com/pbakaus/impeccable.git
 local/vendor/skills/mattpocock-skills        https://github.com/mattpocock/skills.git
 local/vendor/skills/openai-skills            https://github.com/openai/skills.git
 local/vendor/skills/ui-ux-pro-max-skill      https://github.com/nextlevelbuilder/ui-ux-pro-max-skill.git
