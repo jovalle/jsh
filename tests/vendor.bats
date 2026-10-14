@@ -33,14 +33,14 @@ setup() {
   updated=$(git -C "${seed}" rev-parse HEAD)
 
   run /bin/sh "${JSH_ROOT}/lib/unix/vendor.sh" --update --dry-run "${fixture}"
-  [ "${status}" -eq 0 ]
-  [ "${output}" = 'Would update vendor/repo' ]
-  [ "$(git -C "${fixture}/vendor/repo" rev-parse HEAD)" = "${original}" ]
+  [[ "${status}" -eq 0 ]]
+  [[ "${output}" = 'Would update vendor/repo' ]]
+  [[ "$(git -C "${fixture}/vendor/repo" rev-parse HEAD)" = "${original}" ]]
 
   run /bin/sh "${JSH_ROOT}/lib/unix/vendor.sh" --update "${fixture}"
-  [ "${status}" -eq 0 ]
-  [ "${output}" = '✓ Updated vendor/repo' ]
-  [ "$(git -C "${fixture}/vendor/repo" rev-parse HEAD)" = "${updated}" ]
+  [[ "${status}" -eq 0 ]]
+  [[ "${output}" = '✓ Updated vendor/repo' ]]
+  [[ "$(git -C "${fixture}/vendor/repo" rev-parse HEAD)" = "${updated}" ]]
 }
 
 @test "broken submodule metadata is replaced after preserving the checkout" {
@@ -51,15 +51,15 @@ setup() {
   printf 'vendor/broken %s\n' "${remote}" > "${fixture}/conf/vendor.list"
 
   run /bin/sh "${JSH_ROOT}/lib/unix/vendor.sh" --update --dry-run "${fixture}"
-  [ "${status}" -eq 0 ]
-  [ "${output}" = 'Would back up and reclone vendor/broken (broken Git metadata)' ]
-  [ -f "${fixture}/vendor/broken/local.txt" ]
+  [[ "${status}" -eq 0 ]]
+  [[ "${output}" = 'Would back up and reclone vendor/broken (broken Git metadata)' ]]
+  [[ -f "${fixture}/vendor/broken/local.txt" ]]
 
   run /bin/sh "${JSH_ROOT}/lib/unix/vendor.sh" --update "${fixture}"
-  [ "${status}" -eq 0 ]
-  [ "$(git -C "${fixture}/vendor/broken" rev-parse HEAD)" = "$(git -C "${seed}" rev-parse HEAD)" ]
+  [[ "${status}" -eq 0 ]]
+  [[ "$(git -C "${fixture}/vendor/broken" rev-parse HEAD)" = "$(git -C "${seed}" rev-parse HEAD)" ]]
   backup_file=$(find "${fixture}/tmp" -path '*/vendor/broken/local.txt' -print -quit)
-  [ -n "${backup_file}" ]
-  [ "$(cat "${backup_file}")" = 'local data' ]
-  [ -f "$(dirname "${backup_file}")/.git" ]
+  [[ -n "${backup_file}" ]]
+  [[ "$(cat "${backup_file}")" = 'local data' ]]
+  [[ -f "$(dirname "${backup_file}")/.git" ]]
 }
