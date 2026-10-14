@@ -816,6 +816,7 @@ setup_update_clone() {
     jsh::log_error() { printf "error: %s\n" "$*" >&2; }
     jsh::log_info() { :; }
     jsh::log_warn() { :; }
+    jsh::confirm() { return 1; }
     JGIT_BACKUP_ROOT=$2 JGIT_BACKUP_SNAPSHOT=$3 JGIT_BACKUP_WORK_DIR=$4
     JGIT_BACKUP_EXCLUDES=()
     _jgit_backup_stash_current_changes && _jgit_backup_apply_transaction
@@ -826,6 +827,91 @@ setup_update_clone() {
   [[ $(git -C "${repository}" status --porcelain=v1) == "${before_status}" ]]
   [[ -z $(git -C "${repository}" ls-files -u) ]]
   [[ $(git -C "${repository}" stash list --format='%s' | head -n 1) == On\ main:\ jgit\ load* ]]
+}
+
+setup_backup_override() {
+  OVERRIDE_REPOSITORY="${BATS_TEST_TMPDIR}/repository"
+  OVERRIDE_SNAPSHOT="${BATS_TEST_TMPDIR}/snapshot"
+  OVERRIDE_WORK="${BATS_TEST_TMPDIR}/work"
+  local repository=${OVERRIDE_REPOSITORY}
+  init_repo "${repository}"
+  commit_file "${repository}" file base Initial '2026-09-15 10:00:00 +0000'
+  commit_file "${repository}" kept base Kept '2026-09-15 10:00:00 +0000'
+  commit_file "${repository}" gone base Gone '2026-09-15 10:00:00 +0000'
+  mkdir -p "${OVERRIDE_SNAPSHOT}/main" "${OVERRIDE_SNAPSHOT}/submodules" "${OVERRIDE_WORK}"
+  printf 'backup\n' > "${repository}/file"
+  git -C "${repository}" diff --binary --full-index > "${OVERRIDE_SNAPSHOT}/main/tracked.patch"
+  : > "${OVERRIDE_SNAPSHOT}/main/staged.patch"
+  printf 'shared.txt\0' > "${OVERRIDE_SNAPSHOT}/main/untracked.list"
+  printf 'backup\n' > "${repository}/shared.txt"
+  tar -czf "${OVERRIDE_SNAPSHOT}/main/untracked.tar.gz" -C "${repository}" shared.txt
+  rm "${repository}/shared.txt"
+  git -C "${repository}" checkout -q -- file
+  printf 'local\n' > "${repository}/file"
+  printf 'local\n' > "${repository}/kept"
+  git -C "${repository}" add kept
+  git -C "${repository}" rm -q gone
+  printf 'local\n' > "${repository}/shared.txt"
+  printf 'local\n' > "${repository}/notes.txt"
+}
+
+run_backup_override() {
+  run bash -c '
+    source "$1/lib/backup.sh"
+    jsh::log_error() { printf "error: %s\n" "$*" >&2; }
+    jsh::log_info() { :; }
+    jsh::log_warn() { printf "warn: %s\n" "$*" >&2; }
+    OVERRIDE_ANSWER=$5
+    jsh::confirm() { [[ ${OVERRIDE_ANSWER} == yes ]]; }
+    _jgit_backup_validate_untracked_archive() { :; }
+    JGIT_BACKUP_ROOT=$2 JGIT_BACKUP_SNAPSHOT=$3 JGIT_BACKUP_WORK_DIR=$4 JGIT_BACKUP_FORCE=$6
+    JGIT_BACKUP_EXCLUDES=()
+    _jgit_backup_stash_current_changes && _jgit_backup_apply_transaction
+  ' test "${JSH_ROOT}" "${OVERRIDE_REPOSITORY}" "${OVERRIDE_SNAPSHOT}" "${OVERRIDE_WORK}" "$@"
+}
+
+@test "backup load override keeps backup versions of conflicting files only" {
+  local answer force
+  for answer in 'no 1' 'yes 0'; do
+    read -r answer force <<< "${answer}"
+    cd "${BATS_TEST_TMPDIR}"
+    rm -rf "${BATS_TEST_TMPDIR:?}"/*
+    setup_backup_override
+
+    run_backup_override "${answer}" "${force}"
+
+    [[ ${status} -eq 0 ]] || {
+      printf 'answer=%s force=%s\n%s\n' "${answer}" "${force}" "${output}" >&2
+      false
+    }
+    [[ ${output} == *'warn: Backup conflicts with local changes in main repository:'* ]]
+    [[ ${output} == *$'\n  file\n  shared.txt'* ]]
+    [[ ${output} == *'Overridden local files remain in the recovery stash'* ]]
+    cd "${OVERRIDE_REPOSITORY}"
+    [[ $(< file) == backup ]]
+    [[ $(< shared.txt) == backup ]]
+    [[ $(< kept) == local ]]
+    [[ $(< notes.txt) == local ]]
+    [[ ! -e gone ]]
+    [[ $(git status --porcelain=v1) == $' M file\nD  gone\nM  kept\n?? notes.txt\n?? shared.txt' ]]
+    [[ $(git show 'stash@{0}:file') == local ]]
+    [[ $(git show 'stash@{0}^3:shared.txt') == local ]]
+  done
+}
+
+@test "backup load declining override rolls back to local changes" {
+  local before_status
+  setup_backup_override
+  before_status=$(git -C "${OVERRIDE_REPOSITORY}" status --porcelain=v1)
+
+  run_backup_override no 0
+
+  [[ ${status} -ne 0 ]]
+  cd "${OVERRIDE_REPOSITORY}"
+  [[ $(< file) == local ]]
+  [[ $(< shared.txt) == local ]]
+  [[ $(git status --porcelain=v1) == "${before_status}" ]]
+  [[ $(git stash list --format='%s' | head -n 1) == On\ main:\ jgit\ load* ]]
 }
 
 @test "backup load resolves populated submodule conflicts to the newer commit" {
