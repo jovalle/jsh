@@ -15,6 +15,7 @@ font-family = MesloLGS Nerd Font
 font-family = JetBrains Mono
 font-thicken = true
 foreground = #e0e0e0
+keybind = global:ctrl+alt+super+backquote=toggle_quick_terminal
 macos-icon = retro
 palette = 0=#000000
 palette = 1=#cd3131
@@ -32,7 +33,7 @@ palette = 12=#3b8eea
 palette = 13=#d670d6
 palette = 14=#29b8db
 palette = 15=#e5e5e5
-quit-after-last-window-closed = true
+quit-after-last-window-closed = false
 selection-background = #3a3d41
 selection-foreground = #e0e0e0
 shell-integration-features = ssh-env
