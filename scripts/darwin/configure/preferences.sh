@@ -18,6 +18,8 @@ apply_preferences() {
   local changed=0 unchanged=0 failed=0 has_current
   local -a scope_args=()
   PREFERENCE_STATUS=0
+  FINDER_CHANGED=0
+  SYSTEM_UI_CHANGED=0
 
   while IFS= read -r line; do
     case ${line} in
@@ -61,6 +63,10 @@ apply_preferences() {
           previous=${current:-unset}
           jsh::log_success "${description} (${previous} -> ${expected})"
           ((changed += 1))
+          case ${domain} in
+            com.apple.finder) FINDER_CHANGED=1 ;;
+            com.apple.Spotlight | com.apple.screencapture) SYSTEM_UI_CHANGED=1 ;;
+          esac
         else
           jsh::log_error "${description}"
           ((failed += 1))
@@ -214,8 +220,12 @@ main() {
   mkdir -p "${HOME}/Pictures/Screenshots"
   apply_preferences
 
-  killall Finder > /dev/null 2>&1 || true
-  killall SystemUIServer > /dev/null 2>&1 || true
+  if ((FINDER_CHANGED)); then
+    killall Finder > /dev/null 2>&1 || true
+  fi
+  if ((SYSTEM_UI_CHANGED)); then
+    killall SystemUIServer > /dev/null 2>&1 || true
+  fi
   return "${PREFERENCE_STATUS}"
 }
 

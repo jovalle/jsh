@@ -216,6 +216,82 @@ class DesktopPreferenceTests(unittest.TestCase):
             self.assertEqual(result.stderr, "")
 
 
+class ConfigureIdempotenceTests(unittest.TestCase):
+    def test_current_graphify_skill_does_not_run_installer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            binary_dir = home / "bin"
+            binary_dir.mkdir()
+            graphify = binary_dir / "graphify"
+            graphify.write_text(
+                '#!/bin/sh\n'
+                'if [ "$1" = --version ]; then echo "graphify 1.2.3"; '
+                'else echo install >> "$TEST_EVENTS"; fi\n'
+            )
+            graphify.chmod(0o755)
+            skill_dir = home / ".agents/skills/graphify"
+            (skill_dir / "references").mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text("# Graphify\n")
+            (skill_dir / ".graphify_version").write_text("1.2.3")
+            events = home / "events"
+            for _ in range(2):
+                result = subprocess.run(
+                    ["bash", str(ROOT / "scripts/unix/configure/graphify.sh")],
+                    env=dict(
+                        os.environ,
+                        HOME=directory,
+                        PATH=f"{binary_dir}:{os.environ['PATH']}",
+                        TEST_EVENTS=str(events),
+                    ),
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(events.exists())
+
+    def test_current_macos_appearance_does_not_write_or_restart_apps(self):
+        script = r'''source "$1"
+defaults() {
+  case "$1" in
+    read)
+      case "$3" in
+        persistent-apps | persistent-others) printf '(\n)\n' ;;
+        AppleInterfaceStyle) printf 'Dark\n' ;;
+        tilesize) printf '48\n' ;;
+        expose-animation-duration) printf '0.1\n' ;;
+        autohide-time-modifier) printf '0.5\n' ;;
+        autohide) printf '1\n' ;;
+        *) printf '0\n' ;;
+      esac ;;
+    read-type)
+      case "$3" in
+        AppleInterfaceStyle) printf 'Type is string\n' ;;
+        tilesize | wvous-*) printf 'Type is integer\n' ;;
+        expose-animation-duration | autohide-delay | autohide-time-modifier)
+          printf 'Type is float\n' ;;
+        *) printf 'Type is boolean\n' ;;
+      esac ;;
+    write) printf 'defaults write\n' >> "$TEST_EVENTS" ;;
+  esac
+}
+osascript() { printf 'true\n'; }
+magick() { touch "${@: -1}"; }
+killall() { printf 'killall %s\n' "$*" >> "$TEST_EVENTS"; }
+configure_appearance
+configure_appearance
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            events = Path(directory) / "events"
+            result = subprocess.run(
+                ["bash", "-c", script, "test", str(ROOT / "scripts/darwin/configure/appearance.sh")],
+                env=dict(os.environ, HOME=directory, TEST_EVENTS=str(events)),
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(events.exists())
+
+
 class WaterfoxLifecycleTests(unittest.TestCase):
     def test_symlinked_waterfox_policy_is_rejected(self):
         script = r"""source "$1"

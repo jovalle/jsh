@@ -236,7 +236,7 @@ setup() {
 }
 
 @test "macOS Dock clears all pinned applications" {
-  grep -Fq 'defaults write com.apple.dock persistent-apps -array' \
+  grep -Fq 'set_empty_dock_array_if_needed persistent-apps' \
     "${JSH_ROOT}/scripts/darwin/configure/appearance.sh"
   run ! grep -Fq 'persistent-apps -array-add' \
     "${JSH_ROOT}/scripts/darwin/configure/appearance.sh"

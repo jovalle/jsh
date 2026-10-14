@@ -17,5 +17,13 @@ if ! command -v graphify > /dev/null 2>&1; then
   jsh::log_note "Skipping Graphify skill: graphify is not installed."
   exit 0
 fi
+skill_dir="${HOME}/.agents/skills/graphify"
+version=$(graphify --version 2> /dev/null | awk '$1 == "graphify" { print $2; exit }' || true)
+if [[ -n ${version} && -s ${skill_dir}/SKILL.md &&
+      -d ${skill_dir}/references && -r ${skill_dir}/.graphify_version &&
+      $(<"${skill_dir}/.graphify_version") == "${version}" ]]; then
+  jsh::log_note "Graphify skill ${version} is current."
+  exit 0
+fi
 graphify install --platform agents > /dev/null
 jsh::log_success "Graphify skill is installed."
