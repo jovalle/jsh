@@ -77,7 +77,7 @@ Usage:
 Commands:
   open     Open files or directories in Sublime Text (default).
   status   Display current installation, build, and patch status.
-  apply    Patch Sublime Text 4 binary, signing the bundle on macOS.
+  apply    Install managed preferences and patch Sublime Text 4 binary.
   restore  Restore original binary from the most recent backup.
 
 With no arguments or when given file or directory paths, opens Sublime Text directly.
@@ -340,13 +340,14 @@ apply() {
   fi
 
   status_output=$(run_python_helper status "${binary_path}" 2> /dev/null) || status_code=$?
+  if [[ ${status_code} != 0 && ${status_code} != 2 ]]; then
+    die 1 "Cannot patch binary: ${status_output}"
+  fi
+
+  "${JSH_ROOT}/scripts/unix/configure/sublime-text.sh" --preferences-only
   if [[ ${status_code} -eq 0 ]]; then
     jsh::log_note "Sublime Text is already patched (${status_output})."
     return 0
-  fi
-
-  if [[ ${status_code} != 0 && ${status_code} != 2 ]]; then
-    die 1 "Cannot patch binary: ${status_output}"
   fi
 
   stop_sublime "${app_path}"
