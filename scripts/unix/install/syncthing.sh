@@ -15,7 +15,6 @@ unset library_file
 
 DRY_RUN=${JSH_INSTALL_DRY_RUN:-${JSH_CONFIGURE_DRY_RUN:-0}}
 readonly -a PROJECT_IGNORE_PATTERNS=(
-  '(?d).git'
   '(?d)node_modules'
   '(?d).venv'
   '(?d)venv'
@@ -34,6 +33,9 @@ configure_projects_ignores() {
     return 1
   fi
   if [[ ${DRY_RUN} == 1 ]]; then
+    if [[ -r ${target} ]] && grep -Fxq -- '(?d).git' "${target}"; then
+      jsh::log_detail "Would remove Syncthing ignore pattern '(?d).git' from ${target}"
+    fi
     for pattern in "${PROJECT_IGNORE_PATTERNS[@]}"; do
       if [[ ! -r ${target} ]] || ! grep -Fxq -- "${pattern}" "${target}"; then
         jsh::log_detail "Would add Syncthing ignore pattern '${pattern}' to ${target}"
@@ -45,7 +47,7 @@ configure_projects_ignores() {
   mkdir -p -- "${projects_dir}"
   candidate=$(mktemp "${projects_dir}/.stignore.XXXXXX")
   jsh_interrupt_cleanup_path "${candidate}"
-  [[ ! -r ${target} ]] || cat -- "${target}" > "${candidate}"
+  [[ ! -r ${target} ]] || awk '$0 != "(?d).git"' "${target}" > "${candidate}"
   for pattern in "${PROJECT_IGNORE_PATTERNS[@]}"; do
     grep -Fxq -- "${pattern}" "${candidate}" 2> /dev/null && continue
     if [[ ${separator} == 0 && -s ${candidate} ]]; then
