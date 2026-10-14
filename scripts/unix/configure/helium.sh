@@ -652,6 +652,14 @@ apply() {
     return 0
   fi
 
+  if [[ ${JSH_UPDATE:-0} != 1 ]] && ! verify_extension_policy >/dev/null 2>&1 &&
+    (verify_app && verify_extensions && verify_profile_settings) >/dev/null 2>&1; then
+    install_extension_policy
+    verify_extension_policy || die 1 "Helium's extension policy is still inactive."
+    jsh::log_success "Helium policy repaired; the browser remains open."
+    return 0
+  fi
+
   require_policy_privileges
   stop_for_apply "${quit}"
   upgrade_app
