@@ -26,6 +26,7 @@ if [[ ! -f ${wallpaper} ]] || [[ $(file --brief --mime-type "${wallpaper}" 2>/de
 fi
 [[ -z ${wallpaper} ]] || wallpaper=$(realpath -- "${wallpaper}")
 changed=0
+desktop=$(jsh_linux_desktop)
 
 set_xfce() {
   local key=$1 type=$2 value=$3 current
@@ -40,7 +41,7 @@ set_xfce() {
   changed=$((changed + 1))
 }
 
-case $(jsh_linux_desktop) in
+case ${desktop} in
   xfce)
     image_style=5
     xrandr --listmonitors | grep -Eq '[+*]?jsh-left([[:space:]]|$)' && image_style=6
@@ -116,7 +117,9 @@ case $(jsh_linux_desktop) in
   *) jsh::log_error 'Wallpaper requires an XFCE or GNOME session.'; exit 1 ;;
 esac
 if ((changed)); then
-  [[ ${JSH_CONFIGURE_DRY_RUN:-0} == 1 ]] || xfdesktop --reload 2>/dev/null || true
+  if [[ ${desktop} == xfce && ${JSH_CONFIGURE_DRY_RUN:-0} != 1 ]]; then
+    xfdesktop --reload 2>/dev/null || true
+  fi
   jsh::log_success "Wallpaper: ${wallpaper:-solid black} (${changed} settings changed)"
 else
   jsh::log_note "Wallpaper is current: ${wallpaper:-solid black}"
