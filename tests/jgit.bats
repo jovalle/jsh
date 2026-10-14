@@ -96,6 +96,49 @@ run_jgit() {
   [[ ${lines[0]} == *'  First' && ${lines[1]} == *'  Second' && ${#lines[@]} -eq 2 ]]
 }
 
+@test "publish creates a private GitHub repository for the profile user and adds an SSH origin" {
+  local repository="${BATS_TEST_TMPDIR}/my-app" bin="${BATS_TEST_TMPDIR}/bin"
+  mkdir -p "${bin}"
+  cat > "${bin}/gh" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "${BATS_TEST_TMPDIR}/gh.log"
+[[ "\$1 \$2" == 'repo view' ]] && exit 1
+exit 0
+EOF
+  chmod +x "${bin}/gh"
+  init_repo "${repository}"
+  cd "${repository}"
+  git config --local jsh.profile personal
+
+  PATH="${bin}:${PATH}" run run_jgit publish
+  [[ ${status} -eq 0 ]]
+  [[ $(git remote get-url origin) == git@github.com:tester/my-app.git ]]
+  [[ $(command cat "${BATS_TEST_TMPDIR}/gh.log") == $'repo view tester/my-app\nrepo create tester/my-app --private' ]]
+
+  PATH="${bin}:${PATH}" run run_jgit publish other
+  [[ ${status} -eq 0 ]]
+  [[ ${output} == *'origin is already set to git@github.com:tester/my-app.git'* ]]
+  [[ $(wc -l < "${BATS_TEST_TMPDIR}/gh.log") -eq 2 ]]
+}
+
+@test "publish links an existing GitHub repository without creating it" {
+  local repository="${BATS_TEST_TMPDIR}/repository" bin="${BATS_TEST_TMPDIR}/bin"
+  mkdir -p "${bin}"
+  cat > "${bin}/gh" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "${BATS_TEST_TMPDIR}/gh.log"
+EOF
+  chmod +x "${bin}/gh"
+  init_repo "${repository}"
+  cd "${repository}"
+  git config --local jsh.profile personal
+
+  PATH="${bin}:${PATH}" run run_jgit publish site --public
+  [[ ${status} -eq 0 ]]
+  [[ $(git remote get-url origin) == git@github.com:tester/site.git ]]
+  [[ $(command cat "${BATS_TEST_TMPDIR}/gh.log") == 'repo view tester/site' ]]
+}
+
 @test "help version dashboard and Git passthrough are available" {
   local repository="${BATS_TEST_TMPDIR}/repository"
   init_repo "${repository}"
