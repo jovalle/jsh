@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+from __future__ import annotations
+
 import ctypes
 import getpass
 import os
@@ -316,6 +318,26 @@ def run_windows() -> None:
         if sent_events != len(key_events):
             raise ctypes.WinError(ctypes.get_last_error())
 
+    input_blocked = False
+
+    def keep_reporting_activity() -> None:
+        nonlocal input_blocked
+        # SendInput is denied while the desktop is locked or an elevated window has focus.
+        try:
+            report_activity()
+        except OSError as error:
+            if not input_blocked:
+                print(
+                    f"{APP_NAME}: F15 activity blocked, retrying: {error}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            input_blocked = True
+            return
+        if input_blocked:
+            print(f"{APP_NAME}: F15 activity resumed", flush=True)
+        input_blocked = False
+
     try:
         report_activity()
         print_validation(
@@ -324,7 +346,7 @@ def run_windows() -> None:
         )
         wait_until_stopped(
             "idle lock, display sleep, and system sleep are inhibited",
-            report_activity,
+            keep_reporting_activity,
         )
     finally:
         kernel32.SetThreadExecutionState(execution_state_continuous)

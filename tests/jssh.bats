@@ -49,6 +49,20 @@ runtime_env() {
   [[ ${output} != *'No such file'* && ${output} != *'command not found'* ]]
 }
 
+@test "raw mode execs plain ssh with the remaining arguments" {
+  mkdir -p "${work}/fakebin"
+  printf '#!/bin/sh\nprintf "ssh:%%s\\n" "$*"\n' > "${work}/fakebin/ssh"
+  chmod +x "${work}/fakebin/ssh"
+
+  for flag in -r --raw; do
+    run env PATH="${work}/fakebin:${PATH}" JSSH_CACHE_DIR="${work}/cache" \
+      "${JSH_ROOT}/bin/jssh" "${flag}" -p 2222 user@example.test
+
+    [[ ${status} -eq 0 ]]
+    [[ ${output} == 'ssh:-p 2222 user@example.test' ]]
+  done
+}
+
 @test "doctor scans managed symlinks inside the payload runtime" {
   local posix_sh=sh
   # Debian-family hosts run /bin/sh scripts with dash.

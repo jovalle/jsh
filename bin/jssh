@@ -2,6 +2,8 @@
 ##% jssh
 ## --check ## Validate local requirements
 ## --rebuild ## Clear generated payloads
+## --raw ## Open a plain SSH session without the Jsh runtime
+## -r ## Open a plain SSH session without the Jsh runtime
 ## --help ## Show help
 ## --version ## Show version
 ## @host ## SSH host
@@ -49,6 +51,7 @@ Open an ephemeral J shell on a Linux SSH host.
 Options:
       --check      Validate local requirements
       --rebuild    Clear generated payloads
+  -r, --raw        Open a plain SSH session without the Jsh runtime
   -h, --help       Show help
       --version    Show version
 
@@ -513,6 +516,10 @@ _jssh_main() {
       _jssh_secure_cache_dir
       rm -f "${JSSH_CACHE_DIR}"/payload-linux-*.tar
       jsh::log_success 'Generated jssh payloads cleared'
+      ;;
+    -r | --raw)
+      shift
+      exec ssh "$@"
       ;;
     '')
       _jssh_usage >&2

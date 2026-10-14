@@ -190,6 +190,17 @@ parse_bootstrap_command() {
   [[ ${output} == *'jsh [zsh-options]'* ]]
 }
 
+@test "Bash runtime prompt shows user, host, and path" {
+  run bash -c '
+    export JSH_BASH_RUNTIME=1 JSH_RELOADING=1 JSH_ROOT="$1" JSH_RUNTIME_DIR="$2" JSH_BASH="$BASH"
+    source "$JSH_ROOT/bin/jsh"
+    printf "%s\n" "$PS1"
+  ' _ "${JSH_ROOT}" "${BATS_TEST_TMPDIR}/runtime" < /dev/null
+
+  [[ ${status} -eq 0 ]]
+  [[ ${output##*$'\n'} == '\u@\h:\w \$ ' ]]
+}
+
 @test "launcher help colors headings and commands unless NO_COLOR is set" {
   run env JSH_COLOR=always "${JSH_ROOT}/bin/jsh" --help
 

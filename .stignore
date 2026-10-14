@@ -6,4 +6,5 @@
 (?d)*.pyc
 (?d).kube/cache
 (?d).venv
+dotfiles/.config/colima/
 /local/vendor/
