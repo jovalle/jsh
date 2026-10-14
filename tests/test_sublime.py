@@ -1,4 +1,6 @@
+import json
 import os
+import re
 import subprocess
 import tempfile
 import unittest
@@ -28,6 +30,7 @@ class SublimeLinuxTests(unittest.TestCase):
                 "\n".join(
                     [
                         'uname() { printf "Linux\\n"; }',
+                        "export -f uname",
                         "export JSH_SUBLIME_SOURCE_ONLY=1",
                         'source "$1"; shift',
                         'app_build_version() { printf "4200\\n"; }',
@@ -42,7 +45,13 @@ class SublimeLinuxTests(unittest.TestCase):
                 str(ROOT / "bin/sublime"),
                 *arguments,
             ],
-            env={**os.environ, "SUBLIME_BINARY": str(self.binary), "JSH_ROOT": str(ROOT)},
+            env={
+                **os.environ,
+                "SUBLIME_BINARY": str(self.binary),
+                "JSH_ROOT": str(ROOT),
+                "HOME": str(self.directory / "home"),
+                "XDG_CONFIG_HOME": str(self.directory / "config"),
+            },
             capture_output=True,
             text=True,
             check=False,
@@ -65,6 +74,19 @@ class SublimeLinuxTests(unittest.TestCase):
         self.assertEqual(self.binary.read_bytes(), original)
         self.assertEqual(self.command("status").returncode, 1)
 
+    def test_apply_disables_updates_even_when_already_patched(self):
+        settings = (
+            self.directory / "config/sublime-text/Packages/User/Preferences.sublime-settings"
+        )
+        for _ in range(2):
+            settings.parent.mkdir(parents=True, exist_ok=True)
+            settings.write_text('{"update_check": true}')
+            result = self.command("apply", "--yes")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            preferences = json.loads(re.sub(r",\s*}", "}", settings.read_text()))
+            self.assertIs(preferences["update_check"], False)
+        self.assertEqual(len(list(self.directory.glob("sublime_text.backup_*"))), 1)
+
     def test_unknown_duplicate_and_arm64_binaries_are_untouched(self):
         for data, error in (
             (ELF_HEADER + b"unknown", "unrecognized binary structure"),
@@ -81,6 +103,49 @@ class SublimeLinuxTests(unittest.TestCase):
                 self.assertIn(error, result.stdout + result.stderr)
                 self.assertEqual(self.binary.read_bytes(), data)
                 self.assertEqual(list(self.directory.glob("sublime_text.backup_*")), [])
+
+
+class SublimePreferencesTests(unittest.TestCase):
+    def test_preferences_do_not_require_file_association_tools(self):
+        for platform in ("Darwin", "Linux"):
+            for preferences_only in (False, True):
+                with self.subTest(platform=platform, preferences_only=preferences_only), \
+                        tempfile.TemporaryDirectory() as temporary:
+                    home = Path(temporary)
+                    flatpak = home / ".var/app/com.sublimetext.three"
+                    flatpak.mkdir(parents=True)
+                    result = subprocess.run(
+                        [
+                            "bash",
+                            "-c",
+                            'uname() { printf "%s\\n" "$SUBLIME_TEST_PLATFORM"; }; '
+                            'command() { if [[ $1 == -v && ( $2 == duti || $2 == xdg-mime ) ]]; '
+                            'then return 1; fi; builtin command "$@"; }; '
+                            'script=$1; shift; source "$script" "$@"',
+                            "_",
+                            str(ROOT / "scripts/unix/configure/sublime-text.sh"),
+                            *(["--preferences-only"] if preferences_only else []),
+                        ],
+                        env={
+                            **os.environ,
+                            "HOME": temporary,
+                            "XDG_CONFIG_HOME": str(home / "xdg"),
+                            "SUBLIME_TEST_PLATFORM": platform,
+                        },
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    targets = (
+                        [home / "Library/Application Support/Sublime Text"]
+                        if platform == "Darwin"
+                        else [home / "xdg/sublime-text", flatpak / "config/sublime-text"]
+                    )
+                    for target in targets:
+                        settings = target / "Packages/User/Preferences.sublime-settings"
+                        preferences = json.loads(re.sub(r",\s*}", "}", settings.read_text()))
+                        self.assertIs(preferences["update_check"], False)
 
 
 if __name__ == "__main__":

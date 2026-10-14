@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Configure Sublime Text as the desktop editor for text and source files.
+# Install Sublime Text preferences and desktop file associations.
 
 set -euo pipefail
 
@@ -20,9 +20,9 @@ readonly SUBLIME_SETTINGS_SOURCE=${JSH_ROOT}/conf/sublime/Preferences.sublime-se
 
 install_preferences() {
   local target=$1 source_content target_content
-  source_content=$(<"${SUBLIME_SETTINGS_SOURCE}")
+  source_content=$(< "${SUBLIME_SETTINGS_SOURCE}")
   if [[ -r ${target} ]]; then
-    target_content=$(<"${target}")
+    target_content=$(< "${target}")
     [[ ${source_content} == "${target_content}" ]] && return 0
   fi
   mkdir -p -- "${target%/*}"
@@ -65,8 +65,6 @@ configure_macos() {
     return 0
   fi
 
-  install_preferences "${HOME}/Library/Application Support/Sublime Text/Packages/User/Preferences.sublime-settings"
-
   local is_current=1 current_handler
   for content_type in "${content_types[@]}"; do
     current_handler=$(duti -d "${content_type}" 2> /dev/null || true)
@@ -101,7 +99,7 @@ configure_macos() {
 }
 
 configure_linux() {
-  local desktop_id='' desktop_path='' candidate directory mime_type settings_target
+  local desktop_id='' desktop_path='' candidate directory mime_type
   local -i changed=0
   local -a mime_types=(
     text/plain
@@ -164,12 +162,6 @@ configure_linux() {
     return 0
   fi
 
-  case ${desktop_id} in
-    "${SUBLIME_FLATPAK_DESKTOP}") settings_target=${HOME}/.var/app/com.sublimetext.three/config/sublime-text/Packages/User/Preferences.sublime-settings ;;
-    *) settings_target=${XDG_CONFIG_HOME:-${HOME}/.config}/sublime-text/Packages/User/Preferences.sublime-settings ;;
-  esac
-  install_preferences "${settings_target}"
-
   local current_mime_handler
   for mime_type in "${mime_types[@]}"; do
     current_mime_handler=$(xdg-mime query default "${mime_type}" 2> /dev/null || true)
@@ -186,7 +178,16 @@ configure_linux() {
 }
 
 case $(uname -s) in
-  Darwin) configure_macos ;;
-  Linux) configure_linux ;;
+  Darwin)
+    install_preferences "${HOME}/Library/Application Support/Sublime Text/Packages/User/Preferences.sublime-settings"
+    [[ ${1:-} == --preferences-only ]] || configure_macos
+    ;;
+  Linux)
+    install_preferences "${XDG_CONFIG_HOME:-${HOME}/.config}/sublime-text/Packages/User/Preferences.sublime-settings"
+    if [[ -d ${HOME}/.var/app/com.sublimetext.three ]]; then
+      install_preferences "${HOME}/.var/app/com.sublimetext.three/config/sublime-text/Packages/User/Preferences.sublime-settings"
+    fi
+    [[ ${1:-} == --preferences-only ]] || configure_linux
+    ;;
   *) jsh::log_note "Skipping Sublime Text file associations: unsupported platform." ;;
 esac
