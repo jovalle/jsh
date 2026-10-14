@@ -484,6 +484,7 @@ test-reconciliation: ## Test planning, completions, idempotency and platform ada
 	@$(BATS) tests/jssh.bats
 	@$(BATS) tests/kubectx.bats
 	@$(BATS) tests/linux.bats
+	@$(BATS) tests/rea.bats
 	@$(BATS) tests/syncthing.bats
 	@$(BATS) tests/ui.bats
 	@$(BATS) tests/waterfox.bats

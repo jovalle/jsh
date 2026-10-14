@@ -91,7 +91,7 @@
           ]
         },
         "uv": ["graphifyy", "pre-commit-hooks", "tmail-cli"],
-        "npm": {}
+        "npm": { "rea-agents": "*" }
       }
     },
     {

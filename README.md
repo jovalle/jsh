@@ -70,6 +70,13 @@ Everyday commands, rebuilt the way I wish they worked.
 
 With `jsh setup full`, popular apps are configured the way I like them.
 
+#### REA
+
+[REA](https://github.com/morluto/rea) provides reverse-engineering tools through `rea` and Codex MCP.
+Full setup installs the CLI and configures Codex with its matching agent skill when Codex is installed.
+Restart Codex after setup. REA requires Node 22.19+, 24.11+, or 26+; native decompilation also requires
+a separately installed Hopper, Ghidra, or IDA engine. Static JavaScript/Electron analysis works without one.
+
 #### Waterfox
 
 ![Waterfox](assets/waterfox.png)
