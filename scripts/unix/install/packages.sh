@@ -273,10 +273,10 @@ install_brew_manifest() {
   exclude_blocked_formulae "${brewfile}"
   jsh::log_info "Installing Homebrew packages..."
   if [[ ${JSH_UPDATE:-0} == 1 ]]; then
-    HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --file="${brewfile}"
+    HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --verbose --file="${brewfile}"
   else
     HOMEBREW_NO_AUTO_UPDATE=1 brew bundle check --no-upgrade --file="${brewfile}" > /dev/null 2>&1 ||
-      HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --no-upgrade --file="${brewfile}"
+      HOMEBREW_NO_AUTO_UPDATE=1 brew bundle --verbose --no-upgrade --file="${brewfile}"
   fi
   brew bundle check --no-upgrade --file="${brewfile}"
 }
