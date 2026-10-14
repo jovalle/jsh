@@ -136,6 +136,24 @@ setup() {
   [[ ${output} == *'Would inspect, update, and harden Helium.'* ]]
 }
 
+@test "policy-only repair leaves a running Helium instance open" {
+  load_brew() { :; }
+  require_command() { :; }
+  is_patched() { return 1; }
+  verify_extension_policy() { [[ ${POLICY_REPAIRED:-0} == 1 ]]; }
+  verify_app() { :; }
+  verify_extensions() { :; }
+  verify_profile_settings() { :; }
+  install_extension_policy() { POLICY_REPAIRED=1; }
+  stop_for_apply() { printf 'stopped\n' >> "${BATS_TEST_TMPDIR}/events"; }
+  upgrade_app() { printf 'upgraded\n' >> "${BATS_TEST_TMPDIR}/events"; }
+
+  apply
+
+  [[ ${POLICY_REPAIRED} == 1 ]]
+  [[ ! -e ${BATS_TEST_TMPDIR}/events ]]
+}
+
 @test "macOS update reinstalls an app that still fails verification" {
   local calls="${BATS_TEST_TMPDIR}/brew-calls"
   local app_path="${BATS_TEST_TMPDIR}/Helium.app"
