@@ -142,7 +142,8 @@ class DesktopPreferenceTests(unittest.TestCase):
                 "first=$(_jsh_prompt_expand); "
                 '_jsh_prompt_visible_length "$first"; '
                 "zstyle -a zle-line-pre-redraw widgets hooks; "
-                'print -rn -- "$REPLY|$BUFFER|$CURSOR|${options[PROMPTCR]}|$keymap_preserved|$async_preserved|$+functions[TRAPWINCH]|${(j:,:)hooks}"',
+                'print -rn -- "$REPLY|$BUFFER|$CURSOR|${options[PROMPTCR]}|'
+                '$keymap_preserved|$async_preserved|$+functions[TRAPWINCH]|${(j:,:)hooks}"',
                 "test",
                 str(ROOT / "lib/zsh/prompt.zsh"),
             ],
@@ -203,7 +204,8 @@ class DesktopPreferenceTests(unittest.TestCase):
                 [
                     "zsh",
                     "-fc",
-                    'source "$1"; print -rn -- "${_JSH_PROMPT_MODE}:${_JSH_PROMPT_ICON[linux]}:${_JSH_PROMPT_ICON[prompt]}"',
+                    'source "$1"; print -rn -- "${_JSH_PROMPT_MODE}:'
+                    '${_JSH_PROMPT_ICON[linux]}:${_JSH_PROMPT_ICON[prompt]}"',
                     "test",
                     str(ROOT / "lib/zsh/prompt.zsh"),
                 ],
@@ -224,7 +226,7 @@ class ConfigureIdempotenceTests(unittest.TestCase):
             binary_dir.mkdir()
             graphify = binary_dir / "graphify"
             graphify.write_text(
-                '#!/bin/sh\n'
+                "#!/bin/sh\n"
                 'if [ "$1" = --version ]; then echo "graphify 1.2.3"; '
                 'else echo install >> "$TEST_EVENTS"; fi\n'
             )
@@ -245,12 +247,13 @@ class ConfigureIdempotenceTests(unittest.TestCase):
                     ),
                     capture_output=True,
                     text=True,
+                    check=False,
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
             self.assertFalse(events.exists())
 
     def test_current_macos_appearance_does_not_write_or_restart_apps(self):
-        script = r'''source "$1"
+        script = r"""source "$1"
 defaults() {
   case "$1" in
     read)
@@ -279,14 +282,21 @@ magick() { touch "${@: -1}"; }
 killall() { printf 'killall %s\n' "$*" >> "$TEST_EVENTS"; }
 configure_appearance
 configure_appearance
-'''
+"""
         with tempfile.TemporaryDirectory() as directory:
             events = Path(directory) / "events"
             result = subprocess.run(
-                ["bash", "-c", script, "test", str(ROOT / "scripts/darwin/configure/appearance.sh")],
+                [
+                    "bash",
+                    "-c",
+                    script,
+                    "test",
+                    str(ROOT / "scripts/darwin/configure/appearance.sh"),
+                ],
                 env=dict(os.environ, HOME=directory, TEST_EVENTS=str(events)),
                 capture_output=True,
                 text=True,
+                check=False,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertFalse(events.exists())
@@ -318,6 +328,7 @@ prepare_policy
                 ),
                 capture_output=True,
                 text=True,
+                check=False,
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("Refusing to replace symlinked Waterfox policy", result.stderr)
@@ -434,6 +445,7 @@ class DeployTests(unittest.TestCase):
                 ["zsh", str(root / "scripts/unix/deploy/dotfiles.zsh")],
                 env=env,
                 capture_output=True,
+                check=False,
             )
 
             self.assertNotEqual(result.returncode, 0)
@@ -502,7 +514,7 @@ class DeployTests(unittest.TestCase):
             source.parent.mkdir(parents=True)
             source.write_text('{"personal": true}\n')
             find_shim = shim_dir / "find"
-            find_shim.write_text('#!/bin/sh\n"$REAL_FIND" "$@"\n' '[ "$1" != "$HOME" ]\n')
+            find_shim.write_text('#!/bin/sh\n"$REAL_FIND" "$@"\n[ "$1" != "$HOME" ]\n')
             find_shim.chmod(0o755)
             env = dict(
                 os.environ,

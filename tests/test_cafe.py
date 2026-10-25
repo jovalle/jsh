@@ -136,7 +136,7 @@ class LinuxCaffeineTests(unittest.TestCase):
 
 class XfceCaffeineTests(unittest.TestCase):
     def setUp(self):
-        directory = tempfile.TemporaryDirectory()
+        directory = tempfile.TemporaryDirectory()  # pylint: disable=consider-using-with
         self.addCleanup(directory.cleanup)
         self.pid_file = Path(directory.name) / "cafe.test.pid"
         pid_patch = patch.object(CAFFEINE, "PID_FILE", self.pid_file)

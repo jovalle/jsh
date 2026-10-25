@@ -21,6 +21,8 @@ Dynamically fetches the latest upstream releases for:
       - Proxmox VE Bare-Metal Installer
 """
 
+# pylint: disable=too-many-lines
+
 import argparse
 import hashlib
 import json
@@ -36,7 +38,10 @@ import urllib.request
 from pathlib import Path
 
 VERSION = "1.1.0"
-USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+USER_AGENT = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/128.0.0.0 Safari/537.36"
+)
 JSH_UI = Path(__file__).resolve().parents[1] / "lib/ui/cli.sh"
 
 
@@ -87,10 +92,11 @@ def fetch_url(url, timeout=15):
             capture_output=True,
             text=True,
             timeout=timeout + 3,
+            check=False,
         )
         if p.returncode == 0 and p.stdout:
             return p.stdout
-    except Exception:
+    except Exception:  # pylint: disable=broad-exception-caught
         pass
 
     # Fallback to urllib
@@ -115,13 +121,15 @@ def format_bytes(n):
 # ==============================================================================
 
 
-def resolve_win11():
+def resolve_win11():  # pylint: disable=too-many-locals
     """Resolve latest Windows 11 Consumer / Pro x64 download from Microsoft."""
     msdl_path = shutil.which("msdl") or "/usr/local/bin/msdl"
     if os.path.exists(msdl_path):
         try:
             # Query msdl list to find newest Windows 11 product ID
-            proc = subprocess.run([msdl_path, "--list"], capture_output=True, text=True, timeout=8)
+            proc = subprocess.run(
+                [msdl_path, "--list"], capture_output=True, text=True, timeout=8, check=False
+            )
             combined = (proc.stdout or "") + "\n" + (proc.stderr or "")
             candidates = []
             for line in combined.splitlines():
@@ -138,6 +146,7 @@ def resolve_win11():
                 capture_output=True,
                 text=True,
                 timeout=12,
+                check=False,
             )
             out = (dl_proc.stdout or "") + "\n" + (dl_proc.stderr or "")
             link_match = re.search(r"(https://software\.download\.prss\.microsoft\.com[^\s]+)", out)
@@ -146,11 +155,15 @@ def resolve_win11():
                 fn_match = re.search(r"/([^/?]+)\.iso", url)
                 filename = f"{fn_match.group(1)}.iso" if fn_match else "Win11_English_x64.iso"
                 return {"url": url, "filename": filename, "version": filename.replace(".iso", "")}
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             pass
 
     # Microsoft official static direct evaluation / LTSC media
-    static_url = "https://software-static.download.prss.microsoft.com/dbazure/888969d5-f34g-4e03-ac9d-1f9786c66749/26100.1742.240906-0331.ge_release_svc_refresh_CLIENT_LTSC_EVAL_x64FRE_en-us.iso"
+    static_url = (
+        "https://software-static.download.prss.microsoft.com/dbazure/"
+        "888969d5-f34g-4e03-ac9d-1f9786c66749/"
+        "26100.1742.240906-0331.ge_release_svc_refresh_CLIENT_LTSC_EVAL_x64FRE_en-us.iso"
+    )
     return {
         "url": static_url,
         "filename": "Win11_24H2_Enterprise_LTSC_en-us.iso",
@@ -187,7 +200,7 @@ def resolve_ubuntu(flavor="desktop"):
             if iso_name in line:
                 sha = line.split()[0]
                 break
-    except Exception:
+    except Exception:  # pylint: disable=broad-exception-caught
         pass
 
     return {
@@ -204,7 +217,7 @@ def resolve_fedora(edition="Workstation"):
         "https://mirrors.kernel.org/fedora/releases/",
         "https://dl.fedoraproject.org/pub/fedora/linux/releases/",
     ]
-    for mirror in mirrors:
+    for mirror in mirrors:  # pylint: disable=too-many-nested-blocks
         try:
             html = fetch_url(mirror)
             matches = re.findall(r'href="(\d+)/"', html)
@@ -223,9 +236,9 @@ def resolve_fedora(edition="Workstation"):
                             "filename": target_iso,
                             "version": f"Fedora-{v}",
                         }
-                except Exception:
+                except Exception:  # pylint: disable=broad-exception-caught
                     continue
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             continue
     raise RuntimeError(f"Fedora {edition} release not found")
 
@@ -264,7 +277,7 @@ def resolve_linux_mint():
             if target_iso in line:
                 sha = line.split()[0]
                 break
-    except Exception:
+    except Exception:  # pylint: disable=broad-exception-caught
         pass
 
     return {
@@ -280,7 +293,7 @@ def resolve_talos():
     raw = fetch_url("https://api.github.com/repos/siderolabs/talos/releases/latest")
     data = json.loads(raw)
     tag = data["tag_name"]
-    for asset in data["assets"]:
+    for asset in data["assets"]:  # pylint: disable=too-many-nested-blocks
         if asset["name"] == "metal-amd64.iso":
             url = asset["browser_download_url"]
             fn = f"talos-{tag}-metal-amd64.iso"
@@ -293,7 +306,7 @@ def resolve_talos():
                             if "metal-amd64.iso" in line:
                                 sha = line.split()[0]
                                 break
-                    except Exception:
+                    except Exception:  # pylint: disable=broad-exception-caught
                         pass
             return {"url": url, "filename": fn, "version": tag, "sha256": sha}
     raise RuntimeError("Talos metal-amd64.iso asset not found in GitHub release")
@@ -313,7 +326,7 @@ def resolve_kali():
             if target_iso in line:
                 sha = line.split()[0]
                 break
-    except Exception:
+    except Exception:  # pylint: disable=broad-exception-caught
         pass
 
     return {
@@ -342,7 +355,7 @@ def resolve_gparted():
     urls = re.findall(r'(https://[^"]*gparted-live-([0-9\.\-]+)-amd64\.iso)', rss)
     if not urls:
         raise RuntimeError("GParted release ISO not found in RSS")
-    url, ver = urls[0]
+    _, ver = urls[0]
     fn = f"gparted-live-{ver}-amd64.iso"
     direct_url = f"https://downloads.sourceforge.net/project/gparted/gparted-live-stable/{ver}/{fn}"
     return {"url": direct_url, "filename": fn, "version": ver}
@@ -354,7 +367,7 @@ def resolve_clonezilla():
     urls = re.findall(r'(https://[^"]*clonezilla-live-([0-9\.\-]+)-amd64\.iso)', rss)
     if not urls:
         raise RuntimeError("Clonezilla release ISO not found in RSS")
-    url, ver = urls[0]
+    _, ver = urls[0]
     fn = f"clonezilla-live-{ver}-amd64.iso"
     direct_url = (
         f"https://downloads.sourceforge.net/project/clonezilla/clonezilla_live_stable/{ver}/{fn}"
@@ -376,7 +389,7 @@ def resolve_archlinux():
             if target_iso in line:
                 sha = line.split()[0]
                 break
-    except Exception:
+    except Exception:  # pylint: disable=broad-exception-caught
         pass
     ver = re.search(r"archlinux-([0-9\.]+)-x86_64", target_iso)
     return {
@@ -542,10 +555,10 @@ def detect_ventoy_target():
             for line in f:
                 parts = line.split()
                 if len(parts) >= 2:
-                    dev, mnt = parts[0], parts[1]
+                    mnt = parts[1]
                     if "/Ventoy" in mnt or "Ventoy" in mnt:
                         candidates.append(mnt)
-    except Exception:
+    except Exception:  # pylint: disable=broad-exception-caught
         pass
 
     user = os.environ.get("USER", "root")
@@ -567,12 +580,15 @@ def detect_ventoy_target():
     if os.path.exists(label_path):
         try:
             p = subprocess.run(
-                ["udisksctl", "mount", "-b", label_path], capture_output=True, text=True
+                ["udisksctl", "mount", "-b", label_path],
+                capture_output=True,
+                text=True,
+                check=False,
             )
             m = re.search(r"Mounted (?:/dev/\S+) at (/run/media/\S+|/media/\S+)", p.stdout)
             if m:
                 return m.group(1).rstrip(".")
-        except Exception:
+        except Exception:  # pylint: disable=broad-exception-caught
             pass
 
     return None
@@ -628,7 +644,9 @@ def verify_file_sha256(file_path, expected_sha, progress_callback=None):
     return calculated, (calculated == expected_sha.lower() if expected_sha else True)
 
 
-def download_file_resumable(url, target_path, expected_sha=None):
+def download_file_resumable(
+    url, target_path, expected_sha=None
+):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     """Download file with HTTP Range resume, live progress bar, and speed calculation."""
     os.makedirs(os.path.dirname(target_path), exist_ok=True)
     part_path = f"{target_path}.part"
@@ -649,7 +667,7 @@ def download_file_resumable(url, target_path, expected_sha=None):
             if os.path.exists(part_path):
                 os.remove(part_path)
             req = urllib.request.Request(url, headers=headers)
-            resp = urllib.request.urlopen(req, timeout=25)
+            resp = urllib.request.urlopen(req, timeout=25)  # pylint: disable=consider-using-with
         else:
             raise
 
@@ -675,7 +693,7 @@ def download_file_resumable(url, target_path, expected_sha=None):
     )
     print(f"  {Colors.CYAN}{mode_str}{Colors.NC} -> {os.path.basename(target_path)}")
 
-    with open(part_path, part_mode) as f:
+    with resp, open(part_path, part_mode) as f:
         while True:
             chunk = resp.read(chunk_size)
             if not chunk:
@@ -700,7 +718,10 @@ def download_file_resumable(url, target_path, expected_sha=None):
                     cols = shutil.get_terminal_size((80, 20)).columns
                     bar_len = max(10, min(30, cols - 65))
                     filled = int(bar_len * (downloaded / total_bytes))
-                    bar_str = f"[{'=' * filled}{'>' if filled < bar_len else ''}{' ' * (bar_len - filled - 1)}]"
+                    bar_str = (
+                        f"[{'=' * filled}{'>' if filled < bar_len else ''}"
+                        f"{' ' * (bar_len - filled - 1)}]"
+                    )
                 else:
                     pct_str = "  ? %"
                     bar_str = "[ downloading ]"
@@ -708,7 +729,8 @@ def download_file_resumable(url, target_path, expected_sha=None):
                 speed_str = f"{speed / (1024 * 1024):.1f} MB/s"
                 size_str = f"{format_bytes(downloaded)} / {format_bytes(total_bytes)}"
                 sys.stdout.write(
-                    f"\r  {Colors.BOLD}{bar_str} {pct_str}{Colors.NC} {size_str} @ {speed_str} {eta_str}   "
+                    f"\r  {Colors.BOLD}{bar_str} {pct_str}{Colors.NC} "
+                    f"{size_str} @ {speed_str} {eta_str}   "
                 )
                 sys.stdout.flush()
                 last_print = now
@@ -722,7 +744,8 @@ def download_file_resumable(url, target_path, expected_sha=None):
         calc_sha, match = verify_file_sha256(part_path, expected_sha)
         if not match:
             print(
-                f"\n  {Colors.RED}CHECKSUM FAILED! Expected: {expected_sha}, Got: {calc_sha}{Colors.NC}"
+                f"\n  {Colors.RED}CHECKSUM FAILED! Expected: {expected_sha}, "
+                f"Got: {calc_sha}{Colors.NC}"
             )
             raise ValueError(f"Checksum mismatch for {target_path}")
         print(f" {Colors.GREEN}Verified OK ({calc_sha[:16]}...){Colors.NC}")
@@ -732,7 +755,8 @@ def download_file_resumable(url, target_path, expected_sha=None):
     os.rename(part_path, target_path)
     os.sync()
     print(
-        f"  {Colors.GREEN}✓ Finished: {os.path.basename(target_path)} ({format_bytes(downloaded)}){Colors.NC}"
+        f"  {Colors.GREEN}✓ Finished: {os.path.basename(target_path)} "
+        f"({format_bytes(downloaded)}){Colors.NC}"
     )
 
 
@@ -743,22 +767,27 @@ def download_file_resumable(url, target_path, expected_sha=None):
 
 def print_banner(target):
     print(
-        f"{Colors.BOLD}{Colors.HEADER}======================================================={Colors.NC}"
+        f"{Colors.BOLD}{Colors.HEADER}"
+        f"======================================================={Colors.NC}"
     )
     print(
-        f"{Colors.BOLD}{Colors.HEADER}          Ventoy ISO Reconciler & Manager             {Colors.NC}"
+        f"{Colors.BOLD}{Colors.HEADER}"
+        f"          Ventoy ISO Reconciler & Manager             {Colors.NC}"
     )
     print(
-        f"{Colors.BOLD}{Colors.HEADER}======================================================={Colors.NC}"
+        f"{Colors.BOLD}{Colors.HEADER}"
+        f"======================================================={Colors.NC}"
     )
     print(f"Target Directory: {Colors.CYAN}{target}{Colors.NC}")
     try:
         usage = shutil.disk_usage(target)
         free_pct = (usage.free / usage.total) * 100
         print(
-            f"Disk Capacity:   {format_bytes(usage.used)} used / {format_bytes(usage.free)} free ({free_pct:.1f}% free of {format_bytes(usage.total)})"
+            f"Disk Capacity:   {format_bytes(usage.used)} used / "
+            f"{format_bytes(usage.free)} free ({free_pct:.1f}% free of "
+            f"{format_bytes(usage.total)})"
         )
-    except Exception:
+    except Exception:  # pylint: disable=broad-exception-caught
         pass
     print()
 
@@ -778,7 +807,8 @@ def get_selected_distros(args):
                         selected[m] = DISTROS[m]
                 else:
                     print(
-                        f"{Colors.RED}Unknown distro: {d}. Run 'ventoy list' for options.{Colors.NC}"
+                        f"{Colors.RED}Unknown distro: {d}. "
+                        f"Run 'ventoy list' for options.{Colors.NC}"
                     )
                     sys.exit(1)
     elif args.category:
@@ -798,7 +828,8 @@ def check_status(target, selected_distros, verbose=False):
     """Inspect local ISOs vs remote latest releases without downloading."""
     print_banner(target)
     print(
-        f"{Colors.BOLD}{'DISTRO':<22} {'CATEGORY':<10} {'LOCAL VERSION':<30} {'LATEST UPSTREAM':<32} {'STATUS'}{Colors.NC}"
+        f"{Colors.BOLD}{'DISTRO':<22} {'CATEGORY':<10} {'LOCAL VERSION':<30} "
+        f"{'LATEST UPSTREAM':<32} {'STATUS'}{Colors.NC}"
     )
     print("-" * 115)
 
@@ -836,27 +867,29 @@ def check_status(target, selected_distros, verbose=False):
 
             rem_disp = f"{remote_fn[:29]}..." if len(remote_fn) > 32 else remote_fn
             print(
-                f"{meta['name'][:21]:<22} {meta['category']:<10} {local_desc:<30} {rem_disp:<32} {status}"
+                f"{meta['name'][:21]:<22} {meta['category']:<10} {local_desc:<30} "
+                f"{rem_disp:<32} {status}"
             )
             reconcile_plan.append(
                 {"id": distro_id, "meta": meta, "local": local, "remote": remote, "action": action}
             )
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             print(
-                f"{meta['name'][:21]:<22} {meta['category']:<10} {local_desc:<30} {Colors.RED}Error: {str(e)[:25]}{Colors.NC}"
+                f"{meta['name'][:21]:<22} {meta['category']:<10} {local_desc:<30} "
+                f"{Colors.RED}Error: {str(e)[:25]}{Colors.NC}"
             )
 
     print()
     return reconcile_plan
 
 
-def prune_old_versions(target, selected_distros, dry_run=False):
+def prune_old_versions(target, selected_distros, dry_run=False):  # pylint: disable=too-many-locals
     """Find and remove older versions of ISOs when a newer version is present."""
     print(f"\n{Colors.BOLD}Checking for old superseded ISOs to prune...{Colors.NC}")
     pruned_count = 0
     freed_bytes = 0
 
-    for distro_id, meta in selected_distros.items():
+    for meta in selected_distros.values():
         rel_dir = os.path.join(target, "ISO", meta["rel_dir"])
         if not os.path.isdir(rel_dir):
             continue
@@ -878,7 +911,8 @@ def prune_old_versions(target, selected_distros, dry_run=False):
                 freed_bytes += sz
                 if dry_run:
                     print(
-                        f"    {Colors.YELLOW}[DRY-RUN] Would prune:{Colors.NC} {fn} ({format_bytes(sz)})"
+                        f"    {Colors.YELLOW}[DRY-RUN] Would prune:{Colors.NC} "
+                        f"{fn} ({format_bytes(sz)})"
                     )
                 else:
                     os.remove(full)
@@ -889,7 +923,8 @@ def prune_old_versions(target, selected_distros, dry_run=False):
     else:
         action_verb = "Would reclaim" if dry_run else "Reclaimed"
         print(
-            f"  {Colors.BOLD}{action_verb} {format_bytes(freed_bytes)} across {pruned_count} old file(s).{Colors.NC}"
+            f"  {Colors.BOLD}{action_verb} {format_bytes(freed_bytes)} across "
+            f"{pruned_count} old file(s).{Colors.NC}"
         )
 
 
@@ -901,7 +936,8 @@ def run_reconcile(target, selected_distros, args):
 
     if not to_download:
         print(
-            f"{Colors.GREEN}{Colors.BOLD}All selected ISOs are up to date! Nothing to reconcile.{Colors.NC}\n"
+            f"{Colors.GREEN}{Colors.BOLD}All selected ISOs are up to date! "
+            f"Nothing to reconcile.{Colors.NC}\n"
         )
         if args.prune:
             prune_old_versions(target, selected_distros, dry_run=args.dry_run)
@@ -945,14 +981,16 @@ def run_reconcile(target, selected_distros, args):
             success_count += 1
         except KeyboardInterrupt:
             print(
-                f"\n{Colors.YELLOW}Download interrupted by user. Progress saved in .part file.{Colors.NC}"
+                f"\n{Colors.YELLOW}Download interrupted by user. "
+                f"Progress saved in .part file.{Colors.NC}"
             )
             sys.exit(130)
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             print(f"  {Colors.RED}Download failed: {e}{Colors.NC}")
 
     print(
-        f"\n{Colors.GREEN}{Colors.BOLD}Reconciliation completed: {success_count}/{len(to_download)} succeeded.{Colors.NC}"
+        f"\n{Colors.GREEN}{Colors.BOLD}Reconciliation completed: "
+        f"{success_count}/{len(to_download)} succeeded.{Colors.NC}"
     )
 
     if args.prune:
@@ -965,7 +1003,7 @@ def list_distros():
     print("-" * 65)
     for k, v in DISTROS.items():
         print(f"{k:<22} {v['category']:<12} {v['name']}")
-    print(f"\nCategories: windows, ubuntu, fedora, mint, talos, kali, security, rescue")
+    print("\nCategories: windows, ubuntu, fedora, mint, talos, kali, security, rescue")
 
 
 # ==============================================================================
@@ -975,7 +1013,9 @@ def list_distros():
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Ventoy ISO Reconciler: Keep your Ventoy USB loaded with the latest top distros.",
+        description=(
+            "Ventoy ISO Reconciler: Keep your Ventoy USB loaded with the latest top distros."
+        ),
         formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument(
@@ -1072,9 +1112,10 @@ def main():
                     print(f"  SHA256: {calc_sha} [{status}]")
                 else:
                     print(
-                        f"  SHA256: {calc_sha} ({Colors.DIM}no upstream checksum provided{Colors.NC})"
+                        f"  SHA256: {calc_sha} "
+                        f"({Colors.DIM}no upstream checksum provided{Colors.NC})"
                     )
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 print(f"  Error: {e}")
     else:
         run_reconcile(target, selected_distros, args)

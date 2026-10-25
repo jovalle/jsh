@@ -376,8 +376,7 @@ lint-shell: # Lint shell scripts with shellcheck
 lint-python: # Lint Python files with pylint
 	@$(OUTPUT) jsh::log_info "Linting Python files..."
 	@$(OUTPUT) if [ -n "$(PYTHON_FILES)" ]; then \
-		pylint --rcfile=.pylintrc $(PYTHON_FILES) 2>/dev/null || \
-		pylint $(PYTHON_FILES) && \
+		pylint --rcfile=.pylintrc $(PYTHON_FILES) && \
 		jsh::log_success "Python files passed linting"; \
 	else \
 		jsh::log_warn "No Python files found"; \

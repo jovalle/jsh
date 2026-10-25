@@ -535,8 +535,12 @@ class WaterfoxBookmarkTests(unittest.TestCase):
                         patch.object(WATERFOX, "run_waterfox_configuration"),
                         patch.object(WATERFOX, "resolve_profile", return_value=profile),
                         patch.object(WATERFOX, "waterfox_is_running", return_value=True),
-                        patch.object(WATERFOX, "stop_waterfox", side_effect=lambda **kwargs:
-                                     locked.rollback()) as stop,
+                        patch.object(
+                            WATERFOX,
+                            "stop_waterfox",
+                            # pylint: disable-next=cell-var-from-loop
+                            side_effect=lambda **kwargs: locked.rollback(),
+                        ) as stop,
                         patch.object(WATERFOX.sys.stdin, "isatty", return_value=True),
                         patch.object(WATERFOX, "ui_confirm", return_value=True) as confirm,
                         patch.object(WATERFOX, "ui_present", return_value=True),
@@ -595,37 +599,47 @@ class WaterfoxBookmarkTests(unittest.TestCase):
     def test_completed_health_and_failed_icon_checks_survive_repeated_runs(self):
         with tempfile.TemporaryDirectory() as directory:
             profile = self.make_profile(directory)
-            def response(url, timeout):
+
+            def response(url, _timeout):
                 if "root.test" in url:
                     return None, url, "timed out"
                 return 200, url, None
 
             with (
                 patch.object(WATERFOX, "check_page", side_effect=response) as check,
-                patch.object(WATERFOX, "download_icon", side_effect=ValueError("not an image")) as icon,
-                patch.object(WATERFOX, "download_document", side_effect=OSError("offline")) as document,
+                patch.object(
+                    WATERFOX, "download_icon", side_effect=ValueError("not an image")
+                ) as icon,
+                patch.object(
+                    WATERFOX, "download_document", side_effect=OSError("offline")
+                ) as document,
                 patch.object(WATERFOX, "ensure_waterfox_closed") as close,
                 patch.object(WATERFOX, "ui_present", return_value=True),
                 redirect_stdout(io.StringIO()),
             ):
                 args = ["--profile", str(profile), "--yes", "--delay", "0"]
                 self.assertEqual(WATERFOX.main(args), 1)
-                self.assertEqual(WATERFOX.read_processing_cache(profile), {
-                    "health": {
-                        "https://cached.test/page": "alive",
-                        "https://root.test/page": "inconclusive",
-                        "https://missing.test/page": "alive",
+                self.assertEqual(
+                    WATERFOX.read_processing_cache(profile),
+                    {
+                        "health": {
+                            "https://cached.test/page": "alive",
+                            "https://root.test/page": "inconclusive",
+                            "https://missing.test/page": "alive",
+                        },
+                        "favicon": {"https://missing.test/page": "missing"},
+                        "reason": {
+                            "https://cached.test/page": "",
+                            "https://missing.test/page": "",
+                            "https://root.test/page": "timed out; preserved after retry",
+                        },
+                        "redirect": {
+                            "https://cached.test/page": "",
+                            "https://missing.test/page": "",
+                            "https://root.test/page": "",
+                        },
                     },
-                    "favicon": {"https://missing.test/page": "missing"},
-                    "reason": {
-                        "https://cached.test/page": "", "https://missing.test/page": "",
-                        "https://root.test/page": "timed out; preserved after retry",
-                    },
-                    "redirect": {
-                        "https://cached.test/page": "", "https://missing.test/page": "",
-                        "https://root.test/page": "",
-                    },
-                })
+                )
                 before = {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in profile.iterdir()}
                 for network in (check, icon, document):
                     network.reset_mock()
@@ -634,13 +648,16 @@ class WaterfoxBookmarkTests(unittest.TestCase):
                 for network in (check, icon, document):
                     network.assert_not_called()
                 close.assert_not_called()
-                self.assertEqual(before, {
-                    p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in profile.iterdir()
-                })
+                self.assertEqual(
+                    before,
+                    {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in profile.iterdir()},
+                )
 
                 # A changed URL is new work, even on an already processed hostname.
                 with closing(sqlite3.connect(profile / "places.sqlite")) as db:
-                    db.execute("UPDATE moz_places SET url = 'https://missing.test/new' WHERE id = 3")
+                    db.execute(
+                        "UPDATE moz_places SET url = 'https://missing.test/new' WHERE id = 3"
+                    )
                     db.commit()
                 self.assertEqual(WATERFOX.main(args), 1)
                 check.assert_called_once_with("https://missing.test/new", 5.0)
@@ -648,10 +665,15 @@ class WaterfoxBookmarkTests(unittest.TestCase):
                 for network in (check, icon, document):
                     network.reset_mock()
                 self.assertEqual(WATERFOX.main([*args, "--refresh"]), 1)
-                self.assertEqual({call.args[0] for call in check.call_args_list}, {
-                    "https://cached.test/page", "https://root.test/page",
-                    "http://root.test/", "https://missing.test/new",
-                })
+                self.assertEqual(
+                    {call.args[0] for call in check.call_args_list},
+                    {
+                        "https://cached.test/page",
+                        "https://root.test/page",
+                        "http://root.test/",
+                        "https://missing.test/new",
+                    },
+                )
                 self.assertGreater(icon.call_count, 0)
 
     def test_dry_run_does_not_save_network_results(self):
@@ -665,29 +687,55 @@ class WaterfoxBookmarkTests(unittest.TestCase):
                 patch.object(WATERFOX, "ui_present", return_value=True),
                 redirect_stdout(io.StringIO()),
             ):
-                self.assertEqual(WATERFOX.main([
-                    "--profile", str(profile), "--dry-run", "--delay", "0",
-                ]), 0)
+                self.assertEqual(
+                    WATERFOX.main(
+                        [
+                            "--profile",
+                            str(profile),
+                            "--dry-run",
+                            "--delay",
+                            "0",
+                        ]
+                    ),
+                    0,
+                )
             self.assertEqual(before, {p.name: p.read_bytes() for p in profile.iterdir()})
 
     def test_interruption_keeps_completed_health_results(self):
         with tempfile.TemporaryDirectory() as directory:
             profile = self.make_profile(directory)
             with (
-                patch.object(WATERFOX, "assess_page", side_effect=[
-                    (200, "https://cached.test/page", None), KeyboardInterrupt,
-                ]),
+                patch.object(
+                    WATERFOX,
+                    "assess_page",
+                    side_effect=[
+                        (200, "https://cached.test/page", None),
+                        KeyboardInterrupt,
+                    ],
+                ),
                 # Deliver the completed result before the simulated interruption.
                 patch.object(WATERFOX, "as_completed", side_effect=iter),
                 patch.object(WATERFOX, "ui_present", return_value=True),
                 redirect_stdout(io.StringIO()),
             ):
-                self.assertEqual(WATERFOX.main([
-                    "--profile", str(profile), "--yes", "--workers", "1",
-                ]), 130)
-            self.assertEqual(WATERFOX.read_processing_cache(profile)["health"], {
-                "https://cached.test/page": "alive",
-            })
+                self.assertEqual(
+                    WATERFOX.main(
+                        [
+                            "--profile",
+                            str(profile),
+                            "--yes",
+                            "--workers",
+                            "1",
+                        ]
+                    ),
+                    130,
+                )
+            self.assertEqual(
+                WATERFOX.read_processing_cache(profile)["health"],
+                {
+                    "https://cached.test/page": "alive",
+                },
+            )
 
     def test_trash_is_excluded_from_checks_and_duplicate_moves_on_repeated_runs(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -736,10 +784,16 @@ class WaterfoxBookmarkTests(unittest.TestCase):
                 "https://missing.test/page": "https://missing.test/page",
             }
             with (
-                patch.object(WATERFOX, "check_page", side_effect=lambda url, timeout:
-                             (200, destinations[url], None)) as check,
-                patch.object(WATERFOX, "download_icon", side_effect=lambda url, timeout:
-                             (url, b"\x89PNG\r\n\x1a\n")) as icon,
+                patch.object(
+                    WATERFOX,
+                    "check_page",
+                    side_effect=lambda url, timeout: (200, destinations[url], None),
+                ) as check,
+                patch.object(
+                    WATERFOX,
+                    "download_icon",
+                    side_effect=lambda url, timeout: (url, b"\x89PNG\r\n\x1a\n"),
+                ) as icon,
                 patch.object(WATERFOX, "ensure_waterfox_closed") as close,
                 patch.object(WATERFOX, "ui_present", return_value=True),
                 redirect_stdout(io.StringIO()) as output,
@@ -749,63 +803,97 @@ class WaterfoxBookmarkTests(unittest.TestCase):
                 self.assertIn("Fixed: https://cached.test/new-page", output.getvalue())
                 self.assertIn("homepage", output.getvalue())
                 with closing(sqlite3.connect(profile / "places.sqlite")) as db:
-                    self.assertEqual(db.execute(
-                        "SELECT url, visit_count, foreign_count FROM moz_places WHERE id = 1"
-                    ).fetchone(), ("https://cached.test/page", 7, 0))
+                    self.assertEqual(
+                        db.execute(
+                            "SELECT url, visit_count, foreign_count FROM moz_places WHERE id = 1"
+                        ).fetchone(),
+                        ("https://cached.test/page", 7, 0),
+                    )
                     bookmark = db.execute("""
                         SELECT p.url, p.foreign_count, b.guid, b.syncChangeCounter,
                                p.recalc_frecency, p.rev_host, o.host
                         FROM moz_bookmarks b JOIN moz_places p ON p.id = b.fk
                         JOIN moz_origins o ON o.id = p.origin_id WHERE b.id = 5
                         """).fetchone()
-                    self.assertEqual(bookmark[:3], ("https://cached.test/new-page", 1, "cached______"))
+                    self.assertEqual(
+                        bookmark[:3], ("https://cached.test/new-page", 1, "cached______")
+                    )
                     self.assertGreaterEqual(bookmark[3], 1)
                     self.assertEqual(bookmark[4:], (1, "tset.dehcac.", "cached.test"))
-                    self.assertEqual(db.execute("""
+                    self.assertEqual(
+                        db.execute("""
                         SELECT parent.title FROM moz_bookmarks b
                         JOIN moz_bookmarks parent ON parent.id = b.parent WHERE b.id = 6
-                        """).fetchone()[0], "_review")
+                        """).fetchone()[0],
+                        "_review",
+                    )
                 before = {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in profile.iterdir()}
                 for operation in (check, icon, close):
                     operation.reset_mock()
                 self.assertEqual(WATERFOX.main(args), 0)
                 for operation in (check, icon, close):
                     operation.assert_not_called()
-                self.assertEqual(before, {
-                    p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in profile.iterdir()
-                })
+                self.assertEqual(
+                    before,
+                    {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in profile.iterdir()},
+                )
 
     def test_redirect_to_existing_place_reuses_it_without_rewriting_history(self):
         with tempfile.TemporaryDirectory() as directory:
             profile = self.make_profile(directory)
             plan = WATERFOX.plan_organization(
-                profile, set(), None, redirects={"https://cached.test/page": "https://missing.test/page"},
+                profile,
+                set(),
+                None,
+                redirects={"https://cached.test/page": "https://missing.test/page"},
             )
             WATERFOX.apply_organization(profile, plan)
             with closing(sqlite3.connect(profile / "places.sqlite")) as db:
                 self.assertEqual(db.execute("SELECT COUNT(*) FROM moz_places").fetchone()[0], 3)
-                self.assertEqual(db.execute("SELECT fk, guid FROM moz_bookmarks WHERE id = 5").fetchone(),
-                                 (3, "cached______"))
-                self.assertEqual(db.execute("SELECT foreign_count FROM moz_places WHERE id = 3").fetchone()[0], 2)
-                self.assertEqual(db.execute("SELECT url FROM moz_places WHERE id = 1").fetchone()[0],
-                                 "https://cached.test/page")
+                self.assertEqual(
+                    db.execute("SELECT fk, guid FROM moz_bookmarks WHERE id = 5").fetchone(),
+                    (3, "cached______"),
+                )
+                self.assertEqual(
+                    db.execute("SELECT foreign_count FROM moz_places WHERE id = 3").fetchone()[0],
+                    2,
+                )
+                self.assertEqual(
+                    db.execute("SELECT url FROM moz_places WHERE id = 1").fetchone()[0],
+                    "https://cached.test/page",
+                )
 
     def test_dry_run_redirects_are_planned_without_fixed_verdict_or_writes(self):
         with tempfile.TemporaryDirectory() as directory:
             profile = self.make_profile(directory)
             before = {p.name: p.read_bytes() for p in profile.iterdir()}
             with (
-                patch.object(WATERFOX, "check_page", side_effect=lambda url, timeout:
-                             (200, url.replace("/page", "/new"), None)),
-                patch.object(WATERFOX, "download_icon", side_effect=lambda url, timeout:
-                             (url, b"\x89PNG\r\n\x1a\n")),
+                patch.object(
+                    WATERFOX,
+                    "check_page",
+                    side_effect=lambda url, timeout: (200, url.replace("/page", "/new"), None),
+                ),
+                patch.object(
+                    WATERFOX,
+                    "download_icon",
+                    side_effect=lambda url, timeout: (url, b"\x89PNG\r\n\x1a\n"),
+                ),
                 patch.object(WATERFOX, "ensure_waterfox_closed") as close,
                 patch.object(WATERFOX, "ui_present", return_value=True),
                 redirect_stdout(io.StringIO()) as output,
             ):
-                self.assertEqual(WATERFOX.main([
-                    "--profile", str(profile), "--dry-run", "--delay", "0",
-                ]), 0)
+                self.assertEqual(
+                    WATERFOX.main(
+                        [
+                            "--profile",
+                            str(profile),
+                            "--dry-run",
+                            "--delay",
+                            "0",
+                        ]
+                    ),
+                    0,
+                )
                 self.assertIn("Would fix: https://cached.test/new", output.getvalue())
                 self.assertNotIn("Fixed:", output.getvalue())
                 close.assert_not_called()

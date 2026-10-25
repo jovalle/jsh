@@ -30,7 +30,7 @@ ELF_HEADER = b"\x7fELF\x02\x01" + bytes(12) + b"\x3e\x00" + bytes(44)
 
 class SublimeLinuxTests(unittest.TestCase):
     def setUp(self):
-        temporary = tempfile.TemporaryDirectory()
+        temporary = tempfile.TemporaryDirectory()  # pylint: disable=consider-using-with
         self.addCleanup(temporary.cleanup)
         self.directory = Path(temporary.name)
         self.binary = self.directory / "sublime_text"
@@ -109,9 +109,7 @@ class SublimeLinuxTests(unittest.TestCase):
         self.assertEqual(self.binary.read_bytes(), patched)
 
     def test_apply_disables_updates_even_when_already_patched(self):
-        settings = (
-            self.directory / "config/sublime-text/Packages/User/Preferences.sublime-settings"
-        )
+        settings = self.directory / "config/sublime-text/Packages/User/Preferences.sublime-settings"
         for _ in range(2):
             settings.parent.mkdir(parents=True, exist_ok=True)
             settings.write_text('{"update_check": true}')
@@ -271,8 +269,9 @@ source "$1"
     def test_preferences_do_not_require_file_association_tools(self):
         for platform in ("Darwin", "Linux"):
             for preferences_only in (False, True):
-                with self.subTest(platform=platform, preferences_only=preferences_only), \
-                        tempfile.TemporaryDirectory() as temporary:
+                with self.subTest(
+                    platform=platform, preferences_only=preferences_only
+                ), tempfile.TemporaryDirectory() as temporary:
                     home = Path(temporary)
                     flatpak = home / ".var/app/com.sublimetext.three"
                     flatpak.mkdir(parents=True)
@@ -281,7 +280,7 @@ source "$1"
                             "bash",
                             "-c",
                             'uname() { printf "%s\\n" "$SUBLIME_TEST_PLATFORM"; }; '
-                            'command() { if [[ $1 == -v && ( $2 == duti || $2 == xdg-mime ) ]]; '
+                            "command() { if [[ $1 == -v && ( $2 == duti || $2 == xdg-mime ) ]]; "
                             'then return 1; fi; builtin command "$@"; }; '
                             'script=$1; shift; source "$script" "$@"',
                             "_",
