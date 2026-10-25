@@ -3,7 +3,7 @@ CHECK_TARGETS := check-script-headers check-readme check-shell-syntax check-zsh-
 	lint-yaml lint-markdown lint-js test
 FORMAT_TARGETS := format-shell format-python format-yaml format-json format-markdown
 
-.PHONY: help install update setup deploy configure patch hooks uninstall preview check \
+.PHONY: help install update setup list-scopes deploy configure patch hooks uninstall preview check \
 	format clean \
 	check-tools check-syntax lint ci validate pre-commit pre-commit-run commit \
 	commit-msg-check $(CHECK_TARGETS) $(FORMAT_TARGETS)
@@ -53,6 +53,8 @@ define run_scripts
 					*.sh|*.zsh) ;; \
 					*) continue ;; \
 				esac; \
+				scope=$${script##*/}; \
+				case " $${JSH_SCOPE:-$${scope%.*}} " in *" $${scope%.*} "*) ;; *) continue ;; esac; \
 				[ "$$first_script" -eq 1 ] || jsh_blank; \
 				first_script=0; \
 				jsh::status info "Running $$script"; \
@@ -124,6 +126,20 @@ patch: ## Apply patches for the current platform
 
 setup: ## Discover and run the current platform setup
 	$(call run_scripts,install deploy configure patch)
+
+# Prints NAME<TAB>ACTIONS for each script basename usable as a JSH_SCOPE word.
+list-scopes:
+	@for action in install deploy configure patch; do \
+		for platform in $(PLATFORM_DIRS); do \
+			for script in "$(JSH_ROOT)/scripts/$$platform/$$action"/*; do \
+				[ -f "$$script" ] && [ -x "$$script" ] || continue; \
+				case "$$script" in *sync-conflict*) continue ;; *.sh|*.zsh) ;; *) continue ;; esac; \
+				name=$${script##*/}; \
+				printf '%s\t%s\n' "$${name%.*}" "$$action"; \
+			done; \
+		done; \
+	done | awk -F'\t' '!seen[$$0]++ { actions[$$1] = ($$1 in actions) ? actions[$$1] ", " $$2 : $$2 } \
+		END { for (name in actions) print name "\t" actions[name] }' | LC_ALL=C sort
 
 hooks: ## Install repository hooks
 	@"$(JSH_ROOT)/scripts/hooks.sh"
