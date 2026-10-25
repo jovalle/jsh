@@ -749,6 +749,22 @@ class MakeOrchestrationTests(unittest.TestCase):
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                     self.assertEqual(events, expected)
 
+    def test_sublime_patch_runs_on_every_update_for_each_platform(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = self.prepare_root(directory)
+            for platform in ("darwin", "linux", "windows"):
+                self.add_script(root, f"scripts/{platform}/patch/sublime-text.sh", platform)
+            for platform, expected in (
+                ("darwin", ["darwin"]),
+                ("linux", ["linux"]),
+                ("wsl", ["linux", "windows"]),
+            ):
+                (root / "events").unlink(missing_ok=True)
+                for _ in range(2):
+                    result, _ = self.run_make(root, "patch", platform, JSH_SCOPE="sublime-text")
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual((root / "events").read_text().splitlines(), expected * 2)
+
     def test_failure_mode_is_fail_fast_or_continue_on_error(self):
         with tempfile.TemporaryDirectory() as directory:
             root = self.prepare_root(directory)
