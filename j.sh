@@ -102,7 +102,7 @@ fi
 
 usage() {
   cat <<'EOF'
-Usage: j.sh [-y|--yes] [runtime | setup [bare|lite|full] [OPTIONS] | update [--dry-run]]
+Usage: j.sh [-y|--yes] [runtime | setup [bare|lite|full] [OPTIONS] | install [SCOPE] | update [--dry-run] [--close-apps] [SCOPE]]
 
 With no arguments, prepare and open the isolated Jsh runtime.
 
@@ -128,6 +128,7 @@ Phases: prerequisites, repository, launcher, dotfiles, shell, packages, configur
 Runtime, bare, and lite never install packages; missing tools are reported instead.
 Without a profile, setup reuses the recorded profile or asks for one.
 Use -y or --yes to accept prompts for the selected command without interactive input.
+Updates leave running applications open; --close-apps permits closing them when required.
 EOF
 }
 
@@ -146,6 +147,7 @@ select_setup_mode() {
 mode=runtime
 command_seen=0
 dry_run=0
+close_apps=0
 list_phases=0
 install_profile=
 setup_selector=
@@ -159,6 +161,7 @@ while (($#)); do
       export JSH_NON_INTERACTIVE=1
       ;;
     --dry-run) dry_run=1 ;;
+    --close-apps) close_apps=1 ;;
     --list)
       list_phases=1
       setup_option=${setup_option:-$1}
@@ -207,6 +210,15 @@ if [[ ${mode} != setup && -n ${setup_option} ]]; then
 fi
 if ((dry_run)) && [[ ${mode} != setup && ${mode} != update ]]; then
   usage_error "--dry-run is only supported by setup and update."
+fi
+if ((close_apps)) && [[ ${mode} != update ]]; then
+  usage_error "--close-apps is only supported by update."
+fi
+if [[ ${mode} == update ]]; then
+  export JSH_CLOSE_APPS=${close_apps}
+  if ((!close_apps)); then
+    export HOMEBREW_NO_UPGRADE_QUIT_CASKS=1
+  fi
 fi
 if ((dry_run || list_phases)); then
   export JSH_NON_INTERACTIVE=1
@@ -1059,13 +1071,18 @@ run_update_step() {
 
 print_update_summary() {
   local label
+  if [[ -n ${JSH_UPDATE_DEFERRED_FILE:-} && -f ${JSH_UPDATE_DEFERRED_FILE} ]]; then
+    while IFS= read -r label; do
+      UPDATE_WARNINGS+=("${label}")
+    done < <(LC_ALL=C sort -u "${JSH_UPDATE_DEFERRED_FILE}")
+  fi
   jsh_blank
   jsh_info "Update summary"
   for label in "${UPDATE_SUCCEEDED[@]}"; do
     jsh_success "${label}"
   done
   for label in "${UPDATE_WARNINGS[@]}"; do
-    jsh_note "Skipped: ${label}"
+    jsh_warn "Skipped: ${label}"
   done
   for label in "${UPDATE_ERRORS[@]}"; do
     jsh_error "Failed: ${label}"

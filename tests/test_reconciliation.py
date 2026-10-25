@@ -377,10 +377,12 @@ apply_configuration
             profile = Path(directory)
             (profile / "user.js").write_text("managed")
             events = profile / "events"
-            for policy_drift, profile_drift, expected in [
-                (0, 0, ["review"]),
-                (1, 0, ["review", "policy"]),
-                (0, 1, ["review", "close", "edit", "policy"]),
+            for policy_drift, profile_drift, close_apps, expected in [
+                (0, 0, "", ["review"]),
+                (1, 0, "", ["review", "policy"]),
+                (0, 1, "", ["review", "close", "edit", "policy"]),
+                (0, 1, "0", ["review"]),
+                (0, 1, "1", ["review", "close", "edit", "policy"]),
             ]:
                 events.unlink(missing_ok=True)
                 env = dict(
@@ -390,6 +392,7 @@ apply_configuration
                     TEST_DRIFT=str(policy_drift),
                     TEST_PROFILE_DRIFT=str(profile_drift),
                     JSH_ASSUME_YES="1",
+                    JSH_CLOSE_APPS=close_apps,
                 )
                 subprocess.run(
                     [

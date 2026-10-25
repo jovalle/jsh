@@ -220,10 +220,10 @@ main() {
   mkdir -p "${HOME}/Pictures/Screenshots"
   apply_preferences
 
-  if ((FINDER_CHANGED)); then
+  if ((FINDER_CHANGED)) && [[ ${JSH_CLOSE_APPS:-1} == 1 ]]; then
     killall Finder > /dev/null 2>&1 || true
   fi
-  if ((SYSTEM_UI_CHANGED)); then
+  if ((SYSTEM_UI_CHANGED)) && [[ ${JSH_CLOSE_APPS:-1} == 1 ]]; then
     killall SystemUIServer > /dev/null 2>&1 || true
   fi
   return "${PREFERENCE_STATUS}"

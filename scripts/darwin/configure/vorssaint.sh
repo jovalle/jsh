@@ -411,6 +411,10 @@ import_settings() {
   local backup_plist=$1
 
   if pgrep -x Vorssaint > /dev/null 2>&1; then
+    if [[ ${JSH_CLOSE_APPS:-} == 0 ]]; then
+      jsh::log_warn "Skipping Vorssaint import; the application remains open."
+      return 0
+    fi
     VORSSAINT_WAS_RUNNING=1
     killall Vorssaint > /dev/null 2>&1 || true
   fi

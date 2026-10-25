@@ -148,16 +148,18 @@ require_stopped() {
 }
 
 stop_for_apply() {
-  local authorized="${1:-false}" attempt
+  local authorized="${1:-false}" attempt confirmation_status=0
   browser_is_running || return 0
 
-  if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then
-    authorized=true
-  fi
-
   if [[ "${authorized}" != true ]]; then
-    [[ -t 0 ]] || die 1 "Helium is running. Rerun apply with --quit."
-    jsh::confirm 'Helium is running. Quit it now?' --default no || die 1 "Apply cancelled."
+    # Bulk package installs can defer Helium when quitting is not authorized.
+    jsh::confirm_app_close 'Helium is running. Quit it now?' --default no || confirmation_status=$?
+    case ${confirmation_status} in
+      0) ;;
+      1) return 2 ;;
+      129 | 130 | 143) return "${confirmation_status}" ;;
+      *) die 1 "Cannot confirm quitting Helium." ;;
+    esac
   fi
 
   if [[ ${PLATFORM} == Darwin ]]; then
@@ -627,7 +629,7 @@ apply_profile() {
 }
 
 apply() {
-  local quit=false
+  local quit=false quit_status
   local argument
   for argument in "$@"; do
     case ${argument} in
@@ -661,7 +663,14 @@ apply() {
   fi
 
   require_policy_privileges
-  stop_for_apply "${quit}"
+  stop_for_apply "${quit}" || {
+    quit_status=$?
+    if [[ ${quit_status} -eq 2 ]]; then
+      jsh::log_warn "Skipping Helium apply; the browser remains open."
+      return 0
+    fi
+    return "${quit_status}"
+  }
   upgrade_app
   verify_app
   install_linux_launcher

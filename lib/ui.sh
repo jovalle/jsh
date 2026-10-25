@@ -141,6 +141,15 @@ jsh::title() {
   esac
 }
 
+jsh::confirm_app_close() {
+  # Updates set an explicit policy; standalone tools retain their own prompts.
+  case ${JSH_CLOSE_APPS:-} in
+    0) return 1 ;;
+    1) return 0 ;;
+  esac
+  jsh::confirm "$@"
+}
+
 jsh::confirm() {
   local prompt=${1:-Continue?} default=yes answer gum_default
   (($# == 0)) || shift
