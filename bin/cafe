@@ -160,7 +160,7 @@ def toggle_xfce() -> None:
     pid = running_pid()
     if pid is None:
         linux_inhibitor()
-        process = subprocess.Popen(
+        process = subprocess.Popen(  # pylint: disable=consider-using-with
             [sys.executable, str(SCRIPT)],
             cwd="/",
             stdin=subprocess.DEVNULL,

@@ -70,7 +70,7 @@ def format_duration(seconds: float) -> str:
     return f"{seconds}s"
 
 
-class Progress:
+class Progress:  # pylint: disable=too-many-instance-attributes
     def __init__(self, label: str, total: int) -> None:
         self.label = label
         self.colors, self.frames = progress_theme()
@@ -89,7 +89,7 @@ class Progress:
         with self.lock:
             self.endpoint = endpoint
 
-    def bar_line(self) -> str:
+    def bar_line(self) -> str:  # pylint: disable=too-many-locals
         remaining = self.total - self.completed
         elapsed = time.monotonic() - self.started_at
         eta = elapsed / self.completed * remaining if self.completed else 0
@@ -107,8 +107,8 @@ class Progress:
         plain_counts = re.sub(r"\033\[[0-9;]*m", "", counts)
         width = max(1, min(30, columns - len(plain_counts) - len("Progress ") - 1))
         filled = round(width * percent / 100)
-        bar = f"{accent}{'━' * filled}{muted}{'─' * (width - filled)}{reset}"
-        status = f"Progress {bar}{counts}"
+        track = f"{accent}{'━' * filled}{muted}{'─' * (width - filled)}{reset}"
+        status = f"Progress {track}{counts}"
         available = columns - len("Progress ") - width - len(plain_counts) - 3
         if available >= 12:
             target = self.endpoint.split()[0]
@@ -173,11 +173,13 @@ def main(argv=None) -> int:
                 endpoint = event.get("endpoint", progress.endpoint)
                 message = event.get("message")
                 if (
-                    type(completed) is not int
-                    or type(failed) is not int
+                    any(
+                        isinstance(count, bool) or not isinstance(count, int)
+                        for count in (completed, failed)
+                    )
                     or not 0 <= failed <= completed <= args.total
                     or not isinstance(endpoint, str)
-                    or (message is not None and not isinstance(message, str))
+                    or not isinstance(message, (str, type(None)))
                 ):
                     raise ValueError("invalid progress counts or text")
                 with progress.lock:

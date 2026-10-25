@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Organize Waterfox bookmarks and fetch favicons without opening browser tabs."""
 
+# pylint: disable=too-many-lines
+
 from __future__ import annotations
 
 import argparse
@@ -53,11 +55,11 @@ WATERFOX_CONFIGURATOR = JSH_ROOT / "scripts/unix/configure/waterfox.sh"
 WATERFOX_CONFIG = JSH_ROOT / "conf/gecko/waterfox.json"
 JSH_UI = JSH_ROOT / "lib/ui/cli.sh"
 sys.path.insert(0, str(JSH_ROOT))
-from lib.ui.progress import (
+from lib.ui.progress import (  # pylint: disable=wrong-import-position,import-error
     Progress,
     clear_progress,
     print_status,
-)  # pylint: disable=wrong-import-position,import-error
+)
 
 Bookmark = Tuple[str, int]
 DEAD_STATUSES = {404, 410, -1}
@@ -128,7 +130,7 @@ def ui_section(title: str) -> None:
 
 
 @dataclass
-class OrganizationPlan:
+class OrganizationPlan:  # pylint: disable=too-many-instance-attributes
     dead_ids: set[int]
     duplicate_ids: set[int]
     no_icon_ids: set[int]
@@ -264,7 +266,7 @@ def waterfox_root() -> Path:
     raise RuntimeError("Unsupported operating system; pass --profile explicitly")
 
 
-def resolve_profile(profile_arg: Optional[Path]) -> Path:
+def resolve_profile(profile_arg: Optional[Path]) -> Path:  # pylint: disable=too-many-branches
     if profile_arg is not None:
         profile = profile_arg.expanduser().resolve()
     else:
@@ -495,7 +497,8 @@ def waterfox_launch_command(arguments: Sequence[str]) -> List[str]:
 
 
 def open_waterfox(arguments: Sequence[str] = ()) -> None:
-    subprocess.Popen(
+    # The browser is detached and must outlive this process.
+    subprocess.Popen(  # pylint: disable=consider-using-with
         waterfox_launch_command(arguments),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -827,7 +830,7 @@ def remove_waterfox_addons(profile: Path, query: str, assume_yes: bool) -> None:
 
 
 def connect_read_only(database: Path) -> sqlite3.Connection:
-    uri = "file:{}?mode=ro".format(urllib.parse.quote(str(database), safe="/"))
+    uri = f"file:{urllib.parse.quote(str(database), safe='/')}?mode=ro"
     return sqlite3.connect(uri, uri=True, timeout=1)
 
 
@@ -844,7 +847,8 @@ def ensure_profile_readable(profile: Path, assume_yes: bool) -> None:
                 raise
             if attempt:
                 raise RuntimeError(
-                    f"{name} is still locked. Close other applications using this profile and retry."
+                    f"{name} is still locked. "
+                    "Close other applications using this profile and retry."
                 ) from error
             ensure_waterfox_closed(assume_yes)
 
@@ -1064,7 +1068,7 @@ def site_document_urls(bookmarks: Iterable[Bookmark]) -> List[str]:
     return urls
 
 
-def fetch_icon(
+def fetch_icon(  # pylint: disable=too-many-locals
     hostname: str,
     bookmarks: Iterable[Bookmark],
     timeout: float,
@@ -1160,7 +1164,7 @@ def log_failure(hostname: str) -> None:
     print_status("No favicon", hostname)
 
 
-def fetch_icons(
+def fetch_icons(  # pylint: disable=too-many-locals
     grouped: Dict[str, List[Bookmark]],
     timeout: float,
     delay: float,
@@ -1205,8 +1209,7 @@ def fetch_icons(
         executor.shutdown(wait=False, cancel_futures=True)
         clear_progress()
         raise
-    else:
-        executor.shutdown()
+    executor.shutdown()
 
     return downloaded, failures
 
@@ -1270,7 +1273,7 @@ def assess_redirect(
     return None, destination, reason
 
 
-def assess_page(
+def assess_page(  # pylint: disable=too-many-return-statements
     url: str,
     timeout: float,
     cancelled: threading.Event,
@@ -1348,7 +1351,7 @@ def log_health_result(
     print_status(label, f"{url}{redirect} ({detail})", state)
 
 
-def check_pages(
+def check_pages(  # pylint: disable=too-many-locals
     bookmarks: Iterable[Bookmark],
     timeout: float,
     workers: int,
@@ -1400,8 +1403,7 @@ def check_pages(
         executor.shutdown(wait=False, cancel_futures=True)
         clear_progress()
         raise
-    else:
-        executor.shutdown()
+    executor.shutdown()
     return dead, inconclusive
 
 
@@ -1443,7 +1445,7 @@ def folder_is_sorted(rows: Iterable[sqlite3.Row]) -> bool:
     return segment == sorted(segment, key=bookmark_sort_key)
 
 
-def plan_organization(
+def plan_organization(  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     profile: Path,
     dead_urls: set[str],
     icon_urls: Optional[set[str]] = None,
@@ -1618,7 +1620,7 @@ def plan_organization(
         for parent in folder_ids
         if parent not in delete_ids and not folder_is_sorted(children.get(parent, []))
     ]
-    if (
+    if (  # pylint: disable=too-many-boolean-expressions
         dead_ids
         or review_ids
         or url_updates
@@ -1917,7 +1919,9 @@ def update_bookmark_urls(
         touch_bookmark(connection, int(bookmark[1]), timestamp)
 
 
-def apply_organization(profile: Path, plan: OrganizationPlan) -> Tuple[int, Path]:
+def apply_organization(  # pylint: disable=too-many-locals
+    profile: Path, plan: OrganizationPlan
+) -> Tuple[int, Path]:
     database = profile / "places.sqlite"
     connection = sqlite3.connect(database, timeout=1)
     connection.row_factory = sqlite3.Row
@@ -2106,7 +2110,7 @@ def find_or_create_page(connection: sqlite3.Connection, page_url: str, page_hash
     return cursor.lastrowid
 
 
-def update_favicons(
+def update_favicons(  # pylint: disable=too-many-locals
     profile: Path,
     grouped: Dict[str, List[Bookmark]],
     downloaded: Dict[str, Tuple[str, bytes]],
@@ -2152,7 +2156,11 @@ def update_favicons(
         connection.close()
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def main(
+    argv: Optional[Sequence[str]] = None,
+) -> (
+    int
+):  # pylint: disable=too-many-locals,too-many-return-statements,too-many-branches,too-many-statements
     args = parse_args(argv)
     try:
         if args.command:
@@ -2259,13 +2267,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if args.refresh:
             ui_status(
                 "info",
-                f"Refresh enabled; fetching {len(pending_bookmarks)} bookmarks across {len(grouped)} domains",
+                f"Refresh enabled; fetching {len(pending_bookmarks)} bookmarks "
+                f"across {len(grouped)} domains",
             )
         else:
             ui_status("note", f"Using {len(existing_cached_urls)} cached bookmark favicons")
             ui_status(
                 "info",
-                f"Fetching {len(pending_bookmarks)} missing bookmarks across {len(grouped)} domains",
+                f"Fetching {len(pending_bookmarks)} missing bookmarks "
+                f"across {len(grouped)} domains",
             )
 
         downloaded: Dict[str, Tuple[str, bytes]] = {}
