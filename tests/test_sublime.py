@@ -190,6 +190,72 @@ class SublimeLinuxTests(unittest.TestCase):
 
 
 class SublimePreferencesTests(unittest.TestCase):
+    def test_macos_editor_defaults_preserve_mpv_and_only_repair_changed_types(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            (home / "Applications/Sublime Text.app").mkdir(parents=True)
+            state = home / "associations"
+            state.mkdir()
+            # duti resolves these extensions to shared video UTIs, not TypeScript.
+            for kind in ("public.mpeg-2-transport-stream", "public.avchd-mpeg-2-transport-stream"):
+                (state / kind).write_text("io.mpv\n")
+            changes = home / "changes"
+            shell = r"""
+uname() { printf 'Darwin\n'; }
+duti() {
+  local kind handler
+  if [[ $1 == -s ]]; then kind=$3; else kind=$2; fi
+  kind=${kind#.}
+  case ${kind} in
+    ts) kind=public.mpeg-2-transport-stream ;;
+    mts|m2ts) kind=public.avchd-mpeg-2-transport-stream ;;
+  esac
+  if [[ $1 == -s ]]; then
+    printf '%s\n' "$*" >> "$HOME/changes"
+    printf '%s\n' "$2" > "$HOME/associations/$kind"
+  else
+    handler=other.app
+    [[ ! -f $HOME/associations/$kind ]] || handler=$(< "$HOME/associations/$kind")
+    printf '%s\n' "$handler"
+  fi
+}
+source "$1"
+"""
+
+            def configure():
+                result = subprocess.run(
+                    [
+                        "bash",
+                        "-c",
+                        shell,
+                        "_",
+                        str(ROOT / "scripts/unix/configure/sublime-text.sh"),
+                    ],
+                    env={**os.environ, "HOME": temporary},
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+            configure()
+            first = changes.read_text().splitlines()
+            assigned = {line.split()[2] for line in first}
+            self.assertTrue({"public.source-code", ".py", ".tsx", ".cts", ".toml"} <= assigned)
+            self.assertTrue(assigned.isdisjoint({".ts", ".mts", ".m2ts"}))
+            self.assertEqual((state / "public.mpeg-2-transport-stream").read_text(), "io.mpv\n")
+            self.assertEqual(
+                (state / "public.avchd-mpeg-2-transport-stream").read_text(), "io.mpv\n"
+            )
+            configure()
+            self.assertEqual(changes.read_text().splitlines(), first)
+            # An extension outside the old spot checks must also be repaired alone.
+            (state / "tsx").write_text("other.app\n")
+            configure()
+            self.assertEqual(
+                changes.read_text().splitlines(), first + ["-s com.sublimetext.4 .tsx all"]
+            )
+
     def test_preferences_do_not_require_file_association_tools(self):
         for platform in ("Darwin", "Linux"):
             for preferences_only in (False, True):
