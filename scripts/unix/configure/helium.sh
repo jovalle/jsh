@@ -702,13 +702,17 @@ reset_profile() {
   profile_root_is_safe || die 1 "Refusing to reset an unsafe profile path: ${PROFILE_ROOT}"
 
   if [[ "${force}" != true ]]; then
-    [[ -t 0 ]] || die 1 "reset requires --force when input is not interactive."
     if [[ "${delete_all}" == true ]]; then
       prompt="Delete the Helium profile and all extension data at ${PROFILE_ROOT}?"
     else
       prompt="Reset the Helium profile at ${PROFILE_ROOT} while preserving extension data?"
     fi
-    jsh::confirm "${prompt}" --default no || die 1 "Reset cancelled."
+    jsh::confirm "${prompt}" --default no || {
+      local confirmation_status=$?
+      [[ ${confirmation_status} -eq 1 ]] || return "${confirmation_status}"
+      jsh::log_warn "Helium reset skipped; the profile was left untouched."
+      return 0
+    }
   fi
 
   if [[ "${delete_all}" != true ]]; then

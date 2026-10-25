@@ -112,8 +112,13 @@ if ((backend_explicit == 0 && code_only == 0)); then
     *)
       [[ ${JSH_INTERACTIVE:-0} == 1 ]] ||
         die 'Multiple Graphify backends are available. Pass --backend NAME in noninteractive use.'
-      if ! backend=$(jsh::choose_one 'GRAPHIFY BACKEND' "${backend_choices[@]}"); then
-        die 'Graphify backend selection cancelled. Pass --backend NAME to select one explicitly.'
+      if backend=$(jsh::choose_one 'GRAPHIFY BACKEND' "${backend_choices[@]}"); then
+        :
+      else
+        selection_status=$?
+        ((selection_status == 1)) || exit "${selection_status}"
+        jsh::log_note 'Graphify backend selection cancelled.'
+        exit 0
       fi
       ;;
   esac

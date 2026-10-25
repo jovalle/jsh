@@ -250,7 +250,7 @@ confirm() {
   [[ ${default} == no ]] && prompt='y/N'
   while :; do
     jsh_prompt "$1 [${prompt}] " > "${TTY}"
-    IFS= read -r answer < "${TTY}"
+    IFS= read -r answer < "${TTY}" || return 130
     case "${answer}" in
       '') [[ ${default} == yes ]]; return ;;
       y | Y | yes | YES) return 0 ;;

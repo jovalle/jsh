@@ -126,9 +126,15 @@ stop_sublime() {
 
   if [[ ${JSH_ASSUME_YES:-0} != 1 ]]; then
     if [[ -t 0 ]]; then
-      jsh::confirm "Sublime Text is running. Quit it now?" --default yes || die 1 "Operation cancelled."
+      jsh::confirm "Sublime Text is running. Quit it now?" --default yes || {
+        local confirmation_status=$?
+        [[ ${confirmation_status} -eq 1 ]] || exit "${confirmation_status}"
+        jsh::log_warn "Operation skipped; Sublime Text remains open."
+        exit 0
+      }
     else
-      die 1 "Sublime Text is running. Quit Sublime Text or pass -y/--yes."
+      jsh::log_warn "Operation skipped; quit Sublime Text or pass -y/--yes."
+      exit 0
     fi
   fi
 
@@ -429,7 +435,12 @@ restore_backup() {
 
   jsh::log_info "Found backup: ${latest_backup}"
   if [[ ${JSH_ASSUME_YES:-0} != 1 ]]; then
-    jsh::confirm "Restore Sublime Text binary from backup?" --default yes || die 1 "Restore cancelled."
+    jsh::confirm "Restore Sublime Text binary from backup?" --default no || {
+      local confirmation_status=$?
+      [[ ${confirmation_status} -eq 1 ]] || exit "${confirmation_status}"
+      jsh::log_warn "Sublime Text restore skipped; the binary was left untouched."
+      return 0
+    }
   fi
 
   stop_sublime "${app_path}"
