@@ -123,7 +123,8 @@ configure_audio() {
   fi
   temporary=$(mktemp)
   jsh_interrupt_cleanup_path "${temporary}"
-  local source=${JSH_AUDIO_POLICY:-${JSH_ROOT}/conf/hosts/$(hostname -s)/audio.conf}
+  local source=${JSH_AUDIO_POLICY:-}
+  [[ -n ${source} || $(hostname -s) != colossus ]] || source=${JSH_ROOT}/conf/audio.conf
   if [[ ! -r ${source} ]]; then
     rm -f "${temporary}"
     jsh::log_note "No audio device policy for this host; keeping existing devices."
