@@ -173,12 +173,17 @@ run_privileged() {
 run_python_helper() {
   local mode=$1 binary_path=$2 out_path=${3:-}
   python3 -c "
+import platform
 import sys
 
 ORIG_X86 = bytes.fromhex('0F B6 51 05 83 F2 01')
 PATCH_X86 = bytes.fromhex('C6 41 05 01 B2 00 90')
 ORIG_ARM64 = bytes.fromhex('09 15 40 39 4A 00 80 52 3F 01 00 71 E9 13 8A 1A')
 PATCH_ARM64 = bytes.fromhex('29 00 80 52 09 15 00 39 E9 03 1F 2A 1F 20 03 D5')
+# Build 4200 window_list::check_for_update is automatic; the menu uses a separate path.
+UPDATE_X86 = bytes.fromhex('55 48 89 E5 41 57 41 56 41 55 41 54 53 48 81 EC 18 02 00 00 49 89 FF 48 8B 05 9E B6 3C 00 48 8B')
+UPDATE_ARM64 = bytes.fromhex('E1 03 1E AA 20 71 08 94 FE 03 01 AA FD 7B 05 A9 FD 43 01 91 FF C3 07 D1')
+UPDATE_LINUX = bytes.fromhex('55 41 57 41 56 41 55 41 54 53 48 81 EC 08 02 00 00 49 89 FF 4C 8B 77 10 48 8B AF E8 01 00 00 48')
 
 mode = sys.argv[1]
 bin_path = sys.argv[2]
@@ -190,73 +195,71 @@ if sys.argv[4] == 'Linux' and (data[:6] != b'\x7fELF\x02\x01' or data[18:20] != 
     print('unsupported Linux binary: only x86_64 ELF is verified for Build 4200')
     sys.exit(1)
 
-for original, patched in ((ORIG_X86, PATCH_X86), (ORIG_ARM64, PATCH_ARM64)):
+patches = [('x86_64', 'license check', ORIG_X86, PATCH_X86), ('arm64', 'license check', ORIG_ARM64, PATCH_ARM64)]
+if sys.argv[4] == 'Linux' and any(original in data or patched in data for _, _, original, patched in patches):
+    if UPDATE_LINUX not in data and b'\xc3' + UPDATE_LINUX[1:] not in data:
+        print('unrecognized automatic-update signature for Linux x86_64')
+        sys.exit(1)
+    patches.append(('x86_64', 'automatic updates', UPDATE_LINUX, b'\xc3' + UPDATE_LINUX[1:]))
+if sys.argv[4] == 'Darwin':
+    for arch, _, original, patched in patches[:]:
+        if original in data or patched in data:
+            update = UPDATE_X86 if arch == 'x86_64' else UPDATE_ARM64
+            replacement = b'\xc3' + update[1:] if arch == 'x86_64' else bytes.fromhex('C0 03 5F D6') + update[4:]
+            if update not in data and replacement not in data:
+                print('unrecognized automatic-update signature for ' + arch)
+                sys.exit(1)
+            patches.append((arch, 'automatic updates', update, replacement))
+
+active = []
+for arch, feature, original, patched in patches:
     if data.count(original) + data.count(patched) > 1:
         print('ambiguous patch signature')
         sys.exit(1)
+    if original in data or patched in data:
+        active.append((arch, feature, original, patched))
+if not active:
+    print('unrecognized binary structure')
+    sys.exit(1)
 
-has_x86_orig = ORIG_X86 in data
-has_x86_patch = PATCH_X86 in data
-has_arm_orig = ORIG_ARM64 in data
-has_arm_patch = PATCH_ARM64 in data
+all_patched = all(patched in data for _, _, _, patched in active)
+host = {'aarch64': 'arm64', 'amd64': 'x86_64'}.get(platform.machine().lower(), platform.machine().lower())
+arches = sorted({arch for arch, _, _, _ in active}, key=lambda arch: (arch != host, arch))
 
-has_x86 = has_x86_orig or has_x86_patch
-has_arm = has_arm_orig or has_arm_patch
+def arch_label(arch):
+    return arch + (' slice' if arch != host else '')
+
+def per_arch(describe):
+    return '; '.join(arch_label(arch) + ': ' + ', '.join(describe(feature, original, patched) for a, feature, original, patched in active if a == arch) for arch in arches)
 
 if mode == 'status':
-    if not has_x86 and not has_arm:
-        print('unrecognized binary structure')
-        sys.exit(1)
-    parts = []
-    all_patched = True
-    if has_x86:
-        if has_x86_patch:
-            parts.append('x86_64: patched')
-        elif has_x86_orig:
-            parts.append('x86_64: unpatched')
-            all_patched = False
-        else:
-            parts.append('x86_64: unknown')
-            all_patched = False
-    if has_arm:
-        if has_arm_patch:
-            parts.append('arm64: patched')
-        elif has_arm_orig:
-            parts.append('arm64: unpatched')
-            all_patched = False
-        else:
-            parts.append('arm64: unknown')
-            all_patched = False
-    print(', '.join(parts))
+    if all_patched:
+        features = ' and '.join(dict.fromkeys(feature for _, feature, _, _ in active))
+        extra = ''.join('; ' + arch_label(arch) + ' also patched' for arch in arches[1:])
+        print(features + ' (' + arches[0] + extra + ')')
+    else:
+        print(per_arch(lambda feature, _, patched: feature + (' patched' if patched in data else ' unpatched')))
     sys.exit(0 if all_patched else 2)
 
 elif mode == 'patch':
-    if not has_x86_orig and not has_arm_orig:
-        if has_x86_patch or has_arm_patch:
-            print('already_patched')
-            sys.exit(2)
-        print('original byte sequences not found')
-        sys.exit(1)
+    if all_patched:
+        print('already_patched')
+        sys.exit(2)
     buf = bytearray(data)
-    patched_slices = []
-    if has_x86_orig:
-        idx = buf.find(ORIG_X86)
-        buf[idx:idx + len(PATCH_X86)] = PATCH_X86
-        patched_slices.append('x86_64')
-    if has_arm_orig:
-        idx = buf.find(ORIG_ARM64)
-        buf[idx:idx + len(PATCH_ARM64)] = PATCH_ARM64
-        patched_slices.append('arm64')
+    for _, _, original, patched in active:
+        if original in data:
+            idx = buf.find(original)
+            buf[idx:idx + len(patched)] = patched
     out_file = sys.argv[3]
     with open(out_file, 'wb') as f:
         f.write(buf)
-    print(', '.join(patched_slices))
+    active = [entry for entry in active if entry[2] in data]
+    arches = [arch for arch in arches if any(entry[0] == arch for entry in active)]
+    print(per_arch(lambda feature, _, __: feature))
     sys.exit(0)
 
 elif mode == 'verify':
-    if (not has_x86 and not has_arm) or (has_x86 and not has_x86_patch) or (has_arm and not has_arm_patch) or has_x86_orig or has_arm_orig:
-        sys.exit(1)
-    sys.exit(0)
+    sys.exit(0 if all_patched else 1)
 " "${mode}" "${binary_path}" "${out_path}" "${SUBLIME_PLATFORM}"
 }
 
@@ -300,10 +303,10 @@ patch_status() {
   status_output=$(run_python_helper status "${binary_path}") || status_code=$?
 
   if [[ ${status_code} -eq 0 ]]; then
-    jsh::log_success "Sublime Text (Build ${build}) is patched (${status_output})."
+    jsh::log_success "Sublime Text (Build ${build}) is patched: ${status_output}."
     return 0
   elif [[ ${status_code} -eq 2 ]]; then
-    jsh::log_warn "Sublime Text (Build ${build}) needs patch (${status_output})."
+    jsh::log_warn "Sublime Text (Build ${build}) needs patch: ${status_output}."
     return 1
   else
     jsh::log_error "Sublime Text (Build ${build}) status unknown: ${status_output}."
@@ -346,7 +349,7 @@ apply() {
 
   "${JSH_ROOT}/scripts/unix/configure/sublime-text.sh" --preferences-only
   if [[ ${status_code} -eq 0 ]]; then
-    jsh::log_note "Sublime Text is already patched (${status_output})."
+    jsh::log_note "Sublime Text is already patched: ${status_output}."
     return 0
   fi
 
@@ -367,7 +370,7 @@ apply() {
   fi
   chmod 0755 "${temp_file}"
 
-  backup_file="${binary_path}.backup_$(date +%Y%m%d%H%M%S)"
+  backup_file="${binary_path}.backup_$(date +%Y%m%d%H%M%S)_${temp_file##*.}"
   jsh::log_info "Backing up original binary to ${backup_file}..."
   run_privileged "${binary_path}" cp -p "${binary_path}" "${backup_file}" || {
     rm -f "${temp_file}"
