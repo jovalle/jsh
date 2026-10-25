@@ -419,6 +419,7 @@ class DeployTests(unittest.TestCase):
             for relative in (
                 "scripts/unix/deploy/dotfiles.zsh",
                 "lib/env.sh",
+                "lib/files.sh",
                 "lib/output.sh",
                 "lib/ui.sh",
                 "lib/ui/theme.sh",
@@ -566,7 +567,8 @@ class DeployTests(unittest.TestCase):
             )
             command = ["zsh", str(root / "scripts/unix/deploy/dotfiles.zsh")]
             subprocess.run(command, env=env, capture_output=True, check=True)
-            self.assertTrue((home / ".config/example").is_symlink())
+            self.assertFalse((home / ".config/example").is_symlink())
+            self.assertTrue((home / ".config/example/settings.json").is_symlink())
             original = source.stat()
             subprocess.run(command, env=env, capture_output=True, check=True)
             self.assertEqual(source.read_text(), '{"personal": true}\n')
@@ -604,7 +606,8 @@ class DeployTests(unittest.TestCase):
             )
             command = ["zsh", str(root / "scripts/unix/deploy/dotfiles.zsh")]
             subprocess.run(command, env=env, capture_output=True, check=True)
-            self.assertTrue((home / ".config/example").is_symlink())
+            self.assertFalse((home / ".config/example").is_symlink())
+            self.assertTrue((home / ".config/example/SKILL.md").is_symlink())
             subprocess.run(command, env=env, capture_output=True, check=True)
             self.assertTrue(source.is_symlink())
             self.assertFalse((home / "state/jsh/backups").exists())
@@ -652,6 +655,144 @@ class DeployTests(unittest.TestCase):
             self.assertEqual(live_state.read_text(), "live runtime\n")
             self.assertFalse(live_state.is_symlink())
             self.assertFalse((home / "state/jsh/backups").exists())
+
+    def prepare_deploy_root(self, directory):
+        root = Path(directory) / "repo"
+        home = Path(directory) / "home"
+        home.mkdir()
+        for relative in (
+            "scripts/unix/deploy/dotfiles.zsh",
+            "bin/jstow",
+            "lib/env.sh",
+            "lib/files.sh",
+            "lib/output.sh",
+            "lib/ui.sh",
+            "lib/ui/theme.sh",
+        ):
+            target = root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ROOT / relative, target)
+        env = dict(
+            os.environ,
+            HOME=str(home),
+            XDG_STATE_HOME=str(home / "state"),
+            JSH_PLAIN_OUTPUT="1",
+        )
+        return root, home, env
+
+    @unittest.skipUnless(shutil.which("zsh"), "Zsh is required for dotfile deployment")
+    def test_deploy_unfolds_directory_links_and_returns_unmanaged_state_home(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, home, env = self.prepare_deploy_root(directory)
+            source = root / "dotfiles/.config/example/settings.json"
+            source.parent.mkdir(parents=True)
+            source.write_text("managed\n")
+            runtime = root / "dotfiles/.config/example/runtime.json"
+            runtime.write_text("runtime\n")
+            cache = root / "dotfiles/.config/cache/Local State"
+            cache.parent.mkdir(parents=True)
+            cache.write_text("cache\n")
+            (root / ".gitignore").write_text(
+                "dotfiles/.config/example/runtime.json\ndotfiles/.config/cache/\n"
+            )
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            (home / ".config").symlink_to("../repo/dotfiles/.config")
+
+            subprocess.run(
+                ["zsh", str(root / "scripts/unix/deploy/dotfiles.zsh")],
+                env=dict(env, JSH_ASSUME_YES="1"),
+                capture_output=True,
+                check=True,
+            )
+
+            self.assertFalse((home / ".config").is_symlink())
+            self.assertFalse((home / ".config/example").is_symlink())
+            linked = home / ".config/example/settings.json"
+            self.assertTrue(linked.is_symlink())
+            self.assertTrue(linked.samefile(source))
+            self.assertEqual((home / ".config/example/runtime.json").read_text(), "runtime\n")
+            self.assertFalse((home / ".config/example/runtime.json").is_symlink())
+            self.assertEqual((home / ".config/cache/Local State").read_text(), "cache\n")
+            self.assertFalse(runtime.exists())
+            self.assertFalse(cache.parent.exists())
+
+    @unittest.skipUnless(shutil.which("zsh"), "Zsh is required for dotfile deployment")
+    def test_deploy_links_into_missing_directories_and_replaces_identical_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, home, env = self.prepare_deploy_root(directory)
+            fresh = root / "dotfiles/.config/fresh/nested/settings"
+            fresh.parent.mkdir(parents=True)
+            fresh.write_text("fresh\n")
+            same = root / "dotfiles/.config/same/settings"
+            same.parent.mkdir(parents=True)
+            same.write_text("same\n")
+            (home / ".config/same").mkdir(parents=True)
+            (home / ".config/same/settings").write_text("same\n")
+
+            subprocess.run(
+                ["zsh", str(root / "scripts/unix/deploy/dotfiles.zsh")],
+                env=dict(env, JSH_ASSUME_YES="1"),
+                capture_output=True,
+                check=True,
+            )
+
+            self.assertFalse((home / ".config/fresh/nested").is_symlink())
+            self.assertTrue((home / ".config/fresh/nested/settings").samefile(fresh))
+            self.assertTrue((home / ".config/same/settings").is_symlink())
+            self.assertTrue((home / ".config/same/settings").samefile(same))
+            self.assertFalse((home / "state/jsh/backups").exists())
+
+    @unittest.skipUnless(shutil.which("zsh"), "Zsh is required for dotfile deployment")
+    def test_deploy_skips_differing_files_without_prompting(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root, home, env = self.prepare_deploy_root(directory)
+            source = root / "dotfiles/.config/example/settings"
+            source.parent.mkdir(parents=True)
+            source.write_text("managed\n")
+            existing = home / ".config/example/settings"
+            existing.parent.mkdir(parents=True)
+            existing.write_text("local\n")
+
+            result = subprocess.run(
+                ["zsh", str(root / "scripts/unix/deploy/dotfiles.zsh")],
+                env=dict(env, JSH_ASSUME_YES="1"),
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+            self.assertFalse(existing.is_symlink())
+            self.assertEqual(existing.read_text(), "local\n")
+            self.assertEqual(source.read_text(), "managed\n")
+            self.assertIn("Skipping differing file", result.stderr)
+
+    @unittest.skipUnless(shutil.which("zsh"), "Zsh is required for dotfile deployment")
+    def test_deploy_prompt_adopts_or_overrides_differing_files(self):
+        for choice, expected in (("1", "local\n"), ("2", "managed\n")):
+            with self.subTest(choice=choice), tempfile.TemporaryDirectory() as directory:
+                root, home, env = self.prepare_deploy_root(directory)
+                source = root / "dotfiles/.config/example/settings"
+                source.parent.mkdir(parents=True)
+                source.write_text("managed\n")
+                existing = home / ".config/example/settings"
+                existing.parent.mkdir(parents=True)
+                existing.write_text("local\n")
+
+                result = subprocess.run(
+                    ["zsh", str(root / "scripts/unix/deploy/dotfiles.zsh")],
+                    env=dict(env, JSH_INTERACTIVE="1", JSH_UI_BACKEND="plain"),
+                    input=f"y\n{choice}\n",
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+
+                self.assertIn("-managed", result.stderr)
+                self.assertIn("+local", result.stderr)
+                self.assertTrue(existing.is_symlink())
+                self.assertTrue(existing.samefile(source))
+                self.assertEqual(source.read_text(), expected)
+                self.assertFalse((home / "state/jsh/backups").exists())
 
 
 class MakeOrchestrationTests(unittest.TestCase):

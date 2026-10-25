@@ -127,6 +127,7 @@ done < <(
 typeset -a jstow_args
 jstow_args=(
   --restow
+  --no-folding
   --dir "${repo_root}"
   --target "${HOME}"
   '--ignore=(^|/)[.]zcompdump([.-].*)?$'
@@ -147,6 +148,72 @@ else
   dotfile_sources=(${(0)"$(find "${dotfiles_dir}" \( -type f -o -type l \) -print0)"})
 fi
 
+typeset -A managed_paths
+for source in "${dotfile_sources[@]}"; do
+  [[ -n "${source}" ]] || continue
+  relative=${source#"${dotfiles_dir}/"}
+  managed_paths[${relative}]=file
+  while [[ ${relative} == */* ]]; do
+    relative=${relative%/*}
+    managed_paths[${relative}]=dir
+  done
+done
+
+# Move unmanaged repository content home; managed files stay for jstow to link.
+unfold_directory() {
+  local relative=$1 entry child
+  mkdir -p -- "${HOME}/${relative}"
+  for entry in "${dotfiles_dir}/${relative}"/*(DN); do
+    child=${relative}/${entry:t}
+    case ${managed_paths[${child}]:-} in
+      file) ;;
+      dir) unfold_directory "${child}" ;;
+      *) mv -- "${entry}" "${HOME}/${child}" ;;
+    esac
+  done
+}
+
+# Earlier deploys folded whole directories (e.g. ~/.config) into the repository.
+for relative in "${(@ko)managed_paths}"; do
+  [[ ${managed_paths[${relative}]} == dir ]] || continue
+  target="${HOME}/${relative}"
+  [[ -L "${target}" && "${target}" -ef "${dotfiles_dir}/${relative}" ]] || continue
+  jsh::log_info "Unfolding directory link: ${target}"
+  rm -- "${target}"
+  unfold_directory "${relative}"
+done
+
+skip_path() {
+  local escaped
+  escaped=$(printf '%s' "$1" | sed 's/[][\.^$*+?(){}|]/\\&/g')
+  jstow_args+=("--ignore=^${escaped}$")
+}
+
+resolve_conflict() {
+  local target=$1 source=$2 relative=$3 choice
+  if cmp -s -- "${target}" "${source}"; then
+    jsh::log_detail "Replacing identical copy: ${target}"
+    stash_path "${target}"
+    return
+  fi
+  choice=$(jsh_choose_conflict "${target}" "${source}")
+  case ${choice} in
+    adopt)
+      jsh::log_info "Adopting existing file into Jsh: ${target}"
+      cp -- "${target}" "${source}"
+      stash_path "${target}"
+      ;;
+    override)
+      jsh::log_info "Overriding with the Jsh copy: ${target}"
+      stash_path "${target}"
+      ;;
+    *)
+      jsh::log_warn "Skipping differing file: ${target}"
+      skip_path "${relative}"
+      ;;
+  esac
+}
+
 for source in "${dotfile_sources[@]}"; do
   [[ -n "${source}" ]] || continue
   relative=${source#"${dotfiles_dir}/"}
@@ -160,9 +227,11 @@ for source in "${dotfile_sources[@]}"; do
   if [[ -L "${target}" ]]; then
     destination=$(readlink "${target}")
     [[ "${destination}" == /* ]] || destination="${target:h}/${destination}"
-    [[ "${destination:a}" == "${source:a}" ]] && continue
+    [[ "${destination:h:A}/${destination:t}" == "${source:h:A}/${source:t}" ]] && continue
   fi
-  if [[ -e "${target}" || -L "${target}" ]]; then
+  if [[ -f "${target}" && -f "${source}" && ! -L "${source}" ]]; then
+    resolve_conflict "${target}" "${source}" "${relative}"
+  elif [[ -e "${target}" || -L "${target}" ]]; then
     jsh::log_warn "Backing up unmanaged path: ${target}"
     backup_path "${target}"
   fi
