@@ -13,4 +13,5 @@ local/vendor/skills/cloudflare-skills        https://github.com/cloudflare/skill
 local/vendor/skills/impeccable               https://github.com/pbakaus/impeccable.git
 local/vendor/skills/mattpocock-skills        https://github.com/mattpocock/skills.git
 local/vendor/skills/openai-skills            https://github.com/openai/skills.git
+local/vendor/skills/thesysdev-skills         https://github.com/thesysdev/skills.git
 local/vendor/skills/ui-ux-pro-max-skill      https://github.com/nextlevelbuilder/ui-ux-pro-max-skill.git
