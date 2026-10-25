@@ -50,6 +50,7 @@ Everyday commands, rebuilt the way I wish they worked.
 | Command                      | What it adds                                                                                  |
 | ---------------------------- | --------------------------------------------------------------------------------------------- |
 | [`jadopt`](bin/jadopt)       | Moves any file in your home directory into the managed dotfiles.                              |
+| [`jagents`](bin/jagents)     | Keeps agy, Codex, and OpenCode in parity and reconciles MCP servers, skills, and plugins.     |
 | [`jbrew`](bin/jbrew)         | Homebrew with macOS and Linux availability in search, `whatprovides`, adoption, and `extras`. |
 | [`jfetch`](bin/jfetch)       | A fastfetch-inspired system summary.<br><img src="assets/jfetch.png" alt="jfetch output" />   |
 | [`jgit`](bin/jgit)           | Per-repo identities, timestamped commits, history rewrites, and gist-backed stashes.          |

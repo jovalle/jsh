@@ -291,6 +291,19 @@ jsh_repair() {
     repair_failed=1
   fi
 
+  if repair_agents=$("${JSH_ROOT}/lib/unix/agents.sh" "${JSH_ROOT}" --repair); then
+    while IFS=$(printf '\t') read -r repair_kind repair_message; do
+      case ${repair_kind} in
+        fixed) jsh_detail "${repair_message}" ;;
+        issue) jsh_warn "${repair_message}" ;;
+      esac
+    done << EOF
+${repair_agents}
+EOF
+  else
+    repair_failed=1
+  fi
+
   if [ "${repair_failed}" -eq 0 ] && jsh_health_check 1; then
     return 0
   fi
@@ -364,9 +377,24 @@ EOF
     jsh_health_issue 'Managed symlinks could not be scanned.'
   fi
 
+  jsh_blank
+  jsh_info 'AI agents'
+  if doctor_agents=$("${JSH_ROOT}/lib/unix/agents.sh" "${JSH_ROOT}"); then
+    while IFS=$(printf '\t') read -r doctor_kind doctor_message; do
+      case ${doctor_kind} in
+        ok) jsh_health_status ok "${doctor_message}" ;;
+        issue) jsh_health_issue "${doctor_message}" ;;
+      esac
+    done << EOF
+${doctor_agents}
+EOF
+  else
+    jsh_health_issue 'AI agents could not be validated.'
+  fi
+
   [ -n "${JSH_HEALTH_ISSUES}" ] || return 0
   jsh_blank
-  jsh_error 'Jsh needs attention. Run `jsh repair` for dependencies and stale links, or `jsh update` for upstream changes.'
+  jsh_error 'Jsh needs attention. Run `jsh repair` for dependencies, stale links, and agent configuration, or `jsh update` for upstream changes.'
   return 1
 }
 
