@@ -77,6 +77,7 @@ dotfiles/.config/Code/
 dotfiles/.config/colima/
 dotfiles/.config/gh/
 dotfiles/.config/ghostty/config
+dotfiles/.config/opencode/service.json
 dotfiles/.config/spicetify/
 dotfiles/.config/xfce4/desktop/accels.scm
 dotfiles/.config/xfce4/desktop/icons.screen*.yaml
