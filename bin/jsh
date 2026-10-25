@@ -4,6 +4,7 @@
 ## adopt ## Move selected home paths into Jsh dotfiles
 ## setup ## Apply the bare, lite, or full persistent profile
 ##? @setup ## Setup profile, option, or phase
+## install ## Install packages, or every script of the named scope
 ## update ## Update Jsh, dependencies, packages, and managed configuration
 ##? update --dry-run ## Fetch and preview the update without applying it
 ## doctor ## Report dependencies, repository drift, and managed links
@@ -35,7 +36,7 @@ if [ "${JSH_BASH_RUNTIME:-0}" = 1 ]; then
 
   jsh() {
     case ${1:-} in
-      setup | update | repair)
+      setup | install | update | repair)
         JSH_INSTALL_RETURN=1 JSH_BASH_RUNTIME=0 command "${JSH_ROOT}/bin/jsh" "$@" || return
         JSH_RELOADING=1 JSH_BASH_RUNTIME=1 exec "${JSH_BASH}" --noprofile --rcfile "${JSH_ROOT}/bin/jsh" -i
         ;;
@@ -44,7 +45,7 @@ if [ "${JSH_BASH_RUNTIME:-0}" = 1 ]; then
         ;;
       --yes)
         case ${2:-} in
-          setup | update | repair)
+          setup | install | update | repair)
             JSH_INSTALL_RETURN=1 JSH_BASH_RUNTIME=0 command "${JSH_ROOT}/bin/jsh" "$@" || return
             JSH_RELOADING=1 JSH_BASH_RUNTIME=1 exec "${JSH_BASH}" --noprofile --rcfile "${JSH_ROOT}/bin/jsh" -i
             ;;
@@ -368,9 +369,21 @@ EOF
 }
 
 if [ "${1:-}" = __complete ]; then
-  [ "${2:-}" = setup ] || exit 0
+  [ "$#" -ge 2 ] || exit 0
+  complete_provider=$2
   shift 2
   case ${1:-} in -y | --yes) shift ;; esac
+  if [ "${complete_provider}" = scope ]; then
+    complete_action=${1:-}
+    case ${complete_action} in install | update) shift ;; *) exit 0 ;; esac
+    for complete_word do
+      case ${complete_word} in -*) ;; *) exit 0 ;; esac
+    done
+    make --no-print-directory -s -C "${JSH_ROOT}" list-scopes 2> /dev/null
+    printf '%s\t%s\n' gecko 'Alias for waterfox'
+    exit 0
+  fi
+  [ "${complete_provider}" = setup ] || exit 0
   [ "${1:-}" = setup ] || exit 0
   complete_previous=
   complete_profile=
@@ -419,7 +432,7 @@ if [ "${1:-}" = adopt ]; then
   exec "${JSH_ROOT}/bin/jadopt" "$@"
 fi
 
-if [ "${1:-}" = setup ] || [ "${1:-}" = update ]; then
+if [ "${1:-}" = setup ] || [ "${1:-}" = install ] || [ "${1:-}" = update ]; then
   action=$1
   shift
   JSH_DIR=${JSH_ROOT}
@@ -479,7 +492,8 @@ ${usage_heading}Usage${usage_reset}
 ${usage_heading}Commands${usage_reset}
   ${usage_command}runtime${usage_reset}                    Open the minimal, ephemeral shell (default)
   ${usage_command}setup${usage_reset} [bare|lite|full]     Apply a persistent profile; see \`jsh setup --help\`
-  ${usage_command}update${usage_reset} [--dry-run]         Update Jsh, packages, and configuration
+  ${usage_command}install${usage_reset} [SCOPE]            Install packages, or every script of the named scope
+  ${usage_command}update${usage_reset} [SCOPE]             Update everything or the named scope; --dry-run previews
   ${usage_command}adopt${usage_reset} [--dry-run] PATH...  Move home paths into the shared dotfiles package
   ${usage_command}doctor${usage_reset}                     Report dependencies, repository drift, and links
   ${usage_command}repair${usage_reset}                     Clone vendored repos, install fzf, remove stale links

@@ -112,7 +112,10 @@ Commands:
                           bare  launcher only
                           lite  bare plus managed dotfiles and default shell
                           full  lite plus packages, configuration, and patches
-  update                Update Jsh and reapply the recorded profile
+  install [SCOPE]       Run install scripts, or every script of the named scope
+  update [SCOPE]        Update Jsh and reapply the recorded profile, or update only the named scope
+
+Scopes are platform script names such as packages, helium, waterfox (alias gecko), or sublime-text.
 
 Setup options:
   --resume, --retry     Continue the last setup from its unfinished phases
@@ -148,6 +151,7 @@ install_profile=
 setup_selector=
 setup_phase_argument=
 setup_option=
+SCOPE=
 while (($#)); do
   case $1 in
     -y | --yes)
@@ -175,7 +179,7 @@ while (($#)); do
       option_name=${1%%=*}
       select_setup_mode "${option_name#--}" "${1#*=}"
       ;;
-    runtime | setup | update)
+    runtime | setup | install | update)
       ((!command_seen)) || usage_error "Too many commands."
       mode=$1
       command_seen=1
@@ -188,7 +192,12 @@ while (($#)); do
       usage
       exit 0
       ;;
-    *) usage_error "Unknown argument: $1" ;;
+    -*) usage_error "Unknown argument: $1" ;;
+    *)
+      [[ ${mode} == install || ${mode} == update ]] || usage_error "Unknown argument: $1"
+      [[ -z ${SCOPE} ]] || usage_error "Only one scope is allowed."
+      SCOPE=$1
+      ;;
   esac
   shift
 done
@@ -220,7 +229,7 @@ if declare -F jsh::init > /dev/null; then
 fi
 
 if [[ -r /proc/self/status ]] && grep -Eq '^NoNewPrivs:[[:space:]]+1$' /proc/self/status; then
-  if [[ ${mode} == setup || ${mode} == update ]] && ((!dry_run && !list_phases)); then
+  if [[ ${mode} == setup || ${mode} == install || ${mode} == update ]] && ((!dry_run && !list_phases)); then
     jsh_error "This session prohibits privilege elevation. Run Jsh from a regular terminal."
     exit 1
   fi
@@ -917,6 +926,42 @@ update_environment() {
   esac
 }
 
+# Prints NAME<TAB>ACTIONS for each scope available on this platform.
+list_scopes() {
+  local make_command=make
+  command -v make > /dev/null 2>&1 || make_command=gmake
+  "${make_command}" --no-print-directory -s -C "${JSH_DIR}" list-scopes
+}
+
+# Validates SCOPE in place; gecko is an alias for waterfox.
+resolve_scope() {
+  local available
+  if [[ ! -f ${JSH_DIR}/Makefile ]]; then
+    jsh_error "Repository is unavailable at ${JSH_DIR}. Run setup first."
+    return 1
+  fi
+  available=$(list_scopes) || return 1
+  [[ ${SCOPE} != gecko ]] || SCOPE=waterfox
+  if [[ $'\n'${available} != *$'\n'"${SCOPE}"$'\t'* ]]; then
+    jsh_error "Unknown scope: ${SCOPE}"
+    jsh_detail "Scopes: $(cut -f 1 <<< "${available}" | tr '\n' ' ')gecko" >&2
+    return 2
+  fi
+}
+
+run_scope() {
+  (export JSH_SCOPE="$1"; run_make_target setup)
+}
+
+update_scope() {
+  (export JSH_UPDATE=1; run_scope "$1")
+}
+
+run_scope_update() {
+  [[ $1 != waterfox ]] || run_update_step "Betterfox" "${JSH_DIR}/scripts/unix/configure/waterfox.sh" update
+  run_update_step "$1" update_scope "$1"
+}
+
 run_make_target() {
   local target=$1
   if command -v make > /dev/null 2>&1; then
@@ -1028,7 +1073,14 @@ print_update_summary() {
   jsh_detail "${#UPDATE_SUCCEEDED[@]} succeeded, ${#UPDATE_WARNINGS[@]} skipped, ${#UPDATE_ERRORS[@]} failed."
 }
 
-jsh_banner "${mode}"
+scope_status=0
+[[ -z ${SCOPE} ]] || resolve_scope || scope_status=$?
+if ((scope_status)); then
+  declare -F jsh::cleanup > /dev/null && jsh::cleanup
+  exit "${scope_status}"
+fi
+
+jsh_banner "${mode}${SCOPE:+:${SCOPE}}"
 if [[ ${mode} == runtime ]]; then
   jsh_detail "Install directory: ${JSH_DIR}"
   jsh_detail "This opens an isolated J shell without installing a launcher, deploying dotfiles, or configuring the system."
@@ -1058,9 +1110,38 @@ if [[ ${mode} == runtime ]]; then
   exec "${JSH_DIR}/bin/jsh" < "${TTY}"
 fi
 
+if [[ ${mode} == install ]]; then
+  exit_status=0
+  if [[ -n ${SCOPE} ]]; then
+    run_scope "${SCOPE}" || exit_status=$?
+  else
+    run_make_target install || exit_status=$?
+  fi
+  declare -F jsh::cleanup > /dev/null && jsh::cleanup
+  exit "${exit_status}"
+fi
+
 if [[ ${mode} == update ]]; then
   declare -a UPDATE_SUCCEEDED=() UPDATE_WARNINGS=() UPDATE_ERRORS=()
-  jsh_detail "Install directory: ${JSH_DIR}"
+  if ((!dry_run)); then
+    JSH_UPDATE_DEFERRED_FILE=$(mktemp "${TMPDIR:-/tmp}/jsh-update-deferred.XXXXXX")
+    export JSH_UPDATE_DEFERRED_FILE
+    trap 'rm -f -- "${JSH_UPDATE_DEFERRED_FILE}"' EXIT
+  fi
+  if [[ -n ${SCOPE} ]]; then
+    if ((dry_run)); then
+      jsh_info "Planned steps"
+      UPDATE_PREVIEW=1 run_scope_update "${SCOPE}"
+      declare -F jsh::cleanup > /dev/null && jsh::cleanup
+      exit 0
+    fi
+    export JSH_CONTINUE_ON_ERROR=1
+    run_scope_update "${SCOPE}"
+    print_update_summary
+    ((${#UPDATE_ERRORS[@]} == 0))
+    declare -F jsh::cleanup > /dev/null && jsh::cleanup
+    exit
+  fi
   install_profile=$(read_install_profile)
   case ${install_profile} in
     bare) profile_color=32 ;;
