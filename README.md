@@ -27,6 +27,15 @@ Setup runs in phases and records its progress. Continue an interrupted or failed
 from a phase with `--from PHASE`, run specific phases with `--phase PHASE[,PHASE]`, and see them all with `--list`.
 
 Stay current with `jsh update`, preview it with `--dry-run`, and use `jsh doctor` or `jsh repair` when something drifts.
+Target one piece with a scope: `jsh install helium` or `jsh update gecko` runs only that platform's scripts.
+Updates leave running applications open, including with `-y`; work requiring shutdown is deferred.
+Use `jsh update -y --close-apps` to also allow closing applications and restarting desktop components.
+Homebrew upgrades that may stop applications are skipped without this flag, with a warning and a package-specific
+retry command in the update summary.
+
+Declining a prompt skips that action and lets independent work continue. A declined prerequisite also skips the
+action that needs it. Failed operations still return errors, and destructive actions retain their confirmation
+requirements.
 
 **\* Forever free**
 

@@ -15,6 +15,7 @@ unset library_file
 
 declare -A PACKAGE_OWNERS=()
 declare -a BLOCKED_FORMULAE=()
+declare -a DEFERRED_FORMULAE=() DEFERRED_CASKS=()
 
 manifest() {
   jsh_manifest_main "$@"
@@ -63,10 +64,12 @@ claim_package() {
     return 1
   fi
 
-  if ! jsh::confirm "${package} is already declared for ${owner}. Install it with ${manager} instead?" --default no; then
+  jsh::confirm "${package} is already declared for ${owner}. Install it with ${manager} instead?" --default no || {
+    local confirmation_status=$?
+    [[ ${confirmation_status} -eq 1 ]] || return "${confirmation_status}"
     jsh::log_note "Keeping ${package} with ${owner}; skipping ${manager}."
     return 1
-  fi
+  }
   PACKAGE_OWNERS[${package}]=${manager}
 }
 
@@ -99,7 +102,7 @@ register_brew_packages() {
 }
 
 trust_declared_formulae() {
-  local brewfile=$1 formula existing trusted_json
+  local brewfile=$1 formula existing trusted_json confirmation_status kept
   local -a formulae=() untrusted=()
 
   while IFS= read -r formula; do
@@ -118,10 +121,17 @@ trust_declared_formulae() {
 
   jsh::log_warn "Homebrew requires trust for these third-party formulas:"
   printf '  %s\n' "${untrusted[@]}"
-  if ! jsh::confirm "Trust these formulas?" --default yes; then
-    jsh::log_error "Cannot install untrusted third-party formulas."
-    return 1
-  fi
+  jsh::confirm "Trust these formulas?" --default yes || {
+    confirmation_status=$?
+    [[ ${confirmation_status} -eq 1 ]] || return "${confirmation_status}"
+    DEFERRED_FORMULAE+=("${untrusted[@]}")
+    for formula in "${untrusted[@]}"; do
+      kept=$(grep -vFx "brew \"${formula}\"" "${brewfile}" || true)
+      printf '%s\n' "${kept}" > "${brewfile}"
+    done
+    jsh::log_warn "Skipping untrusted formulas; continuing with other packages."
+    return 0
+  }
   brew trust --formula "${untrusted[@]}"
 }
 
@@ -156,21 +166,65 @@ migrate_legacy_npm_packages() {
 }
 
 filter_native_brew_packages() {
-  local brewfile=$1 temporary=$2 line package
+  local brewfile=$1 temporary=$2 line package deferred
 
   while IFS= read -r line || [[ -n "${line}" ]]; do
     package=$(sed -nE 's/^[[:space:]]*(brew|cask) "([^"]+)".*/\2/p' <<< "${line}")
     if [[ -n "${package}" && "${PACKAGE_OWNERS[${package}]:-}" == os ]]; then
       continue
     fi
+    if [[ ${line} == cask\ * ]]; then
+      for deferred in "${DEFERRED_CASKS[@]}"; do
+        [[ ${package##*/} != "${deferred##*/}" ]] || continue 2
+      done
+    fi
     printf '%s\n' "${line}" >> "${temporary}"
   done < "${brewfile}"
 }
 
-update_brew() {
-  local error_file
+defer_brew_app_shutdowns() {
+  local outdated caskroom package receipt retry processes apps app running
+  [[ ${JSH_CLOSE_APPS:-} == 0 ]] || return 0
+  # Homebrew then skips quit and signal directives, leaving running apps open.
+  export HOMEBREW_NO_UPGRADE_QUIT_CASKS=1
+  outdated=$(HOMEBREW_NO_AUTO_UPDATE=1 brew outdated --cask --quiet) || return
+  [[ -n ${outdated} ]] || return 0
+  caskroom=$(brew --caskroom) || return
+  processes=$(ps -Axo command=) || return
+  while IFS= read -r package; do
+    [[ -n ${package} ]] || continue
+    receipt="${caskroom}/${package##*/}/.metadata/INSTALL_RECEIPT.json"
+    # Homebrew upgrades run the installed version's uninstall directives and flight blocks.
+    # Prints nothing when the upgrade cannot stop an app; otherwise the app bundles at risk ("?" if unknown).
+    if apps=$(jq -r '
+      if (.uninstall_artifacts | type == "array") and
+        (.uninstall_flight_blocks == false) and
+        (any(.uninstall_artifacts[];
+          has("pkg") or any(.uninstall[]?;
+            has("script") or has("early_script") or has("pkgutil") or has("kext") or
+            any([.launchctl] | flatten[] | strings; contains("*") or startswith("application.")))) | not)
+      then empty
+      else [.uninstall_artifacts[]? | .app? // empty | (.[1].target? // .[0]) | strings | split("/") | last]
+        | if length > 0 then .[] else "?" end
+      end
+    ' "${receipt}" 2>/dev/null); then
+      [[ -n ${apps} ]] || continue
+      running=0
+      while IFS= read -r app; do
+        [[ ${app} != '?' && ${processes} != *"/${app}/Contents/"* ]] || running=1
+      done <<< "${apps}"
+      ((running)) || continue
+    fi
+    DEFERRED_CASKS+=("${package}")
+    printf -v retry 'brew upgrade --cask -- %q' "${package}"
+    jsh_update_defer "${package}" "its upgrade may close a running application" "${retry}"
+  done <<< "${outdated}"
+}
 
-  error_file=$(mktemp "${JSH_ROOT}/tmp/brew-update.XXXXXX")
+update_brew() {
+  local error_file confirmation_status
+
+  error_file=$(mktemp "${JSH_ROOT}/tmp/brew-update.XXXXXX") || return
   jsh_interrupt_cleanup_path "${error_file}"
   if brew update 2> "${error_file}"; then
     cat "${error_file}" >&2
@@ -185,12 +239,14 @@ update_brew() {
   fi
   rm -f "${error_file}"
 
-  if ! JSH_ASSUME_YES=0 JSH_NON_INTERACTIVE=0 JSH_INTERACTIVE=1 \
-    jsh::confirm "Accept the Xcode license with sudo?" --default no; then
-    jsh::log_error "Cannot update Homebrew until the Xcode license is accepted."
-    return 1
-  fi
-  sudo xcodebuild -license accept
+  JSH_ASSUME_YES=0 JSH_NON_INTERACTIVE=0 JSH_INTERACTIVE=1 \
+    jsh::confirm "Accept the Xcode license with sudo?" --default no || {
+    confirmation_status=$?
+    [[ ${confirmation_status} -eq 1 ]] || return "${confirmation_status}"
+    jsh::log_warn "Skipping Homebrew packages; the Xcode license was not accepted."
+    return 10
+  }
+  sudo xcodebuild -license accept || return
   brew update
 }
 
@@ -237,7 +293,12 @@ exclude_blocked_formulae() {
             unhandled+=("${other}")
           fi
         else
-          unhandled+=("${other}")
+          local confirmation_status=$?
+          [[ ${confirmation_status} -eq 1 ]] || return "${confirmation_status}"
+          jsh::log_warn "Keeping ${other}; deferring ${name}."
+          DEFERRED_FORMULAE+=("${name}")
+          patterns+=(-e "brew \"${name}\"")
+          continue 2
         fi
       fi
     done
@@ -280,8 +341,83 @@ install_brew_manifest() {
   brew bundle check --no-upgrade --file="${brewfile}"
 }
 
+# Offers to remove taps, formulae, and casks that the Brewfile neither declares nor depends on.
+cleanup_brew_packages() {
+  local brewfile=$1 line section=
+  local -a casks=() formulae=() taps=()
+
+  # Without --force this only lists candidates and exits 1 when any exist.
+  while IFS= read -r line; do
+    case ${line} in
+      'Would uninstall casks:') section=cask ;;
+      'Would uninstall formulae:') section=formula ;;
+      'Would untap:') section=tap ;;
+      'Would '* | 'Run `'* | '') section= ;;
+      *)
+        case ${section} in
+          cask) casks+=("${line}") ;;
+          formula) formulae+=("${line}") ;;
+          tap) taps+=("${line}") ;;
+        esac
+        ;;
+    esac
+  done < <(HOMEBREW_NO_AUTO_UPDATE=1 brew bundle cleanup --formula --cask --tap --file="${brewfile}" < /dev/null || true)
+  ((${#taps[@]} + ${#formulae[@]} + ${#casks[@]} > 0)) || return 0
+
+  jsh::log_warn "Installed Homebrew packages not declared in conf/packages.json or needed by a declared package:"
+  ((${#taps[@]} == 0)) || printf '  tap      %s\n' "${taps[@]}"
+  ((${#formulae[@]} == 0)) || printf '  formula  %s\n' "${formulae[@]}"
+  ((${#casks[@]} == 0)) || printf '  cask     %s\n' "${casks[@]}"
+  # Removal is destructive, so -y never accepts it.
+  JSH_ASSUME_YES=0 jsh::confirm "Remove ${#taps[@]} taps, ${#formulae[@]} formulae, and ${#casks[@]} casks?" --default no || {
+    local confirmation_status=$? cleanup
+    [[ ${confirmation_status} -eq 1 ]] || return "${confirmation_status}"
+    local -a commands=()
+    ((${#casks[@]} == 0)) || commands+=("brew uninstall --cask$(printf ' %q' "${casks[@]}")")
+    ((${#formulae[@]} == 0)) || commands+=("brew uninstall --formula$(printf ' %q' "${formulae[@]}")")
+    ((${#taps[@]} == 0)) || commands+=("brew untap$(printf ' %q' "${taps[@]}")")
+    printf -v cleanup '%s && ' "${commands[@]}"
+    jsh_update_defer "removal of undeclared Homebrew packages" \
+      "${#taps[@]} taps, ${#formulae[@]} formulae, and ${#casks[@]} casks are not declared in conf/packages.json" \
+      "${cleanup% && }"
+    return 0
+  }
+  ((${#casks[@]} == 0)) || HOMEBREW_NO_AUTO_UPDATE=1 brew uninstall --cask "${casks[@]}"
+  ((${#formulae[@]} == 0)) || HOMEBREW_NO_AUTO_UPDATE=1 brew uninstall --formula "${formulae[@]}"
+  ((${#taps[@]} == 0)) || brew untap "${taps[@]}"
+  jsh::log_success "Removed undeclared Homebrew packages."
+}
+
+upgrade_brew_packages() {
+  local kind outdated package deferred skip
+  local -a flags=() packages=() deferred_packages=()
+  [[ ${JSH_ASSUME_YES:-0} != 1 ]] || flags+=(--yes)
+  if ((${#DEFERRED_FORMULAE[@]} + ${#DEFERRED_CASKS[@]} == 0)); then
+    brew upgrade "${flags[@]}"
+    jsh::log_success "Declared Homebrew packages are up to date."
+    return
+  fi
+  # Preserve refusals in the final upgrade as well as the filtered Brewfile.
+  for kind in formula cask; do
+    packages=()
+    deferred_packages=("${DEFERRED_FORMULAE[@]}")
+    [[ ${kind} != cask ]] || deferred_packages=("${DEFERRED_CASKS[@]}")
+    outdated=$(brew outdated --"${kind}" --quiet) || return
+    while IFS= read -r package; do
+      [[ -n ${package} ]] || continue
+      skip=0
+      for deferred in "${deferred_packages[@]}"; do
+        [[ ${package} != "${deferred}" && ${package##*/} != "${deferred##*/}" ]] || skip=1
+      done
+      ((skip)) || packages+=("${package}")
+    done <<< "${outdated}"
+    ((${#packages[@]} == 0)) || brew upgrade --"${kind}" "${flags[@]}" "${packages[@]}"
+  done
+  jsh::log_success "Homebrew updates finished; declined packages were deferred."
+}
+
 install_brew_packages() {
-  local declared filtered
+  local declared filtered helium_status kept brew_status
 
   mkdir -p "${JSH_ROOT}/tmp"
   declared=$(mktemp "${JSH_ROOT}/tmp/Brewfile.declared.XXXXXX")
@@ -297,6 +433,8 @@ install_brew_packages() {
   # Native packages cover the base system; Homebrew supplies declared CLI gaps.
   load_brew
   jsh::confirm "Install Homebrew packages?" --default yes || {
+    local confirmation_status=$?
+    [[ ${confirmation_status} -eq 1 ]] || return "${confirmation_status}"
     jsh::log_note "Skipping Homebrew packages."
     rm -f "${declared}" "${filtered}"
     return 0
@@ -307,27 +445,39 @@ install_brew_packages() {
 
   if [[ ${JSH_UPDATE:-0} == 1 ]]; then
     jsh::log_info "Updating Homebrew packages..."
-    update_brew
+    update_brew || {
+      brew_status=$?
+      [[ ${brew_status} -eq 10 ]] || return "${brew_status}"
+      rm -f "${declared}" "${filtered}"
+      return 0
+    }
   fi
 
   register_brew_packages "${declared}"
-  trust_declared_formulae "${declared}"
   migrate_legacy_npm_packages
+  defer_brew_app_shutdowns
   filter_native_brew_packages "${declared}" "${filtered}"
+  trust_declared_formulae "${filtered}"
   if grep -Fxq 'cask "helium-browser"' "${filtered}"; then
     # Close the browser before Homebrew replaces its running application bundle.
-    bash -c 'source "$1"; require_policy_privileges; stop_for_apply' _ "${JSH_ROOT}/scripts/unix/configure/helium.sh"
+    if bash -c 'source "$1"; require_policy_privileges; stop_for_apply' _ "${JSH_ROOT}/scripts/unix/configure/helium.sh"; then
+      :
+    else
+      helium_status=$?
+      [[ ${helium_status} -eq 2 ]] || return "${helium_status}"
+      DEFERRED_CASKS+=(helium-browser)
+      jsh::log_warn "Skipping Helium for this run; continuing with other packages."
+      kept=$(grep -vFx 'cask "helium-browser"' "${filtered}" || true)
+      printf '%s\n' "${kept}" > "${filtered}"
+    fi
   fi
   install_brew_manifest "${filtered}"
+  # The unfiltered manifest keeps Homebrew copies of natively owned packages.
+  cleanup_brew_packages "${declared}"
   rm -f "${declared}" "${filtered}"
 
   if [[ ${JSH_UPDATE:-0} == 1 ]]; then
-    if [[ ${JSH_ASSUME_YES:-0} == 1 ]]; then
-      brew upgrade --yes
-    else
-      brew upgrade
-    fi
-    jsh::log_success "Declared Homebrew packages are up to date."
+    upgrade_brew_packages
   fi
 }
 
@@ -349,12 +499,18 @@ install_cargo_packages() {
 
   ((${#packages[@]} > 0)) || return 0
   jsh::confirm "Install Cargo packages?" --default yes || {
+    local confirmation_status=$?
+    [[ ${confirmation_status} -eq 1 ]] || return "${confirmation_status}"
     jsh::log_note "Skipping Cargo packages."
     return 0
   }
   for package in "${packages[@]}"; do
     name=${package%%@*}
-    claim_package cargo "${name}" || continue
+    claim_package cargo "${name}" || {
+      local claim_status=$?
+      [[ ${claim_status} -eq 1 ]] || return "${claim_status}"
+      continue
+    }
     if [[ ${JSH_UPDATE:-0} != 1 ]] && cargo_package_installed "${name}"; then
       continue
     fi
@@ -385,6 +541,8 @@ install_uv_tools() {
 
   ((${#packages[@]} > 0)) || return 0
   jsh::confirm "Install uv tools?" --default yes || {
+    local confirmation_status=$?
+    [[ ${confirmation_status} -eq 1 ]] || return "${confirmation_status}"
     jsh::log_note "Skipping uv tools."
     return 0
   }
@@ -394,7 +552,11 @@ install_uv_tools() {
   }
 
   for package in "${packages[@]}"; do
-    claim_package uv "${package}" || continue
+    claim_package uv "${package}" || {
+      local claim_status=$?
+      [[ ${claim_status} -eq 1 ]] || return "${claim_status}"
+      continue
+    }
     if [[ ${JSH_UPDATE:-0} != 1 ]] && uv_tool_installed "${package}"; then
       continue
     fi
@@ -429,6 +591,8 @@ install_npm_packages() {
 
   ((${#packages[@]} > 0)) || return 0
   jsh::confirm "Install npm packages?" --default yes || {
+    local confirmation_status=$?
+    [[ ${confirmation_status} -eq 1 ]] || return "${confirmation_status}"
     jsh::log_note "Skipping npm packages."
     return 0
   }
@@ -440,7 +604,11 @@ install_npm_packages() {
   for ((index = 0; index < ${#packages[@]}; index++)); do
     package=${packages[index]}
     version=${versions[index]}
-    claim_package npm "${package}" || continue
+    claim_package npm "${package}" || {
+      local claim_status=$?
+      [[ ${claim_status} -eq 1 ]] || return "${claim_status}"
+      continue
+    }
     if [[ ${JSH_UPDATE:-0} != 1 ]] && npm_package_installed "${package}" "${version}"; then
       continue
     fi
