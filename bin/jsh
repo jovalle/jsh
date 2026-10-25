@@ -7,6 +7,8 @@
 ## install ## Install packages, or every script of the named scope
 ## update ## Update Jsh, dependencies, packages, and managed configuration
 ##? update --dry-run ## Fetch and preview the update without applying it
+##? update --close-apps ## Allow updates to close running applications
+##? @scope ## Install or update scope
 ## doctor ## Report dependencies, repository drift, and managed links
 ## repair ## Clone vendored repositories, install fzf, and remove stale links
 ## uninstall ## Remove dotfile links managed by jstow
@@ -501,6 +503,7 @@ ${usage_heading}Commands${usage_reset}
 
 ${usage_heading}Options${usage_reset}
   -y, --yes                 Accept prompts without interaction
+  --close-apps             Allow update to close running applications (separate from -y)
   -r                        Reload an active J shell after configuration changes
 
 ${usage_heading}Environment${usage_reset}

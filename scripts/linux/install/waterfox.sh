@@ -77,11 +77,18 @@ extract_waterfox_archive() {
 confirm_waterfox_shutdown() {
   local process attempt
   pgrep -x waterfox >/dev/null 2>&1 || pgrep -x waterfox-bin >/dev/null 2>&1 || return 0
-  if [[ ${JSH_ASSUME_YES:-0} != 1 && ! -t 0 ]]; then
+  if [[ ${JSH_CLOSE_APPS:-} != 1 && ${JSH_ASSUME_YES:-0} != 1 && ! -t 0 ]]; then
     jsh::log_warn 'Skipping Waterfox update while the browser is running.'
-    return 1
+    return 2
   fi
-  jsh::confirm 'Close Waterfox before updating?' --default no || return 1
+  jsh::confirm_app_close 'Close Waterfox before updating?' --default no || {
+    local confirmation_status=$?
+    case ${confirmation_status} in
+      1) return 2 ;;
+      129 | 130 | 143) return "${confirmation_status}" ;;
+      *) return 1 ;;
+    esac
+  }
   for process in waterfox waterfox-bin; do
     pkill -TERM -x "${process}" >/dev/null 2>&1 || true
   done
@@ -89,7 +96,7 @@ confirm_waterfox_shutdown() {
     pgrep -x waterfox >/dev/null 2>&1 || pgrep -x waterfox-bin >/dev/null 2>&1 || return 0
     sleep 0.2
   done
-  jsh::log_warn 'Skipping Waterfox update because the browser did not close.'
+  jsh::log_error 'Waterfox did not close; its update could not complete.'
   return 1
 }
 
@@ -110,9 +117,12 @@ install_waterfox() {
     jsh::log_detail "Would install Waterfox ${WATERFOX_VERSION}."
     return
   fi
-  if ! confirm_waterfox_shutdown; then
+  confirm_waterfox_shutdown || {
+    local quit_status=$?
+    [[ ${quit_status} -eq 2 ]] || return "${quit_status}"
+    jsh::log_warn 'Skipping Waterfox update; the running browser was left untouched.'
     return 0
-  fi
+  }
   checksum=$(curl -fsSL "${WATERFOX_URL}.sha512" | awk 'NR == 1 {print $1}')
   [[ ${checksum} =~ ^[0-9a-f]{128}$ ]] || {
     jsh::log_error 'Waterfox returned an invalid SHA-512 checksum.'

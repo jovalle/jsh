@@ -23,7 +23,14 @@ TEMP_DIR=
 quit_sublime() {
   local attempt
   pgrep -x sublime_text > /dev/null 2>&1 || return 0
-  jsh::confirm "Sublime Text is running. Quit it now?" --default yes || return 1
+  jsh::confirm_app_close "Sublime Text is running. Quit it now?" --default yes || {
+    local confirmation_status=$?
+    case ${confirmation_status} in
+      1) return 2 ;;
+      129 | 130 | 143) return "${confirmation_status}" ;;
+      *) return 1 ;;
+    esac
+  }
   osascript -e 'tell application "Sublime Text" to quit' > /dev/null 2>&1 || true
   for ((attempt = 0; attempt < 50; attempt++)); do
     pgrep -x sublime_text > /dev/null 2>&1 || return 0
@@ -68,7 +75,12 @@ install_sublime_text() {
     return 1
   }
 
-  quit_sublime
+  quit_sublime || {
+    local quit_status=$?
+    [[ ${quit_status} -eq 2 ]] || return "${quit_status}"
+    jsh::log_warn "Skipping Sublime Text installation; the running application was left untouched."
+    return 0
+  }
   # Homebrew would otherwise track and upgrade the floating cask build.
   if command -v brew > /dev/null 2>&1 && brew list --cask sublime-text > /dev/null 2>&1; then
     HOMEBREW_NO_AUTO_UPDATE=1 brew uninstall --cask sublime-text

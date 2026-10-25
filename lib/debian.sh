@@ -30,7 +30,11 @@ jsh_debian_install_package() {
     fi
   done
   if ((running)); then
-    if [[ ${JSH_ASSUME_YES:-0} != 1 ]]; then
+    if [[ ${JSH_CLOSE_APPS:-} == 0 ]]; then
+      jsh::log_warn "Skipping update for running app: ${id}; use jsh update --close-apps to allow closing it."
+      return 0
+    fi
+    if [[ ${JSH_CLOSE_APPS:-} != 1 && ${JSH_ASSUME_YES:-0} != 1 ]]; then
       if [[ ! -t 0 ]]; then
         jsh::log_warn "Skipping update for running app: ${id} (noninteractive)."
         return

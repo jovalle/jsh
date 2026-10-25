@@ -102,7 +102,7 @@ APPLESCRIPT
     fi
   fi
 
-  if ((dock_changed)); then
+  if ((dock_changed)) && [[ ${JSH_CLOSE_APPS:-1} == 1 ]]; then
     killall Dock > /dev/null 2>&1 || true
   fi
   jsh::log_success "macOS appearance and Dock configured."

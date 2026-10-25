@@ -61,6 +61,12 @@ jsh_warn() {
   jsh_stderr 33 '' "$*"
 }
 
+jsh_update_defer() {
+  jsh_warn "Skipping $1: $2. Retry: $3"
+  [ -z "${JSH_UPDATE_DEFERRED_FILE:-}" ] ||
+    printf '%s: %s. Retry: %s\n' "$1" "$2" "$3" >> "${JSH_UPDATE_DEFERRED_FILE}"
+}
+
 jsh_warn_stdout() {
   jsh_stdout 33 '' "$*"
 }

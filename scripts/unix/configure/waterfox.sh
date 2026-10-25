@@ -744,15 +744,17 @@ apply_configuration() {
   fi
   if profile_is_locked "${profile}"; then
     jsh::log_warn "Waterfox is open on profile ${profile##*/}."
-    if ! jsh::confirm "Close Waterfox and continue?" --default no; then
+    jsh::confirm_app_close "Close Waterfox and continue?" --default no || {
+      local confirmation_status=$?
+      [[ ${confirmation_status} -eq 1 ]] || return "${confirmation_status}"
       jsh::log_note "Skipping Waterfox configuration."
       jsh::log_detail "Run later: ${JSH_ROOT}/scripts/unix/configure/waterfox.sh apply"
-      return 10
-    fi
+      return 0
+    }
     if ! close_waterfox "${profile}"; then
-      jsh::log_note "Waterfox did not close; skipping configuration."
+      jsh::log_error "Waterfox did not close; configuration could not complete."
       jsh::log_detail "Run later: ${JSH_ROOT}/scripts/unix/configure/waterfox.sh apply"
-      return 10
+      return 1
     fi
   fi
 
