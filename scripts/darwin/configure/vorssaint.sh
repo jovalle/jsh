@@ -32,12 +32,18 @@ cleanup() {
 confirm_import() {
   if jsh::confirm "Apply this backup to Vorssaint?" --default no; then
     IMPORT_CONFIRMED=1
+  else
+    local confirmation_status=$?
+    [[ ${confirmation_status} -eq 1 ]] || return "${confirmation_status}"
   fi
 }
 
 confirm_backup() {
   if jsh::confirm "Replace the managed backup with these active settings?" --default no; then
     BACKUP_CONFIRMED=1
+  else
+    local confirmation_status=$?
+    [[ ${confirmation_status} -eq 1 ]] || return "${confirmation_status}"
   fi
 }
 
@@ -514,6 +520,7 @@ main() {
       import_settings "${merged_plist}"
     else
       jsh::log_warn "Keeping the active Vorssaint settings."
+      return 0
     fi
   else
     jsh::log_note "Vorssaint settings already match the managed backup."

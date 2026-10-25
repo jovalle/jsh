@@ -74,6 +74,21 @@ class WaterfoxUiTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "status 2"):
                 WATERFOX.ui_confirm("Continue?")
 
+    def test_main_preserves_decline_errors_and_interrupt_status(self):
+        for error, expected in [
+            (WATERFOX.OperationDeclined("Skipped"), 0),
+            (RuntimeError("Failed"), 2),
+            *((WATERFOX.UiInterrupted(status), status) for status in (129, 130, 143)),
+        ]:
+            with (
+                self.subTest(status=expected),
+                patch.object(WATERFOX, "run_waterfox_configuration", side_effect=error),
+                patch.object(WATERFOX, "ui_status"),
+                patch.object(WATERFOX, "ui_title"),
+                patch.object(WATERFOX, "clear_progress"),
+            ):
+                self.assertEqual(WATERFOX.main([]), expected)
+
     def test_multi_selection_maps_shared_ui_output(self):
         choices = [("one@example.test", "One"), ("two@example.test", "Two")]
         with patch.object(WATERFOX.subprocess, "run") as run:
@@ -98,8 +113,13 @@ class WaterfoxUiTests(unittest.TestCase):
                 check=False,
             )
 
-            run.return_value.returncode = 130
+            run.return_value.returncode = 1
             self.assertEqual(WATERFOX.ui_choose_many("Add-ons", choices), [])
+            for status in (129, 130, 143):
+                run.return_value.returncode = status
+                with self.assertRaises(WATERFOX.UiInterrupted) as raised:
+                    WATERFOX.ui_choose_many("Add-ons", choices)
+                self.assertEqual(raised.exception.status, status)
 
             run.return_value.returncode = 2
             with self.assertRaisesRegex(RuntimeError, "status 2"):
@@ -190,7 +210,7 @@ class WaterfoxShutdownTests(unittest.TestCase):
             patch.object(WATERFOX, "ui_confirm", return_value=False),
             patch.object(WATERFOX, "ui_status"),
             patch.object(WATERFOX.subprocess, "run") as run,
-            self.assertRaisesRegex(RuntimeError, "Cancelled; Waterfox remains open"),
+            self.assertRaisesRegex(WATERFOX.OperationDeclined, "Skipped; Waterfox remains open"),
         ):
             WATERFOX.ensure_waterfox_closed()
 

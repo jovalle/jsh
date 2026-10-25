@@ -258,9 +258,13 @@ main() {
 
   if [[ "${finalizers}" == "[]" || -z "${finalizers}" ]]; then
     jsh::log_warn "Namespace '${namespace}' has no finalizers (may delete on its own)"
-    if ! jsh::confirm "Proceed anyway?" --default no; then
+    if jsh::confirm "Proceed anyway?" --default no; then
+      :
+    else
+      local confirmation_status=$?
+      ((confirmation_status == 1)) || exit "${confirmation_status}"
       jsh::log_note "Operation cancelled"
-      exit 3
+      exit 0
     fi
   fi
 
@@ -273,9 +277,13 @@ main() {
     jsh::log_detail "  Irreversible; external resources may be orphaned."
     jsh::log_detail "  Continue only when these finalizers are known to be stuck."
 
-    if ! jsh::confirm "Are you sure you want to proceed?" --default no; then
+    if jsh::confirm "Are you sure you want to proceed?" --default no; then
+      :
+    else
+      local confirmation_status=$?
+      ((confirmation_status == 1)) || exit "${confirmation_status}"
       jsh::log_note "Operation cancelled"
-      exit 3
+      exit 0
     fi
   fi
 

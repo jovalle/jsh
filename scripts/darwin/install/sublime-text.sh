@@ -40,9 +40,13 @@ install_sublime_text() {
     jsh::log_note "Sublime Text Build ${SUBLIME_BUILD} is already installed."
     return 0
   fi
-  if [[ -n ${build} ]] && ! jsh::confirm "Replace Sublime Text Build ${build} with Build ${SUBLIME_BUILD}?" --default yes; then
-    jsh::log_note "Keeping Sublime Text Build ${build}."
-    return 0
+  if [[ -n ${build} ]]; then
+    jsh::confirm "Replace Sublime Text Build ${build} with Build ${SUBLIME_BUILD}?" --default yes || {
+      local confirmation_status=$?
+      [[ ${confirmation_status} -eq 1 ]] || return "${confirmation_status}"
+      jsh::log_note "Keeping Sublime Text Build ${build}."
+      return 0
+    }
   fi
 
   mkdir -p "${JSH_ROOT}/tmp"

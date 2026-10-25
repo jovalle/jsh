@@ -5,6 +5,7 @@ _jgit_backup_require() {
 }
 
 _jgit_backup_confirm() {
+  [[ -t ${JSH_UI_INPUT_FD:-0} ]] || return 2
   JSH_ASSUME_YES=0 JSH_NON_INTERACTIVE=0 JSH_INTERACTIVE=1 \
     jsh::confirm "$1" --default "${2:-no}"
 }
@@ -14,16 +15,24 @@ _jgit_backup_authenticate() {
   _jgit_backup_require gh
   auth_status=$(LC_ALL=C gh auth status 2>&1) || {
     printf '%s\n' "${auth_status}" >&2
-    _jgit_backup_confirm 'Authenticate GitHub CLI for secret gist backups?' yes ||
+    _jgit_backup_confirm 'Authenticate GitHub CLI for secret gist backups?' yes || {
+      local confirmation_status=$?
+      [[ ${confirmation_status} -ne 1 ]] || _jgit_cancel 'Backup skipped; GitHub CLI authentication was declined'
+      [[ ${confirmation_status} != 129 && ${confirmation_status} != 130 && ${confirmation_status} != 143 ]] || exit "${confirmation_status}"
       _jgit_die 'GitHub CLI authentication is required'
+    }
     gh auth login --scopes gist || _jgit_die 'GitHub CLI authentication failed'
     auth_status=$(LC_ALL=C gh auth status 2>&1) || _jgit_die 'GitHub CLI authentication failed'
   }
 
   if grep -q 'Token scopes:' <<< "${auth_status}" &&
     ! grep -Eq "Token scopes:.*['\", ]gist['\", ]" <<< "${auth_status}"; then
-    _jgit_backup_confirm 'Grant GitHub CLI gist access?' yes ||
+    _jgit_backup_confirm 'Grant GitHub CLI gist access?' yes || {
+      local confirmation_status=$?
+      [[ ${confirmation_status} -ne 1 ]] || _jgit_cancel 'Backup skipped; gist access was declined'
+      [[ ${confirmation_status} != 129 && ${confirmation_status} != 130 && ${confirmation_status} != 143 ]] || exit "${confirmation_status}"
       _jgit_die 'the active GitHub CLI token requires gist access'
+    }
     gh auth refresh --scopes gist || _jgit_die 'could not grant GitHub CLI gist access'
   fi
 }
@@ -264,7 +273,9 @@ _jgit_backup_select_gist() {
     choices+=("${gist_id}" "${created:-${JGIT_BACKUP_GIST_UPDATED[index]}}  ${gist_id}  ${head:-unknown}")
     index=$((index + 1))
   done
+  choices+=(cancel 'Cancel backup selection')
   selected=$(jsh::choose_one 'Applicable backups' "${choices[@]}") || return
+  [[ ${selected} != cancel ]] || return 10
   JGIT_BACKUP_SELECTED_GIST=${selected}
 }
 
@@ -277,7 +288,6 @@ _jgit_backup_resolve_save_gist() {
   fi
   if [[ -n ${configured} ]]; then
     jsh::log_warn "Configured backup gist is unavailable or belongs to another repository: ${configured}"
-    git -C "${JGIT_BACKUP_ROOT}" config --local --unset-all jsh.backupGist 2> /dev/null || true
   fi
 
   _jgit_backup_discover_gists
@@ -285,7 +295,11 @@ _jgit_backup_resolve_save_gist() {
     JGIT_BACKUP_SELECTED_GIST=
     return
   }
-  _jgit_backup_select_gist || _jgit_die 'backup selection cancelled'
+  _jgit_backup_select_gist || {
+    local selection_status=$?
+    [[ ${selection_status} != 1 && ${selection_status} != 10 ]] || _jgit_cancel 'Backup selection cancelled'
+    exit "${selection_status}"
+  }
 }
 
 _jgit_backup_publish() {
@@ -636,7 +650,7 @@ _jgit_backup_stash_current_changes() {
 _jgit_backup_report_stashes() {
   local index
   for ((index = 0; index < ${#JGIT_BACKUP_STASH_OIDS[@]}; index++)); do
-    jsh::log_error "Recovery stash retained for ${JGIT_BACKUP_STASH_PATHS[index]}: ${JGIT_BACKUP_STASH_OIDS[index]}"
+    jsh::log_warn "Recovery stash retained for ${JGIT_BACKUP_STASH_PATHS[index]}: ${JGIT_BACKUP_STASH_OIDS[index]}"
   done
 }
 
@@ -755,12 +769,16 @@ _jgit_backup_stash_conflicts() {
 _jgit_backup_should_override() {
   local repository=$1 stash_oid=$2 stash_path=$3 conflicts
   conflicts=${JGIT_BACKUP_WORK_DIR}/override-check-${RANDOM}.list
-  _jgit_backup_stash_conflicts "${repository}" "${stash_oid}" all "${conflicts}" || return 1
+  _jgit_backup_stash_conflicts "${repository}" "${stash_oid}" all "${conflicts}" || return 2
   [[ -s ${conflicts} ]] || return 1
   jsh::log_warn "Backup conflicts with local changes in ${stash_path}:"
   sed 's/^/  /' "${conflicts}" >&2
-  ((${JGIT_BACKUP_FORCE:-0} == 1)) ||
-    _jgit_backup_confirm 'Override conflicting local files with the backup?' no
+  ((${JGIT_BACKUP_FORCE:-0} == 1)) && return 0
+  _jgit_backup_confirm 'Override conflicting local files with the backup?' no || {
+    local confirmation_status=$?
+    [[ ${confirmation_status} -ne 1 ]] || return 10
+    return "${confirmation_status}"
+  }
 }
 
 _jgit_backup_restore_local() {
@@ -793,7 +811,7 @@ _jgit_backup_override_stash() {
 }
 
 _jgit_backup_apply_stashes() {
-  local index repository stash_oid stash_path stash_ref staged_patch conflicts failed=0
+  local index repository stash_oid stash_path stash_ref staged_patch conflicts failed=0 override_status
   JGIT_BACKUP_KEPT_STASHES=()
   for ((index = 0; index < ${#JGIT_BACKUP_STASH_OIDS[@]}; index++)); do
     repository=${JGIT_BACKUP_STASH_REPOSITORIES[index]}
@@ -815,6 +833,9 @@ _jgit_backup_apply_stashes() {
       fi
       JGIT_BACKUP_KEPT_STASHES+=("${stash_oid}")
       continue
+    else
+      override_status=$?
+      [[ ${override_status} -eq 1 ]] || return "${override_status}"
     fi
     if ! git -C "${repository}" stash apply --quiet "${stash_ref}"; then
       if ! _jgit_backup_resolve_gitlink_conflicts "${repository}"; then
@@ -887,14 +908,23 @@ _jgit_backup_rollback_transaction() {
 }
 
 _jgit_backup_apply_transaction() {
+  local apply_status
   if _jgit_backup_apply_snapshot && _jgit_backup_apply_stashes; then
     _jgit_backup_drop_stashes
     return
+  else
+    apply_status=$?
   fi
-  jsh::log_error 'Backup conflicted with the current worktree; rolling back'
-  _jgit_backup_rollback_transaction ||
+  if [[ ${apply_status} == 10 || ${apply_status} == 129 || ${apply_status} == 130 || ${apply_status} == 143 ]]; then
+    jsh::log_warn 'Backup load stopped; restoring the pre-load worktree'
+  else
+    jsh::log_error 'Backup load failed; rolling back'
+  fi
+  _jgit_backup_rollback_transaction || {
     jsh::log_error 'Automatic rollback failed; recovery stashes were retained'
-  return 1
+    return 1
+  }
+  return "${apply_status}"
 }
 
 _jgit_backup_apply_untracked() {
@@ -1031,16 +1061,19 @@ _jgit_backup_load() {
   trap 'rm -rf "${JGIT_BACKUP_WORK_DIR}"' RETURN EXIT
   _jgit_backup_discover_valid_gists
   ((${#JGIT_BACKUP_GIST_IDS[@]} > 0)) || _jgit_die 'no applicable backup gists found'
-  _jgit_backup_select_gist || _jgit_die 'backup selection cancelled'
+  _jgit_backup_select_gist || {
+    local selection_status=$?
+    [[ ${selection_status} != 1 && ${selection_status} != 10 ]] || _jgit_cancel 'Backup selection cancelled'
+    exit "${selection_status}"
+  }
   gist_id=${JGIT_BACKUP_SELECTED_GIST}
-  git -C "${JGIT_BACKUP_ROOT}" config --local jsh.backupGist "${gist_id}"
   _jgit_backup_download "${gist_id}"
   _jgit_backup_preview "${gist_id}"
   _jgit_backup_confirm 'Apply this backup?' no || {
-    jsh::log_note 'Backup load cancelled'
-    return
+    local confirmation_status=$?
+    [[ ${confirmation_status} -eq 1 ]] || exit "${confirmation_status}"
+    _jgit_cancel 'Backup load cancelled; the worktree was left untouched'
   }
-
   if ! _jgit_backup_stash_current_changes; then
     if ((${#JGIT_BACKUP_STASH_OIDS[@]} > 0)); then
       if _jgit_backup_rollback_transaction; then
@@ -1051,7 +1084,12 @@ _jgit_backup_load() {
     fi
     _jgit_die 'could not prepare local changes for backup load'
   fi
-  _jgit_backup_apply_transaction || return 1
+  _jgit_backup_apply_transaction || {
+    local apply_status=$?
+    [[ ${apply_status} -ne 10 ]] || _jgit_cancel 'Backup load cancelled; the pre-load worktree was restored'
+    return "${apply_status}"
+  }
+  git -C "${JGIT_BACKUP_ROOT}" config --local jsh.backupGist "${gist_id}"
   jsh::log_success "Loaded uncommitted changes from secret gist ${gist_id}"
   git -C "${JGIT_BACKUP_ROOT}" status --short
 }

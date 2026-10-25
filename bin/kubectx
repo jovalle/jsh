@@ -182,16 +182,21 @@ rename_context() {
 }
 
 choose_contexts_to_delete_interactive() {
-  local context choices
+  local context choices prompt_status
   local -a contexts=() selector_choices=()
   mapfile -t contexts < <(get_contexts)
   for context in "${contexts[@]}"; do
     selector_choices+=("${context}" "${context}")
   done
-  choices=$(jsh::choose_many 'Contexts to delete' "${selector_choices[@]}" || true)
+  if choices=$(jsh::choose_many 'Contexts to delete' "${selector_choices[@]}"); then
+    :
+  else
+    prompt_status=$?
+    ((prompt_status == 1)) || exit "${prompt_status}"
+  fi
   if [[ -z "${choices}" ]]; then
-    echo 2>&1 "error: you did not choose any contexts to delete"
-    exit 1
+    echo "Deletion cancelled; no contexts selected."
+    exit 0
   else
     # Convert newline-separated choices to array
     local contexts_to_delete=()
@@ -204,8 +209,12 @@ choose_contexts_to_delete_interactive() {
     for ctx in "${contexts_to_delete[@]}"; do
       echo "  - ${ctx}"
     done
-    if ! JSH_UI_OUTPUT_FD=1 UI_OUTPUT_FD=1 \
+    if JSH_UI_OUTPUT_FD=1 UI_OUTPUT_FD=1 \
       jsh::confirm 'Are you sure you want to delete these contexts?' --default no; then
+      :
+    else
+      prompt_status=$?
+      ((prompt_status == 1)) || exit "${prompt_status}"
       echo "Deletion cancelled."
       exit 0
     fi

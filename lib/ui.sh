@@ -174,7 +174,7 @@ jsh::confirm() {
         else
           printf '%s [y/N]: ' "${prompt}" >&"${JSH_UI_OUTPUT_FD}"
         fi
-        IFS= read -r -u "${JSH_UI_INPUT_FD}" answer || answer=
+        IFS= read -r -u "${JSH_UI_INPUT_FD}" answer || return 130
         case ${answer} in
           '')
             [[ ${default} == yes ]]
@@ -218,7 +218,7 @@ jsh::choose() {
           index=$((index + 1))
         done
         printf 'Selection: ' >&"${JSH_UI_OUTPUT_FD}"
-        IFS= read -r -u "${JSH_UI_INPUT_FD}" answer || return 1
+        IFS= read -r -u "${JSH_UI_INPUT_FD}" answer || return 130
         case ${answer} in
           *[!0-9]* | '') ;;
           *)
@@ -275,7 +275,7 @@ jsh::choose_one() {
     fi
     shift
   done
-  return 1
+  return 2
 }
 
 jsh::choose_many() {
@@ -311,8 +311,8 @@ jsh::choose_many() {
     index=$((index + 1))
   done
   printf 'Selections (comma-separated, all, or empty to cancel): ' >&"${JSH_UI_OUTPUT_FD}"
-  IFS= read -r -u "${JSH_UI_INPUT_FD}" answer || return 1
-  [[ -n ${answer} ]] || return 130
+  IFS= read -r -u "${JSH_UI_INPUT_FD}" answer || return 130
+  [[ -n ${answer} ]] || return 1
   if [[ ${answer} == all ]]; then
     printf '%s\n' "${ids[@]}"
     return

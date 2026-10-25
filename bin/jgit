@@ -13,6 +13,7 @@
 ## rewrite [--last N|REF...] ## Rewrite commit messages and timestamps
 ## stash [push options] ## Stash tracked and untracked changes, excluding ignored files
 ## update [--stash] [--all [DIR]] ## Fast-forward repositories from their upstreams
+## status all ## Summarize every project, most recently changed first
 ## rebase [ARGS...] ## Fetch the default branch from upstream/origin and rebase onto it
 ## heal [--yes] ## Repair broken tool-owned refs
 ## save [--exclude PATH]... ## Back up uncommitted changes to a secret gist
@@ -33,6 +34,7 @@
 ##? update --stash ## Stash and restore local changes
 ##? update --all ## Update the base directory and immediate child repositories
 ##? update --all @directory ## Repository base directory
+##? status all ## Summarize every project, most recently changed first
 ##? heal --yes ## Back up and remove broken tool-owned refs
 ##? save --exclude @path ## Exclude a repository-relative path
 ##? backup --exclude @path ## Exclude a repository-relative path
@@ -92,6 +94,7 @@ Commands:
   stash [push options]  Stash tracked and untracked changes, excluding ignored files
   update [--stash]      Fast-forward the current branch from its upstream
   update --all [DIR]    Update repositories in DIR and its immediate children
+  status all            Summarize every project, most recently changed first, in a pager
   rebase [ARGS...]      Fetch main/master from upstream (else origin) and rebase onto it
   heal [--yes]          Repair broken tool-owned refs; preview by default
   save [--exclude PATH] Back up uncommitted changes to a secret gist
@@ -132,6 +135,11 @@ EOF
 _jgit_die() {
   jsh::log_error "$*"
   exit 1
+}
+
+_jgit_cancel() {
+  jsh::log_warn "$*"
+  exit 0
 }
 
 _jgit_section() {
@@ -206,15 +214,23 @@ _jgit_generate_ssh_key() {
   expanded_key=$(_jgit_expand_home "${key_path}")
   [[ -e ${expanded_key} ]] && return 0
 
-  jsh::confirm "Generate missing SSH key ${key_path}?" --default yes || return 0
+  jsh::confirm "Generate missing SSH key ${key_path}?" --default yes || {
+    local confirmation_status=$?
+    [[ ${confirmation_status} -eq 1 ]] || exit "${confirmation_status}"
+    _jgit_cancel 'Git profile skipped; the SSH key and repository configuration were left untouched'
+  }
 
   key_type=$(_jgit_ssh_key_type "${key_path}")
   if [[ -z ${key_type} ]]; then
     if [[ ${JSH_INTERACTIVE:-0} == 1 ]]; then
-      key_type=$(jsh::input 'SSH key type') || _jgit_die 'SSH key type is required'
+      key_type=$(jsh::input 'SSH key type') || {
+        local input_status=$?
+        [[ ${input_status} -ne 1 ]] || _jgit_cancel 'SSH key generation cancelled'
+        exit "${input_status}"
+      }
     else
       jsh_prompt 'SSH key type: '
-      read -r key_type || _jgit_die 'SSH key type is required'
+      read -r key_type || exit 130
     fi
     [[ -n ${key_type} ]] || _jgit_die 'SSH key type is required'
   fi
@@ -222,7 +238,7 @@ _jgit_generate_ssh_key() {
   command -v ssh-keygen > /dev/null 2>&1 || _jgit_die 'ssh-keygen is required'
   key_directory=${expanded_key%/*}
   [[ ${key_directory} == "${expanded_key}" ]] || mkdir -p "${key_directory}"
-  command ssh-keygen -t "${key_type}" -f "${expanded_key}" -C ''
+  command ssh-keygen -t "${key_type}" -f "${expanded_key}" -C '' || return
   jsh::log_success "Generated SSH key ${key_path}"
 }
 
@@ -471,7 +487,7 @@ _jgit_profile_choices() {
 }
 
 _jgit_profile_select() {
-  local preferred=${1:-} profile label selected answer
+  local preferred=${1:-} profile label selected answer selection_status
   local -a choices=()
   [[ -r ${JGIT_CONFIG} ]] || _jgit_die "profile config not found: ${JGIT_CONFIG}"
   _jgit_profile_names | grep -q . || _jgit_die "no profiles found in ${JGIT_CONFIG}"
@@ -481,7 +497,11 @@ _jgit_profile_select() {
       choices+=("${profile}" "${label}")
     done < <(_jgit_profile_choices "${preferred}")
     jsh::choose_one 'PROFILE          NAME                     EMAIL                                USER' \
-      "${choices[@]}" || return
+      "${choices[@]}" || {
+      selection_status=$?
+      [[ ${selection_status} -ne 1 ]] || return 10
+      return "${selection_status}"
+    }
     return
   fi
 
@@ -492,9 +512,9 @@ _jgit_profile_select() {
   else
     jsh_prompt 'Profile: ' >&2
   fi
-  read -r answer || return 1
+  read -r answer || return 130
   selected=${answer:-${preferred}}
-  [[ -n ${selected} ]] || return 1
+  [[ -n ${selected} ]] || return 10
   _jgit_profile_exists "${selected}" || _jgit_die "unknown profile: ${selected}"
   printf '%s\n' "${selected}"
 }
@@ -503,8 +523,9 @@ _jgit_profile_select_apply() {
   local profile
   git rev-parse --git-dir > /dev/null 2>&1 || _jgit_die 'not in a Git repository'
   profile=$(_jgit_profile_select "$(_jgit_active_profile)") || {
-    jsh::log_warn 'Profile selection cancelled'
-    return 1
+    local selection_status=$?
+    [[ ${selection_status} -eq 10 ]] || exit "${selection_status}"
+    _jgit_cancel 'Profile selection cancelled'
   }
   _jgit_profile_apply "${profile}"
 }
@@ -595,14 +616,16 @@ _jgit_create() {
   [[ ! -e ${project_path} && ! -L ${project_path} ]] || _jgit_die "project already exists: ${project_path}"
   preferred=$(_jgit_active_profile)
 
+  profile=$(_jgit_profile_select "${preferred}") || {
+    local selection_status=$?
+    [[ ${selection_status} -eq 10 ]] || exit "${selection_status}"
+    _jgit_cancel 'Project creation skipped; no repository was created'
+  }
+  _jgit_profile_validate "${profile}" || exit 1
+  _jgit_generate_ssh_key "$(_jgit_profile_field "${profile}" ssh_key)"
   mkdir -p "${project_root}"
   mkdir "${project_path}"
   git -C "${project_path}" init
-
-  profile=$(_jgit_profile_select "${preferred}") || {
-    jsh::log_warn "Profile selection cancelled; repository kept at ${project_path}"
-    return 1
-  }
   (
     cd "${project_path}"
     _jgit_profile_apply "${profile}" 0
@@ -637,7 +660,7 @@ _jgit_publish() {
 
   profile=$(_jgit_active_profile)
   if [[ -z ${profile} ]]; then
-    _jgit_profile_select_apply || return
+    _jgit_profile_select_apply
     profile=$(_jgit_active_profile)
   fi
   owner=$(_jgit_profile_field "${profile}" user) || _jgit_die "profile '${profile}' is missing user"
@@ -648,7 +671,11 @@ _jgit_publish() {
   if gh repo view "${owner}/${name}" > /dev/null 2>&1; then
     jsh::log_info "Using existing GitHub repository ${owner}/${name}"
   else
-    jsh::confirm "Create ${visibility} GitHub repository ${owner}/${name}?" --default yes || return 1
+    jsh::confirm "Create ${visibility} GitHub repository ${owner}/${name}?" --default yes || {
+      local confirmation_status=$?
+      [[ ${confirmation_status} -eq 1 ]] || exit "${confirmation_status}"
+      _jgit_cancel 'Publish skipped; no remote repository was created'
+    }
     gh repo create "${owner}/${name}" "--${visibility}" > /dev/null
     jsh::log_success "Created GitHub repository ${owner}/${name}"
   fi
@@ -1028,7 +1055,7 @@ _jgit_amend_edit() {
     ((found >= 0)) || _jgit_die "unknown commit in date list: ${commit}"
     inputs[found]=${date}
   done < "${file}"
-  ((seen)) || _jgit_die 'amend cancelled'
+  ((seen)) || _jgit_cancel 'amend cancelled; no commits were changed'
 
   for index in "${!AMEND_OLD_COMMITS[@]}"; do
     commit=${AMEND_OLD_COMMITS[index]}
@@ -1112,7 +1139,11 @@ _jgit_amend() {
   if [[ -z ${timestamp} ]]; then
     ((target_set)) || target_ref=$(git rev-list --first-parent "$(_jgit_amend_range)" HEAD | tail -n 1)
   elif ((target_set == 0)) && [[ ${JSH_INTERACTIVE:-0} == 1 && -t ${JSH_UI_INPUT_FD:-0} ]]; then
-    target_ref=$(_jgit_amend_pick) || _jgit_die 'amend cancelled'
+    target_ref=$(_jgit_amend_pick) || {
+      local selection_status=$?
+      [[ ${selection_status} -eq 1 ]] || exit "${selection_status}"
+      _jgit_cancel 'amend cancelled; no commits were changed'
+    }
   fi
   target=$(git rev-parse --verify "${target_ref}^{commit}" 2> /dev/null) ||
     _jgit_die "invalid commit ref: ${target_ref}"
@@ -1452,10 +1483,11 @@ _jgit_rewrite() {
   for commit in "${REWRITE_COMMITS[@]}"; do
     git show -s --format='  %h  %s  (%ad)' --date=short "${commit}"
   done
-  if ! jsh::confirm 'Continue?' --default no; then
-    jsh::log_warn 'Rewrite cancelled'
-    return
-  fi
+  jsh::confirm 'Continue?' --default no || {
+    local confirmation_status=$?
+    [[ ${confirmation_status} -eq 1 ]] || exit "${confirmation_status}"
+    _jgit_cancel 'Rewrite cancelled'
+  }
 
   JGIT_REWRITE_SELECTED=$(git rev-parse --path-format=absolute --git-path "jgit-rewrite-selected.$$")
   JGIT_REWRITE_MARKER=$(git rev-parse --path-format=absolute --git-path "jgit-rewrite-current.$$")
@@ -1839,7 +1871,8 @@ _jgit_find_update_repositories() {
   for candidate in "${base}" "${base}"/*; do
     [[ -d ${candidate} ]] || continue
     candidate_root=$(git -C "${candidate}" rev-parse --show-toplevel 2> /dev/null) || continue
-    [[ ${candidate_root} == "${candidate}" ]] || continue
+    # Git reports the on-disk case, which can differ from the typed path on macOS.
+    [[ ${candidate_root} -ef ${candidate} ]] || continue
     UPDATE_REPOSITORIES+=("${candidate_root}")
   done
 }
@@ -1889,6 +1922,148 @@ _jgit_update() {
     printf 'Updated %d %s; %d failed\n' "${updated}" "${noun}" "${failed}"
   fi
   ((failed == 0))
+}
+
+_jgit_relative_time() {
+  local delta=$((STATUS_NOW - $1)) suffix=ago count unit
+  if ((delta < 0)); then
+    delta=$((-delta))
+    suffix='from now'
+  fi
+  if ((delta < 60)); then
+    printf 'just now'
+    return
+  elif ((delta < 3600)); then
+    count=$((delta / 60)) unit=minute
+  elif ((delta < 86400)); then
+    count=$((delta / 3600)) unit=hour
+  elif ((delta < 2592000)); then
+    count=$((delta / 86400)) unit=day
+  elif ((delta < 31536000)); then
+    count=$((delta / 2592000)) unit=month
+  else
+    count=$((delta / 31536000)) unit=year
+  fi
+  ((count == 1)) || unit=${unit}s
+  printf '%d %s %s' "${count}" "${unit}" "${suffix}"
+}
+
+# Prints the latest change time, then the summary block. A project changes when it
+# commits or when a file with uncommitted changes is modified.
+_jgit_status_project() {
+  local repo=$1 line xy entry_path head='' oid='' upstream='' ab='' commit='' summary
+  local staged=0 unstaged=0 untracked=0 conflicts=0 stashes changed=0 latest commit_time
+  local -a paths=()
+  while IFS= read -r -d '' line; do
+    xy=..
+    case ${line} in
+      '# branch.oid '*) oid=${line#'# branch.oid '} ;;
+      '# branch.head '*) head=${line#'# branch.head '} ;;
+      '# branch.upstream '*) upstream=${line#'# branch.upstream '} ;;
+      '# branch.ab '*) ab=${line#'# branch.ab '} ;;
+      '? '*)
+        untracked=$((untracked + 1))
+        paths+=("${line#'? '}")
+        ;;
+      '1 '*) read -r _ xy _ _ _ _ _ _ entry_path <<< "${line}" ;;
+      '2 '*)
+        read -r _ xy _ _ _ _ _ _ _ entry_path <<< "${line}"
+        read -r -d '' _
+        ;;
+      'u '*)
+        read -r _ _ _ _ _ _ _ _ _ _ entry_path <<< "${line}"
+        conflicts=$((conflicts + 1))
+        ;;
+    esac
+    [[ ${line} == [12u]' '* ]] || continue
+    paths+=("${entry_path}")
+    [[ ${xy:0:1} == . ]] || staged=$((staged + 1))
+    [[ ${xy:1:1} == . ]] || unstaged=$((unstaged + 1))
+  done < <(git -C "${repo}" status --porcelain=v2 --branch -z 2> /dev/null)
+
+  if ((${#paths[@]} > 0)); then
+    # Deleted paths cannot be stat'ed; the remaining paths still report.
+    latest=$(cd "${repo}" && { "${STATUS_STAT[@]}" -- "${paths[@]}" 2> /dev/null || true; } |
+      awk '$1 > max { max = $1 } END { print max + 0 }')
+    changed=${latest:-0}
+  fi
+  commit=$(git -C "${repo}" log -1 --format='%ct %h  %s' 2> /dev/null || true)
+  commit_time=${commit%% *}
+  [[ -z ${commit} ]] || ((commit_time <= changed)) || changed=${commit_time}
+  stashes=$(git -C "${repo}" rev-list --walk-reflogs --count refs/stash 2> /dev/null) || stashes=0
+
+  printf '%s\n' "${changed}"
+  _jgit_section "${repo##*/}" first
+  [[ ${head} != '(detached)' ]] || head="detached at ${oid:0:7}"
+  _jgit_row Branch "${head}"
+  ab=${ab#+}
+  [[ -z ${upstream} ]] ||
+    _jgit_row Upstream "${upstream} (${ab%% *} ahead, ${ab##* -} behind)"
+  if ((staged + unstaged + untracked + conflicts == 0)); then
+    summary=$(_jgit_state ok clean)
+  else
+    summary="${staged} staged, ${unstaged} modified, ${untracked} untracked"
+    ((conflicts == 0)) || summary="${summary}, ${conflicts} conflicted"
+    summary=$(_jgit_state warn "${summary}")
+  fi
+  _jgit_row 'Working tree' "${summary}"
+  ((stashes == 0)) || _jgit_row Stashes "${stashes}"
+  ((changed == 0)) || _jgit_row Changed "$(_jgit_relative_time "${changed}")"
+  if [[ -n ${commit} ]]; then
+    _jgit_row 'Last commit' "${commit#* }  ($(_jgit_relative_time "${commit_time}"))"
+  else
+    _jgit_row 'Last commit' 'none'
+  fi
+}
+
+_jgit_status_report() {
+  local repo block index=0 separator=''
+  local -a keys=() blocks=()
+  for repo in "${UPDATE_REPOSITORIES[@]}"; do
+    block=$(_jgit_status_project "${repo}")
+    keys+=("${block%%$'\n'*} ${index}")
+    blocks+=("${block#*$'\n'}")
+    index=$((index + 1))
+  done
+  while read -r _ index; do
+    printf '%s%s\n' "${separator}" "${blocks[index]}"
+    separator=$'\n'
+  done < <(printf '%s\n' "${keys[@]}" | sort -k1,1nr -k2,2n)
+}
+
+_jgit_status_all() {
+  local base pager
+  case ${1:-} in
+    '') ;;
+    -h | --help)
+      printf '%s\n' \
+        'Usage: jgit status all' \
+        '' \
+        'Summarizes every repository in JSH_PROJECT_DIR (default: ~/projects),' \
+        'most recently changed first. Output is paged with the Git pager on a terminal.'
+      return
+      ;;
+    *) _jgit_die "unknown status all argument: $1" ;;
+  esac
+
+  base=$(_jgit_expand_home "${JSH_PROJECT_DIR:-~/projects}")
+  [[ -d ${base} ]] || _jgit_die "project directory not found: ${base}"
+  base=$(CDPATH='' cd -P "${base}" && pwd -P)
+  _jgit_find_update_repositories "${base}"
+  ((${#UPDATE_REPOSITORIES[@]} > 0)) || _jgit_die "no repositories found in ${base}"
+
+  STATUS_NOW=$(_jgit_now)
+  STATUS_STAT=(stat -f %m)
+  ! stat -c %Y / > /dev/null 2>&1 || STATUS_STAT=(stat -c %Y)
+
+  pager=
+  [[ ! -t 1 ]] || pager=$(git var GIT_PAGER 2> /dev/null || printf 'less')
+  if [[ -z ${pager} || ${pager} == cat ]]; then
+    _jgit_status_report
+    return
+  fi
+  # Quitting the pager early ends the report with SIGPIPE, which is not an error.
+  _jgit_status_report | LESS=${LESS:-FRX} LV=${LV:--c} sh -c "${pager}" || true
 }
 
 # Rebases onto the remote default branch, never the branch's own upstream, so commits
@@ -2078,6 +2253,11 @@ case ${1:-} in
   rebase)
     shift
     _jgit_rebase "$@"
+    ;;
+  status)
+    [[ ${2:-} == all ]] || exec git "$@"
+    shift 2
+    _jgit_status_all "$@"
     ;;
   heal)
     shift

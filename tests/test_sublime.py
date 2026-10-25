@@ -96,6 +96,18 @@ class SublimeLinuxTests(unittest.TestCase):
         self.assertEqual(self.binary.read_bytes(), original)
         self.assertEqual(self.command("status").returncode, 1)
 
+    def test_unapproved_shutdown_and_restore_leave_binary_untouched(self):
+        before = self.binary.read_bytes()
+        result = self.command("apply", running=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.binary.read_bytes(), before)
+        self.assertEqual(list(self.directory.glob("sublime_text.backup_*")), [])
+        self.assertEqual(self.command("apply", "--yes").returncode, 0)
+        patched = self.binary.read_bytes()
+        result = self.command("restore")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.binary.read_bytes(), patched)
+
     def test_apply_disables_updates_even_when_already_patched(self):
         settings = (
             self.directory / "config/sublime-text/Packages/User/Preferences.sublime-settings"
