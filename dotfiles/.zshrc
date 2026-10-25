@@ -273,6 +273,8 @@ _j_ui_message() {
 
 # shellcheck disable=SC1090  # Repository-owned Zsh module
 source "${JSH}/lib/zsh/j.zsh"
+# shellcheck disable=SC1090  # Repository-owned Zsh module
+source "${JSH}/lib/zsh/vault.zsh"
 
 # ============================================================================
 # 6. SHELL ALIASES
