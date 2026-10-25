@@ -367,7 +367,6 @@ else
   alias cp='cp -iv' mv='mv -iv' rm='rm -i' ln='ln -iv'
 fi
 alias mkdir='mkdir -p'
-alias t='touch'
 alias dud='du -d 1 -h' duf='du -sh *'
 if ! has eza; then
   alias lll='ls -laFh'
@@ -458,6 +457,8 @@ alias g='grep -i'
 has rg && alias rg='rg -i'
 has ag && alias ag='ag -i'
 has ack && alias ack='ack -i'
+has agy && alias gemini='agy --dangerously-skip-permissions'
+has opencode && alias oc='opencode'
 
 # ---- Quick Commands ----
 
