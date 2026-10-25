@@ -169,7 +169,6 @@
         "pacman": [
           "base-devel",
           "bash",
-          "bats",
           "bzip2",
           "ca-certificates",
           "cargo",
@@ -247,7 +246,6 @@
       "install": {
         "dnf": [
           "bash",
-          "bats",
           "bzip2",
           "ca-certificates",
           "cargo",
@@ -353,7 +351,6 @@
           "yamllint",
           "zoxide",
           "bash",
-          "bats",
           "build-essential",
           "bzip2",
           "ca-certificates",

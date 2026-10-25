@@ -81,7 +81,6 @@ register_native_packages() {
     case ${package} in
       fd-find) PACKAGE_OWNERS[fd]=os ;;
       fd) PACKAGE_OWNERS[fd-find]=os ;;
-      bats) PACKAGE_OWNERS[bats-core]=os ;;
       golang-go) PACKAGE_OWNERS[go]=os ;;
       python3-poetry) PACKAGE_OWNERS[poetry]=os ;;
       netcat-openbsd) PACKAGE_OWNERS[netcat]=os ;;

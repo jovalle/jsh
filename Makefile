@@ -1,6 +1,6 @@
 CHECK_TARGETS := check-script-headers check-readme check-shell-syntax check-zsh-syntax check-python-syntax \
 	check-yaml-syntax check-json-syntax lint-shell lint-python \
-	lint-yaml lint-markdown lint-js test-reconciliation
+	lint-yaml lint-markdown lint-js test
 FORMAT_TARGETS := format-shell format-python format-yaml format-json format-markdown
 
 .PHONY: help install update setup deploy configure patch hooks uninstall preview check \
@@ -79,7 +79,6 @@ endef
 
 # Tool versions (can be overridden)
 PYTHON := python3
-BATS ?= bats
 YAMLLINT_CONFIG := dotfiles/.yamllint
 
 # Find files by type
@@ -208,7 +207,7 @@ check: $(CHECK_TARGETS) ## Run all checks
 check-tools: ## Check required developer tools
 	@$(OUTPUT) jsh::log_info "Checking for required tools..."
 	@$(OUTPUT) errors=0; \
-	for tool in actionlint autopep8 bats black check-added-large-files commitlint cz eslint gitleaks hadolint jq \
+	for tool in actionlint autopep8 black check-added-large-files commitlint cz eslint gitleaks hadolint jq \
 		markdownlint pre-commit prettier pylint shellcheck shfmt stow yamllint yq; do \
 		if command -v $$tool >/dev/null 2>&1; then \
 			jsh::log_success "$$tool"; \
@@ -461,6 +460,9 @@ ci: check ## Run CI checks
 
 validate: check ## Run all checks
 
+test: ## Run all tests
+	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m unittest discover -s tests -p 'test_*.py'
+
 ##@ Cleanup
 
 clean: ## Remove temporary files and caches
@@ -470,23 +472,3 @@ clean: ## Remove temporary files and caches
 	@find . -type d -name ".mypy_cache" ! -path "./local/vendor/*" -delete
 	@find . -name "*sync-conflict-*" -delete
 	@$(OUTPUT) jsh::log_success "Cleanup complete"
-
-.PHONY: test-reconciliation
-test-reconciliation: ## Test planning, completions, idempotency and platform adapters
-	@$(BATS) tests/cafe.bats
-	@$(BATS) tests/completions.bats
-	@$(BATS) tests/env.bats
-	@$(BATS) tests/helium.bats
-	@$(BATS) tests/install.bats
-	@$(BATS) tests/jgit.bats
-	@$(BATS) tests/jgraphify.bats
-	@$(BATS) tests/jmount.bats
-	@$(BATS) tests/jssh.bats
-	@$(BATS) tests/kubecolor.bats
-	@$(BATS) tests/kubectx.bats
-	@$(BATS) tests/linux.bats
-	@$(BATS) tests/rea.bats
-	@$(BATS) tests/syncthing.bats
-	@$(BATS) tests/ui.bats
-	@$(BATS) tests/waterfox.bats
-	@PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -m unittest discover -s tests -p 'test_*.py'
