@@ -79,8 +79,8 @@ EOF
 managed_extensions() {
   cat <<EOF
 blockjmkbacgjkknlgpkjjiijinjdanf	uBlock Origin
+aeblfdkhhhdcdjpifhhbdiojplfjncoa	1Password	managed
 jplgfhpmjnbigmhklmmbgecoobifkmpa	Proton VPN	managed
-nngceckbapebfimnlniiiahkandclblb	Bitwarden	managed
 pkehgijcmpdhfbdbbnkijodmdjhbjlgp	Privacy Badger	managed
 EOF
 }

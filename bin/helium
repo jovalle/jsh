@@ -55,8 +55,8 @@ Commands:
   launch  Alias for open.
   reset   Reset the profile, preserving extension data unless --all is used.
 
-With no command, apply the patch when needed. If Helium is already patched,
-prompt to launch it; the default is no.
+With no command, apply the patch when needed and refresh extension settings.
+If Helium is already patched, prompt to launch it; the default is no.
 EOF
 }
 
@@ -74,6 +74,7 @@ prompt_to_launch() {
 case ${1:-} in
   '')
     if "${PATCH_SCRIPT}" status; then
+      "${PATCH_SCRIPT}" apply
       prompt_to_launch
       exit 0
     fi

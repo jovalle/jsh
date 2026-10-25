@@ -100,7 +100,7 @@ favicons to address the emptiness of a fresh install.
 
 ![Helium](assets/helium.png)
 
-Contingency to [Waterfox](#waterfox) in a growing world of Chromium. Hardened profile with Bitwarden, Proton VPN, and
+Contingency to [Waterfox](#waterfox) in a growing world of Chromium. Hardened profile with 1Password, Proton VPN, and
 Privacy Badger alongside the built-in uBlock Origin.
 
 Launch and verify it with [`helium`](bin/helium).
