@@ -95,3 +95,24 @@ jsh_desktop_executable() {
   value=${value//\$/\\\$}
   printf '"%s"\n' "${value}"
 }
+
+# Print adopt, override, or skip for a home file that differs from its Jsh copy.
+jsh_choose_conflict() {
+  local target=$1 source=$2 backend=${JSH_UI_BACKEND:-plain}
+  if [[ ${JSH_ASSUME_YES:-0} == 1 || ${JSH_NON_INTERACTIVE:-0} == 1 || ${JSH_INTERACTIVE:-0} != 1 ]]; then
+    printf 'skip\n'
+    return
+  fi
+  # Gum needs a terminal; piped answers use the numbered prompt.
+  [[ -t ${JSH_UI_INPUT_FD:-0} ]] || backend=plain
+  jsh::log_warn "Existing file differs from the Jsh copy: ${target}"
+  if command -v git > /dev/null 2>&1; then
+    git --no-pager diff --no-index --color=auto -- "${source}" "${target}" >&2 || :
+  else
+    diff -u -- "${source}" "${target}" >&2 || :
+  fi
+  JSH_UI_BACKEND=${backend} jsh::choose_one "Resolve ${target}:" \
+    adopt 'Adopt existing file into Jsh' \
+    override 'Override with the Jsh copy' \
+    skip 'Skip this file' || printf 'skip\n'
+}
