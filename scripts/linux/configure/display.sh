@@ -44,18 +44,79 @@ refresh_layout() {
   xrandr --fb "${width}x${height}"
 }
 
+settle_xfce_layout() {
+  local expected actual attempt stable=0
+  expected=$(xrandr --listmonitors | awk 'NR>1 { gsub(/\/[0-9]+/, "", $3); print $3 }' | sort)
+  [[ -n ${expected} ]] || return 1
+  # RandR is synchronous, but xfdesktop processes the monitor change later.
+  # Wait for its real desktop windows, using absolute (not frame-relative) positions.
+  for ((attempt = 0; attempt < 50; attempt++)); do
+    actual=$(xwininfo -root -tree | awk '
+      /\("xfdesktop" "Xfdesktop"\)/ {
+        for (i=1; i<=NF; i++) {
+          if ($i ~ /^[0-9]+x[0-9]+[+-][0-9]+[+-][0-9]+$/) {
+            split($i, size, /x|\+|-/)
+            if (size[1] > 10 && size[2] > 10) print size[1] "x" size[2] $NF
+            break
+          }
+        }
+      }' | sort)
+    if [[ ${actual} == "${expected}" ]]; then
+      stable=$((stable + 1))
+      ((stable < 3)) || return 0
+    else
+      stable=0
+    fi
+    sleep 0.1
+  done
+  jsh::log_error "XFCE did not finish updating the desktop monitor geometry."
+  return 1
+}
+
+finish_layout() {
+  local desktop
+  desktop=$(jsh_linux_desktop)
+  if [[ ${desktop} == xfce ]]; then
+    settle_xfce_layout || return
+  fi
+  "${SCRIPT_DIR}/wallpaper.sh"
+  if [[ ${desktop} == xfce ]]; then
+    # Layout changes require a redraw even when wallpaper settings are unchanged.
+    sleep 0.2
+    xfdesktop --reload
+  fi
+}
+
 toggle_layout() {
-  local record output width height x y half mm_width mm_height half_mm monitors
+  local record output width height x y half mm_width mm_height half_mm monitors layout_lock
+  local lock_directory=${XDG_RUNTIME_DIR:-${JSH_ROOT}/tmp}
+  local display_name=${DISPLAY:-default}
   command -v xrandr > /dev/null 2>&1 || {
     jsh::log_error "xrandr is required to toggle the display layout."
     return 1
   }
+  command -v flock > /dev/null 2>&1 || {
+    jsh::log_error "flock is required to serialize display layout changes."
+    return 1
+  }
+  if [[ $(jsh_linux_desktop) == xfce ]]; then
+    command -v xwininfo > /dev/null 2>&1 && command -v xfdesktop > /dev/null 2>&1 || {
+      jsh::log_error "xwininfo and xfdesktop are required to refresh the XFCE display layout."
+      return 1
+    }
+  fi
+  mkdir -p -- "${lock_directory}"
+  exec {layout_lock}>> "${lock_directory}/jsh-display-${display_name//[^[:alnum:]]/_}.lock"
+  if ! flock -n "${layout_lock}"; then
+    jsh::log_note "A display layout change is already in progress."
+    return 0
+  fi
   monitors=$(xrandr --listmonitors)
   if grep -Eq "[+*]?${LEFT_NAME}([[:space:]]|$)" <<< "${monitors}"; then
     xrandr --delmonitor "${LEFT_NAME}" 2> /dev/null || true
     xrandr --delmonitor "${RIGHT_NAME}" 2> /dev/null || true
     refresh_layout || true
-    "${SCRIPT_DIR}/wallpaper.sh"
+    finish_layout
     notify_layout "Restored the physical ultrawide display."
     return
   fi
@@ -94,7 +155,7 @@ toggle_layout() {
   xrandr --setmonitor "*${LEFT_NAME}" "${half}/${half_mm}x${height}/${mm_height}+${x}+${y}" "${output}"
   xrandr --setmonitor "${RIGHT_NAME}" "${half}/${half_mm}x${height}/${mm_height}+$((x + half))+${y}" "${output}"
   refresh_layout || true
-  "${SCRIPT_DIR}/wallpaper.sh"
+  finish_layout
   notify_layout "Split the ultrawide display into two logical monitors."
 }
 
