@@ -65,7 +65,6 @@ repos:
         language: system
         types: [text]
         stages: [pre-commit, pre-push, manual]
-        exclude: '^tests/.*\.bats$'
       - id: mixed-line-ending
         name: mixed line ending
         entry: mixed-line-ending
