@@ -50,11 +50,14 @@ configure_macos() {
     sh bash zsh fish ps1 bat cmd
     c h cc cpp cxx hpp hxx m mm
     py pyi rb pl pm php lua go rs java kt kts scala swift
-    js mjs cjs jsx ts mts cts tsx css scss sass less vue svelte
+    js mjs cjs jsx cts tsx css scss sass less vue svelte
     sql graphql gql proto diff patch
     tf tfvars hcl nix ex exs erl hrl clj cljs edn hs lhs elm zig zon r jl dart
     tex bib
   )
+  # macOS resolves .ts to MPEG-2 video and .mts/.m2ts to AVCHD video.
+  # Setting either extension here steals mpv's video defaults. TypeScript
+  # files can still be opened explicitly in Sublime Text.
 
   if ! command -v duti > /dev/null 2>&1; then
     jsh::log_note "Skipping Sublime Text file associations: duti is unavailable."
@@ -65,37 +68,29 @@ configure_macos() {
     return 0
   fi
 
-  local is_current=1 current_handler
+  local changed=0 current_handler
   for content_type in "${content_types[@]}"; do
     current_handler=$(duti -d "${content_type}" 2> /dev/null || true)
-    if [[ "${current_handler}" != "${SUBLIME_BUNDLE_ID}" ]]; then
-      is_current=0
-      break
-    fi
-  done
-  if ((is_current)); then
-    for extension in txt md py js ts c toml; do
-      if ! duti -x "${extension}" 2> /dev/null | grep -Fxq "${SUBLIME_BUNDLE_ID}"; then
-        is_current=0
-        break
-      fi
-    done
-  fi
-
-  if ((is_current)); then
-    jsh::log_note "Sublime Text is already the default macOS text and source editor."
-    return 0
-  fi
-
-  for content_type in "${content_types[@]}"; do
-    if ! duti -s "${SUBLIME_BUNDLE_ID}" "${content_type}" all > /dev/null 2>&1; then
+    [[ ${current_handler} == "${SUBLIME_BUNDLE_ID}" ]] && continue
+    if duti -s "${SUBLIME_BUNDLE_ID}" "${content_type}" all > /dev/null 2>&1; then
+      changed=1
+    else
       jsh::log_warn "Skipping unsupported macOS content type: ${content_type}."
     fi
   done
   for extension in "${extensions[@]}"; do
-    duti -s "${SUBLIME_BUNDLE_ID}" ".${extension}" all > /dev/null 2>&1 || true
+    if duti -x "${extension}" 2> /dev/null | grep -Fxq "${SUBLIME_BUNDLE_ID}"; then
+      continue
+    fi
+    if duti -s "${SUBLIME_BUNDLE_ID}" ".${extension}" all > /dev/null 2>&1; then
+      changed=1
+    fi
   done
-  jsh::log_success "Sublime Text is the default macOS text and source editor."
+  if ((changed)); then
+    jsh::log_success "Sublime Text is the default macOS text and source editor."
+  else
+    jsh::log_note "Sublime Text is already the default macOS text and source editor."
+  fi
 }
 
 configure_linux() {
