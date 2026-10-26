@@ -19,7 +19,8 @@ while IFS= read -r -d '' source; do
   if [[ ${OSTYPE} == darwin* && ${relative} == .config/Code/User/* ]]; then
     target="${HOME}/Library/Application Support/Code/User/${relative#.config/Code/User/}"
   fi
-  if [[ -L ${target} && $(readlink "${target}") == "${source}" ]]; then
+  # -ef also matches files reached through a linked parent directory that points here.
+  if [[ -L ${target} && $(readlink "${target}") == "${source}" || ${target} -ef ${source} ]]; then
     current+=("${relative}")
     continue
   fi
