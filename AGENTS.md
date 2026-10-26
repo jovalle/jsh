@@ -96,6 +96,18 @@ settings). Run them only when asked, and prefer `--dry-run`.
 - Never: commit secrets, tokens, or personal data; read or print credentials; edit generated or vendored paths; run
   commands that wait on a password prompt.
 
+## 1Password
+
+- For authorized tasks using 1Password CLI on macOS or Linux, reuse one persistent terminal session for all `op`
+  calls. Separate agent command sessions can each trigger approval; authorization follows the terminal, not the
+  record. In Codex, start a shell with `exec_command` and `tty: true`, keep it running, and send subsequent commands
+  through `write_stdin` using the returned `session_id`. A new PTY for every call does not reuse authorization.
+- Batch the task's required secret references into one `op run --env-file=PATH -- COMMAND` invocation where possible.
+  The environment file contains only `op://` references; pass resolved secrets directly to the consuming process,
+  never to agent output. Do not fetch extra records or run authentication probes before the actual operation.
+- Close the session when the task finishes. Reauthorization after locking 1Password or session expiry is expected;
+  do not add keepalive calls, cache plaintext secrets or session tokens, or disable approval protections.
+
 ## graphify
 
 For any question about this repo's architecture, structure, components, or how to add/modify/find
