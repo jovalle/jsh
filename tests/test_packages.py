@@ -23,6 +23,10 @@ class PackageTests(unittest.TestCase):  # pylint: disable=too-many-public-method
         stdout = patch("sys.stdout", new_callable=io.StringIO)
         stdout.start()
         self.addCleanup(stdout.stop)
+        for target, name in ((PACKAGES, "admin"), (PACKAGES.output, "confirm")):
+            patcher = patch.object(target, name, return_value=True)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def test_apt_only_installs_missing_packages_without_upgrade(self):
         with patch.object(PACKAGES, "native_installed", side_effect=[True, False]), patch.object(
@@ -40,6 +44,26 @@ class PackageTests(unittest.TestCase):  # pylint: disable=too-many-public-method
         ) as run:
             PACKAGES.native_packages("dnf", ["git"])
         run.assert_called_once_with(["dnf", "install", "-y", "--", "git"], root=True)
+
+    def test_missing_packages_without_sudo_are_reported_not_installed(self):
+        with patch.object(PACKAGES, "native_installed", return_value=False), patch.object(
+            PACKAGES, "admin", return_value=False
+        ), patch.object(PACKAGES, "run") as run, patch.object(
+            PACKAGES.output, "problem"
+        ) as problem:
+            PACKAGES.native_packages("dnf", ["ripgrep"])
+        run.assert_not_called()
+        problem.assert_called_once_with("sudo needs a password; install these packages manually")
+
+    def test_failed_python_tool_does_not_stop_the_next_one(self):
+        failure = subprocess.CalledProcessError(1, ["uv"])
+        installed = [False, True, False, True]
+        with patch.object(PACKAGES, "installed", side_effect=installed), patch.object(
+            PACKAGES, "run", side_effect=[failure, ""]
+        ) as run, patch.object(PACKAGES.output, "problem") as problem:
+            PACKAGES.python_tools({"tmail": "tmail-cli", "just": "rust-just"})
+        problem.assert_called_once_with("could not install tmail-cli")
+        self.assertEqual(run.call_args_list[1].args[0], ["uv", "tool", "install", "rust-just"])
 
     def test_existing_packages_require_no_mutations(self):
         with patch.object(PACKAGES, "native_installed", return_value=True), patch.object(

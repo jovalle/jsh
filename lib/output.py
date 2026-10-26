@@ -84,6 +84,30 @@ def skip(reason):
         print(f"{paint('○', '33')} {paint(reason, '33')}", flush=True)
 
 
+def problem(text):
+    """Report something the step could not do while letting the step finish."""
+    if Step.active:
+        Step.active.problems += 1
+    attention(text)
+
+
+def confirm(question):
+    """Ask a yes/no question (default no) while pausing the active step's spinner."""
+    if not sys.stdin.isatty():
+        return False
+    step = Step.active
+    if step:
+        step.stop()
+    try:
+        answer = input(f"{paint('?', '1;36')} {question} {paint('(y/N)', '2')} ")
+    except EOFError:
+        answer = ""
+    finally:
+        if step:
+            step.start()
+    return answer.strip().lower() in ("y", "yes")
+
+
 def run(arguments):
     """Run a command, keeping its output in the active step's log instead of the terminal."""
     step = Step.active
@@ -119,17 +143,30 @@ class Step:
         self.counts = {}
         self.lines = []
         self.skipped = None
+        self.problems = 0
         self.log = None
         self.started = time.monotonic()
         self._done = threading.Event()
         self._spinner = None
 
-    def __enter__(self):
-        Step.active = self
+    def start(self):
         if styled():
             sys.stdout.write("\033[?25l")
+            self._done.clear()
             self._spinner = threading.Thread(target=self._spin, daemon=True)
             self._spinner.start()
+
+    def stop(self):
+        if self._spinner:
+            self._done.set()
+            self._spinner.join()
+            self._spinner = None
+            sys.stdout.write("\r\033[K\033[?25h")
+            sys.stdout.flush()
+
+    def __enter__(self):
+        Step.active = self
+        self.start()
         return self
 
     def _spin(self):
@@ -153,10 +190,7 @@ class Step:
 
     def __exit__(self, kind, value, trace):
         Step.active = None
-        if self._spinner:
-            self._done.set()
-            self._spinner.join()
-            sys.stdout.write("\r\033[K\033[?25h")
+        self.stop()
         elapsed = paint(f"[{duration(time.monotonic() - self.started)}]", "2")
         if kind is not None:
             parts = [paint("✗", "31"), f"{self.label:<9}", " " * SUMMARY_WIDTH, elapsed]
@@ -164,7 +198,8 @@ class Step:
             parts = [paint("○", "33"), f"{self.label:<9}", paint(self.skipped, "33")]
         else:
             summary = f"{self.summary():<{SUMMARY_WIDTH}}"
-            parts = [paint("✓", "32"), f"{self.label:<9}", paint(summary, "2"), elapsed]
+            mark = paint("!", "33") if self.problems else paint("✓", "32")
+            parts = [mark, f"{self.label:<9}", paint(summary, "2"), elapsed]
         print(" ".join(parts), flush=True)
         for text in self.lines:
             print(text, flush=True)
@@ -172,6 +207,8 @@ class Step:
             with open(self.log, encoding="utf-8", errors="replace") as stream:
                 for text in deque(stream, maxlen=20):
                     print(paint(f"  │ {text.rstrip()}", "2"))
+            print(paint(f"  log: {tilde(self.log)}", "2"), flush=True)
+        elif self.log and self.problems:
             print(paint(f"  log: {tilde(self.log)}", "2"), flush=True)
         elif self.log:
             os.unlink(self.log)

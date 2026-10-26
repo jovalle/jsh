@@ -16,6 +16,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DRY_RUN = os.environ.get("JSH_DRY_RUN") == "1"
+# JSH_INSTALL=0 only reports missing tools, for hosts where software cannot be installed.
+INSTALL = os.environ.get("JSH_INSTALL", "1") != "0"
 sys.path.insert(0, str(ROOT / "lib"))
 import output  # pylint: disable=import-error,wrong-import-position
 
@@ -30,6 +32,17 @@ def run(arguments, root=False, capture=False):
     else:
         output.run(arguments)
     return ""
+
+
+def admin():
+    if os.geteuid() == 0:
+        return True
+    if not installed("sudo"):
+        return False
+    result = subprocess.run(
+        ["sudo", "-n", "true"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+    )
+    return result.returncode == 0
 
 
 def report(names):
@@ -58,6 +71,17 @@ def native_packages(manager, names):
             output.current(name)
     if not missing:
         return
+    output.attention("missing: " + ", ".join(missing))
+    if not INSTALL:
+        output.note("installs disabled by JSH_INSTALL=0")
+        return
+    if not DRY_RUN:
+        if not admin():
+            output.problem("sudo needs a password; install these packages manually")
+            return
+        if not output.confirm("Install the missing packages?"):
+            output.note("skipped installing missing packages")
+            return
     output.progress("installing " + ", ".join(missing))
     if manager == "apt":
         run(["apt-get", "update"], root=True)
@@ -196,6 +220,9 @@ def appimage(name, spec):
 def flatpak(spec, manager, dependencies):
     if not installed("flatpak"):
         native_packages(manager, dependencies)
+        if not DRY_RUN and not installed("flatpak"):
+            output.problem(f"flatpak is missing; skipped {spec['id']}")
+            return
     if DRY_RUN:
         output.note(f"would ensure user Flathub remote and install {spec['id']} if missing")
         return
@@ -233,6 +260,9 @@ def vscode(spec, manager):
         output.note(f"would download the official VS Code {channel} package from {url}")
         report(["vscode"])
         return
+    if not admin():
+        output.problem("sudo needs a password; install vscode manually")
+        return
     output.progress("downloading vscode")
     release = metadata(url)
     with tempfile.TemporaryDirectory(prefix="vscode-", dir=ROOT / "tmp") as directory:
@@ -253,10 +283,14 @@ def python_tools(tools):
             output.current(command)
             continue
         output.progress(f"installing {package}")
-        if installed("uv"):
-            run(["uv", "tool", "install", package])
-        else:
-            run([sys.executable, "-m", "pip", "install", "--user", package])
+        try:
+            if installed("uv"):
+                run(["uv", "tool", "install", package])
+            else:
+                run([sys.executable, "-m", "pip", "install", "--user", package])
+        except subprocess.CalledProcessError:
+            output.problem(f"could not install {package}")
+            continue
         report([command])
 
 
@@ -276,7 +310,11 @@ def npm_packages(packages):
             output.current(name)
             continue
         output.progress(f"installing {specification}")
-        run(["npm", "install", "--global", specification])
+        try:
+            run(["npm", "install", "--global", specification])
+        except subprocess.CalledProcessError:
+            output.problem(f"could not install {specification}")
+            continue
         report([name])
 
 
@@ -368,7 +406,9 @@ def darwin_group(config, spec, item):
 
 
 def install_group(config, spec, selected, item):
-    if item == "runtime":
+    if not INSTALL and (selected == "darwin" or item not in ("core", "tools")):
+        output.skip("installs disabled by JSH_INSTALL=0")
+    elif item == "runtime":
         vendor(config["runtime"]["vendor"])
         fzf_binary()
         launcher()
@@ -380,6 +420,8 @@ def install_group(config, spec, selected, item):
         native_packages(
             spec["manager"], spec[item] + spec.get("desktops", {}).get(session_desktop(), [])
         )
+        if not INSTALL:
+            return
         if installed("brew"):
             brew_packages(config["brew"])
         else:
@@ -394,7 +436,7 @@ def install_group(config, spec, selected, item):
                 flatpak(app, spec["manager"], spec["flatpak"])
             elif app["type"] == "vscode":
                 vscode(app, spec["manager"])
-    if item == "tools":
+    if item == "tools" and INSTALL:
         python_tools(config["python"])
         npm_packages(config.get("npm", {}))
 
