@@ -24,13 +24,8 @@ if [[ -z ${JSH_ROOT:-} ]]; then
   }
 fi
 
-for library_file in "${JSH_ROOT}"/lib/*; do
-  [[ -f ${library_file} && -x ${library_file} ]] || continue
-  # shellcheck source=/dev/null
-  . "${library_file}"
-done
-unset library_file
-jsh::init
+# shellcheck source=../lib/output.sh
+. "${JSH_ROOT}/lib/output.sh"
 
 JSSH_CACHE_DIR=${JSSH_CACHE_DIR:-${XDG_CACHE_HOME:-${HOME}/.cache}/jssh}
 JSSH_REMOTE_TMPDIR=${JSSH_REMOTE_TMPDIR:-/tmp}
@@ -62,7 +57,6 @@ EOF
 }
 
 _jssh_die() {
-  jsh::spinner_stop
   jsh::log_error "$*"
   exit 1
 }
@@ -112,20 +106,10 @@ _jssh_validate_platform() {
 
 _jssh_required_sources() {
   printf '%s\n' \
-    bin/jsh \
     dotfiles/.zshrc \
-    dotfiles/.zsh/completions/_jsh \
-    dotfiles/.zsh/completions/_make \
-    lib/env.sh \
     lib/output.sh \
-    lib/ui.sh \
-    lib/ui/cli.sh \
-    lib/ui/gum.sh \
-    lib/ui/lipgloss.sh \
-    lib/ui/theme.sh \
-    lib/unix/links.sh \
-    lib/zsh/j.zsh \
-    lib/zsh/prompt.zsh \
+    lib/j.zsh \
+    lib/prompt.zsh \
     local/vendor/zsh-autosuggestions/LICENSE \
     local/vendor/zsh-autosuggestions/zsh-autosuggestions.zsh \
     local/vendor/zsh-completions/LICENSE \
@@ -180,20 +164,13 @@ _jssh_build_payload() {
   build_dir=$(mktemp -d "${JSSH_CACHE_DIR}/build.XXXXXX")
   root=${build_dir}/jsh
   mkdir -p \
-    "${root}/bin" \
-    "${root}/dotfiles/.zsh" \
-    "${root}/lib/ui" \
-    "${root}/lib/unix" \
+    "${root}/dotfiles" \
+    "${root}/lib" \
     "${root}/local/vendor"
 
-  cp "${JSH_ROOT}/bin/jsh" "${root}/bin/jsh"
   cp "${JSH_ROOT}/dotfiles/.zshrc" "${root}/dotfiles/.zshrc"
-  cp -R "${JSH_ROOT}/dotfiles/.zsh/completions" "${root}/dotfiles/.zsh/completions"
-  cp "${JSH_ROOT}/lib/env.sh" "${JSH_ROOT}/lib/output.sh" "${JSH_ROOT}/lib/ui.sh" "${root}/lib/"
-  cp "${JSH_ROOT}/lib/ui/cli.sh" "${JSH_ROOT}/lib/ui/gum.sh" \
-    "${JSH_ROOT}/lib/ui/lipgloss.sh" "${JSH_ROOT}/lib/ui/theme.sh" "${root}/lib/ui/"
-  cp "${JSH_ROOT}/lib/unix/links.sh" "${root}/lib/unix/"
-  cp -R "${JSH_ROOT}/lib/zsh" "${root}/lib/zsh"
+  cp "${JSH_ROOT}/lib/output.sh" "${JSH_ROOT}/lib/j.zsh" "${JSH_ROOT}/lib/prompt.zsh" \
+    "${root}/lib/"
   mkdir -p \
     "${root}/local/vendor/zsh-autosuggestions" \
     "${root}/local/vendor/zsh-completions" \
@@ -248,10 +225,8 @@ mkdir "\${probe}" || exit 1
 rmdir "\${probe}"
 if command -v zsh >/dev/null 2>&1; then
   remote_shell=zsh
-elif command -v bash >/dev/null 2>&1; then
-  remote_shell=bash
 else
-  echo 'jssh: remote zsh or bash is required' >&2
+  echo 'jssh: remote zsh is required' >&2
   exit 127
 fi
 printf '%s %s\n' "\$(uname -s)" "\${remote_shell}"
@@ -278,7 +253,6 @@ cleanup() {
 trap cleanup 0 1 2 15
 touch "\${JSSH_SESSION}/.jssh-marker"
 tar -xf - -C "\${JSSH_SESSION}"
-[ -f "\${JSSH_SESSION}/jsh/bin/jsh" ] || exit 1
 [ -f "\${JSSH_SESSION}/jsh/dotfiles/.zshrc" ] || exit 1
 complete=1
 printf '%s\n' "\${JSSH_SESSION}"
@@ -310,28 +284,13 @@ for locale_name in \$(locale -a); do
   case \${locale_name} in C.UTF-8 | C.utf8) utf8_locale=\${locale_name} ;; esac
 done
 [ "\${JSH_LANG}" != C ] || JSH_LANG=\${utf8_locale:-C}
-PATH="\${JSH_ROOT}/bin:\${PATH}"
-export JSH_ROOT JSH_RUNTIME_DIR JSH_LOAD_CONFIG JSH_LANG PATH
+export JSH_ROOT JSH_RUNTIME_DIR JSH_LOAD_CONFIG JSH_LANG
 mkdir -p "\${JSH_RUNTIME_DIR}"
 [ ! -t 1 ] || printf '\033[2J\033[H'
-case '${JSSH_REMOTE_SHELL}' in
-  zsh)
-    JSH_ZSH=\$(command -v zsh) || exit 127
-    ZDOTDIR="\${JSH_ROOT}/dotfiles"
-    export JSH_ZSH ZDOTDIR
-    "\${JSH_ZSH}" -d -i
-    exit_code=\$?
-    ;;
-  bash)
-    JSH_BASH=\$(command -v bash) || exit 127
-    JSH_BASH_RUNTIME=1
-    export JSH_BASH JSH_BASH_RUNTIME
-    "\${JSH_BASH}" --noprofile --rcfile "\${JSH_ROOT}/bin/jsh" -i
-    exit_code=\$?
-    ;;
-  *) exit 127 ;;
-esac
-exit "\${exit_code}"
+ZDOTDIR="\${JSH_ROOT}/dotfiles"
+export ZDOTDIR
+zsh -d -i
+exit \$?
 EOF
 }
 
@@ -362,8 +321,6 @@ _jssh_cleanup() {
 _jssh_on_exit() {
   local exit_code=$?
   trap - EXIT
-  jsh::spinner_stop
-  jsh::cleanup
   _jssh_cleanup
   exit "${exit_code}"
 }
@@ -449,21 +406,16 @@ _jssh_connect() {
   trap 'exit 130' INT
   trap 'exit 143' TERM
 
-  jsh::spinner_static "Checking ${JSSH_TARGET}"
+  jsh::log_info "Checking ${JSSH_TARGET}"
   preflight=$(_jssh_remote_preflight_script)
   read -r kernel JSSH_REMOTE_SHELL < <(
     printf '%s\n' "${preflight}" | ssh "${control_options[@]}" \
       "${JSSH_SSH_OPTIONS[@]}" -T "${JSSH_TARGET}" sh -s
   ) || _jssh_die 'remote preflight failed'
   _jssh_validate_platform "${kernel}"
-  jsh::spinner_stop
-  case ${JSSH_REMOTE_SHELL} in
-    zsh) ;;
-    bash) jsh::log_warn "Remote Zsh not found; using limited Bash runtime" ;;
-    *) _jssh_die 'remote preflight returned an invalid shell' ;;
-  esac
+  [[ ${JSSH_REMOTE_SHELL} == zsh ]] || _jssh_die 'remote preflight returned an invalid shell'
 
-  jsh::spinner_start "Preparing Jsh runtime"
+  jsh::log_info "Preparing Jsh runtime"
   payload=$(_jssh_build_payload)
   receive_script=$(_jssh_remote_receive_script)
   quoted=$(_jssh_quote "${receive_script}")
@@ -475,7 +427,6 @@ _jssh_connect() {
   [[ ${JSSH_REMOTE_DIR} != *[!A-Za-z0-9._/-]* && ${JSSH_REMOTE_DIR} != *..* ]] || \
     _jssh_die 'remote returned an unsafe session path'
 
-  jsh::spinner_stop
   jsh::log_success "Jsh runtime deployed to ${JSSH_TARGET}"
   launch_script=$(_jssh_remote_launch_script)
   quoted=$(_jssh_quote "${launch_script}")
@@ -485,7 +436,6 @@ _jssh_connect() {
     "${JSSH_TARGET}" "sh -c '${quoted}'" || session_status=$?
 
   _jssh_cleanup
-  jsh::cleanup
   trap - EXIT INT TERM
   ((session_status == 0)) || return "${session_status}"
   jsh::log_success "Disconnected from ${JSSH_TARGET}"

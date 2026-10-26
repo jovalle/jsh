@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Jsh is an opinionated shell environment, command set, and workstation automation for macOS, Linux, and Windows.
+Jsh is a small workstation setup tool for macOS, Debian-family Linux, and RHEL-family Linux.
 This checkout is live: it lives at `~/.jsh`, `dotfiles/` is symlinked into `$HOME`, and `bin/` is on `PATH`, so edits
 take effect on the developer's machine immediately.
 
@@ -12,36 +12,37 @@ this file and delete the generated copy.
 
 | Task             | Command                                                                    |
 | ---------------- | -------------------------------------------------------------------------- |
-| All checks       | `make check` (syntax, setup script headers, README coverage)               |
-| All linters      | `make lint` (shellcheck, pylint, yamllint, markdownlint, eslint)           |
+| All checks       | `just check` (syntax, headers, README, linters, tests)                     |
+| All linters      | `just lint` (shellcheck, pylint, yamllint, markdownlint)                   |
 | One shell file   | `bash -n FILE` or `zsh -n FILE`, then `shellcheck --severity=warning FILE` |
-| All tests        | `make test`                                                                |
-| One test module  | `python3 -m unittest tests.test_sublime`                                   |
-| Pre-commit hooks | `make pre-commit-run`                                                      |
-| Setup scopes     | `make list-scopes`                                                         |
+| All tests        | `just test`                                                                |
+| One test module  | `python3 -m unittest tests.test_apps`                                      |
+| Pre-commit hooks | `just check hooks`                                                         |
+| Setup targets    | `just list`                                                                |
 
-ShellCheck info findings SC2310/SC2312 are pre-existing; only warnings and errors must be clean.
+ShellCheck info findings SC2310/SC2312 are pre-existing; only warnings and errors must be clean. Runtime uses Bash and the Python standard library.
 
-`make install|update|setup|deploy|configure|patch|uninstall` and `jsh setup|install|update|repair` change the live
-machine (packages, system defaults, application settings). Run them only when asked, and prefer `--dry-run`.
+`just install|set|tweak|customize|configure` change the live machine (packages, system defaults, application
+settings). Run them only when asked, and prefer `--dry-run`.
 
 ## layout
 
-- `j.sh`: bootstrap and setup orchestrator; phases are listed in `SETUP_PHASES`.
-- `bin/`: standalone commands on `PATH`. Every file needs a README entry (`make check-readme`).
-- `lib/`: shared shell libraries sourced by scripts; `lib/zsh/` holds interactive Zsh code (prompt, `j`).
-- `scripts/<platform>/<phase>/`: setup scripts. Platforms: `unix`, `darwin`, `linux`, `windows`. Phases: `install`,
-  `deploy`, `configure`, `patch`.
+- `justfile`: setup recipes (`just setup`, `just install`, `just set dotfiles`, ...) and development checks.
+- `bin/jsh`: opens the isolated zsh runtime with this checkout's dotfiles.
+- `lib/`: sourced or imported code only: logging (`output.sh`, `output.py`), shared Bash helpers including the
+  `jsh::job` runner, and the `j` zsh function. Nothing here runs as its own process.
+- `scripts/`: one internal program per job (`install.py`, `dotfiles.sh`, `customize.sh`, `configure.py`), run by
+  `jsh::job`, not by hand. `scripts/tweak/darwin.sh` and `scripts/tweak/linux.sh` hold OS-specific preferences.
 - `conf/`: declarative data. Package installs belong in `conf/packages.json`, not inline in scripts.
   `*.example.json` files are templates; `conf/git.json` and `conf/mounts.json` are gitignored personal data.
-- `dotfiles/`: linked into `$HOME` file by file with `bin/jstow --no-folding`.
+- `dotfiles/`: regular files and symlinks are discovered recursively and linked into `$HOME`.
 - `tests/`: Python `unittest` modules.
 - Generated or machine-local, never edit by hand: `graphify-out/`, `local/`, `node_modules/`, `.venv/`.
 - Scratch files go in `tmp/` (gitignored), not `/tmp`.
 
 ## conventions
 
-- Setup scripts start with this header, enforced by `make check-script-headers`:
+- Setup scripts start with this header, enforced by `just check headers` (use `../..` under `scripts/tweak/`):
 
   ```bash
   #!/usr/bin/env bash
@@ -50,29 +51,26 @@ machine (packages, system defaults, application settings). Run them only when as
   set -euo pipefail
 
   SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
-  JSH_ROOT=$(cd -- "${SCRIPT_DIR}/../../.." && pwd -P)
+  JSH_ROOT=$(cd -- "${SCRIPT_DIR}/.." && pwd -P)
   readonly SCRIPT_DIR JSH_ROOT
-  for library_file in "${JSH_ROOT}"/lib/*; do
-    [[ -f ${library_file} && -x ${library_file} ]] || continue
-    # shellcheck source=/dev/null
-    . "${library_file}"
-  done
+  # shellcheck source=lib/core.sh
+  . "${JSH_ROOT}/lib/core.sh"
   ```
 
 - Use `jsh::log_info`, `jsh::log_warn`, `jsh::log_success`, and `jsh::log_error` for user-facing output, not `echo`.
 - Setup scripts are idempotent: check current state, skip when already correct, and change only what differs.
-- A script that skips an unsupported platform or architecture must `return 0`/`exit 0`, or `set -e` callers abort.
-- Honor `--dry-run` (no writes) and `--yes` (accept prompts, never pick or widen a profile or scope). A declined
+- A script that skips an unsupported desktop or unavailable optional component must `return 0`/`exit 0`, or `set -e` callers abort.
+- Honor `--dry-run` (no writes) and `--yes` (accept prompts for the selected command only). A declined
   prompt skips only that action and anything that depends on it.
 - Shell indent is 2 spaces; Python is 4 spaces with a 100-column limit; see `.editorconfig`.
-- New files get single-word names when the directory supplies context (`lib/zsh/vault.zsh`, not
-  `op-vault.zsh`). Use hyphens only to disambiguate or to match an existing name (`sublime-text.sh`).
+- New files get single-word names when the directory supplies context (`conf/vscode/settings.json`, not
+  `vscode-settings.json`). Use hyphens only to disambiguate or to match an existing name (`sublime-text.sh`).
 
 ## tests
 
 - Never write Bats tests (`*.bats`) or add Bats tooling. Tests are Python `unittest` files at `tests/test_<name>.py`.
-- Do not create or extend tests for shell-environment code: `j.sh`, `lib/` (including `lib/zsh/`), shell
-  dotfiles, prompts, completions, aliases, environment setup, deploy/setup orchestration, or the `Makefile`.
+- Do not create or extend tests for shell-environment code: `lib/` (including `lib/*.zsh`), shell
+  dotfiles, prompts, completions, aliases, environment setup, deploy/setup orchestration, or the `justfile`.
   Validate those changes with `bash -n`/`zsh -n` and `shellcheck --severity=warning` instead.
 - Tests are allowed only for standalone programs (for example `bin/*`) and for scripts that install or
   configure standalone external apps (for example Sublime Text, Waterfox, mpv).
@@ -93,7 +91,7 @@ machine (packages, system defaults, application settings). Run them only when as
 - Always: read the surrounding code first, keep diffs minimal and in the existing style, run the narrowest relevant
   check from the commands table before reporting done, and say what was verified.
 - Ask first: deleting files; adding packages or dependencies; running setup targets or anything that needs `sudo`;
-  changing `.pre-commit-config.yaml`, `Makefile` check targets, or Git hooks; touching credentials, SSH, or Git
+  changing `.pre-commit-config.yaml`, `justfile` check recipes, or Git hooks; touching credentials, SSH, or Git
   identity handling.
 - Never: commit secrets, tokens, or personal data; read or print credentials; edit generated or vendored paths; run
   commands that wait on a password prompt.

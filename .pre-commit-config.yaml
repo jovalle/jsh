@@ -9,7 +9,7 @@ repos:
     hooks:
       - id: readme-coverage
         name: check README coverage
-        entry: make check-readme
+        entry: just check readme
         language: system
         pass_filenames: false
         files: ^(?:README\.md|bin/)
@@ -78,7 +78,7 @@ repos:
         language: system
         args: [--severity=warning]
         types: [shell]
-        exclude: '(^|/)(\.zshrc|.*\.zsh)$|^(dotfiles/\.zsh/|lib/zsh/)'
+        exclude: '(^|/)(\.zshrc|.*\.zsh)$'
 
       - id: yamllint
         name: yamllint

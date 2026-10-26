@@ -50,6 +50,10 @@ if [[ ${JSH_LOAD_CONFIG:-1} == 1 ]]; then
 fi
 unset _jsh_rc
 
+if [[ ${functions_source[command_not_found_handler]:-} == /etc/profile.d/PackageKit.sh ]]; then
+  unfunction command_not_found_handler
+fi
+
 # Silence/optimize specific tools
 export DIRENV_LOG_FORMAT=                        # Silence direnv
 export DIRENV_WARN_TIMEOUT=30s                   # Direnv timeout
@@ -94,7 +98,7 @@ typeset -a jsh_plugins=(fzf fzf-tab zsh-autosuggestions zsh-completions zsh-synt
 if [[ ${JSH_LOAD_CONFIG:-1} == 1 ]]; then
   for plugin in ${jsh_plugins}; do
     if [[ ! -d "${JSH_VENDOR}/${plugin}" ]]; then
-      print -u2 -- "jsh vendored plugins are missing. Run: jsh repair"
+      print -u2 -- "jsh vendored plugins are missing. Run: just install runtime"
       break
     fi
   done
@@ -144,9 +148,8 @@ MAILCHECK=0                         # Disable mail checking
 # brew shellenv prepends site-functions to fpath, so run it before the repo entries.
 command -v brew &>/dev/null && eval "$(brew shellenv)"
 
-# Add repository, user, and vendored completions to fpath.
-fpath=("${JSH}/dotfiles/.zsh/completions" ~/.zsh/completions \
-  "${JSH_VENDOR}/zsh-completions/src" "${fpath[@]}")
+# Add user and vendored completions to fpath.
+fpath=(~/.zsh/completions "${JSH_VENDOR}/zsh-completions/src" "${fpath[@]}")
 typeset -gUa fpath
 
 # Initialize completion system
@@ -165,33 +168,6 @@ unset _jsh_compdump
 # shellcheck disable=SC1090  # Vendored repository
 [[ -r "${JSH_VENDOR}/fzf-tab/fzf-tab.plugin.zsh" && -n ${commands[fzf]:-} ]] && \
   source "${JSH_VENDOR}/fzf-tab/fzf-tab.plugin.zsh"
-
-# Register commands that declare completion metadata with a ##% comment.
-typeset -g JSH_COMPLETION_PATHS=${JSH_COMPLETION_PATHS:-${JSH}/bin}
-typeset -gA JSH_COMPLETION_SOURCES
-autoload -Uz _jsh
-for completion_dir in ${(s.:.)JSH_COMPLETION_PATHS}; do
-  for completion_source in "${completion_dir}"/*(N); do
-    [[ -f ${completion_source} && -x ${completion_source} ]] || continue
-    completion_command=
-    completion_line_count=0
-    while IFS= read -r completion_line; do
-      completion_line_count=$((completion_line_count + 1))
-      (( completion_line_count <= 80 )) || break
-      [[ ${completion_line} == '##% '* ]] || continue
-      completion_command=${${completion_line#'##% '}%% *}
-      break
-    done < "${completion_source}"
-    [[ -n ${completion_command} ]] || continue
-    JSH_COMPLETION_SOURCES[${completion_command}]=${completion_source}
-    compdef _jsh "${completion_command}"
-  done
-done
-unset completion_command completion_dir completion_line completion_line_count completion_source
-
-# Derive options from --help when a command has no dedicated completer.
-autoload -Uz _jsh_fallback
-compdef _jsh_fallback -default-
 
 # Completion styling
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'  # Case insensitive
@@ -247,9 +223,8 @@ export JSH_OS
 
 has() { whence -p -- "$1" >/dev/null 2>&1; }
 
-# shellcheck source=../lib/ui.sh
-source "${JSH}/lib/ui.sh"
-jsh::init
+# shellcheck source=../lib/output.sh
+source "${JSH}/lib/output.sh"
 
 _j_ui_message() {
   local level="$1" color="" reset="" mark="" output_fd=1
@@ -272,9 +247,7 @@ _j_ui_message() {
 }
 
 # shellcheck disable=SC1090  # Repository-owned Zsh module
-source "${JSH}/lib/zsh/j.zsh"
-# shellcheck disable=SC1090  # Repository-owned Zsh module
-source "${JSH}/lib/zsh/vault.zsh"
+source "${JSH}/lib/j.zsh"
 
 # ============================================================================
 # 6. SHELL ALIASES
@@ -854,7 +827,7 @@ elif has batcat; then
   alias cat='batcat --paging=never'
 fi
 if has nvim || has vim; then
-  alias edit='vim' vz='vim ~/.zshrc'
+  alias vz='vim ~/.zshrc'
 fi
 alias show_options='setopt'
 
@@ -1402,19 +1375,21 @@ urldecode() {
 # ---- Git Utilities ----
 
 _git_confirm() {
-  local action="$1"
   local reply
-
-  if [[ ${JSH_INTERACTIVE:-0} == 1 && -t 0 ]]; then
-    jsh::confirm "${action}" --default no && return 0
-  else
-    printf '%s [y/N] ' "${action}"
-    read -r reply || return 1
-    case "${reply}" in
-      y|Y|yes|YES) return 0 ;;
-    esac
+  printf '%s [y/N] ' "$1"
+  read -r -s -k 1 reply || return 1
+  if [[ ${reply} == [yY] ]]; then
+    print y
+    return 0
   fi
+  print n
   _j_ui_message info "Cancelled"
+  return 1
+}
+
+_git_require_origin() {
+  git remote get-url origin >/dev/null 2>&1 && return 0
+  _j_ui_message error "No origin remote: add one with git remote add origin URL"
   return 1
 }
 
@@ -1425,7 +1400,7 @@ function git+ {
     return 1
   }
 
-  git remote get-url origin >/dev/null 2>&1 || jgit publish || return 1
+  _git_require_origin || return 1
   _git_confirm "Push '${branch}' to origin?" || return 1
   git push --set-upstream "$@" origin "${branch}"
 }
@@ -1440,7 +1415,7 @@ _git_force_push() {
     return 1
   }
 
-  git remote get-url origin >/dev/null 2>&1 || jgit publish || return 1
+  _git_require_origin || return 1
   if [[ ${confirm} == 1 ]]; then
     _git_confirm "Force-push '${branch}' to origin with --force-with-lease?" || return 1
   fi
@@ -1664,16 +1639,16 @@ fcd() {
   local root=${1:-.} directory selected
   local -a choices=()
   while IFS= read -r directory; do
-    choices+=("${directory}" "${directory}")
+    choices+=("${directory}")
   done < <(find "${root}" -type d 2>/dev/null)
   (( ${#choices[@]} )) || { _j_ui_message warn 'No directories found'; return 1; }
-  selected=$(jsh::choose_one 'Directory' "${choices[@]}") || return
+  selected=$(jsh::choose 'Directory' "${choices[@]}") || return
   cd "${selected}" || return
 }
 
 fe() {
   local file selected
-  local -a files=() choices=()
+  local -a files=()
   if [[ -t 0 ]]; then
     while IFS= read -r file; do
       files+=("${file}")
@@ -1684,15 +1659,8 @@ fe() {
     done
   fi
   (( ${#files[@]} )) || { _j_ui_message warn 'No files found'; return 1; }
-  if [[ -t 0 ]]; then
-    selected=$(jsh::choose 'File' "${files[@]}") || return
-  else
-    for file in "${files[@]}"; do
-      choices+=("${file}" "${file}")
-    done
-    selected=$("${JSH}/lib/ui/cli.sh" choose-one File "${choices[@]}") || return
-  fi
-  "${EDITOR:-vim}" "${selected}"
+  selected=$(jsh::choose 'File' "${files[@]}") || return
+  "${EDITOR:-vim}" "${selected}" </dev/tty
 }
 
 fh() {
@@ -1761,7 +1729,7 @@ fgl() {
 # ============================================================================
 
 # shellcheck disable=SC1090  # Repository-owned native prompt
-source "${JSH}/lib/zsh/prompt.zsh"
+source "${JSH}/lib/prompt.zsh"
 
 # ============================================================================
 # 9. PATH PRIORITIZATION / DEDUPLICATION
@@ -1795,34 +1763,8 @@ dedup_path
 # 10. SHELL LIFECYCLE
 # ============================================================================
 
-jgit() {
-  local project_root=${JSH_PROJECT_DIR:-${HOME}/Projects}
-  [[ ${project_root} != '~' ]] || project_root=${HOME}
-  [[ ${project_root} != '~/'* ]] || project_root=${HOME}/${project_root#\~/}
-  if [[ ${1:-} == create && $# == 2 && -d ${project_root%/}/$2 ]]; then
-    builtin cd -- "${project_root%/}/$2"
-    return
-  fi
-  command "${JSH}/bin/jgit" "$@" || return
-  [[ ${1:-} == create && $# == 2 ]] || return 0
-  builtin cd -- "${project_root%/}/$2"
-}
-
 jsh() {
   case ${1:-} in
-    setup|install|update|repair)
-      JSH_INSTALL_RETURN=1 command "${JSH}/bin/jsh" "$@" || return
-      jsh reload
-      ;;
-    --yes)
-      case ${2:-} in
-        setup|install|update|repair)
-          JSH_INSTALL_RETURN=1 command "${JSH}/bin/jsh" "$@" || return
-          jsh reload
-          ;;
-        *) command "${JSH}/bin/jsh" "$@" ;;
-      esac
-      ;;
     -r|reload)
       shift
       if (( $# )); then
@@ -1833,9 +1775,10 @@ jsh() {
       setopt LOCAL_OPTIONS GLOBAL_EXPORT
       local JSH_RELOADING=1
       source "${JSH}/dotfiles/.zshrc"
+      return
       ;;
-    *) command "${JSH}/bin/jsh" "$@" ;;
   esac
+  command "${JSH}/bin/jsh" "$@"
 }
 
 # These plugins must load after widgets and local customizations are defined.
@@ -1843,14 +1786,16 @@ typeset -gA ZSH_HIGHLIGHT_STYLES
 ZSH_HIGHLIGHT_STYLES[command]='fg=green'
 ZSH_HIGHLIGHT_STYLES[hashed-command]='fg=green'
 
+# Re-sourcing on reload makes the two plugins wrap each other's widgets into a loop.
 # shellcheck disable=SC1090  # Vendored repositories
-[[ -r "${JSH_VENDOR}/zsh-autosuggestions/zsh-autosuggestions.zsh" ]] && \
+(( $+functions[_zsh_autosuggest_start] )) || \
+  [[ ! -r "${JSH_VENDOR}/zsh-autosuggestions/zsh-autosuggestions.zsh" ]] || \
   source "${JSH_VENDOR}/zsh-autosuggestions/zsh-autosuggestions.zsh"
-[[ -r "${JSH_VENDOR}/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" ]] && \
+(( $+functions[_zsh_highlight] )) || \
+  [[ ! -r "${JSH_VENDOR}/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" ]] || \
   source "${JSH_VENDOR}/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
 
 if (( _jsh_runtime_active )) && [[ ${JSH_RELOADING:-0} != 1 ]]; then
-  source "${JSH}/lib/output.sh"
   jsh_banner
 fi
 

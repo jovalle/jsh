@@ -18,15 +18,14 @@ esac
 if [[ -z ${JSH_ROOT:-} ]]; then
   if [[ -n ${JSH_DIR:-} ]]; then
     JSH_ROOT=${JSH_DIR}
-  elif [[ -f ${launcher%/*}/../lib/ui.sh ]]; then
+  elif [[ -f ${launcher%/*}/../lib/core.sh ]]; then
     JSH_ROOT=$(CDPATH='' cd -P "${launcher%/*}/.." && pwd -P)
   else
     JSH_ROOT=${HOME}/.jsh
   fi
 fi
-# shellcheck source=../lib/ui.sh
-. "${JSH_ROOT}/lib/ui.sh"
-jsh::init
+# shellcheck source=../lib/core.sh
+. "${JSH_ROOT}/lib/core.sh"
 
 # Default proxy settings (override via environment or config)
 PROXY_HTTP="${PROXY_HTTP:-${HTTP_PROXY:-}}"
