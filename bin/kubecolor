@@ -115,9 +115,6 @@ kubecolor_format() {
       version_palette[2] = 238
       version_palette[3] = 232
       version_palette[4] = 250
-      role_palette[0] = 94
-      role_palette[1] = 95
-      role_palette[2] = 96
     }
 
     function paint(color, text) {
@@ -199,24 +196,18 @@ kubecolor_format() {
       return palette_color(index_value)
     }
 
-    function role_color(role, normalized, alphabet, index_value, hash, character) {
+    function role_color(role, normalized) {
       normalized = tolower(role)
-      if (normalized == "control-plane" || normalized == "master") return esc "[38;5;208m"
-      if (normalized == "node") return green
-      if (normalized == "gpu") return magenta
-      if (normalized == "worker") return blue
-      alphabet = "abcdefghijklmnopqrstuvwxyz0123456789-_."
-      hash = 0
-      for (index_value = 1; index_value <= length(normalized); index_value++) {
-        character = substr(normalized, index_value, 1)
-        hash = (hash * 33 + index(alphabet, character)) % 216
-      }
-      return sprintf("%s[38;5;%dm", esc, role_palette[hash % 3])
+      if (normalized == "cp" || normalized == "control-plane" || normalized == "master") return red
+      if (normalized == "gpu") return green
+      if (normalized == "node") return yellow
+      return magenta
     }
 
     function role_name(role, normalized) {
       normalized = tolower(role)
       if (normalized == "ingress") return "ing"
+      if (normalized == "ingress-ifa") return "ing-ifa"
       if (normalized == "egress-gateway") return "egw"
       if (normalized == "egress-gateway-pci") return "egwpci"
       if (normalized == "control-plane") return "cp"
