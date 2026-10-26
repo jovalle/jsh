@@ -1,107 +1,117 @@
-#!/bin/sh
+#!/usr/bin/env bash
+# Colored, symbol-led output and selection menus shared by jsh commands (Bash and Zsh).
 
-# Human output uses cyan for activity, dim gray for notes and skips, green
-# checks for success, yellow for warnings, and red crosses for errors. Prompts
-# use yellow without a status mark. Emitters terminate one record; composing
-# callers use jsh_blank between blocks, never before the first or after the
-# last. Keep structured data, command output, and generated files raw.
-
-jsh_color_enabled() {
-  jsh_output_descriptor=$1
-
-  [ "${JSH_PLAIN_OUTPUT:-0}" != 1 ] || return 1
-  [ "${TERM:-}" != dumb ] || return 1
-  [ -z "${NO_COLOR+x}" ] || return 1
-
-  case ${JSH_COLOR:-auto} in
-    always) return 0 ;;
-    never) return 1 ;;
-    auto | '') [ -t "${jsh_output_descriptor}" ] ;;
-    *) return 1 ;;
-  esac
+# Records whether stdout and stderr take color; rerun after redirecting either stream.
+jsh::color_init() {
+  _jsh_color_1=0
+  _jsh_color_2=0
+  [[ -z ${NO_COLOR:-} && ${TERM:-} != dumb ]] || return 0
+  [[ ! -t 1 ]] || _jsh_color_1=1
+  [[ ! -t 2 ]] || _jsh_color_2=1
 }
 
-jsh_stdout() {
-  jsh_output_color=$1
-  jsh_output_prefix=$2
-  shift 2
-
-  if jsh_color_enabled 1; then
-    printf '\033[%sm%s%s\033[0m\n' "${jsh_output_color}" "${jsh_output_prefix}" "$*"
+# Usage: jsh::paint FD SGR TEXT. FD 1 or 2 selects which stream's color decision applies.
+jsh::paint() {
+  local enabled=${_jsh_color_1:-0}
+  [[ $1 != 2 ]] || enabled=${_jsh_color_2:-0}
+  if [[ ${enabled} == 1 ]]; then
+    printf '\033[%sm%s\033[0m' "$2" "$3"
   else
-    printf '%s%s\n' "${jsh_output_prefix}" "$*"
+    printf '%s' "$3"
   fi
 }
 
-jsh_stderr() {
-  jsh_output_color=$1
-  jsh_output_prefix=$2
-  shift 2
+jsh::log_info() { printf '%s %s\n' "$(jsh::paint 1 36 '›')" "$*"; }
+jsh::log_note() { printf '%s\n' "$(jsh::paint 1 2 "$*")"; }
+jsh::log_detail() { printf '%s\n' "$(jsh::paint 1 2 "$*")"; }
+jsh::log_item() { printf '  %s %s\n' "$(jsh::paint 1 32 +)" "$*"; }
+jsh::log_current() { printf '  %s %s\n' "$(jsh::paint 1 32 '✓')" "$(jsh::paint 1 2 "$*")"; }
+jsh::log_success() { printf '%s %s\n' "$(jsh::paint 1 32 '✓')" "$*"; }
+jsh::log_warn() { printf '%s %s\n' "$(jsh::paint 2 33 !)" "$(jsh::paint 2 33 "$*")" >&2; }
+jsh::log_error() { printf '%s %s\n' "$(jsh::paint 2 31 '✗')" "$(jsh::paint 2 31 "$*")" >&2; }
+jsh::log_section() { printf '\n%s\n' "$(jsh::paint 1 1 "$*")"; }
 
-  if jsh_color_enabled 2; then
-    printf '\033[%sm%s%s\033[0m\n' "${jsh_output_color}" "${jsh_output_prefix}" "$*" >&2
+# Usage: jsh::log_summary LABEL DETAIL. Matches the Python step result lines.
+jsh::log_summary() {
+  printf '%s %-9s %s\n' "$(jsh::paint 1 32 '✓')" "$1" "$(jsh::paint 1 2 "$2")"
+}
+
+# Milliseconds since an arbitrary point; whole seconds where EPOCHREALTIME is missing (Bash 3.2).
+jsh::clock() {
+  if [[ -n ${EPOCHREALTIME:-} ]]; then
+    local now=${EPOCHREALTIME//[!0-9]/}
+    printf '%s\n' "$((10#${now} / 1000))"
   else
-    printf '%s%s\n' "${jsh_output_prefix}" "$*" >&2
+    printf '%s\n' "$((SECONDS * 1000))"
   fi
 }
 
-jsh_info() {
-  jsh_stdout 36 '' "$*"
-}
-
-jsh_note() {
-  jsh_stdout '2;37' '' "$*"
-}
-
-jsh_success() {
-  jsh_stdout 32 '✓ ' "$*"
-}
-
-jsh_warn() {
-  jsh_stderr 33 '' "$*"
-}
-
-jsh_update_defer() {
-  jsh_warn "Skipping $1: $2. Retry: $3"
-  [ -z "${JSH_UPDATE_DEFERRED_FILE:-}" ] ||
-    printf '%s: %s. Retry: %s\n' "$1" "$2" "$3" >> "${JSH_UPDATE_DEFERRED_FILE}"
-}
-
-jsh_warn_stdout() {
-  jsh_stdout 33 '' "$*"
-}
-
-jsh_error() {
-  jsh_stderr 31 '✗ ' "$*"
-}
-
-jsh_prompt() {
-  if jsh_color_enabled 1; then
-    printf '\033[33m%s\033[0m' "$*"
+jsh::duration() {
+  local ms=$1
+  if ((ms < 1000)); then
+    printf '%sms\n' "${ms}"
   else
-    printf '%s' "$*"
+    printf '%s.%02ds\n' "$((ms / 1000))" "$((ms % 1000 / 10))"
   fi
 }
 
-jsh_detail() {
-  printf '%s\n' "$*"
+# Usage: _jsh_menu LABEL ITEM... Prints a numbered menu on stderr and reads the reply from the terminal.
+_jsh_menu() {
+  local label=$1 item index=0
+  shift
+  for item in "$@"; do
+    index=$((index + 1))
+    printf '%3d) %s\n' "${index}" "${item}" >&2
+  done
+  printf '%s %s: ' "$(jsh::paint 2 '1;36' '?')" "${label}" >&2
+  IFS= read -r _jsh_menu_reply </dev/tty
 }
 
-jsh_blank() {
-  printf '\n'
+# Usage: _jsh_pick N ITEM... Prints the Nth item.
+_jsh_pick() {
+  local wanted=$1 item
+  shift
+  [[ ${wanted} =~ ^[0-9]+$ ]] && ((wanted >= 1 && wanted <= $#)) || return 1
+  for item in "$@"; do
+    wanted=$((wanted - 1))
+    if ((wanted == 0)); then
+      printf '%s\n' "${item}"
+      return 0
+    fi
+  done
 }
 
-# Usage: jsh_banner [LABEL]; LABEL is centred in the gap on the last banner line.
+# Usage: jsh::choose LABEL ITEM... Prints the chosen item; fzf when installed, else a numbered menu.
+jsh::choose() {
+  local label=$1
+  shift
+  (($#)) || return 1
+  if command -v fzf >/dev/null 2>&1; then
+    printf '%s\n' "$@" | fzf --height=40% --reverse --prompt="${label}> "
+    return
+  fi
+  _jsh_menu "${label}" "$@" || return 1
+  _jsh_pick "${_jsh_menu_reply}" "$@"
+}
+
+# Usage: jsh::choose_many LABEL ITEM... Prints the chosen items, one per line.
+jsh::choose_many() {
+  local label=$1 number
+  shift
+  (($#)) || return 1
+  if command -v fzf >/dev/null 2>&1; then
+    printf '%s\n' "$@" | fzf --multi --height=40% --reverse --prompt="${label} (Tab marks)> "
+    return
+  fi
+  _jsh_menu "${label} (numbers separated by spaces)" "$@" || return 1
+  while IFS= read -r number; do
+    [[ -z ${number} ]] || _jsh_pick "${number}" "$@" || return 1
+  done < <(printf '%s\n' "${_jsh_menu_reply}" | tr -s ' ,' '\n\n')
+}
+
 jsh_banner() {
-  jsh_banner_label=${1:-}
-  if [ -n "${SSH_CONNECTION:-}" ]; then
-    [ -z "${jsh_banner_label}" ] || jsh_info "jsh ${jsh_banner_label}"
-    unset jsh_banner_label
-    return 0
-  fi
-  jsh_banner_left=$(((26 - ${#jsh_banner_label}) / 2))
-  jsh_banner_right=$((26 - ${#jsh_banner_label} - jsh_banner_left))
-  jsh_banner_text='   :%@@@@@@@@@#*#@%-              +-:##
+  cat <<'BANNER'
+   :%@@@@@@@@@#*#@%-              +-:##
   :#    -#%%+=#:@#                :@@%:
    %@@     +@++@@-            *-   @@%:
           *@%:%@@:    :%@@@@*%+  *@@@%::*@@#
@@ -113,9 +123,8 @@ jsh_banner() {
           +@+:%*     *@@@@@%@%-   #@@@+  *@@-
    :==--::*#:#-     -:   -*:        +   =@@=
  :@@@@@@@@#@-                         +@#:
-'"$(printf " =   :-=-:%${jsh_banner_left}s%s%${jsh_banner_right}s-:" '' "${jsh_banner_label}" '')"
-  jsh_blank
-  jsh_stdout '1;36' '' "${jsh_banner_text}"
-  jsh_blank
-  unset jsh_banner_text jsh_banner_label jsh_banner_left jsh_banner_right
+ =   :-=-:                          -:
+BANNER
 }
+
+jsh::color_init

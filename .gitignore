@@ -52,6 +52,7 @@
 .fseventsd
 .history
 .idea
+.jshrc
 .kube
 .oh-my-zsh
 .sops

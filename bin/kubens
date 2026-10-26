@@ -28,15 +28,14 @@ esac
 if [[ -z ${JSH_ROOT:-} ]]; then
   if [[ -n ${JSH_DIR:-} ]]; then
     JSH_ROOT=${JSH_DIR}
-  elif [[ -f ${launcher%/*}/../lib/ui.sh ]]; then
+  elif [[ -f ${launcher%/*}/../lib/core.sh ]]; then
     JSH_ROOT=$(CDPATH='' cd -P "${launcher%/*}/.." && pwd -P)
   else
     JSH_ROOT=${HOME}/.jsh
   fi
 fi
-# shellcheck source=../lib/ui.sh
-. "${JSH_ROOT}/lib/ui.sh"
-jsh::init
+# shellcheck source=../lib/core.sh
+. "${JSH_ROOT}/lib/core.sh"
 
 KUBENS_DIR="${XDG_CACHE_HOME:-${HOME}/.kube}/kubens"
 
@@ -212,7 +211,7 @@ main() {
   fi
 
   if [[ "$#" -eq 0 ]]; then
-    if [[ ${JSH_INTERACTIVE:-0} == 1 && -z ${KUBECTX_IGNORE_FZF:-} ]]; then
+    if [[ -t 0 && -t 1 && -z ${KUBECTX_IGNORE_FZF:-} ]]; then
       choose_namespace_interactive
     else
       list_namespaces

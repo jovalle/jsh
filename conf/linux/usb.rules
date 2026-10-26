@@ -1,0 +1,2 @@
+# Managed by jsh
+ACTION=="add|change", SUBSYSTEM=="usb", TEST=="power/wakeup", ATTR{power/wakeup}="enabled"

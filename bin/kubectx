@@ -28,15 +28,14 @@ esac
 if [[ -z ${JSH_ROOT:-} ]]; then
   if [[ -n ${JSH_DIR:-} ]]; then
     JSH_ROOT=${JSH_DIR}
-  elif [[ -f ${launcher%/*}/../lib/ui.sh ]]; then
+  elif [[ -f ${launcher%/*}/../lib/core.sh ]]; then
     JSH_ROOT=$(CDPATH='' cd -P "${launcher%/*}/.." && pwd -P)
   else
     JSH_ROOT=${HOME}/.jsh
   fi
 fi
-# shellcheck source=../lib/ui.sh
-. "${JSH_ROOT}/lib/ui.sh"
-jsh::init
+# shellcheck source=../lib/core.sh
+. "${JSH_ROOT}/lib/core.sh"
 
 KUBECTX="${XDG_CACHE_HOME:-${HOME}/.kube}/kubectx"
 
@@ -182,21 +181,16 @@ rename_context() {
 }
 
 choose_contexts_to_delete_interactive() {
-  local context choices prompt_status
+  local context choices
   local -a contexts=() selector_choices=()
   mapfile -t contexts < <(get_contexts)
   for context in "${contexts[@]}"; do
-    selector_choices+=("${context}" "${context}")
+    selector_choices+=("${context}")
   done
-  if choices=$(jsh::choose_many 'Contexts to delete' "${selector_choices[@]}"); then
-    :
-  else
-    prompt_status=$?
-    ((prompt_status == 1)) || exit "${prompt_status}"
-  fi
+  choices=$(jsh::choose_many 'Contexts to delete' "${selector_choices[@]}" || true)
   if [[ -z "${choices}" ]]; then
-    echo "Deletion cancelled; no contexts selected."
-    exit 0
+    echo 2>&1 "error: you did not choose any contexts to delete"
+    exit 1
   else
     # Convert newline-separated choices to array
     local contexts_to_delete=()
@@ -209,12 +203,7 @@ choose_contexts_to_delete_interactive() {
     for ctx in "${contexts_to_delete[@]}"; do
       echo "  - ${ctx}"
     done
-    if JSH_UI_OUTPUT_FD=1 UI_OUTPUT_FD=1 \
-      jsh::confirm 'Are you sure you want to delete these contexts?' --default no; then
-      :
-    else
-      prompt_status=$?
-      ((prompt_status == 1)) || exit "${prompt_status}"
+    if ! jsh::confirm 'Are you sure you want to delete these contexts?'; then
       echo "Deletion cancelled."
       exit 0
     fi
@@ -380,7 +369,7 @@ main() {
   fi
 
   if [[ "$#" -eq 0 ]]; then
-    if [[ ${JSH_INTERACTIVE:-0} == 1 && -z "${KUBECTX_IGNORE_FZF:-}" ]]; then
+    if [[ -t 0 && -t 1 && -z "${KUBECTX_IGNORE_FZF:-}" ]]; then
       choose_context_interactive
     else
       list_contexts
@@ -395,7 +384,7 @@ main() {
   elif [[ "${1}" == "-d" || "${1}" == "--delete" ]]; then
     if [[ "$#" -lt 2 ]]; then
       # No specific contexts provided, use interactive selection
-      if [[ ${JSH_INTERACTIVE:-0} == 1 && -z "${KUBECTX_IGNORE_FZF:-}" ]]; then
+      if [[ -t 0 && -t 1 && -z "${KUBECTX_IGNORE_FZF:-}" ]]; then
         choose_contexts_to_delete_interactive
       else
         echo "error: missing context NAME outside interactive selection" >&2
