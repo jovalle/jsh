@@ -110,7 +110,9 @@ jsh::choose_many() {
 }
 
 jsh_banner() {
-  cat <<'BANNER'
+  local banner
+  banner=$(
+    cat <<'BANNER'
    :%@@@@@@@@@#*#@%-              +-:##
   :#    -#%%+=#:@#                :@@%:
    %@@     +@++@@-            *-   @@%:
@@ -125,6 +127,8 @@ jsh_banner() {
  :@@@@@@@@#@-                         +@#:
  =   :-=-:                          -:
 BANNER
+  )
+  printf '%s\n' "$(jsh::paint 1 36 "${banner}")"
 }
 
 jsh::color_init
