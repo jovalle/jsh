@@ -25,7 +25,6 @@ case ${_JSH_PROMPT_MODE} in
 			fail '✘' ahead '⇡' behind '⇣' stash '*'
 			conflict '~' staged '+' unstaged '!' untracked '?'
 			jobs $'\uf013' python $'\ue73c' node $'\ue718' kube '⎈'
-			stack $'\uf5fd '
 		)
 		;;
 	unicode)
@@ -35,7 +34,6 @@ case ${_JSH_PROMPT_MODE} in
 			fail '✘' ahead '⇡' behind '⇣' stash '*'
 			conflict '~' staged '+' unstaged '!' untracked '?'
 			jobs '⚙' python 'py:' node 'node:' kube '⎈'
-			stack '≡ '
 		)
 		;;
 	ascii)
@@ -45,7 +43,6 @@ case ${_JSH_PROMPT_MODE} in
 			fail 'x' ahead '^' behind 'v' stash '*'
 			conflict '~' staged '+' unstaged '!' untracked '?'
 			jobs 'jobs:' python 'py:' node 'node:' kube 'kube:'
-			stack 'stack:'
 		)
 		;;
 esac
@@ -73,7 +70,7 @@ else
 fi
 
 typeset -ga JSH_PROMPT_LEFT JSH_PROMPT_RIGHT
-(( ${#JSH_PROMPT_LEFT} )) || JSH_PROMPT_LEFT=(os stack directory git)
+(( ${#JSH_PROMPT_LEFT} )) || JSH_PROMPT_LEFT=(os directory git)
 (( ${#JSH_PROMPT_RIGHT} )) || \
 	JSH_PROMPT_RIGHT=(status duration jobs direnv node python kube aws time)
 [[ ${JSH_PROMPT_ASYNC:-1} == (0|1) ]] || JSH_PROMPT_ASYNC=1
@@ -102,13 +99,12 @@ if [[ ${JSH_PLAIN_OUTPUT:-0} != 1 && ${JSH_COLOR:-auto} != never && \
 	typeset -g _JSH_C_CONTEXT=$'%{\e[38;2;255;215;175m%}'
 	typeset -g _JSH_C_CONTEXT_ROOT=$'%{\e[38;2;255;215;0m%}'
 	typeset -g _JSH_C_TIME=$'%{\e[38;2;128;128;128m%}'
-	typeset -g _JSH_C_STACK=$'%{\e[38;2;255;215;0m%}'
 else
 	typeset -g _JSH_C_RESET='' _JSH_C_OS='' _JSH_C_DIR='' _JSH_C_CLEAN=''
 	typeset -g _JSH_C_MODIFIED='' _JSH_C_UNTRACKED='' _JSH_C_ERROR=''
 	typeset -g _JSH_C_STATUS_ERROR='' _JSH_C_DURATION='' _JSH_C_JOBS=''
 	typeset -g _JSH_C_ENV='' _JSH_C_KUBE='' _JSH_C_AWS=''
-	typeset -g _JSH_C_CONTEXT='' _JSH_C_CONTEXT_ROOT='' _JSH_C_TIME='' _JSH_C_STACK=''
+	typeset -g _JSH_C_CONTEXT='' _JSH_C_CONTEXT_ROOT='' _JSH_C_TIME=''
 fi
 
 typeset -g _JSH_PROMPT_EXIT='' _JSH_PROMPT_STARTED='' _JSH_PROMPT_DURATION=0
@@ -194,15 +190,6 @@ _jsh_prompt_segment_os() {
 		darwin*) REPLY="${_JSH_C_OS}${_JSH_PROMPT_ICON[apple]}${_JSH_C_RESET}" ;;
 		*) REPLY="${_JSH_C_OS}${_JSH_PROMPT_ICON[linux]}${_JSH_C_RESET}" ;;
 	esac
-}
-
-_jsh_prompt_segment_stack() {
-	local stacks=${J_STACKS:-${HOME}/Stacks}
-	REPLY=''
-	(( !_JSH_PROMPT_HIDE_OS )) || return
-	[[ ${PWD} == ${stacks}/?* ]] || return
-	_jsh_prompt_escape "${${PWD#${stacks}/}%%/*}"
-	REPLY="${_JSH_C_STACK}${_JSH_PROMPT_ICON[stack]}${REPLY}${_JSH_C_RESET}"
 }
 
 _jsh_prompt_segment_directory() {

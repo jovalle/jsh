@@ -162,10 +162,8 @@ patches, and forced themes are not managed.
 `j` is a Zsh function loaded by `dotfiles/.zshrc`:
 
 - `j` loads the SSH keys named in `conf/git.json`, checks this checkout, dotfile
-  links, and core tools, checks the current stack, then runs executables in
-  `local/init.d`.
-- `j status [STACK]` summarizes the Git repositories in a stack, or in
-  `~/Projects` outside a stack.
+  links, and core tools, then runs executables in `local/init.d`.
+- `j status` summarizes the Git repositories in `J_PATHS`.
 - `j QUERY` jumps to a directory by frecency; `j pick` chooses one; `j --help`
   lists the rest.
 
