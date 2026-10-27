@@ -259,14 +259,16 @@ def audio(desktop):
         changed = write_file(policy, Path(source_name).read_bytes())
     else:
         output.note("no audio device policy for this host; keeping existing devices")
-    command = f"bash {ROOT}/scripts/customize/audio.sh cycle"
-    shortcut(
-        desktop,
-        "Jsh audio output",
-        "<Control><Alt><Super>a",
-        "<Primary><Alt><Super>a",
-        command,
-    )
+    if shutil.which("pactl"):
+        shortcut(
+            desktop,
+            "Jsh audio output",
+            "<Control><Alt><Super>a",
+            "<Primary><Alt><Super>a",
+            f"bash {ROOT}/scripts/customize/audio.sh cycle",
+        )
+    else:
+        output.note("skipped audio output shortcut: pactl is unavailable")
     if changed and shutil.which("systemctl"):
         apply("WirePlumber", "systemctl", "--user", "restart", "wireplumber.service")
 
