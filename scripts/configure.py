@@ -162,14 +162,21 @@ def running(*names):
     return False
 
 
+def present(command, *paths):
+    return bool(shutil.which(command)) or any(path.exists() for path in paths)
+
+
 def helium():
+    directory = (
+        HOME / "Library/Application Support/net.imput.helium" if MACOS else CONFIG / "helium"
+    )
+    if not present("helium", directory, Path("/Applications/Helium.app")):
+        output.skip("not installed")
+        return
     apply_policy(policy_path("helium"), json.loads((ROOT / "conf/helium/policy.json").read_text()))
     if running("helium", "Helium", "helium-bin"):
         output.skip("close the browser and rerun just configure helium")
         return
-    directory = (
-        HOME / "Library/Application Support/net.imput.helium" if MACOS else CONFIG / "helium"
-    )
     profiles = sorted(directory.glob("*/Preferences"))
     if not profiles:
         output.skip("open it once to create a profile, then rerun configure")
@@ -209,6 +216,15 @@ def default_waterfox_profiles(directory):
 
 
 def waterfox():
+    directories = (
+        [HOME / "Library/Application Support/Waterfox"]
+        if MACOS
+        else [HOME / ".waterfox", HOME / ".var/app/net.waterfox.waterfox/.waterfox"]
+    )
+    flatpak = Path("/var/lib/flatpak/app/net.waterfox.waterfox")
+    if not present("waterfox", *directories, flatpak, Path("/Applications/Waterfox.app")):
+        output.skip("not installed")
+        return
     if MACOS:
         desired = json.loads((ROOT / "conf/gecko/policies.json").read_text())
         desired["EnterprisePoliciesEnabled"] = True
@@ -216,11 +232,6 @@ def waterfox():
     if running("waterfox", "waterfox-bin", "Waterfox"):
         output.skip("close the browser and rerun just configure waterfox")
         return
-    directories = (
-        [HOME / "Library/Application Support/Waterfox"]
-        if MACOS
-        else [HOME / ".waterfox", HOME / ".var/app/net.waterfox.waterfox/.waterfox"]
-    )
     for directory in directories:
         if not (directory / "profiles.ini").exists():
             continue
@@ -249,6 +260,9 @@ def waterfox():
 
 def vscode():
     directory = HOME / "Library/Application Support/Code/User" if MACOS else CONFIG / "Code/User"
+    if not present("code", directory):
+        output.skip("not installed")
+        return
     desired = json.loads((ROOT / "conf/vscode/settings.json").read_text())
     shell = shutil.which("zsh")
     if shell:
@@ -264,6 +278,14 @@ def sublime():
     else:
         flatpak = HOME / ".var/app/com.sublimetext.three/config/sublime-text"
         directory = flatpak if flatpak.is_dir() else CONFIG / "sublime-text"
+    apps = (
+        Path("/Applications/Sublime Text.app"),
+        Path("/var/lib/flatpak/app/com.sublimetext.three"),
+        HOME / ".var/app/com.sublimetext.three",
+    )
+    if not present("subl", directory, *apps):
+        output.skip("not installed")
+        return
     if not directory.is_dir():
         output.skip("open Sublime Text once, then rerun configure")
         return

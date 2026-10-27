@@ -37,6 +37,9 @@ class AppTests(unittest.TestCase):  # pylint: disable=too-many-public-methods
         patcher = patch.object(APPS, "running", return_value=False)
         self.running = patcher.start()
         self.addCleanup(patcher.stop)
+        patcher = patch.object(APPS, "present", return_value=True)
+        self.present = patcher.start()
+        self.addCleanup(patcher.stop)
         self.policies = self.home / "policies"
         patcher = patch.object(APPS, "policy_path", lambda app: self.policies / app)
         patcher.start()
@@ -158,6 +161,13 @@ class AppTests(unittest.TestCase):  # pylint: disable=too-many-public-methods
             written["ExtensionSettings"]["blockjmkbacgjkknlgpkjjiijinjdanf"],
             {"toolbar_pin": "force_pinned"},
         )
+
+    def test_uninstalled_apps_are_skipped_without_policy_or_settings(self):
+        self.present.return_value = False
+        for app in (APPS.helium, APPS.waterfox, APPS.vscode, APPS.sublime):
+            app()
+        self.install_root.assert_not_called()
+        self.assertEqual(list(self.home.iterdir()), [])
 
     def test_current_policy_is_not_rewritten(self):
         self.seed("policies/helium", (ROOT / "conf/helium/policy.json").read_text())
