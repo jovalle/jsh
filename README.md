@@ -178,6 +178,7 @@ These commands are on `PATH` through `bin/`:
 | -------------------------- | ----------------------------------------------------- |
 | [cafe](bin/cafe)           | Keep the computer awake until interrupted             |
 | [colours](bin/colours)     | Print the terminal's 256-color palette                |
+| [git](bin/git)             | Git plus `save`, `load`, `refresh`, and `commit -t`   |
 | [jssh](bin/jssh)           | Open an ephemeral Jsh Zsh session on a Linux SSH host |
 | [kubecolor](bin/kubecolor) | Colorize interactive `kubectl` output                 |
 | [kubectx](bin/kubectx)     | Switch between kubectl contexts                       |

@@ -539,6 +539,11 @@ if has git; then
   alias gcount='git rev-list --count HEAD'
   alias gdiff='git diff --name-only master'
   alias gvimdiff='git difftool --tool=vimdiff --no-prompt'
+  # Extra subcommands from bin/git.
+  zstyle ':completion:*:*:git:*' user-commands \
+    save:'back up uncommitted changes to a secret gist' \
+    load:'apply changes saved with git save' \
+    refresh:'fetch origin and rebase onto its default branch'
 fi
 
 # ---- Docker ----
