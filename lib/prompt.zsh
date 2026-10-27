@@ -300,7 +300,7 @@ _jsh_prompt_segment_node() {
 	REPLY=''
 	[[ -n ${_JSH_PROMPT_NODE} ]] || return
 	_jsh_prompt_escape "${_JSH_PROMPT_NODE}"
-	REPLY="${_JSH_C_CLEAN}${_JSH_PROMPT_ICON[node]}${REPLY}${_JSH_C_RESET}"
+	REPLY="${_JSH_C_CLEAN}${_JSH_PROMPT_ICON[node]} ${REPLY}${_JSH_C_RESET}"
 }
 
 _jsh_prompt_segment_python() {
@@ -309,7 +309,7 @@ _jsh_prompt_segment_python() {
 	[[ -n ${environment} ]] || return
 	environment=${environment:t}
 	_jsh_prompt_escape "${environment}"
-	REPLY="${_JSH_C_ENV}${_JSH_PROMPT_ICON[python]}${REPLY}${_JSH_C_RESET}"
+	REPLY="${_JSH_C_ENV}${_JSH_PROMPT_ICON[python]} ${REPLY}${_JSH_C_RESET}"
 }
 
 _jsh_prompt_segment_kube() {
