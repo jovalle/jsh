@@ -34,6 +34,11 @@ jsh::root() {
   fi
 }
 
+# Succeeds when system changes can run without a password prompt.
+jsh::admin() {
+  [[ ${EUID} == 0 ]] || sudo -n true >/dev/null 2>&1
+}
+
 jsh::confirm() {
   local answer
   [[ ${JSH_DRY_RUN:-0} != 1 && ${JSH_ASSUME_YES:-0} != 1 ]] || return 0
@@ -88,7 +93,8 @@ _jsh_run_job() {
 
 # Usage: jsh::job JOB [COMPONENT] [--dry-run] [--yes]. Confirms once, then runs the job.
 jsh::job() {
-  local job=$1 component='' argument started
+  local job=$1 component='' argument started step parts failed=()
+  local steps=(install dotfiles tweak customize configure)
   shift
   export JSH_DRY_RUN=0 JSH_ASSUME_YES=0 PYTHONDONTWRITEBYTECODE=1
   for argument in "$@"; do
@@ -131,6 +137,11 @@ jsh::job() {
     return 1
   fi
   [[ ! -t 1 ]] || jsh_banner
+  if [[ ${job} == setup && ${JSH_PLATFORM} != darwin ]] && ! jsh::admin; then
+    steps=('install runtime extensions' dotfiles customize configure)
+    jsh::log_info 'No root or passwordless sudo: setup covers the runtime, dotfiles, desktop, and app settings.'
+    jsh::log_note '  › Run sudo -v first to include packages and system tweaks.'
+  fi
   if ! jsh::confirm "Run ${job}${component:+ ${component}}?"; then
     jsh::log_info 'Skipped.'
     return 0
@@ -139,13 +150,18 @@ jsh::job() {
   export JSH_ASSUME_YES=1
   started=$(jsh::clock)
   if [[ ${job} == setup ]]; then
-    for job in install dotfiles tweak customize configure; do
-      jsh::log_section "${job}"
-      _jsh_run_job "${job}"
+    for step in "${steps[@]}"; do
+      jsh::log_section "${step}"
+      read -r -a parts <<<"${step}"
+      _jsh_run_job "${parts[@]}" || failed+=("${step}")
     done
   else
-    _jsh_run_job "${job}" "${component}"
+    _jsh_run_job "${job}" "${component}" || failed+=("${job}")
   fi
   printf '\n'
+  if ((${#failed[@]})); then
+    jsh::log_error "Failed: ${failed[*]}"
+    return 1
+  fi
   jsh::log_success "Done in $(jsh::duration "$(($(jsh::clock) - started))")"
 }
