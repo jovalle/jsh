@@ -382,11 +382,40 @@ def launcher():
     report(["jsh launcher"])
 
 
-def main(group):
+def gnome_extensions(extensions):
+    """Install pinned extensions.gnome.org builds that match the running GNOME Shell."""
+    if session_desktop() != "gnome" or not installed("gnome-extensions"):
+        output.skip("needs an active GNOME session")
+        return
+    shell = run(["gnome-shell", "--version"], capture=True).split()[-1].split(".")[0]
+    data = Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local/share")))
+    roots = (data / "gnome-shell/extensions", Path("/usr/share/gnome-shell/extensions"))
+    for uuid, builds in extensions.items():
+        if any((root / uuid).is_dir() for root in roots):
+            output.current(uuid)
+            continue
+        build = next((build for build in builds if shell in build["shells"]), None)
+        if build is None:
+            output.problem(f"{uuid}: no pinned build for GNOME Shell {shell}")
+            continue
+        if DRY_RUN:
+            output.note(f"would install {uuid} from {build['url']}")
+            report([uuid])
+            continue
+        output.progress(f"downloading {uuid}")
+        with tempfile.TemporaryDirectory(prefix="jsh-", dir=ROOT / "tmp") as directory:
+            archive = Path(directory) / "extension.zip"
+            download(build["url"], archive, build["sha256"])
+            run(["gnome-extensions", "install", "--force", str(archive)])
+        report([uuid])
+        output.note("log out and back in so GNOME Shell loads new extensions")
+
+
+def main(names):
     config = json.loads((ROOT / "conf/packages.json").read_text())
     selected = os.environ["JSH_PLATFORM"]
     spec = config["platforms"][selected]
-    groups = ["core", "tools", "runtime", "apps"] if group == "all" else [group]
+    groups = ["core", "tools", "runtime", "apps", "extensions"] if names == ["all"] else names
     if not DRY_RUN:
         (ROOT / "tmp").mkdir(exist_ok=True)
     for item in groups:
@@ -412,6 +441,8 @@ def install_group(config, spec, selected, item):
         vendor(config["runtime"]["vendor"])
         fzf_binary()
         launcher()
+    elif item == "extensions":
+        gnome_extensions(config["gnome"]["extensions"])
     elif selected == "darwin":
         darwin_group(config, spec, item)
     elif item == "core":
@@ -443,7 +474,7 @@ def install_group(config, spec, selected, item):
 
 if __name__ == "__main__":
     try:
-        main(sys.argv[1] if len(sys.argv) > 1 else "all")
+        main(sys.argv[1:] or ["all"])
     except KeyboardInterrupt:
         sys.exit(130)
     except (OSError, ValueError, KeyError, RuntimeError, subprocess.CalledProcessError) as error:

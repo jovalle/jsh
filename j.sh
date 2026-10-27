@@ -21,7 +21,7 @@ Usage: jsh COMMAND [COMPONENT] [--dry-run] [--yes]
   runtime                Open an isolated zsh with this checkout's dotfiles
   list                   List groups, apps, and OS components
 
-Groups: core, tools, runtime, apps, all
+Groups: core, tools, runtime, apps, extensions, all
 Apps: helium, waterfox, vscode, ghostty, spotify, todoist
 Tweaks: preferences
 Customization: wallpaper, keybindings, desktop, dock, audio, display, all
@@ -66,7 +66,7 @@ done
 }
 case ${action}:${component} in
   list:)
-    printf '%s\n' 'install: core tools runtime apps all helium waterfox vscode ghostty spotify todoist' \
+    printf '%s\n' 'install: core tools runtime apps extensions all helium waterfox vscode ghostty spotify todoist' \
       'dotfiles' 'tweak: preferences' \
       'customize: wallpaper keybindings desktop dock audio display all' \
       'configure: helium waterfox vscode all' 'setup' 'runtime'
