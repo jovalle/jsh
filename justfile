@@ -13,7 +13,7 @@ default:
 setup *args:
     @. lib/core.sh; jsh::job setup "$@"
 
-# Install software: core, tools, runtime, apps, or one app (default: all)
+# Install software: core, tools, runtime, apps, extensions, or one app (default: all)
 [group('setup')]
 install *args:
     @. lib/core.sh; jsh::job install "$@"
@@ -47,7 +47,7 @@ configure *args:
 # List install groups, apps, and components
 [group('setup')]
 list:
-    @printf '%s\n' 'install: core tools runtime apps all helium waterfox vscode ghostty spotify todoist sublime' \
+    @printf '%s\n' 'install: core tools runtime apps extensions all helium waterfox vscode ghostty spotify todoist sublime' \
       'set: dotfiles' 'tweak: preferences' \
       'customize: wallpaper keybindings desktop dock audio display all' \
       'configure: helium waterfox vscode sublime agents all'

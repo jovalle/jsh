@@ -78,7 +78,7 @@ _jsh_run_job() {
   local preferences=linux
   [[ ${JSH_PLATFORM} != darwin ]] || preferences=darwin
   case $1 in
-    install) python3 "${JSH_ROOT}/scripts/install.py" "${2:-all}" ;;
+    install) python3 "${JSH_ROOT}/scripts/install.py" "${2:-all}" ${3:+"$3"} ;;
     dotfiles) bash "${JSH_ROOT}/scripts/dotfiles.sh" ;;
     tweak) bash "${JSH_ROOT}/scripts/tweak/${preferences}.sh" ;;
     customize) bash "${JSH_ROOT}/scripts/customize.sh" "${2:-all}" ;;
@@ -110,8 +110,8 @@ jsh::job() {
   done
   case ${job}:${component} in
     install: | install:all | install:core | install:tools | install:runtime | install:apps | \
-      install:helium | install:waterfox | install:vscode | install:ghostty | install:spotify | \
-      install:todoist | install:sublime | \
+      install:extensions | install:helium | install:waterfox | install:vscode | install:ghostty | \
+      install:spotify | install:todoist | install:sublime | \
       dotfiles: | tweak: | tweak:preferences | customize: | customize:all | \
       customize:wallpaper | customize:keybindings | customize:desktop | customize:dock | \
       customize:audio | customize:display | configure: | configure:all | \

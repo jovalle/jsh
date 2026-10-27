@@ -65,8 +65,13 @@ Use native package managers for upgrades.
 ## Software
 
 Edit [conf/packages.json](conf/packages.json). Groups are `core`, `tools`,
-`runtime`, and `apps`; omitting the group installs all four. An app name installs
-only that app and its required installation channel.
+`runtime`, `apps`, and `extensions`; omitting the group installs all five. An app
+name installs only that app and its required installation channel.
+
+The `extensions` group installs the GNOME Shell extensions under
+`gnome.extensions` into the user's extension directory in a GNOME session, using
+the pinned extensions.gnome.org build and SHA-256 digest for the running shell
+version. New extensions load after the next login.
 
 The `runtime` group shallow-clones the shell plugins and agent skill repositories
 listed under `runtime.vendor` into `local/vendor`, installs the fzf release pinned

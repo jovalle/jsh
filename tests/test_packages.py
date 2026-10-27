@@ -167,7 +167,7 @@ class PackageTests(unittest.TestCase):  # pylint: disable=too-many-public-method
         with patch.dict(os.environ, {"JSH_PLATFORM": "darwin"}), patch.object(
             PACKAGES, "DRY_RUN", True
         ), patch.object(PACKAGES, "brew_packages") as brew:
-            PACKAGES.main("ghostty")
+            PACKAGES.main(["ghostty"])
         brew.assert_called_once_with({"casks": ["ghostty"]})
 
     def test_missing_brew_tap_is_added_before_formulae(self):
@@ -298,6 +298,42 @@ class PackageTests(unittest.TestCase):  # pylint: disable=too-many-public-method
             PACKAGES.launcher()
             link = Path(home) / ".local/bin/jsh"
             self.assertEqual(link.readlink(), ROOT / "bin/jsh")
+
+    def install_extension(self, shell, present=False):
+        builds = {
+            "Vitals@x": [
+                {"shells": ["40"], "url": "https://e.test/40.zip", "sha256": "a" * 64},
+                {"shells": ["45"], "url": "https://e.test/45.zip", "sha256": "b" * 64},
+            ]
+        }
+        with tempfile.TemporaryDirectory(dir=ROOT / "tmp") as data, patch.dict(
+            os.environ, XDG_DATA_HOME=data, JSH_DESKTOP="gnome"
+        ), patch.object(PACKAGES, "installed", return_value=True), patch.object(
+            PACKAGES, "run", return_value=f"GNOME Shell {shell}.3"
+        ) as run, patch.object(PACKAGES, "download") as download, patch.object(
+            PACKAGES.output, "problem"
+        ) as problem:
+            if present:
+                (Path(data) / "gnome-shell/extensions/Vitals@x").mkdir(parents=True)
+            PACKAGES.gnome_extensions(builds)
+        return run, download, problem
+
+    def test_extension_build_matches_running_shell(self):
+        run, download, problem = self.install_extension("45")
+        self.assertEqual(download.call_args.args[0], "https://e.test/45.zip")
+        self.assertEqual(download.call_args.args[2], "b" * 64)
+        self.assertEqual(run.call_args.args[0][:3], ["gnome-extensions", "install", "--force"])
+        problem.assert_not_called()
+
+    def test_installed_extension_is_left_alone(self):
+        run, download, _ = self.install_extension("40", present=True)
+        download.assert_not_called()
+        self.assertEqual(run.call_count, 1)
+
+    def test_extension_without_pinned_build_is_reported(self):
+        _, download, problem = self.install_extension("39")
+        download.assert_not_called()
+        problem.assert_called_once_with("Vitals@x: no pinned build for GNOME Shell 39")
 
 
 if __name__ == "__main__":
