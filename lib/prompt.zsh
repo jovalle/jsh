@@ -117,6 +117,12 @@ typeset -g _JSH_PROMPT_NODE='' _JSH_PROMPT_NODE_PWD='' _JSH_PROMPT_KUBE_CACHE=''
 typeset -g _JSH_PROMPT_KUBE_SIGNATURE=''
 typeset -gi _JSH_PROMPT_KUBE_DIRTY=1 _JSH_PROMPT_DIR_MAX=0 _JSH_PROMPT_BRANCH_MAX=0
 typeset -gi _JSH_PROMPT_HIDE_OS=0 _JSH_PROMPT_HIDE_GIT=0
+# Segments may render a shorter form while this is 1.
+typeset -gi _JSH_PROMPT_COMPACT=0
+# Integrations (e.g. jkp) set this to show $PWD relative to a project root.
+typeset -g _JSH_PROMPT_DIR_ROOT=''
+# Prompt-formatted text that stands in for the root when _JSH_PROMPT_DIR_ROOT is set.
+typeset -g _JSH_PROMPT_DIR_LABEL=''
 typeset -g _JSH_PROMPT_TIME_MODE=full
 
 _jsh_prompt_escape() {
@@ -146,7 +152,12 @@ _jsh_prompt_clip() {
 }
 
 _jsh_prompt_directory() {
-	if [[ ${PWD} == ${HOME} ]]; then
+	local root=${_JSH_PROMPT_DIR_ROOT:-}
+	if [[ -n ${root} && ${PWD} == ${root}/* ]]; then
+		REPLY=${PWD#${root}/}
+	elif [[ -n ${root} && -n ${_JSH_PROMPT_DIR_LABEL} && ${PWD} == ${root} ]]; then
+		REPLY=''
+	elif [[ ${PWD} == ${HOME} ]]; then
 		REPLY='~'
 	elif [[ ${PWD} == ${HOME}/* ]]; then
 		REPLY="~/${PWD#${HOME}/}"
@@ -193,21 +204,31 @@ _jsh_prompt_segment_os() {
 }
 
 _jsh_prompt_segment_directory() {
-	local directory context=''
+	local directory context='' label=''
 	local -i max=${_JSH_PROMPT_DIR_MAX}
 	if _jsh_prompt_segment_context; then
 		context="${REPLY}:"
 		_jsh_prompt_visible_length "${context}"
 		(( max == 0 )) || { max=$((max - REPLY)); (( max > 0 )) || max=1; }
 	fi
+	if [[ -n ${_JSH_PROMPT_DIR_ROOT} && ( ${PWD} == ${_JSH_PROMPT_DIR_ROOT} || ${PWD} == ${_JSH_PROMPT_DIR_ROOT}/* ) ]]; then
+		label=${_JSH_PROMPT_DIR_LABEL}
+		_jsh_prompt_visible_length "${label}/"
+		(( max == 0 )) || { max=$((max - REPLY)); (( max > 0 )) || max=1; }
+	fi
 	_jsh_prompt_directory
 	directory=${REPLY}
-	(( max == 0 )) || {
+	(( max == 0 )) || [[ -z ${directory} ]] || {
 		_jsh_prompt_abbreviate "${directory}" ${max}
 		directory=${REPLY}
 	}
 	_jsh_prompt_escape "${directory}"
-	REPLY="${context}${_JSH_C_DIR}${REPLY}${_JSH_C_RESET}"
+	directory=${REPLY}
+	if [[ -n ${label} ]]; then
+		REPLY="${context}${label}${_JSH_C_DIR}/${directory}${_JSH_C_RESET}"
+	else
+		REPLY="${context}${_JSH_C_DIR}${directory}${_JSH_C_RESET}"
+	fi
 }
 
 _jsh_prompt_segment_git() {
