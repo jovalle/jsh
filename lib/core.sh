@@ -122,7 +122,6 @@ jsh::job() {
       customize:wallpaper | customize:keybindings | customize:desktop | customize:dock | \
       customize:audio | customize:display | configure: | configure:all | \
       configure:helium | configure:waterfox | configure:vscode | configure:sublime | \
-      configure:agents | \
       setup:) ;;
     *)
       jsh::log_error "Unknown target: ${job}${component:+ ${component}}"

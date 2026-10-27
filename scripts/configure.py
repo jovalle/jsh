@@ -24,8 +24,6 @@ MACOS = sys.platform == "darwin"
 BACKUP = Path(os.environ.get("XDG_STATE_HOME", str(HOME / ".local/state")))
 BACKUP = BACKUP / "jsh/backups" / f"{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}"
 sys.path.insert(0, str(ROOT / "lib"))
-sys.path.insert(0, str(ROOT / "scripts/configure"))
-import agents as agent_clients  # pylint: disable=import-error,wrong-import-position
 import output  # pylint: disable=import-error,wrong-import-position
 
 
@@ -293,17 +291,12 @@ def sublime():
     update_json(directory / "Packages/User/Preferences.sublime-settings", desired)
 
 
-def agents():
-    agent_clients.reconcile(HOME, DRY_RUN, ROOT / "conf/agents.json", os.environ)
-
-
 def main(name):
     apps = {
         "helium": helium,
         "waterfox": waterfox,
         "vscode": vscode,
         "sublime": sublime,
-        "agents": agents,
     }
     for label, app in apps.items():
         if name in ("all", label):
@@ -314,13 +307,7 @@ def main(name):
 if __name__ == "__main__":
     try:
         main(sys.argv[1] if len(sys.argv) > 1 else "all")
-    except (
-        OSError,
-        ValueError,
-        KeyError,
-        subprocess.CalledProcessError,
-        agent_clients.Failure,
-    ) as error:
+    except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as error:
         output.error(str(error))
         sys.exit(1)
     except KeyboardInterrupt:

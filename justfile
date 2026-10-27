@@ -39,7 +39,7 @@ tweak *args:
 customize *args:
     @. lib/core.sh; jsh::job customize "$@"
 
-# Configure apps: helium, waterfox, vscode, sublime, agents (default: all)
+# Configure apps: helium, waterfox, vscode, sublime (default: all)
 [group('setup')]
 configure *args:
     @. lib/core.sh; jsh::job configure "$@"
@@ -50,7 +50,7 @@ list:
     @printf '%s\n' 'install: core tools runtime apps extensions all helium waterfox vscode ghostty spotify todoist sublime' \
       'set: dotfiles' 'tweak: preferences' \
       'customize: wallpaper keybindings desktop dock audio display all' \
-      'configure: helium waterfox vscode sublime agents all'
+      'configure: helium waterfox vscode sublime all'
 
 # Run every check, or one of: syntax, headers, readme, hooks
 [group('develop')]
