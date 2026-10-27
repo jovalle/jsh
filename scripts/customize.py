@@ -13,6 +13,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DRY_RUN = os.environ.get("JSH_DRY_RUN") == "1"
+GNOME_EXTENSIONS = (
+    "apps-menu@gnome-shell-extensions.gcampax.github.com",
+    "window-list@gnome-shell-extensions.gcampax.github.com",
+    "Vitals@CoreCoding.com",
+)
+VITALS_SENSORS = "['_processor_usage_', '_memory_usage_', '_system_load_1m_', '_storage_free_']"
 sys.path.insert(0, str(ROOT / "lib"))
 import output  # pylint: disable=import-error,wrong-import-position
 
@@ -32,9 +38,10 @@ def apply(label, *arguments):
     output.item(label)
 
 
-def gsetting(schema, key, value, label=None):
-    if query("gsettings", "get", schema, key) != value:
-        apply(label or key, "gsettings", "set", schema, key, value)
+def gsetting(schema, key, value, label=None, schemadir=None):
+    command = ["gsettings", *(["--schemadir", str(schemadir)] if schemadir else [])]
+    if query(*command, "get", schema, key) != value:
+        apply(label or key, *command, "set", schema, key, value)
     else:
         output.current(label or key)
 
@@ -205,6 +212,30 @@ def run_linux_script(name, desktop):
 
 def desktop_settings(desktop):
     run_linux_script("desktop", desktop)
+    if desktop == "gnome":
+        gnome_extensions()
+
+
+def gnome_extensions():
+    data = Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local/share")))
+    roots = (data / "gnome-shell/extensions", Path("/usr/share/gnome-shell/extensions"))
+    raw = query("gsettings", "get", "org.gnome.shell", "enabled-extensions")
+    enabled = ast.literal_eval(raw.removeprefix("@as ")) if raw else []
+    wanted = list(enabled)
+    for uuid in GNOME_EXTENSIONS:
+        if not any((root / uuid).is_dir() for root in roots):
+            output.attention(f"{uuid} is not installed; run just install extensions")
+        elif uuid not in wanted:
+            wanted.append(uuid)
+    if wanted == enabled:
+        output.current("enabled-extensions")
+    else:
+        gsetting("org.gnome.shell", "enabled-extensions", str(wanted))
+    gsetting("org.gnome.shell", "disable-user-extensions", "false")
+    schemas = data / "gnome-shell/extensions/Vitals@CoreCoding.com/schemas"
+    if schemas.is_dir():
+        vitals = "org.gnome.shell.extensions.vitals"
+        gsetting(vitals, "hot-sensors", VITALS_SENSORS, "Vitals sensors", schemas)
 
 
 def dock(desktop):
