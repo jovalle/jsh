@@ -129,7 +129,9 @@ their preferences change. Wallpaper changes require `JSH_WALLPAPER`; no wallpape
 is selected implicitly. Linux customization supports active GNOME and XFCE
 sessions and skips headless or other sessions. Its `desktop`, `dock`, `audio`, and
 `display` components restore panel monitors, application pins, audio output
-cycling, and the X11 ultrawide split shortcut. The macOS `display` component uses
+cycling, and the X11 ultrawide split shortcut. In GNOME, `desktop` also enables the
+Applications menu, the Window List, and Vitals, showing CPU, memory, load, and free
+disk space in the top bar. The macOS `display` component uses
 displayplacer to select desktop-density resolutions.
 On macOS, keybindings configuration sets keyboard repeat and full keyboard
 navigation. Add macOS menu shortcuts under `darwin.shortcuts` in
