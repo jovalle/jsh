@@ -123,7 +123,6 @@ Jsh does not enable Fedora COPR repositories on RHEL.
 | `conf/gecko/policies.json`    | Waterfox add-on, search, and Citrix policy (macOS)             |
 | `conf/vscode/`                | Settings merged into VS Code's configuration                   |
 | `conf/sublime/`               | Settings merged into Sublime Text's user preferences           |
-| `conf/agents.json`            | AI agent clients, shared MCP servers, and shared skills        |
 
 Linux tweaks configure passwordless sudo, SSH/GPG/Podman user services, the
 JetBrains Mono Nerd Font, and the timezone from `JSH_TIMEZONE` (default
@@ -157,11 +156,6 @@ written with `sudo -n` while the browser may stay open: Helium force-installs an
 pins its extensions on macOS and Linux, and Waterfox installs its add-ons on macOS.
 Waterfox policies are not managed for the Linux Flatpak. Toolbar layout, binary
 patches, and forced themes are not managed.
-
-`just configure agents` checks each client in `conf/agents.json`, removes broken
-skill links and missing local OpenCode plugins, adds the shared MCP servers and
-slash commands for user-only shared skills, and lists anything a client has that
-the file does not declare. Declare intentional extras under that client's `keep`.
 
 ## Commands
 
