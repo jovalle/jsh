@@ -495,13 +495,14 @@ _jsh_prompt_git_async_callback() {
 	_jsh_prompt_git_parse "${data}"
 	_JSH_PROMPT_GIT_VALID=1 _JSH_PROMPT_GIT_DIRTY=0
 	zle reset-prompt 2>/dev/null || true
+	zle -R 2>/dev/null || true
 }
 
 _jsh_prompt_git_async_start() {
 	_jsh_prompt_git_async_stop
 	_JSH_PROMPT_GIT_PWD=${PWD}
 	exec {_JSH_PROMPT_GIT_FD}< <(_jsh_prompt_git_worker "${PWD}") || return
-	zle -F ${_JSH_PROMPT_GIT_FD} _jsh_prompt_git_async_callback 2>/dev/null || {
+	zle -F -w ${_JSH_PROMPT_GIT_FD} _jsh_prompt_git_async_callback 2>/dev/null || {
 		exec {_JSH_PROMPT_GIT_FD}<&-
 		_JSH_PROMPT_GIT_FD=-1
 		return 1
@@ -705,7 +706,9 @@ _jsh_prompt_keymap_select() {
 	zle reset-prompt 2>/dev/null || true
 }
 
-if (( $+functions[add-zle-hook-widget] )); then
+typeset -ga _jsh_prompt_hooks=()
+zstyle -a zle-line-pre-redraw widgets _jsh_prompt_hooks
+if [[ ${TERM_PROGRAM:-} != vscode ]] && (( ${_jsh_prompt_hooks[(I)<->:_jsh_prompt_line_pre_redraw]} )); then
 	add-zle-hook-widget -d line-pre-redraw _jsh_prompt_line_pre_redraw 2>/dev/null || true
 fi
 unfunction _jsh_prompt_line_pre_redraw 2>/dev/null || true
@@ -721,6 +724,52 @@ if (( ${_JSH_PROMPT_TRAPWINCH_INSTALLED:-0} )); then
 fi
 unfunction _jsh_prompt_previous_trapwinch _jsh_prompt_resize 2>/dev/null || true
 
+if [[ ${TERM_PROGRAM:-} == vscode ]]; then
+	autoload -Uz add-zle-hook-widget
+	_jsh_prompt_line_pre_redraw() {
+		if zle && (( COLUMNS > 0 && COLUMNS < ${_JSH_PROMPT_DRAW_COLUMNS:-0} )); then
+			_jsh_prompt_resize
+			return
+		fi
+		local text=$(_jsh_prompt_expand)
+		typeset -gi _JSH_PROMPT_DRAW_COLUMNS=${COLUMNS}
+		typeset -ga _JSH_PROMPT_DRAW_LINES=("${(@f)text}")
+	}
+	_jsh_prompt_resize() {
+		local line
+		local -i rows=0
+		if zle && (( COLUMNS > 0 && COLUMNS < ${_JSH_PROMPT_DRAW_COLUMNS:-0} )); then
+			for line in "${_JSH_PROMPT_DRAW_LINES[@]}"; do
+				_jsh_prompt_visible_length "${line}"
+				(( REPLY > 0 )) && (( rows += (REPLY - 1) / COLUMNS ))
+			done
+			_JSH_PROMPT_DRAW_COLUMNS=${COLUMNS}
+			if (( rows > 0 )); then
+				printf '\033[%dA' ${rows}
+				zle reset-prompt
+				zle -R
+			fi
+		fi
+		zle && _jsh_prompt_line_pre_redraw
+		return 0
+	}
+	if (( $+functions[TRAPWINCH] )); then
+		functions[_jsh_prompt_previous_trapwinch]=${functions[TRAPWINCH]}
+	fi
+	TRAPWINCH() {
+		_jsh_prompt_resize
+		if (( $+functions[_jsh_prompt_previous_trapwinch] )); then
+			_jsh_prompt_previous_trapwinch "$@"
+		fi
+		return 0
+	}
+	_JSH_PROMPT_TRAPWINCH_INSTALLED=1
+	# Re-adding after zsh-syntax-highlighting wrapped the widget makes it call itself.
+	(( ${_jsh_prompt_hooks[(I)<->:_jsh_prompt_line_pre_redraw]} )) || \
+		add-zle-hook-widget line-pre-redraw _jsh_prompt_line_pre_redraw
+fi
+unset _jsh_prompt_hooks
+
 jsh_prompt_refresh() {
 	_JSH_PROMPT_GIT_DIRTY=1 _JSH_PROMPT_GIT_VALID=0 _JSH_PROMPT_KUBE_DIRTY=1
 	_jsh_prompt_precmd
@@ -734,6 +783,7 @@ add-zsh-hook preexec _jsh_prompt_preexec
 add-zsh-hook precmd _jsh_prompt_precmd
 add-zsh-hook chpwd _jsh_prompt_chpwd
 add-zsh-hook zshexit _jsh_prompt_git_async_stop
+zle -N _jsh_prompt_git_async_callback
 zle -N zle-keymap-select _jsh_prompt_keymap_select
 _jsh_prompt_node_update
 _jsh_prompt_render
