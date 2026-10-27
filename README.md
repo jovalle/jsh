@@ -52,8 +52,11 @@ dry runs do not resolve the latest remote versions.
 Customization components are `wallpaper`, `keybindings`, `desktop`, `dock`,
 `audio`, and `display`. Omitting the component, or selecting `all`, runs all six.
 
-`just setup` runs install, dotfiles, tweak, customize, then configure. It stops
-on an error; rerun the individual recipe after fixing the cause. Unsupported
+`just setup` runs install, dotfiles, tweak, customize, then configure. On Linux
+without root or an authorized `sudo -n` session, it runs only
+`install runtime extensions`, dotfiles, customize, and configure. A failed job
+does not stop the later ones; rerun the individual recipe after fixing the cause.
+Packages that cannot be installed are reported and skipped. Unsupported
 desktop sessions and uninitialized or running browser profiles are reported as
 skips. Initialize each browser once, close it, then run `just configure` again.
 
