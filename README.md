@@ -167,8 +167,9 @@ patches, and forced themes are not managed.
 - `j QUERY` jumps to a directory by frecency; `j pick` chooses one; `j --help`
   lists the rest.
 
-A stack is a directory in `~/Stacks` whose children are repositories. An optional
-`repos.list` holds one `NAME URL` per line; `j` clones missing entries.
+Integrations can show a directory relative to a project root in the prompt by
+setting `_JSH_PROMPT_DIR_ROOT` and a prompt-formatted `_JSH_PROMPT_DIR_LABEL`
+from a `precmd` hook.
 
 These commands are on `PATH` through `bin/`:
 
