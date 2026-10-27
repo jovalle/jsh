@@ -169,6 +169,7 @@ def keybindings(desktop):
             "gsettings", "get", "org.gnome.settings-daemon.plugins.media-keys", "custom-keybindings"
         )
         paths = ast.literal_eval(raw.removeprefix("@as ")) if raw else []
+    original = list(paths)
     for binding in config:
         if not shutil.which(binding["command"].split()[0]):
             output.note(f"skipped unavailable command: {binding['command']}")
@@ -194,7 +195,10 @@ def keybindings(desktop):
                 )
             if path not in paths:
                 paths.append(path)
-    if desktop == "gnome":
+    # Compare lists, not text: gsettings prints an empty list as "@as []".
+    if desktop == "gnome" and paths == original:
+        output.current("custom-keybindings")
+    elif desktop == "gnome":
         gsetting("org.gnome.settings-daemon.plugins.media-keys", "custom-keybindings", str(paths))
 
 
