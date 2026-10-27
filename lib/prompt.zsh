@@ -625,7 +625,7 @@ _jsh_prompt_expand() {
 	local -i left_length right_length spaces left_budget max
 	[[ ${width} == <-> && ${width} -gt 0 ]] || width=80
 	max=$((width - 1))
-	_JSH_PROMPT_TIME_MODE=full
+	_JSH_PROMPT_TIME_MODE=full _JSH_PROMPT_COMPACT=0
 	for name in ${JSH_PROMPT_RIGHT}; do
 		case ${name} in
 			duration|time) pinned+=(${name}) ;;
@@ -634,6 +634,14 @@ _jsh_prompt_expand() {
 	done
 	_jsh_prompt_join '  ' ${JSH_PROMPT_RIGHT}; right=${REPLY}
 	_jsh_prompt_visible_length "${right}"; right_length=${REPLY}
+	# Compact the right side before abbreviating the directory.
+	_jsh_prompt_build_left 100000
+	_jsh_prompt_visible_length "${REPLY}"
+	if (( REPLY + right_length >= max )); then
+		_JSH_PROMPT_COMPACT=1
+		_jsh_prompt_join '  ' ${JSH_PROMPT_RIGHT}; right=${REPLY}
+		_jsh_prompt_visible_length "${right}"; right_length=${REPLY}
+	fi
 	left_budget=$((width - right_length - 1))
 	(( left_budget > 0 )) || left_budget=1
 	_jsh_prompt_build_left ${left_budget}; left=${REPLY}
@@ -660,7 +668,13 @@ _jsh_prompt_expand() {
 		(( left_budget > 0 )) || left_budget=1
 		_jsh_prompt_build_left ${left_budget}; left=${REPLY}
 		_jsh_prompt_clip "${left}" ${left_budget}; left=${REPLY}
+		_JSH_PROMPT_COMPACT=0
 		_jsh_prompt_join '  ' ${extras}; overflow=${REPLY}
+		_jsh_prompt_visible_length "${overflow}"
+		if (( REPLY > max )); then
+			_JSH_PROMPT_COMPACT=1
+			_jsh_prompt_join '  ' ${extras}; overflow=${REPLY}
+		fi
 		_jsh_prompt_clip "${overflow}" ${max}; overflow=${REPLY}
 	fi
 	_jsh_prompt_visible_length "${left}"; left_length=${REPLY}
