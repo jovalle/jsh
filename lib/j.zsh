@@ -7,7 +7,6 @@ source "${JSH}/lib/output.sh"
 typeset -g J_DATA=${J_DATA:-${JSH}/local/j.db}
 typeset -g J_EXCLUDE=${J_EXCLUDE:-${HOME}}
 typeset -g J_PATHS=${J_PATHS-${GIT_BASE:-${HOME}/Projects}}
-typeset -g J_STACKS=${J_STACKS:-${HOME}/Stacks}
 typeset -g J_INIT=${J_INIT:-${JSH}/local/init.d}
 typeset -gF _J_DECAY=0.99
 typeset -gF _J_MIN_SCORE=0.01
@@ -76,11 +75,10 @@ _j_array_contains() {
   return 1
 }
 
-# Immediate children of J_PATHS roots, every stack, and every stack's children.
+# Immediate children of J_PATHS roots.
 _j_get_projects() {
   local root candidate
   local -a roots=(${(s.:.)J_PATHS})
-  [[ ! -d ${J_STACKS} ]] || roots+=("${J_STACKS}" "${J_STACKS}"/*(N/))
   for root in "${roots[@]}"; do
     root=${root/#\~/${HOME}}
     [[ -d ${root} ]] || continue
@@ -370,33 +368,6 @@ _j_chpwd() {
   _j_track_directory "${PWD}"
 }
 
-# Prints the stack directory containing PWD, if any.
-_j_stack_root() {
-  local stacks=${J_STACKS:A} here=${PWD:A}
-  [[ -d ${stacks} && ${here} == ${stacks}/* ]] || return 1
-  here=${here#${stacks}/}
-  print -r -- "${stacks}/${here%%/*}"
-}
-
-# Prints NAME<TAB>URL per repo: from repos.list (NAME URL per line) or child Git repos.
-_j_stack_repos() {
-  local stack=$1 name url rest dir
-  if [[ -f ${stack}/repos.list ]]; then
-    while read -r name url rest; do
-      [[ -n ${name} && ${name} != \#* ]] || continue
-      if [[ ${name} == */* || ${name} == . || ${name} == .. ]]; then
-        jsh::log_warn "repos.list: invalid name ${name}"
-        continue
-      fi
-      print -r -- "${name}"$'\t'"${url}"
-    done <"${stack}/repos.list"
-  else
-    for dir in "${stack}"/*(N/); do
-      [[ ! -e ${dir}/.git ]] || print -r -- "${dir:t}"$'\t'
-    done
-  fi
-}
-
 # Prints: commit-epoch branch upstream ahead behind staged modified untracked conflicts
 _j_git_state() {
   local line branch='-' upstream='-' epoch
@@ -490,34 +461,17 @@ _j_status_rows() {
   done
 }
 
-# Usage: _j_status [STACK]. Summarizes a stack's repos, else every repo under J_PATHS.
+# Summarizes every repo under J_PATHS.
 _j_status() {
-  local stack root dir name url
+  local root dir
   local -a dirs
-  if (( $# )); then
-    stack=${J_STACKS}/$1
-    [[ $1 != */* && -d ${stack} ]] || {
-      jsh::log_error "No stack named $1 in $(_j_display_path "${J_STACKS}")"
-      return 1
-    }
-  else
-    stack=$(_j_stack_root)
-  fi
-
-  if [[ -n ${stack} ]]; then
-    print -r -- "$(jsh::paint 1 1 "Stack ${stack:t}")"
-    while IFS=$'\t' read -r name url; do
-      dirs+=("${stack}/${name}")
-    done < <(_j_stack_repos "${stack}")
-  else
-    print -r -- "$(jsh::paint 1 1 Projects)"
-    for root in ${(s.:.)J_PATHS}; do
-      root=${root/#\~/${HOME}}
-      for dir in "${root}"/*(N/); do
-        [[ ! -e ${dir}/.git ]] || dirs+=("${dir}")
-      done
+  print -r -- "$(jsh::paint 1 1 Projects)"
+  for root in ${(s.:.)J_PATHS}; do
+    root=${root/#\~/${HOME}}
+    for dir in "${root}"/*(N/); do
+      [[ ! -e ${dir}/.git ]] || dirs+=("${dir}")
     done
-  fi
+  done
 
   if (( ! ${#dirs} )); then
     jsh::log_note 'No repositories found.'
@@ -666,80 +620,14 @@ for profile in json.load(open(sys.argv[1], encoding="utf-8")).get("profiles", {}
   (( ! ${#failed} )) || jsh::log_warn "ssh: could not load ${(j:, :)failed}"
 }
 
-# Prints origin's default branch ref, falling back to origin/main then origin/master.
-_j_default_ref() {
-  local ref
-  ref=$(command git -C "$1" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null) && {
-    print -r -- "${ref}"
-    return 0
-  }
-  for ref in origin/main origin/master; do
-    command git -C "$1" rev-parse --verify --quiet "${ref}^{commit}" >/dev/null && {
-      print -r -- "${ref}"
-      return 0
-    }
-  done
-  return 1
-}
-
-# Clones missing stack repos, fetches the rest, and reports commits pending on upstream.
-_j_check_stack() {
-  local stack=$1 line name url dir ref behind
-  local -a repos
-  repos=("${(@f)$(_j_stack_repos "${stack}")}")
-  repos=(${repos:#})
-  if (( ! ${#repos} )); then
-    jsh::log_note 'No repositories listed (add repos.list or clone into the stack).'
-    return 0
-  fi
-
-  for line in "${repos[@]}"; do
-    name=${line%%$'\t'*}
-    url=${line#*$'\t'}
-    dir=${stack}/${name}
-    if [[ ! -e ${dir} ]]; then
-      if [[ -z ${url} ]]; then
-        jsh::log_warn "${name}: missing and no URL in repos.list"
-      elif command git clone --quiet -- "${url}" "${dir}"; then
-        jsh::log_success "${name}: cloned"
-      else
-        jsh::log_error "${name}: clone failed"
-      fi
-      continue
-    fi
-    if [[ ! -e ${dir}/.git ]]; then
-      jsh::log_warn "${name}: not a Git repository"
-      continue
-    fi
-    if ! command git -C "${dir}" remote get-url origin >/dev/null 2>&1; then
-      jsh::log_note "${name}: no origin remote"
-      continue
-    fi
-    if ! GIT_TERMINAL_PROMPT=0 command git -C "${dir}" fetch --quiet origin 2>/dev/null; then
-      jsh::log_warn "${name}: fetch failed"
-      continue
-    fi
-    if ! ref=$(_j_default_ref "${dir}"); then
-      jsh::log_note "${name}: origin has no default branch"
-      continue
-    fi
-    behind=$(command git -C "${dir}" rev-list --count "HEAD..${ref}" 2>/dev/null)
-    if (( behind )); then
-      jsh::log_warn "${name}: ${behind} pending on ${ref}"
-    else
-      jsh::log_success "${name}: up to date with ${ref}"
-    fi
-  done
-}
-
-# Runs each executable in J_INIT in name order with J_STACK set to the current stack.
+# Runs each executable in J_INIT in name order.
 _j_run_init() {
   local script
   local -a scripts=("${J_INIT}"/*(N.x))
   (( ${#scripts} )) || return 0
   jsh::log_section Init
   for script in "${scripts[@]}"; do
-    if J_STACK=$1 "${script}"; then
+    if "${script}"; then
       jsh::log_success "${script:t}"
     else
       jsh::log_error "${script:t} failed"
@@ -748,7 +636,6 @@ _j_run_init() {
 }
 
 _j_init() {
-  local stack
   # Keys load first so the fetches below can authenticate without prompting.
   print -r -- "$(jsh::paint 1 1 SSH)"
   _j_load_keys
@@ -756,19 +643,15 @@ _j_init() {
   _j_check_checkout
   _j_check_dotfiles
   _j_check_tools
-  if stack=$(_j_stack_root); then
-    jsh::log_section "Stack ${stack:t}"
-    _j_check_stack "${stack}"
-  fi
-  _j_run_init "${stack}"
+  _j_run_init
   return 0
 }
 
 _j_help() {
   cat <<'EOF'
 Usage:
-  j                   Load SSH keys, check jsh health and the current stack, run init scripts
-  j status [STACK]    Summarize repos in STACK, the current stack, or every project
+  j                   Load SSH keys, check jsh health, run init scripts
+  j status            Summarize every repo in J_PATHS
   j pick [query ...]  Choose a directory interactively
   j [query ...]       Jump to the best matching directory
   j -                 Jump to the previous directory
@@ -779,15 +662,10 @@ Usage:
   j --db              Show tracked directories and scores
   j --clean           Remove missing directories
 
-Stacks:
-  A stack is a directory in $J_STACKS whose children are repos. An optional repos.list
-  holds one "NAME URL" per line (# comments allowed); j clones missing entries.
-
 Environment:
   J_DATA              Database path (default: $JSH/local/j.db)
   J_EXCLUDE           Colon-separated paths excluded from tracking
   J_PATHS             Colon-separated project roots (default: $GIT_BASE)
-  J_STACKS            Stack root (default: ~/Stacks)
   J_INIT              Init script directory (default: $JSH/local/init.d)
   J_NO_HOOK           Disable automatic directory tracking
 EOF
