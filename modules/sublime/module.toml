@@ -1,0 +1,11 @@
+description = "Sublime Text with managed preferences (installs only when named)"
+
+[[install]]
+brew = { casks = ["sublime-text"] }
+optional = true
+
+[[install]]
+flatpak = ["com.sublimetext.three"]
+
+[[configure]]
+script = "configure.py"

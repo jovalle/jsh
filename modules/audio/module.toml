@@ -1,0 +1,9 @@
+description = "Linux audio output policy and the output-cycling shortcut"
+when = { desktop = ["gnome", "xfce"] }
+
+[[configure]]
+script = "configure.py"
+
+[commands.cycle]
+run = "cycle.sh cycle"
+about = "Switch to the next enabled audio output"

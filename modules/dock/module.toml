@@ -1,0 +1,5 @@
+description = "Pin installed jsh apps to the GNOME or XFCE dock"
+when = { desktop = ["gnome", "xfce"] }
+
+[[configure]]
+script = "dock.sh"

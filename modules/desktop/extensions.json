@@ -1,0 +1,22 @@
+{
+  "install": {
+    "Vitals@CoreCoding.com": [
+      {
+        "shells": ["40", "41", "42", "43", "44"],
+        "url": "https://extensions.gnome.org/download-extension/Vitals@CoreCoding.com.shell-extension.zip?version_tag=39255",
+        "sha256": "5c16e31dfd3b5538ee2c12f7a45e019592132ffc7691a70d9274a727ee113aa6"
+      },
+      {
+        "shells": ["45", "46", "47", "48", "49", "50", "51"],
+        "url": "https://extensions.gnome.org/download-extension/Vitals@CoreCoding.com.shell-extension.zip?version_tag=76696",
+        "sha256": "0c7df95d7ad2ab509d9bd892622e8df501f9f719cc079af28b29c936d1d8b97a"
+      }
+    ]
+  },
+  "enable": [
+    "apps-menu@gnome-shell-extensions.gcampax.github.com",
+    "window-list@gnome-shell-extensions.gcampax.github.com",
+    "Vitals@CoreCoding.com"
+  ],
+  "vitals": "['_processor_usage_', '_memory_usage_', '_system_load_1m_', '_storage_free_']"
+}

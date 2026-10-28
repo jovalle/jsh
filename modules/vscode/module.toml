@@ -1,0 +1,21 @@
+description = "Visual Studio Code with managed settings and keybindings"
+
+[[install]]
+brew = { casks = ["visual-studio-code"] }
+
+[[install]]
+script = "install.py"
+when = { platform = "linux" }
+
+[[link]]
+from = "keybindings.json"
+to = "~/Library/Application Support/Code/User/keybindings.json"
+when = { platform = "darwin" }
+
+[[link]]
+from = "keybindings.json"
+to = "~/.config/Code/User/keybindings.json"
+when = { platform = "linux" }
+
+[[configure]]
+script = "configure.py"

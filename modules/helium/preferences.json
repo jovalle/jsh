@@ -1,0 +1,51 @@
+{
+  "helium": {
+    "completed_onboarding": true,
+    "global_privacy_control": true,
+    "services": {
+      "enabled": true,
+      "user_consented": true,
+      "schema_version": 1,
+      "disable_schema_alerts": true,
+      "browser_updates": true,
+      "ublock_assets": true,
+      "ext_proxy": true,
+      "bangs": false,
+      "spellcheck_files": false
+    }
+  },
+  "enable_do_not_track": true,
+  "credentials_enable_service": false,
+  "profile": {
+    "password_manager_enabled": false,
+    "cookie_controls_mode": 1,
+    "default_content_setting_values": {
+      "notifications": 2,
+      "geolocation": 2,
+      "media_stream_mic": 2,
+      "media_stream_camera": 2,
+      "popups": 2,
+      "automatic_downloads": 2
+    }
+  },
+  "autofill": {
+    "profile_enabled": false,
+    "credit_card_enabled": false
+  },
+  "alternate_error_pages": {
+    "enabled": false
+  },
+  "search": {
+    "suggest_enabled": false
+  },
+  "background_mode": {
+    "enabled": false
+  },
+  "webrtc": {
+    "ip_handling_policy": "disable_non_proxied_udp"
+  },
+  "privacy_sandbox": {
+    "first_party_sets_enabled": false
+  },
+  "network_prediction_options": 2
+}

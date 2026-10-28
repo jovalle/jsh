@@ -1,0 +1,12 @@
+description = "Helium browser with its managed policy and preferences"
+
+[[install]]
+brew = { casks = ["helium-browser"] }
+
+[[install]]
+appimage.name = "helium"
+appimage.release = "https://api.github.com/repos/imputnet/helium-linux/releases/latest"
+appimage.architectures = { aarch64 = "arm64", x86_64 = "x86_64" }
+
+[[configure]]
+script = "configure.py"
