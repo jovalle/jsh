@@ -10,6 +10,23 @@ from jsh import handlers, system
 from jsh.modules import Step
 
 VERBS = {"install": "installed", "link": "linked", "configure": "configured", "update": "updated"}
+DOING = {
+    "install": "installing",
+    "link": "linking",
+    "configure": "configuring",
+    "update": "updating",
+}
+# Batched tasks are named after their handler; these say what the handler works on.
+SUBJECTS = {
+    "appimage": "AppImages",
+    "apt": "apt packages",
+    "brew": "Homebrew packages",
+    "dnf": "dnf packages",
+    "flatpak": "Flatpak apps",
+    "git": "Git repositories",
+    "link": "files",
+    "uv": "uv tools",
+}
 FAILURES = (OSError, ValueError, KeyError, RuntimeError, subprocess.CalledProcessError)
 
 
@@ -21,6 +38,12 @@ class Task:
         self.steps = steps
         self.units = sum(handlers.units(handler, step) for step in steps)
         self.root = any(step.root for step in steps)
+
+    def describe(self):
+        """Reads as speech on the progress line: "updating ai module", "installing uv tools"."""
+        if handlers.batch(self.handler):
+            return f"{DOING[self.phase]} {SUBJECTS.get(self.label, self.label)}"
+        return f"{DOING[self.phase]} {self.label} module"
 
 
 class Context:  # pylint: disable=too-many-instance-attributes
@@ -172,7 +195,7 @@ def execute(tasks, display, facts, dry_run):
     display.begin(sum(task.units for task in tasks))
     for task in tasks:
         start = display.done
-        display.task(f"{task.phase} {task.label}")
+        display.task(task.describe())
         module = None if handlers.batch(task.handler) else task.steps[0].module
         ctx = Context(display, facts, task.phase, task.label, logs, dry_run, module)
         ctx.limit = start + task.units
