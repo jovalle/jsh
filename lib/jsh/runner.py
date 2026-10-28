@@ -133,7 +133,7 @@ def plan(modules, phases, facts, named=()):
 
 def phase_steps(module, phase):
     if phase == "link":
-        implicit = [Step(module, "link", "link", {"from": "home", "to": "~"})]
+        implicit = [Step(module, "link", "link", {"from": "home", "to": "~", "tree": True})]
         return (implicit if module.home else []) + module.steps["link"]
     if phase == "update":
         updatable = [

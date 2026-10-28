@@ -1,5 +1,6 @@
-"""Link module files into place: home/ mirrors into $HOME, and `link:` entries add others.
+"""Link module files into place: home/ mirrors into $HOME, and link entries add others.
 
+home/ is linked file by file; a link entry links its path as is, even a directory.
 An existing file is moved to ~/.local/state/jsh/backups first; a stale link into this checkout
 is replaced without a backup. Targets under a symlinked parent directory are left for review.
 """
@@ -19,7 +20,9 @@ IGNORED = (".DS_Store",)
 
 def check(args):
     if not isinstance(args, dict) or not all(isinstance(args.get(k), str) for k in ("from", "to")):
-        raise ValueError("link needs from: and to: paths")
+        raise ValueError("link needs from and to paths")
+    if set(args) - {"from", "to", "tree"}:
+        raise ValueError("link accepts from and to")
 
 
 def units(step):
@@ -29,7 +32,7 @@ def units(step):
 def pairs(step):
     source = Path(os.path.normpath(step.module.path / step.args["from"]))
     target = Path(os.path.expanduser(step.args["to"]))
-    if not source.is_dir() or source.is_symlink():
+    if not step.args.get("tree") or not source.is_dir() or source.is_symlink():
         yield source, target
         return
     found = []
@@ -65,6 +68,10 @@ def place(ctx, source, target, backups):
     if (target.is_symlink() and os.readlink(target) == str(source)) or (
         target.exists() and source.exists() and target.samefile(source)
     ):
+        ctx.current()
+        return
+    if not source.exists():
+        ctx.notice(f"{label}: {tilde(source)} is missing; run jsh install first")
         ctx.current()
         return
     parent = linked_parent(target)
