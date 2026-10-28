@@ -500,15 +500,18 @@ _j_check_checkout() {
 
 _j_check_dotfiles() {
   setopt localoptions extendedglob
-  local source entry
-  local -a sources=("${JSH}"/dotfiles/**/*~*/(.DS_Store|.zcompdump*)(ND^/)) broken
-  (( ${#sources} )) || return 0
-  for source in "${sources[@]}"; do
-    entry=${source#${JSH}/dotfiles/}
-    [[ -L ${HOME}/${entry} && ${HOME}/${entry} -ef ${source} ]] || broken+=("${entry}")
+  local source entry home
+  local -a sources broken
+  for home in "${JSH}"/modules/*/home(N/); do
+    for source in "${home}"/**/*~*/(.DS_Store|.zcompdump*)(ND^/); do
+      entry=${source#${home}/}
+      sources+=("${entry}")
+      [[ -L ${HOME}/${entry} && ${HOME}/${entry} -ef ${source} ]] || broken+=("${entry}")
+    done
   done
+  (( ${#sources} )) || return 0
   if (( ${#broken} )); then
-    jsh::log_warn "dotfiles: ${#broken} of ${#sources} not linked (run just set dotfiles)"
+    jsh::log_warn "dotfiles: ${#broken} of ${#sources} not linked (run jsh link)"
     for entry in "${broken[@]:0:10}"; do
       jsh::log_note "  ${entry}"
     done
@@ -519,39 +522,30 @@ _j_check_dotfiles() {
 }
 
 _j_check_tools() {
+  local python candidate
   local -a report
-  if (( ! $+commands[python3] )); then
-    jsh::log_warn 'tools: python3 missing (run just install core)'
+  for candidate in python3 python3.14 python3.13 python3.12 python3.11; do
+    (( $+commands[${candidate}] )) || continue
+    command "${candidate}" -c 'import tomllib' 2>/dev/null || continue
+    python=${commands[${candidate}]}
+    break
+  done
+  if [[ -z ${python} ]]; then
+    jsh::log_warn 'tools: Python 3.11+ missing (run ./j.sh to install it)'
     return 0
   fi
   # First line is the declared count; each further line is a missing package.
-  report=("${(@f)$(command python3 - "${JSH}/conf/packages.json" <<'EOF'
-import json, shutil, sys
+  report=("${(@f)$(PYTHONPATH="${JSH}/lib" "${python}" - <<'EOF'
+import shutil
+from jsh import modules, system
 
-with open(sys.argv[1], encoding="utf-8") as handle:
-    platforms = json.load(handle)["platforms"]
-if sys.platform == "darwin":
-    groups = platforms.get("darwin", {})
-    names = [n for g in ("core", "tools") for n in groups.get(g, {}).get("formulae", [])]
-else:
-    ids = set()
-    try:
-        with open("/etc/os-release", encoding="utf-8") as handle:
-            for line in handle:
-                key, _, value = line.strip().partition("=")
-                if key in ("ID", "ID_LIKE"):
-                    ids.update(value.strip('"').split())
-    except OSError:
-        pass
-    if ids & {"debian", "ubuntu"}:
-        groups = platforms.get("debian", {})
-    elif ids & {"rhel", "centos", "rocky", "almalinux"}:
-        groups = platforms.get("rhel", {})
-    else:
-        groups = {}
-    names = groups.get("core", []) + groups.get("tools", [])
-commands = {"python": "python3", "ripgrep": "rg", "procps": "ps", "procps-ng": "ps",
-            "ca-certificates": None}
+facts = system.Facts()
+handler = {"darwin": "brew", "debian": "apt", "rhel": "dnf"}[facts.platform]
+names = []
+for step in modules.load(system.ROOT / "modules/core").steps["install"]:
+    if step.handler == handler and facts.matches(step.when):
+        names += step.args if isinstance(step.args, list) else step.args.get("formulae", [])
+commands = {"python": "python3", "procps": "ps", "procps-ng": "ps", "ca-certificates": None}
 print(len(names))
 for name in names:
     command = commands.get(name, name)
@@ -560,7 +554,7 @@ for name in names:
 EOF
   )}")
   if (( ${#report} > 1 )); then
-    jsh::log_warn "tools: missing ${(j:, :)report[2,-1]} (run just install)"
+    jsh::log_warn "tools: missing ${(j:, :)report[2,-1]} (run jsh install core)"
   else
     jsh::log_success "tools: ${report[1]:-0} present"
   fi
