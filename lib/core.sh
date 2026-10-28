@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared execution, platform detection, and plain logging.
+# Helpers for module scripts and bin tools: progress events, dry-run-aware commands, prompts.
 
 export PATH="${PATH}:/usr/sbin:/sbin"
 
@@ -14,6 +14,27 @@ unset _jsh_brew
 
 # shellcheck source=lib/output.sh
 . "${JSH_ROOT}/lib/output.sh"
+
+# Usage: jsh::emit EVENT [TEXT]. Reports to the jsh runner, or prints when run by hand.
+jsh::emit() {
+  if [[ -n ${JSH_EVENTS:-} ]]; then
+    printf '%s %s\n' "$1" "${2:-}" >&"${JSH_EVENTS}"
+    return
+  fi
+  case $1 in
+    added) printf '%s %s\n' "$(jsh::paint 1 32 +)" "$2" ;;
+    changed) printf '%s %s\n' "$(jsh::paint 1 33 '~')" "$2" ;;
+    removed) printf '%s %s\n' "$(jsh::paint 1 31 -)" "$2" ;;
+    notice) jsh::log_warn "$2" ;;
+  esac
+}
+
+jsh::added() { jsh::emit added "$*"; }
+jsh::changed() { jsh::emit changed "$*"; }
+jsh::removed() { jsh::emit removed "$*"; }
+jsh::current() { jsh::emit current "${1:-1}"; }
+jsh::progress() { jsh::emit progress "$*"; }
+jsh::notice() { jsh::emit notice "$*"; }
 
 jsh::run() {
   if [[ ${JSH_DRY_RUN:-0} == 1 ]]; then
