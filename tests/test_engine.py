@@ -155,6 +155,22 @@ class EngineTests(unittest.TestCase):
         ok, out = self.run_phases(("link",))
         self.assertIn("Checked 2 items (no changes)", out)
 
+    def test_link_entry_links_a_directory_whole_and_flags_missing_sources(self):
+        manifest = {
+            "description": "Skills",
+            "link": [
+                {"from": "kit", "to": "~/.agents/skills/kit"},
+                {"from": "../../local/vendor/absent", "to": "~/.agents/skills/absent"},
+            ],
+        }
+        self.module("skills", manifest, {"kit/SKILL.md": "kit\n", "kit/refs/a.md": "a\n"})
+        _, out = self.run_phases(("link",))
+        target = self.home / ".agents/skills/kit"
+        self.assertEqual(os.readlink(target), str(self.base / "modules/skills/kit"))
+        self.assertIn("! link: ~/.agents/skills/absent: ", out)
+        self.assertIn("is missing; run jsh install first", out)
+        self.assertFalse((self.home / ".agents/skills/absent").is_symlink())
+
     def test_stale_link_into_the_checkout_is_replaced_without_backup(self):
         self.module("shell", {"description": "Shell"}, {"home/.zshrc": "zsh\n"})
         (self.home / ".zshrc").symlink_to(self.base / "dotfiles/.zshrc")
