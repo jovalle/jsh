@@ -1,0 +1,26 @@
+{
+  "description": "Desktop apps without managed settings",
+  "install": [
+    {
+      "brew": {
+        "formulae": ["spicetify-cli"],
+        "casks": [
+          "android-platform-tools",
+          "citrix-workspace",
+          "signal",
+          "spotify",
+          "tailscale-app",
+          "todoist-app",
+          "vorssaint",
+          "zoom"
+        ]
+      },
+      "when": { "platform": "darwin" }
+    },
+    {
+      "brew": { "casks": ["bambu-studio", "elgato-stream-deck", "macfuse", "mounty"] },
+      "when": { "platform": "darwin", "host": "archon" }
+    },
+    { "flatpak": ["com.spotify.Client", "com.todoist.Todoist"] }
+  ]
+}

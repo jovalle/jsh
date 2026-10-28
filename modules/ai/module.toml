@@ -1,5 +1,0 @@
-description = "AI assistants and coding agent CLIs"
-
-[[install]]
-brew.formulae = ["opencode"]
-brew.casks = ["antigravity-cli", "chatgpt", "codex", "copilot-cli"]

@@ -1,0 +1,12 @@
+{
+  "description": "Ghostty terminal and its settings",
+  "install": [
+    { "brew": { "casks": ["ghostty"] } },
+    {
+      "appimage": {
+        "name": "ghostty",
+        "release": "https://api.github.com/repos/pkgforge-dev/ghostty-appimage/releases/latest"
+      }
+    }
+  ]
+}

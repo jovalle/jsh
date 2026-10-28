@@ -1,4 +1,0 @@
-description = "Kubernetes CLIs and k9s settings"
-
-[[install]]
-brew = { formulae = ["helm", "helmfile", "k9s", "kubernetes-cli"] }

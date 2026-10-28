@@ -1,0 +1,8 @@
+{
+  "description": "Container runtimes and Docker tooling",
+  "install": [
+    { "brew": { "formulae": ["colima", "docker", "docker-buildx", "docker-compose", "lima"] } },
+    { "apt": ["podman"] },
+    { "dnf": ["podman"] }
+  ]
+}

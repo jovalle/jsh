@@ -1,0 +1,5 @@
+{
+  "description": "Waterfox browser with its managed policy and user.js preferences",
+  "install": [{ "brew": { "casks": ["waterfox"] } }, { "flatpak": ["net.waterfox.waterfox"] }],
+  "configure": [{ "script": "configure.py" }]
+}

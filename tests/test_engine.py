@@ -1,6 +1,7 @@
 """The engine plans module steps into tasks, runs them, and reports through the display."""
 
 import io
+import json
 import os
 import sys
 import tempfile
@@ -41,7 +42,8 @@ class EngineTests(unittest.TestCase):
         self.facts = system.Facts(platform="darwin", desktop="darwin", host="archon")
 
     def module(self, name, manifest, files=None):
-        write(self.base / "modules" / name / "module.toml", manifest)
+        text = manifest if isinstance(manifest, str) else json.dumps(manifest)
+        write(self.base / "modules" / name / "module.json", text)
         for relative, text in (files or {}).items():
             write(self.base / "modules" / name / relative, text)
 
@@ -54,23 +56,22 @@ class EngineTests(unittest.TestCase):
         return ok, stream.getvalue()
 
     def test_when_filters_modules_and_steps(self):
-        mac = 'description = "Mac"\nwhen = { platform = "darwin" }\n'
-        mac += '[[configure]]\nscript = "a.py"\n'
+        mac = {
+            "description": "Mac",
+            "when": {"platform": "darwin"},
+            "configure": [{"script": "a.py"}],
+        }
         self.module("mac", mac)
-        self.module("tux", mac.replace("Mac", "Tux").replace("darwin", "linux"))
+        self.module("tux", {**mac, "description": "Tux", "when": {"platform": "linux"}})
         self.module(
             "both",
-            """\
-            description = "Both"
-
-            [[configure]]
-            script = "a.py"
-            when = { host = "other" }
-
-            [[configure]]
-            script = "a.py"
-            when = { platform = ["linux", "darwin"], host = "archon" }
-            """,
+            {
+                "description": "Both",
+                "configure": [
+                    {"script": "a.py", "when": {"host": "other"}},
+                    {"script": "a.py", "when": {"platform": ["linux", "darwin"], "host": "archon"}},
+                ],
+            },
         )
         tasks = runner.plan(modules.discover(self.base), ("configure",), self.facts)
         labels = [(task.label, len(task.steps)) for task in tasks]
@@ -79,16 +80,14 @@ class EngineTests(unittest.TestCase):
     def test_script_events_become_changes_and_notices(self):
         self.module(
             "demo",
-            "description = \"Demo\"\n[[configure]]\nscript = \"apply.sh 'two words'\"\n",
-            {
-                "apply.sh": """\
+            {"description": "Demo", "configure": [{"script": "apply.sh 'two words'"}]},
+            {"apply.sh": """\
                 . "${JSH_ROOT}/lib/core.sh"
                 [[ $1 == 'two words' && ${JSH_PHASE} == configure ]] || exit 9
                 jsh::changed "demo setting"
                 jsh::current 2
                 jsh::notice "close the app first"
-                """
-            },
+                """},
         )
         write(self.base / "lib/core.sh", (ROOT / "lib/core.sh").read_text())
         write(self.base / "lib/output.sh", (ROOT / "lib/output.sh").read_text())
@@ -98,11 +97,11 @@ class EngineTests(unittest.TestCase):
         self.assertIn("\n~ demo setting\n\n1 configured [", out)
 
     def test_failed_task_is_reported_and_later_tasks_still_run(self):
-        bad = 'description = "Bad"\n[[configure]]\nscript = "fail.sh"\n'
+        bad = {"description": "Bad", "configure": [{"script": "fail.sh"}]}
         self.module("abad", bad, {"fail.sh": "echo boom\nexit 3\n"})
         self.module(
             "good",
-            'description = "Good"\n[[configure]]\nscript = "ok.py"\n',
+            {"description": "Good", "configure": [{"script": "ok.py"}]},
             {"ok.py": "def configure(ctx):\n    ctx.added('good thing')\n"},
         )
         ok, out = self.run_phases(("configure",))
@@ -114,7 +113,7 @@ class EngineTests(unittest.TestCase):
     def test_root_step_without_sudo_is_skipped_with_a_notice(self):
         self.module(
             "sys",
-            'description = "System"\n[[configure]]\nscript = "ok.py"\nroot = true\n',
+            {"description": "System", "configure": [{"script": "ok.py", "root": True}]},
             {"ok.py": "def configure(ctx):\n    ctx.added('should not run')\n"},
         )
         with mock.patch.object(system, "admin", return_value=False):
@@ -126,21 +125,15 @@ class EngineTests(unittest.TestCase):
     def test_update_reuses_install_steps_of_updatable_handlers(self):
         self.module(
             "tool",
-            """\
-            description = "Tool"
-
-            [[install]]
-            git = { a = "https://example.test/a.git" }
-
-            [[install]]
-            script = "a.py"
-
-            [[install]]
-            link = { from = "a", to = "b" }
-
-            [[update]]
-            script = "b.py"
-            """,
+            {
+                "description": "Tool",
+                "install": [
+                    {"git": {"a": "https://example.test/a.git"}},
+                    {"script": "a.py"},
+                    {"link": {"from": "a", "to": "b"}},
+                ],
+                "update": [{"script": "b.py"}],
+            },
         )
         tasks = runner.plan(modules.discover(self.base), ("update",), self.facts)
         self.assertEqual(
@@ -150,7 +143,7 @@ class EngineTests(unittest.TestCase):
 
     def test_link_places_backs_up_and_reports_current(self):
         files = {"home/.zshrc": "zsh\n", "home/.config/a/b": "b\n"}
-        self.module("shell", 'description = "Shell"\n', files)
+        self.module("shell", {"description": "Shell"}, files)
         write(self.home / ".zshrc", "mine\n")
         ok, out = self.run_phases(("link",))
         self.assertTrue(ok)
@@ -163,31 +156,34 @@ class EngineTests(unittest.TestCase):
         self.assertIn("Checked 2 items (no changes)", out)
 
     def test_stale_link_into_the_checkout_is_replaced_without_backup(self):
-        self.module("shell", 'description = "Shell"\n', {"home/.zshrc": "zsh\n"})
+        self.module("shell", {"description": "Shell"}, {"home/.zshrc": "zsh\n"})
         (self.home / ".zshrc").symlink_to(self.base / "dotfiles/.zshrc")
         _, out = self.run_phases(("link",))
         self.assertIn("~ ~/.zshrc", out)
         self.assertFalse((self.base / "state").exists())
 
     def test_dry_run_reports_without_changing_anything(self):
-        self.module("shell", 'description = "Shell"\n', {"home/.zshrc": "zsh\n"})
+        self.module("shell", {"description": "Shell"}, {"home/.zshrc": "zsh\n"})
         _, out = self.run_phases(("link",), dry_run=True)
         self.assertIn("1 to link [", out)
         self.assertFalse((self.home / ".zshrc").exists())
 
     def test_unknown_handler_is_rejected(self):
-        self.module("odd", 'description = "Odd"\n[[configure]]\nnope = 1\n')
+        self.module("odd", {"description": "Odd", "configure": [{"nope": 1}]})
         with self.assertRaisesRegex(ValueError, "Unknown handler: nope"):
             runner.plan(modules.discover(self.base), ("configure",), self.facts)
 
     def test_malformed_manifests_name_the_file_and_problem(self):
         cases = {
-            'description = "A"\n[[install]\n': "module.toml: Expected ']]'",
-            'description = "A"\nextra = 1\n': "module.toml: unknown keys extra",
-            "[[install]]\nbrew = {}\n": "module.toml: description is required",
-            'description = "A"\n[[install]]\nbrew = {}\napt = []\n': "names exactly one handler",
-            'description = "A"\nwhen = { os = "x" }\n': "when accepts desktop, host, platform",
-            'description = "A"\n[commands.go]\nabout = "x"\n': "[commands.go] needs run",
+            '{"description": "A",': "module.json: Expecting property name",
+            '["description"]': "module.json: the manifest must be an object",
+            '{"description": "A", "extra": 1}': "module.json: unknown keys extra",
+            '{"install": [{"brew": {}}]}': "module.json: description is required",
+            '{"description": "A", "install": ["brew"]}': "install must be a list of step objects",
+            '{"description": "A", "install": [{"brew": {}, "apt": []}]}': "names exactly one",
+            '{"description": "A", "when": {"os": "x"}}': "when accepts desktop, host, platform",
+            '{"description": "A", "commands": ["go"]}': "commands must be an object",
+            '{"description": "A", "commands": {"go": {"about": "x"}}}': "commands.go needs run",
         }
         for text, message in cases.items():
             with self.subTest(message=message):
