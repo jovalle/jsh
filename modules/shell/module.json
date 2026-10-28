@@ -1,0 +1,17 @@
+{
+  "description": "Zsh, its plugins, the prompt, and the jsh launcher",
+  "install": [
+    {
+      "git": {
+        "fzf": "https://github.com/junegunn/fzf.git",
+        "fzf-tab": "https://github.com/Aloxaf/fzf-tab.git",
+        "zsh-completions": "https://github.com/zsh-users/zsh-completions.git",
+        "zsh-autosuggestions": "https://github.com/zsh-users/zsh-autosuggestions.git",
+        "zsh-syntax-highlighting": "https://github.com/zsh-users/zsh-syntax-highlighting.git"
+      }
+    },
+    { "script": "fzf.py" }
+  ],
+  "update": [{ "script": "fzf.py" }],
+  "link": [{ "from": "../../bin/jsh", "to": "~/.local/bin/jsh" }]
+}

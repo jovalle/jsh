@@ -1,5 +1,0 @@
-description = "Keyboard repeat, menu shortcuts, and custom launcher keybindings"
-when = { desktop = ["darwin", "gnome", "xfce"] }
-
-[[configure]]
-script = "configure.py"

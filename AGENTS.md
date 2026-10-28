@@ -23,17 +23,17 @@ Run them only when asked.
 
 ## layout
 
-- `j.sh`: entry point. Finds a Python with `tomllib` (3.11+), installing one through
+- `j.sh`: entry point. Finds Python 3.9+, installing one through
   Homebrew, apt, or dnf when none exists, then runs `python -m jsh` with `lib/` on
   `PYTHONPATH`. `j.sh runtime` and `bin/jsh` with no arguments open the isolated Zsh;
   `bin/jsh COMMAND` delegates to `j.sh`.
-- `lib/jsh/`: the engine. `modules.py` (reads `module.toml` with `tomllib` and validates
+- `lib/jsh/`: the engine. `modules.py` (reads `module.json` and validates
   it), `runner.py` (plans phases into tasks, runs them, gives
   handlers a `Context`), `output.py` (bun-style display), `cli.py`, `system.py` (facts,
   sudo, queries). Helpers for module scripts: `files.py`, `apps.py`, `web.py`, `desktop.py`.
 - `lib/jsh/handlers/`: one file per handler (`brew`, `apt`, `dnf`, `flatpak`, `appimage`,
   `uv`, `git`, `link`, `script`). `_native.py` is shared apt/dnf code, not a handler.
-- `modules/NAME/`: `module.toml`, optional `home/` (linked into `$HOME`), and the scripts
+- `modules/NAME/`: `module.json`, optional `home/` (linked into `$HOME`), and the scripts
   and data its steps use.
 - `lib/core.sh`, `lib/output.sh`: Bash helpers for module scripts and `bin/` tools.
   `lib/j.zsh`, `lib/prompt.zsh`: the `j` function and prompt, sourced by `.zshrc`.
@@ -47,7 +47,7 @@ Run them only when asked.
   `when`, `install`, `configure`, `update`, `link`, and `commands`. `make modules` loads
   every manifest and plans it for each platform and desktop; run it after manifest edits.
 - Phases: `setup` = `install` → `link` → `configure`. `update` reuses `install` steps of
-  handlers with an `update` function, except `script` steps (declare those as `[[update]]`).
+  handlers with an `update` function, except `script` steps (declare those under `update`).
 - Prefer a declarative handler step over a script. Use a `script` step for one-off logic.
 - Steps must be idempotent: check current state, change only what differs, and report each
   unit exactly once with `added`, `changed`, `removed`, or `current`. Use `notice` only for
@@ -55,7 +55,7 @@ Run them only when asked.
   `jsh::run`/`jsh::root`). Command output belongs in the task log (`ctx.run`, or stdout in
   Bash scripts), never on the terminal.
 - Privileged work uses `sudo -n` (`ctx.run(..., root=True)`, `jsh::root`) or a step with
-  `root = true`. Never prompt for input or a password.
+  `"root": true`. Never prompt for input or a password.
 - A new handler module defines phase functions taking `(ctx, steps)`, plus optional
   `BATCH`, `PRIORITY`, `PLATFORMS`, `EXPLICIT`, `units(step)`, and `check(args)`; see
   `lib/jsh/handlers/__init__.py`. Read `system.ROOT` at call time so tests can patch it.
@@ -79,7 +79,7 @@ Run them only when asked.
 
 - Output follows bun: one transient progress line, then `+`/`~`/`-` change lines and one
   summary. Do not add banners, prompts, or per-step success lines.
-- Runtime is Bash and the Python 3.11+ standard library only. Python is 4-space indented with a
+- Runtime is Bash and the Python 3.9+ standard library only. Python is 4-space indented with a
   100-column limit; shell is 2-space indented; see `.editorconfig`.
 - Names: commands read like speech (`jsh install helium`), files and directories are one
   lowercase word when that stays clear.

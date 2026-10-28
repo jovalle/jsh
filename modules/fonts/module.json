@@ -1,0 +1,8 @@
+{
+  "description": "JetBrains Mono Nerd Font",
+  "install": [
+    { "brew": { "casks": ["font-jetbrains-mono-nerd-font"] } },
+    { "script": "install.py", "when": { "platform": "linux" } }
+  ],
+  "update": [{ "script": "install.py", "when": { "platform": "linux" } }]
+}

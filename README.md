@@ -2,7 +2,7 @@
 
 A small workstation setup tool for macOS, Debian-family Linux, and RHEL-family Linux.
 Everything it sets up lives in a module: one folder under [modules/](modules) with a
-`module.toml` that says what to install, which files to link, and what to configure.
+`module.json` that says what to install, which files to link, and what to configure.
 Add a folder to add a module; delete it to remove one.
 
 ```text
@@ -17,8 +17,8 @@ jsh setup 1d5a32f (darwin)
 
 ## Getting started
 
-Clone this repository to `~/.jsh`. Jsh needs Bash and Python 3.11 or later, which reads
-`module.toml` with the built-in `tomllib`. When no such Python is on the machine, `j.sh`
+Clone this repository to `~/.jsh`. Jsh needs Bash and Python 3.9 or later. When no such
+Python is on the machine, `j.sh`
 installs one first: with Homebrew on macOS (install [Homebrew](https://brew.sh) first),
 or with apt or dnf on Linux (run `sudo -v` first). Then:
 
@@ -50,40 +50,39 @@ prompts for a password and never asks for confirmation.
 
 A module is `modules/NAME/` (one lowercase word) containing:
 
-- `module.toml`: the manifest (below).
-- `home/`: files linked into `$HOME` at the same relative path.
+- `module.json`: the manifest (below).
+- `home/`: files linked into `$HOME` at the same relative path, one link per file.
 - Scripts and data files that its steps refer to.
 
-```toml
-description = "Example app with its settings and a shortcut command"
-when = { platform = ["darwin", "linux"] } # optional: platform, desktop, host
+A `link` entry links its `from` path (relative to the module) to `to` as one link,
+so a directory is linked whole.
 
-[[install]]
-brew = { casks = ["example"] }
-
-[[install]]
-appimage.name = "example"
-appimage.release = "https://api.github.com/repos/example/example/releases/latest"
-
-[[configure]]
-script = "configure.py"
-
-[[link]]
-from = "settings.json"
-to = "~/.config/example/settings.json"
-
-[commands.sync]
-run = "sync.sh"
-about = "Sync example data now"
+```json
+{
+  "description": "Example app with its settings and a shortcut command",
+  "when": { "platform": ["darwin", "linux"] },
+  "install": [
+    { "brew": { "casks": ["example"] } },
+    {
+      "appimage": {
+        "name": "example",
+        "release": "https://api.github.com/repos/example/example/releases/latest"
+      }
+    }
+  ],
+  "configure": [{ "script": "configure.py" }],
+  "link": [{ "from": "settings.json", "to": "~/.config/example/settings.json" }],
+  "commands": { "sync": { "run": "sync.sh", "about": "Sync example data now" } }
+}
 ```
 
-Each `[[install]]`, `[[configure]]`, or `[[update]]` step names one handler and may add
-`when` (same keys as the module), `root = true` (skip with a notice when sudo is not
-authorized), or `optional = true` (run only when the module is named, as in
-`jsh install sublime`). `platform` matches `darwin`, `debian`, `rhel`, or `linux`;
-`desktop` matches `darwin`, `gnome`, or `xfce`; `host` matches the short host name.
-Top-level keys (`description`, `when`) come before the first `[[...]]` table. Malformed
-manifests are rejected with the file and the problem.
+Each `install`, `configure`, or `update` step names one handler and may add
+`when` (same keys as the module; optional: `platform`, `desktop`, `host`),
+`"root": true` (skip with a notice when sudo is not authorized), or `"optional": true`
+(run only when the module is named, as in `jsh install sublime`). `platform` matches
+`darwin`, `debian`, `rhel`, or `linux`; `desktop` matches `darwin`, `gnome`, or `xfce`;
+`host` matches the short host name. Malformed manifests are rejected with the file and
+the problem.
 
 | Handler    | Arguments                              | `install`                            | `update`                      |
 | ---------- | -------------------------------------- | ------------------------------------ | ----------------------------- |
@@ -174,6 +173,6 @@ make check   # syntax, headers, readme, modules, lint, and test
 make help    # each check on its own
 ```
 
-Runtime uses only Bash and the Python 3.11+ standard library. Checks also need Zsh,
+Runtime uses only Bash and the Python 3.9+ standard library. Checks also need Zsh,
 ShellCheck, Pylint, yamllint, and markdownlint. Tests use temporary home directories
 and mocked commands; no check changes the machine.

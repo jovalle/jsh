@@ -11,20 +11,20 @@ if [[ ${1:-} == runtime ]]; then
   exec "${JSH_ROOT}/bin/jsh" "$@"
 fi
 
-# Prints the first Python that can read module.toml files (3.11+ ships tomllib).
+# Prints the first Python 3.9+ (the oldest the engine supports).
 find_python() {
   local candidate
   for candidate in python3 python3.14 python3.13 python3.12 python3.11 \
     /opt/homebrew/bin/python3 /usr/local/bin/python3 /home/linuxbrew/.linuxbrew/bin/python3; do
     candidate=$(command -v "${candidate}" 2>/dev/null) || continue
-    "${candidate}" -c 'import tomllib' 2>/dev/null || continue
+    "${candidate}" -c 'import sys; sys.exit(sys.version_info < (3, 9))' 2>/dev/null || continue
     printf '%s\n' "${candidate}"
     return 0
   done
   return 1
 }
 
-# Installs Python 3.11+ with the system package manager, or Homebrew when that is all there is.
+# Installs Python 3.9+ with the system package manager, or Homebrew when that is all there is.
 install_python() {
   local log=${JSH_ROOT}/local/logs/python.log package
   local -a sudo=()
@@ -57,12 +57,12 @@ install_python() {
 
 if ! python=$(find_python); then
   if [[ " $* " == *' --dry-run '* ]]; then
-    printf 'jsh: Python 3.11 or later is required; run without --dry-run to install it\n' >&2
+    printf 'jsh: Python 3.9 or later is required; run without --dry-run to install it\n' >&2
     exit 1
   fi
-  printf 'jsh: installing Python 3.11 or later to read module.toml files\n' >&2
+  printf 'jsh: installing Python 3.9 or later\n' >&2
   if ! install_python || ! python=$(find_python); then
-    printf 'jsh: could not install Python 3.11+; see %s\n' "${JSH_ROOT}/local/logs/python.log" >&2
+    printf 'jsh: could not install Python 3.9+; see %s\n' "${JSH_ROOT}/local/logs/python.log" >&2
     exit 1
   fi
 fi

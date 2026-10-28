@@ -3,9 +3,9 @@ SHELL := bash
 .SHELLFLAGS := -euo pipefail -c
 .DEFAULT_GOAL := help
 export PYTHONDONTWRITEBYTECODE := 1
-# The first Python with tomllib (3.11+), matching ./j.sh.
+# The first Python 3.9+, matching ./j.sh.
 PYTHON := $(shell for p in python3 python3.14 python3.13 python3.12 python3.11; do \
-  $$p -c 'import tomllib' 2>/dev/null && { command -v $$p; break; }; done)
+  $$p -c 'import sys; sys.exit(sys.version_info < (3, 9))' 2>/dev/null && { command -v $$p; break; }; done)
 
 SHELL_FILES := bin/jsh j.sh lib/core.sh lib/output.sh $(shell find modules -type f -name '*.sh' -not -path '*/home/*')
 ZSH_FILES := modules/shell/home/.zshrc lib/j.zsh lib/prompt.zsh
@@ -16,10 +16,10 @@ PYTHON_FILES := $(shell find lib modules tests -type f -name '*.py')
 help:
 	@printf '%s\n' \
 	  'make check    Run syntax, headers, readme, modules, lint, and test' \
-	  'make syntax   Parse every shell, zsh, Python, JSON, and TOML file' \
+	  'make syntax   Parse every shell, zsh, Python, and JSON file' \
 	  'make headers  Require the standard header on module scripts' \
 	  'make readme   Require a README entry for every bin/ command' \
-	  'make modules  Load every module.toml and plan it for each platform' \
+	  'make modules  Load every module.json and plan it for each platform' \
 	  'make lint     Run shellcheck, pylint, yamllint, and markdownlint' \
 	  'make test     Run the Python unittest suite' \
 	  'make hooks    Run the pre-commit hooks on every file'
@@ -32,8 +32,6 @@ syntax:
 	@$(PYTHON) -c 'import sys; [compile(open(p).read(), p, "exec") for p in sys.argv[1:]]' $(PYTHON_FILES)
 	@$(PYTHON) -c 'import json, sys; [json.load(open(p)) for p in sys.argv[1:]]' \
 	  $$(find modules -name '*.json' -not -path '*/home/*')
-	@$(PYTHON) -c 'import sys, tomllib; [tomllib.load(open(p, "rb")) for p in sys.argv[1:]]' \
-	  modules/*/module.toml
 
 headers:
 	@for file in modules/*/*.sh; do \

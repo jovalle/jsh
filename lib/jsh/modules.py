@@ -1,7 +1,7 @@
-"""Discover modules: each modules/<name>/module.toml describes one subject jsh sets up."""
+"""Discover modules: each modules/<name>/module.json describes one subject jsh sets up."""
 
+import json
 import re
-import tomllib
 from pathlib import Path
 
 from jsh.system import ROOT
@@ -54,7 +54,7 @@ def discover(root=None):
     """Return every module under modules/, sorted by name; malformed manifests raise."""
     base = Path(root or ROOT).resolve() / "modules"
     found = []
-    for path in sorted(base.glob("*/module.toml")):
+    for path in sorted(base.glob("*/module.json")):
         found.append(load(path.parent))
     return found
 
@@ -62,14 +62,16 @@ def discover(root=None):
 def load(path):
     path = Path(path)
     name = path.name
-    source = path / "module.toml"
+    source = path / "module.json"
     if not NAME.match(name):
         raise ManifestError(f"{source}: module names are one lowercase word")
     try:
-        with open(source, "rb") as stream:
-            data = tomllib.load(stream)
-    except tomllib.TOMLDecodeError as error:
+        with open(source, encoding="utf-8") as stream:
+            data = json.load(stream)
+    except json.JSONDecodeError as error:
         raise ManifestError(f"{source}: {error}") from error
+    if not isinstance(data, dict):
+        raise ManifestError(f"{source}: the manifest must be an object")
     unknown = set(data) - TOP_KEYS
     if unknown:
         raise ManifestError(f"{source}: unknown keys {', '.join(sorted(unknown))}")
@@ -79,27 +81,29 @@ def load(path):
     module = Module(name, path, data)
     for phase in (*PHASES, "link"):
         entries = data.get(phase) or []
-        if not isinstance(entries, list):
-            raise ManifestError(f"{source}: use [[{phase}]] tables for {phase} steps")
+        if not isinstance(entries, list) or not all(isinstance(e, dict) for e in entries):
+            raise ManifestError(f"{source}: {phase} must be a list of step objects")
         for entry in entries:
             module.steps[phase].append(step(module, phase, entry, source))
+    if not isinstance(module.commands, dict):
+        raise ManifestError(f"{source}: commands must be an object")
     for command, spec in module.commands.items():
         if not isinstance(spec, dict) or not isinstance(spec.get("run"), str):
-            raise ManifestError(f"{source}: [commands.{command}] needs run")
+            raise ManifestError(f"{source}: commands.{command} needs run")
     return module
 
 
 def step(module, phase, entry, source):
     if phase == "link":
         if not {"from", "to"} <= set(entry):
-            raise ManifestError(f"{source}: [[link]] entries need from and to")
+            raise ManifestError(f"{source}: link entries need from and to")
         when = entry.get("when")
         check_when(when, source)
         args = {key: value for key, value in entry.items() if key != "when"}
         return Step(module, "link", "link", args, when)
     handlers = [key for key in entry if key not in STEP_KEYS]
     if len(handlers) != 1:
-        raise ManifestError(f"{source}: each [[{phase}]] step names exactly one handler")
+        raise ManifestError(f"{source}: each {phase} step names exactly one handler")
     check_when(entry.get("when"), source)
     handler = handlers[0]
     return Step(

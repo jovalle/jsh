@@ -1,0 +1,5 @@
+{
+  "description": "Linux SSH agent, GPG agent, and Podman user services",
+  "when": { "platform": "linux" },
+  "configure": [{ "script": "services.sh" }]
+}

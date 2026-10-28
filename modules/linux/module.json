@@ -1,0 +1,8 @@
+{
+  "description": "Linux kernel limits, memory and power policy, timezone, and passwordless sudo",
+  "when": { "platform": "linux" },
+  "configure": [
+    { "script": "sudo.sh", "root": true },
+    { "script": "system.sh", "root": true }
+  ]
+}
