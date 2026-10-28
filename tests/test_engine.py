@@ -140,6 +140,10 @@ class EngineTests(unittest.TestCase):
             [(task.label, [step.args for step in task.steps]) for task in tasks],
             [("git", [{"a": "https://example.test/a.git"}]), ("tool", ["b.py"])],
         )
+        self.assertEqual(
+            [task.describe() for task in tasks],
+            ["updating Git repositories", "updating tool module"],
+        )
 
     def test_link_places_backs_up_and_reports_current(self):
         files = {"home/.zshrc": "zsh\n", "home/.config/a/b": "b\n"}
