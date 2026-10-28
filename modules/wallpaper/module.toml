@@ -1,0 +1,5 @@
+description = "Desktop wallpaper from JSH_WALLPAPER"
+when = { desktop = ["darwin", "gnome", "xfce"] }
+
+[[configure]]
+script = "configure.py"

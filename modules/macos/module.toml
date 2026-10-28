@@ -1,0 +1,5 @@
+description = "macOS system preferences (defaults) and the apps that reload them"
+when = { platform = "darwin" }
+
+[[configure]]
+script = "defaults.sh"

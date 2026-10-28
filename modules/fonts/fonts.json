@@ -1,0 +1,11 @@
+{
+  "id": "jetbrains-mono",
+  "repository": "ryanoasis/nerd-fonts",
+  "asset": "JetBrainsMono.tar.xz",
+  "files": [
+    "JetBrainsMonoNerdFont-Bold.ttf",
+    "JetBrainsMonoNerdFont-BoldItalic.ttf",
+    "JetBrainsMonoNerdFont-Italic.ttf",
+    "JetBrainsMonoNerdFont-Regular.ttf"
+  ]
+}
