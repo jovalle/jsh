@@ -131,8 +131,11 @@ class HandlerTests(unittest.TestCase):
         for name in ("fresh", "stale"):
             (self.base / "local/vendor" / name / ".git").mkdir(parents=True)
         answers = {"fresh": ("aaa", "aaa\tHEAD"), "stale": ("bbb1234", "ccc5678\tHEAD")}
+        dates = {"bbb1234": "2026-01-02", "ccc5678": "2026-03-04"}
 
         def query(arguments):
+            if "log" in arguments:
+                return dates[arguments[-1]]
             local, remote = answers[Path(arguments[2]).name]
             return local if "rev-parse" in arguments else remote
 
@@ -141,7 +144,9 @@ class HandlerTests(unittest.TestCase):
             git.system, "query", side_effect=query
         ), mock.patch.dict(os.environ):
             git.update(ctx, steps({"fresh": "u", "stale": "u"}))
-        self.assertEqual(self.changes(), [("~", "stale bbb1234 → ccc5678")])
+        self.assertEqual(
+            self.changes(), [("~", "stale bbb1234 (2026-01-02) → ccc5678 (2026-03-04)")]
+        )
         self.assertEqual(ctx.run.call_count, 2)
 
 
