@@ -49,4 +49,10 @@ def update(ctx, steps):
             continue
         ctx.run(["git", "-C", target, "fetch", "--quiet", "--depth", "1", "origin", "HEAD"])
         ctx.run(["git", "-C", target, "reset", "--quiet", "--hard", "FETCH_HEAD"])
-        ctx.changed(f"{path} {local[:7]} → {remote[:7]}")
+        ctx.changed(f"{path} {dated(target, local)} → {dated(target, remote)}")
+
+
+def dated(target, commit):
+    """Names a commit as `abc1234 (2026-10-27)`; the date is left out when it is unknown."""
+    date = system.query(["git", "-C", str(target), "log", "-1", "--format=%cs", commit])
+    return f"{commit[:7]} ({date})" if date else commit[:7]
