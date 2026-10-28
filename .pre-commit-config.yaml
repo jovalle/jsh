@@ -9,7 +9,7 @@ repos:
     hooks:
       - id: readme-coverage
         name: check README coverage
-        entry: just check readme
+        entry: make readme
         language: system
         pass_filenames: false
         files: ^(?:README\.md|bin/)

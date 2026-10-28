@@ -106,7 +106,7 @@ _jssh_validate_platform() {
 
 _jssh_required_sources() {
   printf '%s\n' \
-    dotfiles/.zshrc \
+    modules/shell/home/.zshrc \
     lib/output.sh \
     lib/j.zsh \
     lib/prompt.zsh \
@@ -164,11 +164,11 @@ _jssh_build_payload() {
   build_dir=$(mktemp -d "${JSSH_CACHE_DIR}/build.XXXXXX")
   root=${build_dir}/jsh
   mkdir -p \
-    "${root}/dotfiles" \
+    "${root}/modules/shell/home" \
     "${root}/lib" \
     "${root}/local/vendor"
 
-  cp "${JSH_ROOT}/dotfiles/.zshrc" "${root}/dotfiles/.zshrc"
+  cp "${JSH_ROOT}/modules/shell/home/.zshrc" "${root}/modules/shell/home/.zshrc"
   cp "${JSH_ROOT}/lib/output.sh" "${JSH_ROOT}/lib/j.zsh" "${JSH_ROOT}/lib/prompt.zsh" \
     "${root}/lib/"
   mkdir -p \
@@ -253,7 +253,7 @@ cleanup() {
 trap cleanup 0 1 2 15
 touch "\${JSSH_SESSION}/.jssh-marker"
 tar -xf - -C "\${JSSH_SESSION}"
-[ -f "\${JSSH_SESSION}/jsh/dotfiles/.zshrc" ] || exit 1
+[ -f "\${JSSH_SESSION}/jsh/modules/shell/home/.zshrc" ] || exit 1
 complete=1
 printf '%s\n' "\${JSSH_SESSION}"
 EOF
@@ -287,7 +287,7 @@ done
 export JSH_ROOT JSH_RUNTIME_DIR JSH_LOAD_CONFIG JSH_LANG
 mkdir -p "\${JSH_RUNTIME_DIR}"
 [ ! -t 1 ] || printf '\033[2J\033[H'
-ZDOTDIR="\${JSH_ROOT}/dotfiles"
+ZDOTDIR="\${JSH_ROOT}/modules/shell/home"
 export ZDOTDIR
 zsh -d -i
 exit \$?
