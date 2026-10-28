@@ -1,48 +1,68 @@
 # AGENTS.md
 
-Jsh is a small workstation setup tool for macOS, Debian-family Linux, and RHEL-family Linux.
-This checkout is live: it lives at `~/.jsh`, `dotfiles/` is symlinked into `$HOME`, and `bin/` is on `PATH`, so edits
-take effect on the developer's machine immediately.
+jsh sets up a workstation (macOS, Debian-family Linux, RHEL-family Linux) from modules.
+This checkout is live: it lives at `~/.jsh`, module `home/` files are symlinked into `$HOME`,
+and `bin/` is on `PATH`, so edits take effect on the developer's machine immediately.
 
-This is the only project instruction file for every agent. Do not create `.github/copilot-instructions.md`,
-`CLAUDE.md`, or `GEMINI.md`. If a tool generates one (for example `graphify vscode install`), merge anything new into
-this file and delete the generated copy.
+This is the only agent instruction file. Do not create `CLAUDE.md`, `GEMINI.md`, or
+`.github/copilot-instructions.md`; jsh does not manage agent tools, skills, or prompts.
 
 ## commands
 
-| Task             | Command                                                                    |
-| ---------------- | -------------------------------------------------------------------------- |
-| All checks       | `just check` (syntax, headers, README, linters, tests)                     |
-| All linters      | `just lint` (shellcheck, pylint, yamllint, markdownlint)                   |
-| One shell file   | `bash -n FILE` or `zsh -n FILE`, then `shellcheck --severity=warning FILE` |
-| All tests        | `just test`                                                                |
-| One test module  | `python3 -m unittest tests.test_apps`                                      |
-| Pre-commit hooks | `just check hooks`                                                         |
-| Setup targets    | `just list`                                                                |
+| Task             | Command                                                                                |
+| ---------------- | -------------------------------------------------------------------------------------- |
+| All checks       | `make check`                                                                           |
+| One check        | `make syntax`, `make headers`, `make readme`, `make modules`, `make lint`, `make test` |
+| One shell file   | `bash -n FILE` or `zsh -n FILE`, then `shellcheck --severity=warning FILE`             |
+| One test module  | `python3 -m unittest tests.test_engine`                                                |
+| Preview setup    | `./j.sh setup --dry-run` (or one module: `./j.sh configure helium --dry-run`)          |
+| Pre-commit hooks | `make hooks`                                                                           |
 
-ShellCheck info findings SC2310/SC2312 are pre-existing; only warnings and errors must be clean. Runtime uses Bash and the Python standard library.
-
-`just install|set|tweak|customize|configure` change the live machine (packages, system defaults, application
-settings). Run them only when asked, and prefer `--dry-run`.
+`./j.sh setup|install|link|configure|update` without `--dry-run` changes the live machine.
+Run them only when asked.
 
 ## layout
 
-- `justfile`: setup recipes (`just setup`, `just install`, `just set dotfiles`, ...) and development checks.
-- `bin/jsh`: opens the isolated zsh runtime with this checkout's dotfiles.
-- `lib/`: sourced or imported code only: logging (`output.sh`, `output.py`), shared Bash helpers including the
-  `jsh::job` runner, and the `j` zsh function. Nothing here runs as its own process.
-- `scripts/`: one internal program per job (`install.py`, `dotfiles.sh`, `customize.sh`, `configure.py`), run by
-  `jsh::job`, not by hand. `scripts/tweak/darwin.sh` and `scripts/tweak/linux.sh` hold OS-specific preferences.
-- `conf/`: declarative data. Package installs belong in `conf/packages.json`, not inline in scripts.
-  `*.example.json` files are templates; `conf/git.json` and `conf/mounts.json` are gitignored personal data.
-- `dotfiles/`: regular files and symlinks are discovered recursively and linked into `$HOME`.
-- `tests/`: Python `unittest` modules.
-- Generated or machine-local, never edit by hand: `graphify-out/`, `local/`, `node_modules/`, `.venv/`.
-- Scratch files go in `tmp/` (gitignored), not `/tmp`.
+- `j.sh`: entry point. Finds a Python with `tomllib` (3.11+), installing one through
+  Homebrew, apt, or dnf when none exists, then runs `python -m jsh` with `lib/` on
+  `PYTHONPATH`. `j.sh runtime` and `bin/jsh` with no arguments open the isolated Zsh;
+  `bin/jsh COMMAND` delegates to `j.sh`.
+- `lib/jsh/`: the engine. `modules.py` (reads `module.toml` with `tomllib` and validates
+  it), `runner.py` (plans phases into tasks, runs them, gives
+  handlers a `Context`), `output.py` (bun-style display), `cli.py`, `system.py` (facts,
+  sudo, queries). Helpers for module scripts: `files.py`, `apps.py`, `web.py`, `desktop.py`.
+- `lib/jsh/handlers/`: one file per handler (`brew`, `apt`, `dnf`, `flatpak`, `appimage`,
+  `uv`, `git`, `link`, `script`). `_native.py` is shared apt/dnf code, not a handler.
+- `modules/NAME/`: `module.toml`, optional `home/` (linked into `$HOME`), and the scripts
+  and data its steps use.
+- `lib/core.sh`, `lib/output.sh`: Bash helpers for module scripts and `bin/` tools.
+  `lib/j.zsh`, `lib/prompt.zsh`: the `j` function and prompt, sourced by `.zshrc`.
+- `conf/`: personal, gitignored machine data (`git.json`) and its example.
+- `tests/`: Python `unittest` modules. Generated or machine-local, never edit:
+  `local/` (vendor clones, logs, runtime), `.venv/`, `tmp/`. Scratch files go in `tmp/`.
+
+## modules and handlers
+
+- A module name is one lowercase word. Its manifest needs `description`; other keys are
+  `when`, `install`, `configure`, `update`, `link`, and `commands`. `make modules` loads
+  every manifest and plans it for each platform and desktop; run it after manifest edits.
+- Phases: `setup` = `install` → `link` → `configure`. `update` reuses `install` steps of
+  handlers with an `update` function, except `script` steps (declare those as `[[update]]`).
+- Prefer a declarative handler step over a script. Use a `script` step for one-off logic.
+- Steps must be idempotent: check current state, change only what differs, and report each
+  unit exactly once with `added`, `changed`, `removed`, or `current`. Use `notice` only for
+  something the user must act on. Honor `ctx.dry_run` (Python) or `JSH_DRY_RUN` (Bash; use
+  `jsh::run`/`jsh::root`). Command output belongs in the task log (`ctx.run`, or stdout in
+  Bash scripts), never on the terminal.
+- Privileged work uses `sudo -n` (`ctx.run(..., root=True)`, `jsh::root`) or a step with
+  `root = true`. Never prompt for input or a password.
+- A new handler module defines phase functions taking `(ctx, steps)`, plus optional
+  `BATCH`, `PRIORITY`, `PLATFORMS`, `EXPLICIT`, `units(step)`, and `check(args)`; see
+  `lib/jsh/handlers/__init__.py`. Read `system.ROOT` at call time so tests can patch it.
 
 ## conventions
 
-- Setup scripts start with this header, enforced by `just check headers` (use `../..` under `scripts/tweak/`):
+- Module Bash scripts at `modules/NAME/*.sh` start with this header (`make headers`):
 
   ```bash
   #!/usr/bin/env bash
@@ -51,83 +71,51 @@ settings). Run them only when asked, and prefer `--dry-run`.
   set -euo pipefail
 
   SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
-  JSH_ROOT=$(cd -- "${SCRIPT_DIR}/.." && pwd -P)
+  JSH_ROOT=$(cd -- "${SCRIPT_DIR}/../.." && pwd -P)
   readonly SCRIPT_DIR JSH_ROOT
   # shellcheck source=lib/core.sh
   . "${JSH_ROOT}/lib/core.sh"
   ```
 
-- Use `jsh::log_info`, `jsh::log_warn`, `jsh::log_success`, and `jsh::log_error` for user-facing output, not `echo`.
-- Setup scripts are idempotent: check current state, skip when already correct, and change only what differs.
-- A script that skips an unsupported desktop or unavailable optional component must `return 0`/`exit 0`, or `set -e` callers abort.
-- Honor `--dry-run` (no writes) and `--yes` (accept prompts for the selected command only). A declined
-  prompt skips only that action and anything that depends on it.
-- Shell indent is 2 spaces; Python is 4 spaces with a 100-column limit; see `.editorconfig`.
-- New files get single-word names when the directory supplies context (`conf/vscode/settings.json`, not
-  `vscode-settings.json`). Use hyphens only to disambiguate or to match an existing name (`sublime-text.sh`).
+- Output follows bun: one transient progress line, then `+`/`~`/`-` change lines and one
+  summary. Do not add banners, prompts, or per-step success lines.
+- Runtime is Bash and the Python 3.11+ standard library only. Python is 4-space indented with a
+  100-column limit; shell is 2-space indented; see `.editorconfig`.
+- Names: commands read like speech (`jsh install helium`), files and directories are one
+  lowercase word when that stays clear.
 
 ## tests
 
-- Never write Bats tests (`*.bats`) or add Bats tooling. Tests are Python `unittest` files at `tests/test_<name>.py`.
-- Do not create or extend tests for shell-environment code: `lib/` (including `lib/*.zsh`), shell
-  dotfiles, prompts, completions, aliases, environment setup, deploy/setup orchestration, or the `justfile`.
-  Validate those changes with `bash -n`/`zsh -n` and `shellcheck --severity=warning` instead.
-- Tests are allowed only for standalone programs (for example `bin/*`) and for scripts that install or
-  configure standalone external apps (for example Sublime Text, Waterfox, mpv).
-- Tests must not touch the real `$HOME` or system settings; point paths at a temporary directory.
-- Never delete or weaken a failing test to make a run pass.
+- Tests are Python `unittest` files at `tests/test_<name>.py`. Never add Bats.
+- Cover the engine, handlers, app module scripts, and standalone `bin/` programs. Do not
+  test shell-environment code (`lib/*.sh`, `lib/*.zsh`, `.zshrc`); validate it with
+  `bash -n`/`zsh -n` and ShellCheck.
+- Tests must not touch the real `$HOME` or system settings: point `HOME` and `XDG_*` at a
+  temporary directory under `tmp/` and mock commands. Never weaken a failing test.
 
 ## git
 
-- Conventional Commits, enforced by commitlint: `type(scope): subject`. Types: `feat`, `fix`, `docs`, `style`,
-  `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`. Header at most 72 characters, no trailing period;
-  body lines at most 100. Scope names the component, for example `fix(waterfox): ...` or `feat(jgit): ...`.
-- Commit only when asked. Stage only the files you changed; the worktree usually holds unrelated in-progress work, so
-  never stash, reset, or revert it.
-- Never bypass hooks (`--no-verify`), push, force-push, or rewrite published history without explicit approval.
+- Conventional Commits, enforced by commitlint: `type(scope): subject`, header at most 72
+  characters, no trailing period, body lines at most 100. Scope names the module or
+  component, for example `fix(waterfox): ...` or `feat(engine): ...`.
+- Commit only when asked. Stage only your files; the worktree often holds unrelated work,
+  so never stash, reset, or revert it. Never bypass hooks, push, or rewrite published
+  history without explicit approval.
 
 ## boundaries
 
-- Always: read the surrounding code first, keep diffs minimal and in the existing style, run the narrowest relevant
-  check from the commands table before reporting done, and say what was verified.
-- Ask first: deleting files; adding packages or dependencies; running setup targets or anything that needs `sudo`;
-  changing `.pre-commit-config.yaml`, `justfile` check recipes, or Git hooks; touching credentials, SSH, or Git
-  identity handling.
-- Never: commit secrets, tokens, or personal data; read or print credentials; edit generated or vendored paths; run
-  commands that wait on a password prompt.
+- Always: read the surrounding code first, keep diffs minimal and in the existing style,
+  run the narrowest relevant check, and say what was verified.
+- Ask first: deleting files; adding dependencies; running setup without `--dry-run` or
+  anything needing `sudo`; changing `.pre-commit-config.yaml`, `Makefile` checks, or Git
+  hooks; touching credentials, SSH, or Git identity handling.
+- Never: commit secrets or personal data; read or print credentials; edit generated or
+  vendored paths; run commands that wait on a password prompt.
 
 ## 1Password
 
-- For authorized tasks using 1Password CLI on macOS or Linux, reuse one persistent terminal session for all `op`
-  calls. Separate agent command sessions can each trigger approval; authorization follows the terminal, not the
-  record. In Codex, start a shell with `exec_command` and `tty: true`, keep it running, and send subsequent commands
-  through `write_stdin` using the returned `session_id`. A new PTY for every call does not reuse authorization.
-- Batch the task's required secret references into one `op run --env-file=PATH -- COMMAND` invocation where possible.
-  The environment file contains only `op://` references; pass resolved secrets directly to the consuming process,
-  never to agent output. Do not fetch extra records or run authentication probes before the actual operation.
-- Close the session when the task finishes. Reauthorization after locking 1Password or session expiry is expected;
-  do not add keepalive calls, cache plaintext secrets or session tokens, or disable approval protections.
-
-## graphify
-
-For any question about this repo's architecture, structure, components, or how to add/modify/find
-code, your first action should be `graphify query "<question>"` when `graphify-out/graph.json`
-exists. Use `graphify path "<A>" "<B>"` for relationship questions and `graphify explain "<concept>"`
-for focused-concept questions. These return a scoped subgraph, usually much smaller than the full
-report or raw grep output.
-
-Triggers: "how do I…", "where is…", "what does … do", "add/modify a <component>",
-"explain the architecture", or anything that depends on how files or classes relate.
-
-If `graphify-out/wiki/index.md` exists, use it for broad navigation. Read `graphify-out/GRAPH_REPORT.md`
-only for broad architecture review or when query/path/explain do not surface enough context. Only read
-source files when (a) modifying/debugging specific code, (b) the graph lacks the needed detail, or
-(c) the graph is missing or stale.
-
-Type `/graphify` in Copilot Chat to build or update the graph.
-
-## archify
-
-Use the global `archify` skill for architecture, workflow, sequence, data-flow,
-and lifecycle diagrams. Run its Node commands with `ARCHIFY_UPDATE_CHECK_DISABLED=1`, and keep typed
-sources and rendered HTML together under `docs/architecture/`.
+- For authorized tasks using the 1Password CLI, reuse one persistent terminal session for
+  all `op` calls; authorization follows the terminal. Batch the needed secret references
+  into one `op run --env-file=PATH -- COMMAND`, where the file holds only `op://`
+  references and resolved secrets go straight to the consuming process, never to agent
+  output. Close the session when done; do not cache secrets or add keepalive calls.
