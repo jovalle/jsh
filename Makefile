@@ -7,8 +7,10 @@ export PYTHONDONTWRITEBYTECODE := 1
 PYTHON := $(shell for p in python3 python3.14 python3.13 python3.12 python3.11; do \
   $$p -c 'import sys; sys.exit(sys.version_info < (3, 9))' 2>/dev/null && { command -v $$p; break; }; done)
 
-SHELL_FILES := bin/jsh j.sh lib/core.sh lib/output.sh $(shell find modules -type f -name '*.sh' -not -path '*/home/*')
-ZSH_FILES := modules/shell/home/.zshrc lib/j.zsh lib/prompt.zsh
+SHELL_FILES := bin/jsh bin/git j.sh lib/core.sh lib/output.sh \
+  $(shell find modules -type f -name '*.sh' -not -path '*/home/*' -not -path 'modules/skills/*')
+ZSH_FILES := modules/shell/home/.zshrc modules/shell/completions/_jsh lib/j.zsh lib/prompt.zsh \
+  lib/startup.zsh
 PYTHON_FILES := $(shell find lib modules tests -type f -name '*.py')
 
 .PHONY: help check syntax headers readme modules lint test hooks

@@ -1816,6 +1816,15 @@ if (( _jsh_runtime_active )) && [[ ${JSH_RELOADING:-0} != 1 ]]; then
   jsh_banner
 fi
 
+# Agent shells and reloads skip start-up work.
+if [[ -o interactive && ${JSH_RELOADING:-0} != 1 && -r ${JSH}/lib/startup.zsh ]] &&
+  (( ! _jsh_agent_shell )); then
+  # shellcheck source=../../../lib/startup.zsh
+  source "${JSH}/lib/startup.zsh"
+  _jsh_load_keys
+  _jsh_run_init
+fi
+
 if (( _jsh_runtime_active )); then
   if (( _jsh_runtime_had_xdg_cache )); then
     export XDG_CACHE_HOME=${_jsh_runtime_xdg_cache}

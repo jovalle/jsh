@@ -141,13 +141,17 @@ Notes:
 
 ## Commands
 
-`j` is a Zsh function loaded by `.zshrc`:
+`j` is a Zsh function loaded by `.zshrc` for jumping between projects and stacks:
 
-- `j` loads the SSH keys named in `conf/git.json`, checks this checkout, links, and
-  core tools, then runs executables in `local/init.d`.
-- `j status` summarizes the Git repositories in `J_PATHS`.
-- `j QUERY` jumps to a directory by frecency; `j pick` chooses one; `j --help` lists
+- `j` opens a picker; `j QUERY` jumps to the best match by frecency; `j --help` lists
   the rest.
+- Jump targets are the directories under `J_PATHS` (default `$GIT_BASE`) and
+  `J_STACKS` (default `~/Stacks`), each stack, and each stack's repositories.
+- `projects` summarizes the Git repositories in those places.
+
+Each new interactive shell loads the SSH keys named in `conf/git.json` that the agent
+does not hold yet and runs the executables in `local/init.d` (or `JSH_INIT`), printing
+only what it added or what failed. Agent shells skip both.
 
 Integrations can show a directory relative to a project root in the prompt by setting
 `_JSH_PROMPT_DIR_ROOT` and a prompt-formatted `_JSH_PROMPT_DIR_LABEL` from a `precmd`
