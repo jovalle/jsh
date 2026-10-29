@@ -1,4 +1,4 @@
-# Jump between directories by frecency, run workstation initialization, and summarize repos.
+# Jump between projects and stacks by frecency; `projects` summarizes their repos.
 
 zmodload -F zsh/datetime p:EPOCHSECONDS
 # shellcheck source=lib/output.sh
@@ -7,7 +7,7 @@ source "${JSH}/lib/output.sh"
 typeset -g J_DATA=${J_DATA:-${JSH}/local/j.db}
 typeset -g J_EXCLUDE=${J_EXCLUDE:-${HOME}}
 typeset -g J_PATHS=${J_PATHS-${GIT_BASE:-${HOME}/Projects}}
-typeset -g J_INIT=${J_INIT:-${JSH}/local/init.d}
+typeset -g J_STACKS=${J_STACKS:-${HOME}/Stacks}
 typeset -gF _J_DECAY=0.99
 typeset -gF _J_MIN_SCORE=0.01
 typeset -g _J_PREV_DIR=""
@@ -75,10 +75,11 @@ _j_array_contains() {
   return 1
 }
 
-# Immediate children of J_PATHS roots.
+# Immediate children of J_PATHS roots, every stack, and every stack's children.
 _j_get_projects() {
   local root candidate
   local -a roots=(${(s.:.)J_PATHS})
+  [[ ! -d ${J_STACKS} ]] || roots+=("${J_STACKS}" "${J_STACKS}"/*(N/))
   for root in "${roots[@]}"; do
     root=${root/#\~/${HOME}}
     [[ -d ${root} ]] || continue
@@ -461,12 +462,13 @@ _j_status_rows() {
   done
 }
 
-# Summarizes every repo under J_PATHS.
+# Summarizes every repo under J_PATHS and in each stack.
 _j_status() {
   local root dir
-  local -a dirs
+  local -a dirs roots=(${(s.:.)J_PATHS})
+  [[ ! -d ${J_STACKS} ]] || roots+=("${J_STACKS}"/*(N/))
   print -r -- "$(jsh::paint 1 1 Projects)"
-  for root in ${(s.:.)J_PATHS}; do
+  for root in "${roots[@]}"; do
     root=${root/#\~/${HOME}}
     for dir in "${root}"/*(N/); do
       [[ ! -e ${dir}/.git ]] || dirs+=("${dir}")
@@ -480,172 +482,15 @@ _j_status() {
   _j_status_rows "${dirs[@]}"
 }
 
-_j_check_checkout() {
-  local -a state detail
-  local -i changed
-  GIT_TERMINAL_PROMPT=0 command git -C "${JSH}" fetch --quiet 2>/dev/null ||
-    jsh::log_warn 'jsh: fetch failed; comparing with the last fetched upstream'
-  state=(${=$(_j_git_state "${JSH}")})
-  changed=$(( state[6] + state[7] + state[8] + state[9] ))
-  [[ ${state[3]} != - ]] || detail+=('no upstream')
-  (( ! state[5] )) || detail+=("${state[5]} behind ${state[3]}")
-  (( ! state[4] )) || detail+=("${state[4]} ahead")
-  (( ! changed )) || detail+=("${changed} changed")
-  if (( ${#detail} )); then
-    jsh::log_warn "jsh: ${(j:, :)detail}"
-  else
-    jsh::log_success "jsh: clean and up to date with ${state[3]}"
-  fi
-}
-
-_j_check_dotfiles() {
-  setopt localoptions extendedglob
-  local source entry home
-  local -a sources broken
-  for home in "${JSH}"/modules/*/home(N/); do
-    for source in "${home}"/**/*~*/(.DS_Store|.zcompdump*)(ND^/); do
-      entry=${source#${home}/}
-      sources+=("${entry}")
-      [[ -L ${HOME}/${entry} && ${HOME}/${entry} -ef ${source} ]] || broken+=("${entry}")
-    done
-  done
-  (( ${#sources} )) || return 0
-  if (( ${#broken} )); then
-    jsh::log_warn "dotfiles: ${#broken} of ${#sources} not linked (run jsh link)"
-    for entry in "${broken[@]:0:10}"; do
-      jsh::log_note "  ${entry}"
-    done
-    (( ${#broken} <= 10 )) || jsh::log_note "  … $(( ${#broken} - 10 )) more"
-  else
-    jsh::log_success "dotfiles: ${#sources} linked"
-  fi
-}
-
-_j_check_tools() {
-  local python candidate
-  local -a report
-  for candidate in python3 python3.14 python3.13 python3.12 python3.11; do
-    (( $+commands[${candidate}] )) || continue
-    command "${candidate}" -c 'import tomllib' 2>/dev/null || continue
-    python=${commands[${candidate}]}
-    break
-  done
-  if [[ -z ${python} ]]; then
-    jsh::log_warn 'tools: Python 3.11+ missing (run ./j.sh to install it)'
-    return 0
-  fi
-  # First line is the declared count; each further line is a missing package.
-  report=("${(@f)$(PYTHONPATH="${JSH}/lib" "${python}" - <<'EOF'
-import shutil
-from jsh import modules, system
-
-facts = system.Facts()
-handler = {"darwin": "brew", "debian": "apt", "rhel": "dnf"}[facts.platform]
-names = []
-for step in modules.load(system.ROOT / "modules/core").steps["install"]:
-    if step.handler == handler and facts.matches(step.when):
-        names += step.args if isinstance(step.args, list) else step.args.get("formulae", [])
-commands = {"python": "python3", "procps": "ps", "procps-ng": "ps", "ca-certificates": None}
-print(len(names))
-for name in names:
-    command = commands.get(name, name)
-    if command and not shutil.which(command):
-        print(name)
-EOF
-  )}")
-  if (( ${#report} > 1 )); then
-    jsh::log_warn "tools: missing ${(j:, :)report[2,-1]} (run jsh install core)"
-  else
-    jsh::log_success "tools: ${report[1]:-0} present"
-  fi
-}
-
-# Loads each conf/git.json profile ssh_key into the agent unless already loaded.
-_j_load_keys() {
-  local config=${JSH}/conf/git.json key public fingerprint loaded
-  local -a keys ssh_add=(ssh-add) added failed
-  local -i present=0 agent_status
-  [[ -r ${config} ]] || {
-    jsh::log_note 'ssh: no conf/git.json profiles'
-    return 0
-  }
-  keys=("${(@f)$(command python3 -c '
-import json, sys
-for profile in json.load(open(sys.argv[1], encoding="utf-8")).get("profiles", {}).values():
-    if profile.get("ssh_key"):
-        print(profile["ssh_key"])
-' "${config}" 2>/dev/null)}")
-  keys=(${(u)keys:#})
-  (( ${#keys} )) || {
-    jsh::log_note 'ssh: no profile keys configured'
-    return 0
-  }
-
-  loaded=$(command ssh-add -l 2>/dev/null)
-  agent_status=$?
-  if (( agent_status == 2 )); then
-    jsh::log_warn 'ssh: no agent running'
-    return 0
-  fi
-  [[ ${OSTYPE} != darwin* || ! -x /usr/bin/ssh-add ]] ||
-    ssh_add=(/usr/bin/ssh-add --apple-use-keychain)
-
-  for key in "${keys[@]}"; do
-    key=${key/#\~\//${HOME}/}
-    [[ ${key} == */* ]] || key=${HOME}/.ssh/${key}
-    if [[ ! -r ${key} ]]; then
-      failed+=("${key:t} (missing)")
-      continue
-    fi
-    public=${key}.pub
-    [[ -r ${public} ]] || public=${key}
-    fingerprint=${${(z)$(command ssh-keygen -lf "${public}" 2>/dev/null)}[2]}
-    if [[ -n ${fingerprint} && ${loaded} == *" ${fingerprint} "* ]]; then
-      (( ++present ))
-    elif command "${ssh_add[@]}" -q "${key}"; then
-      added+=("${key:t}")
-    else
-      failed+=("${key:t}")
-    fi
-  done
-
-  (( ! ${#added} )) || jsh::log_success "ssh: added ${(j:, :)added}"
-  (( ! present )) || jsh::log_success "ssh: ${present} already loaded"
-  (( ! ${#failed} )) || jsh::log_warn "ssh: could not load ${(j:, :)failed}"
-}
-
-# Runs each executable in J_INIT in name order.
-_j_run_init() {
-  local script
-  local -a scripts=("${J_INIT}"/*(N.x))
-  (( ${#scripts} )) || return 0
-  jsh::log_section Init
-  for script in "${scripts[@]}"; do
-    if "${script}"; then
-      jsh::log_success "${script:t}"
-    else
-      jsh::log_error "${script:t} failed"
-    fi
-  done
-}
-
-_j_init() {
-  # Keys load first so the fetches below can authenticate without prompting.
-  print -r -- "$(jsh::paint 1 1 SSH)"
-  _j_load_keys
-  jsh::log_section Health
-  _j_check_checkout
-  _j_check_dotfiles
-  _j_check_tools
-  _j_run_init
-  return 0
+projects() {
+  jsh::color_init
+  _j_status
 }
 
 _j_help() {
   cat <<'EOF'
 Usage:
-  j                   Load SSH keys, check jsh health, run init scripts
-  j status            Summarize every repo in J_PATHS
+  j                   Choose a project or stack interactively
   j pick [query ...]  Choose a directory interactively
   j [query ...]       Jump to the best matching directory
   j -                 Jump to the previous directory
@@ -656,11 +501,14 @@ Usage:
   j --db              Show tracked directories and scores
   j --clean           Remove missing directories
 
+`projects` summarizes the Git repositories in J_PATHS and every stack.
+
 Environment:
   J_DATA              Database path (default: $JSH/local/j.db)
   J_EXCLUDE           Colon-separated paths excluded from tracking
   J_PATHS             Colon-separated project roots (default: $GIT_BASE)
-  J_INIT              Init script directory (default: $JSH/local/init.d)
+  J_STACKS            Stack root; its children and their children are jump targets
+                      (default: ~/Stacks)
   J_NO_HOOK           Disable automatic directory tracking
 EOF
 }
@@ -673,19 +521,12 @@ j() {
   local -i count=0
 
   jsh::color_init
-  if (( ! $# )); then
-    _j_init
+  if (( ! $# )) || [[ $1 == pick ]]; then
+    (( ! $# )) || shift
+    selected=$(_j_interactive "$@") || return
+    builtin cd -- "${selected}"
     return
   fi
-  case $1 in
-    status) shift; _j_status "$@"; return ;;
-    pick)
-      shift
-      selected=$(_j_interactive "$@") || return
-      builtin cd -- "${selected}"
-      return
-      ;;
-  esac
 
   while (( $# )); do
     case $1 in

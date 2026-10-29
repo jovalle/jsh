@@ -36,7 +36,9 @@ Run them only when asked.
 - `modules/NAME/`: `module.json`, optional `home/` (linked into `$HOME`), and the scripts
   and data its steps use.
 - `lib/core.sh`, `lib/output.sh`: Bash helpers for module scripts and `bin/` tools.
-  `lib/j.zsh`, `lib/prompt.zsh`: the `j` function and prompt, sourced by `.zshrc`.
+  `lib/j.zsh`, `lib/prompt.zsh`, `lib/startup.zsh`: the `j` jump function, the prompt, and
+  interactive start-up (SSH keys, `local/init.d`), sourced by `.zshrc`.
+  `modules/shell/completions/_jsh`: Zsh completion for `jsh`.
 - `conf/`: personal, gitignored machine data (`git.json`) and its example.
 - `tests/`: Python `unittest` modules. Generated or machine-local, never edit:
   `local/` (vendor clones, logs, runtime), `.venv/`, `tmp/`. Scratch files go in `tmp/`.
