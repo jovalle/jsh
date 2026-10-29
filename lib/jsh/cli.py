@@ -1,7 +1,8 @@
-"""jsh command line: setup, install, link, configure, update, list, and module commands."""
+"""jsh command line: setup, install, link, configure, update, status, list, module commands."""
 
 import os
 import shlex
+import subprocess
 import sys
 
 from jsh import modules as catalog
@@ -15,6 +16,7 @@ PHASES = {
     "link": ("link",),
     "configure": ("configure",),
     "update": ("update",),
+    "status": ("install", "link"),
 }
 
 USAGE = """\
@@ -25,6 +27,7 @@ Usage: jsh COMMAND [MODULE...] [--dry-run]
   link [MODULE...]        Link module home/ files into your home directory
   configure [MODULE...]   Apply settings
   update [MODULE...]      Upgrade installed software
+  status [MODULE...]      Show checkout state, missing software, and unlinked files
   list                    List modules and their commands
   MODULE COMMAND [ARG...] Run a module command
   runtime                 Open an isolated zsh with this checkout's dotfiles
@@ -60,14 +63,15 @@ def main(argv):
 
 
 def run(command, selected, named, dry_run):
+    status = command == "status"
+    dry_run = dry_run or status
     facts = system.Facts()
     explicit = [module.name for module in selected] if named else ()
     tasks = runner.plan(selected, PHASES[command], facts, explicit)
     display = Display(dry_run=dry_run)
-    commit = system.query(["git", "-C", str(system.ROOT), "rev-parse", "--short", "HEAD"])
-    desktop = facts.desktop if facts.family == "linux" else ""
-    detail = ", ".join(filter(None, [facts.platform, desktop, "dry run" if dry_run else ""]))
-    display.header(f"jsh {command}", f"{commit} ({detail})".strip())
+    display.header(f"jsh {command}", describe(facts, dry_run and not status))
+    if status:
+        checkout(display)
     if named:
         for module in selected:
             if not facts.matches(module.when):
@@ -81,6 +85,41 @@ def run(command, selected, named, dry_run):
     if interrupted:
         return 130
     return 0 if ok else 1
+
+
+def describe(facts, preview):
+    """Header detail: the checkout's commit, platform, desktop, and whether it is a preview."""
+    commit = system.query(["git", "-C", str(system.ROOT), "rev-parse", "--short", "HEAD"])
+    desktop = facts.desktop if facts.family == "linux" else ""
+    detail = ", ".join(filter(None, [facts.platform, desktop, "dry run" if preview else ""]))
+    return f"{commit} ({detail})".strip()
+
+
+def checkout(display):
+    """Report when this checkout is dirty, has no upstream, or differs from it."""
+    root = str(system.ROOT)
+    try:
+        subprocess.run(
+            ["git", "-C", root, "fetch", "--quiet"],
+            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        display.notice("checkout", "fetch timed out; comparing with the last fetched upstream")
+    upstream = system.query(["git", "-C", root, "rev-parse", "--abbrev-ref", "@{upstream}"])
+    parts = [] if upstream else ["no upstream"]
+    range_ = "@{upstream}...HEAD"
+    counts = system.query(["git", "-C", root, "rev-list", "--left-right", "--count", range_])
+    if upstream and counts:
+        behind, ahead = (int(value) for value in counts.split())
+        parts += [f"{ahead} ahead of {upstream}"] if ahead else []
+        parts += [f"{behind} behind {upstream}"] if behind else []
+    changed = len(system.query(["git", "-C", root, "status", "--porcelain"]).splitlines())
+    parts += [f"{changed} changed"] if changed else []
+    if parts:
+        display.notice("checkout", ", ".join(parts))
 
 
 def show(found, facts):
