@@ -36,6 +36,7 @@ or with apt or dnf on Linux (run `sudo -v` first). Then:
 | `jsh link [MODULE...]`      | Link each module's `home/` files into your home directory       |
 | `jsh configure [MODULE...]` | Apply settings: OS preferences, desktop, apps                   |
 | `jsh update [MODULE...]`    | Upgrade declared software that has a newer version              |
+| `jsh status [MODULE...]`    | Show checkout state, missing software, and unlinked files       |
 | `jsh list`                  | List modules and their commands                                 |
 | `jsh MODULE COMMAND`        | Run a module command, for example `jsh audio cycle`             |
 | `jsh`                       | Open the isolated jsh Zsh shell (history under `local/runtime`) |
