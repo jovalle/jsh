@@ -4,7 +4,9 @@
 #   git save              Back up staged, unstaged, and untracked changes to a secret gist
 #   git load [--force]    Apply the changes saved for this repository's origin
 #   git refresh           Fetch origin and rebase the current branch onto its default branch
+#   git profile [NAME]    Use a conf/git.json profile: identity, SSH key, SSH GitHub remotes
 #   git commit -t TIME    Commit with a chosen date (see `git commit -t --help`)
+#   git status            On a terminal, adds identity and branch notes and condenses file lists
 
 set -euo pipefail
 
@@ -23,11 +25,17 @@ if [[ -z ${git_bin} ]]; then
 fi
 
 case ${1:-} in
-  save | load | refresh) ;;
+  save | load | refresh | profile) ;;
   commit)
     case " $* " in
       *' -t'* | *' --timestamp'*) ;;
       *) exec "${git_bin}" "$@" ;;
+    esac
+    ;;
+  status)
+    [[ -t 1 ]] || exec "${git_bin}" "$@"
+    case " $* " in
+      *' --porcelain'* | *' -z '* | *' --null '* | *' -h '* | *' --help '*) exec "${git_bin}" "$@" ;;
     esac
     ;;
   *) exec "${git_bin}" "$@" ;;
@@ -475,11 +483,194 @@ load() {
   run_git status --short
 }
 
+# ---- profile ----
+
+# Prints NAME, display name, email, GitHub user, and SSH key per profile, split by \x1f
+# (tabs would let `read` collapse empty fields).
+read_profiles() {
+  local file=${JSH_GIT_PROFILES:-${JSH_ROOT}/conf/git.json}
+  [[ -r ${file} ]] || die "no profiles: create ${file} from conf/git.example.json"
+  python3 - "${file}" <<'EOF'
+import json, sys
+
+for name, profile in json.load(open(sys.argv[1], encoding="utf-8")).get("profiles", {}).items():
+    fields = [name] + [profile.get(key, "") for key in ("name", "email", "user", "ssh_key")]
+    print("\x1f".join(fields))
+EOF
+}
+
+# Prints the path of a profile ssh_key: a ~/ path, any other path, or a name under ~/.ssh.
+key_path() {
+  local key=${1/#\~\//${HOME}/}
+  [[ ${key} == */* ]] || key=${HOME}/.ssh/${key}
+  printf '%s\n' "${key}"
+}
+
+# Prints a GitHub HTTPS URL as SSH; any other URL is printed unchanged.
+ssh_url() {
+  local path
+  case $1 in
+    https://github.com/*)
+      path=${1#https://github.com/}
+      path=${path%/}
+      printf 'git@github.com:%s.git\n' "${path%.git}"
+      ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
+profile() {
+  local wanted='' line chosen='' name display email user key current remote url push owner
+  local -a lines names
+  case ${1:-} in
+    -h | --help)
+      printf 'usage: git profile [NAME | --list]\n\nSet user.name, user.email, and core.sshCommand from a conf/git.json\n'
+      printf 'profile, and switch GitHub HTTPS origin and upstream remotes to SSH.\n'
+      return
+      ;;
+  esac
+  (($# <= 1)) || die 'usage: git profile [NAME | --list]'
+  wanted=${1:-}
+  while IFS= read -r line; do
+    [[ -n ${line} ]] && lines+=("${line}") && names+=("${line%%$'\x1f'*}")
+  done < <(read_profiles)
+  ((${#lines[@]})) || die 'no profiles in conf/git.json'
+  if [[ -z ${wanted} || ${wanted} == --list ]]; then
+    current=$(run_git config user.email 2> /dev/null || true)
+    if [[ ${wanted} == --list || ! -t 0 || ! -t 1 ]]; then
+      for line in "${lines[@]}"; do
+        IFS=$'\x1f' read -r name display email user key <<< "${line}"
+        printf '%s %-12s %s <%s>\n' "$([[ ${email} == "${current}" ]] && echo '*' || echo ' ')" \
+          "${name}" "${display}" "${email}"
+      done
+      return
+    fi
+    wanted=$(jsh::choose profile "${names[@]}") || exit 1
+  fi
+  for line in "${lines[@]}"; do
+    [[ ${line%%$'\x1f'*} == "${wanted}" ]] && chosen=${line}
+  done
+  [[ -n ${chosen} ]] || die "unknown profile: ${wanted} (have: ${names[*]})"
+  run_git rev-parse --git-dir > /dev/null 2>&1 || die 'not a Git repository'
+  IFS=$'\x1f' read -r name display email user key <<< "${chosen}"
+  [[ -z ${display} ]] || run_git config user.name "${display}"
+  [[ -z ${email} ]] || run_git config user.email "${email}"
+  if [[ -n ${key} ]]; then
+    key=$(key_path "${key}")
+    [[ -r ${key} ]] || jsh::log_warn "SSH key not found: ${key}"
+    run_git config core.sshCommand "ssh -i $(printf '%q' "${key}") -o IdentitiesOnly=yes"
+  fi
+  for remote in origin upstream; do
+    url=$(run_git remote get-url "${remote}" 2> /dev/null) || continue
+    [[ $(ssh_url "${url}") == "${url}" ]] || run_git remote set-url "${remote}" "$(ssh_url "${url}")"
+    push=$(run_git config --get "remote.${remote}.pushurl" 2> /dev/null) || continue
+    [[ $(ssh_url "${push}") == "${push}" ]] ||
+      run_git remote set-url --push "${remote}" "$(ssh_url "${push}")"
+  done
+  jsh::log_success "profile ${name}: ${display} <${email}>"
+  url=$(run_git remote get-url origin 2> /dev/null) || return 0
+  owner=${url#git@github.com:}
+  owner=${owner%%/*}
+  if [[ ${url} == git@github.com:* && -n ${user} && ${owner} != "${user}" ]] &&
+    ! run_git remote get-url upstream > /dev/null 2>&1; then
+    jsh::log_note "origin belongs to ${owner}; for a fork, rename it to upstream and add origin"
+  fi
+}
+
+# ---- status ----
+
+# Prints who commits here are authored as, where that comes from, and the matching profile.
+status_identity() {
+  local ident scope name display pemail user key url fix profile=none note=''
+  run_git rev-parse --git-dir > /dev/null 2>&1 || return 0
+  if ! ident=$(run_git var GIT_AUTHOR_IDENT 2> /dev/null); then
+    jsh::log_warn 'No commit identity here; set one with git profile'
+    return 0
+  fi
+  ident=${ident% * *}
+  author_email=${ident##*<}
+  author_email=${author_email%>}
+  if [[ -n ${GIT_AUTHOR_EMAIL:-} ]]; then
+    scope=environment
+  elif scope=$(run_git config --show-scope --get user.email 2> /dev/null); then
+    scope=${scope%%$'\t'*}
+  else
+    scope=guessed
+  fi
+  [[ ${scope} == local ]] || note=" (${scope})"
+  if [[ -r ${JSH_GIT_PROFILES:-${JSH_ROOT}/conf/git.json} ]]; then
+    while IFS=$'\x1f' read -r name display pemail user key; do
+      [[ ${pemail} == "${author_email}" ]] || continue
+      profile=${name}
+      [[ -n ${key} ]] || break
+      fix=''
+      [[ $(run_git config core.sshCommand 2> /dev/null) == \
+        "ssh -i $(printf '%q' "$(key_path "${key}")") -o IdentitiesOnly=yes" ]] ||
+        fix='SSH key not set'
+      url=$(run_git remote get-url origin 2> /dev/null) || url=''
+      [[ $(ssh_url "${url}") == "${url}" ]] || fix+="${fix:+, }origin uses HTTPS"
+      [[ -z ${fix} ]] || note+="; ${fix}, run git profile ${name}"
+      break
+    done < <(read_profiles)
+  fi
+  jsh::log_note "profile ${profile}: ${ident}${note}"
+}
+
+# Usage: plural COUNT SINGULAR PLURAL
+plural() {
+  if (($1 == 1)); then printf '1 %s\n' "$2"; else printf '%s %s\n' "$1" "$3"; fi
+}
+
+# Prints what git status leaves out: unpushed commits by another identity, distance from the
+# default branch, a future-dated HEAD, and stashes.
+status_history() {
+  local others count target upstream stamp
+  run_git rev-parse --verify --quiet HEAD > /dev/null || return 0
+  if [[ -n ${author_email} && -n $(run_git remote) ]]; then
+    others=$(run_git log --format=%ae HEAD --not --remotes | grep -vxF -- "${author_email}") ||
+      others=''
+    if [[ -n ${others} ]]; then
+      count=$(printf '%s\n' "${others}" | wc -l)
+      jsh::log_warn "$(plural $((count)) 'unpushed commit' 'unpushed commits') authored as" \
+        "$(printf '%s\n' "${others}" | sort -u | paste -sd ',' - | sed 's/,/, /g')"
+    fi
+  fi
+  if target=$(run_git symbolic-ref --quiet --short refs/remotes/origin/HEAD); then
+    upstream=$(run_git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2> /dev/null) ||
+      upstream=''
+    count=$(run_git rev-list --count "HEAD..${target}")
+    [[ ${upstream} == "${target}" ]] || ((count == 0)) ||
+      jsh::log_note "$(plural "${count}" commit commits) behind ${target}; git refresh rebases onto it"
+  fi
+  stamp=$(run_git log -1 --format=%ct HEAD)
+  ((stamp <= $(date +%s) + 60)) || jsh::log_warn \
+    "HEAD is dated $(format_epoch "${stamp}" '%Y-%m-%d %H:%M'), in the future; new commits will predate it"
+  count=$(run_git rev-list --walk-reflogs --count refs/stash 2> /dev/null) || count=0
+  ((count == 0)) || jsh::log_note "$(plural "${count}" stash stashes) (git stash list)"
+}
+
+# Prints git status without hints, with paths from the root, grouped by change type.
+condense_status() {
+  local color=false
+  [[ -n ${NO_COLOR:-} ]] || color=$(run_git config --get-colorbool color.status true)
+  run_git -c advice.statusHints=false -c status.relativePaths=false -c color.status=never status |
+    python3 "${JSH_ROOT}/lib/jsh/status.py" "${color}"
+  exit 0
+}
+
 command=$1
 shift
 case ${command} in
   save) save "$@" ;;
   load) load "$@" ;;
   refresh) refresh "$@" ;;
+  profile) profile "$@" ;;
   commit) commit_at "$@" ;;
+  status)
+    author_email=''
+    status_identity
+    status_history
+    (($#)) || condense_status
+    exec "${git_bin}" status "$@"
+    ;;
 esac

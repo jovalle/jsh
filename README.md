@@ -155,18 +155,18 @@ hook.
 
 These commands are on `PATH` through `bin/`:
 
-| Command                    | Purpose                                                    |
-| -------------------------- | ---------------------------------------------------------- |
-| [cafe](bin/cafe)           | Keep the computer awake until interrupted                  |
-| [colours](bin/colours)     | Print the terminal's 256-color palette                     |
-| [git](bin/git)             | Git plus `save`, `load`, `refresh`, and `commit -t`        |
-| [jsh](bin/jsh)             | Open the jsh Zsh shell, or run `jsh COMMAND` from anywhere |
-| [jssh](bin/jssh)           | Open an ephemeral jsh Zsh session on a Linux SSH host      |
-| [kubecolor](bin/kubecolor) | Colorize interactive `kubectl` output                      |
-| [kubectx](bin/kubectx)     | Switch between kubectl contexts                            |
-| [kubens](bin/kubens)       | Switch between Kubernetes namespaces                       |
-| [nukem](bin/nukem)         | Remove finalizers from a namespace stuck terminating       |
-| [proxy](bin/proxy)         | Run a command with proxy environment variables set         |
+| Command                    | Purpose                                                        |
+| -------------------------- | -------------------------------------------------------------- |
+| [cafe](bin/cafe)           | Keep the computer awake until interrupted                      |
+| [colours](bin/colours)     | Print the terminal's 256-color palette                         |
+| [git](bin/git)             | Git plus `save`, `load`, `refresh`, `profile`, and `commit -t` |
+| [jsh](bin/jsh)             | Open the jsh Zsh shell, or run `jsh COMMAND` from anywhere     |
+| [jssh](bin/jssh)           | Open an ephemeral jsh Zsh session on a Linux SSH host          |
+| [kubecolor](bin/kubecolor) | Colorize interactive `kubectl` output                          |
+| [kubectx](bin/kubectx)     | Switch between kubectl contexts                                |
+| [kubens](bin/kubens)       | Switch between Kubernetes namespaces                           |
+| [nukem](bin/nukem)         | Remove finalizers from a namespace stuck terminating           |
+| [proxy](bin/proxy)         | Run a command with proxy environment variables set             |
 
 ## Development
 

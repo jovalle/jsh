@@ -554,7 +554,8 @@ if has git; then
   zstyle ':completion:*:*:git:*' user-commands \
     save:'back up uncommitted changes to a secret gist' \
     load:'apply changes saved with git save' \
-    refresh:'fetch origin and rebase onto its default branch'
+    refresh:'fetch origin and rebase onto its default branch' \
+    profile:'use a conf/git.json identity, SSH key, and SSH remotes'
 fi
 
 # ---- Docker ----
