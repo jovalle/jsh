@@ -184,6 +184,20 @@ class AppTests(unittest.TestCase):  # pylint: disable=too-many-public-methods
         self.assertIn(WATERFOX.BEGIN, first)
         self.assertEqual(other.read_text(), "unmanaged")
 
+    def test_running_waterfox_blocks_only_a_pending_user_js_change(self):
+        self.seed(".waterfox/profiles.ini", "[Profile0]\nPath=main\nDefault=1\n")
+        target = self.seed(".waterfox/main/user.js", "unmanaged\n")
+        self.running.return_value = True
+        WATERFOX.configure(self.context())
+        self.assertEqual(target.read_text(), "unmanaged\n")
+        self.assertIn("close Waterfox", self.stream.getvalue())
+        self.running.return_value = False
+        WATERFOX.configure(self.context())
+        self.running.return_value = True
+        self.stream = io.StringIO()
+        WATERFOX.configure(self.context())
+        self.assertNotIn("close Waterfox", self.stream.getvalue())
+
     def test_waterfox_ambiguous_profiles_are_not_changed(self):
         self.seed(".waterfox/profiles.ini", "[Profile0]\nPath=one\n[Profile1]\nPath=two\n")
         target = self.seed(".waterfox/one/user.js", "unmanaged")

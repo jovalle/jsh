@@ -35,8 +35,9 @@ def default_profiles(directory):
     if not selected and len(sections) == 1:
         selected = sections
     return [
-        (Path(item["Path"]) if item.get("IsRelative", "1") != "1" else directory / item["Path"])
-        .resolve()
+        (
+            Path(item["Path"]) if item.get("IsRelative", "1") != "1" else directory / item["Path"]
+        ).resolve()
         for item in selected
     ]
 
@@ -63,9 +64,6 @@ def configure(ctx):
         desired = json.loads((HERE / "policies.json").read_text())
         desired["EnterprisePoliciesEnabled"] = True
         apps.apply_policy(ctx, POLICY, desired, keep_unmanaged=True)
-    if apps.running("waterfox", "waterfox-bin", "Waterfox"):
-        ctx.notice("close Waterfox, then rerun: jsh configure waterfox")
-        return
     for directory in directories():
         if not (directory / "profiles.ini").exists():
             continue
@@ -75,6 +73,10 @@ def configure(ctx):
             return
         target = profiles[0] / "user.js"
         current = target.read_text() if target.exists() else ""
-        files.write(ctx, target, user_js(current, (HERE / "user.js").read_text().strip()))
+        text = user_js(current, (HERE / "user.js").read_text().strip())
+        if text != current and apps.running("waterfox", "waterfox-bin", "Waterfox"):
+            ctx.notice("close Waterfox, then rerun: jsh configure waterfox")
+            return
+        files.write(ctx, target, text)
         return
     ctx.notice("open Waterfox once to create a profile, then rerun: jsh configure waterfox")
