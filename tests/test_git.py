@@ -1,7 +1,10 @@
 """bin/git adds save, load, refresh, and commit -t, and passes everything else to the real git."""
 
 import datetime as dt
+import json
 import os
+import pty
+import select
 import shutil
 import subprocess
 import tempfile
@@ -329,6 +332,241 @@ class SaveLoadTests(GitTestCase):
         result = self.run_git("save", cwd=self.here)
         self.assertIn("Nothing to save", result.stdout)
         self.assertEqual(self.gists(), [])
+
+
+class ProfileTestCase(GitTestCase):
+    def setUp(self):
+        super().setUp()
+        self.path = self.repo()
+        profiles = {
+            "profiles": {
+                "personal": {
+                    "name": "Jay Personal",
+                    "email": "jay@example.net",
+                    "user": "jay",
+                    "ssh_key": "id_personal",
+                },
+                "work": {"name": "Jay Work", "email": "jay@example.org", "ssh_key": "~/keys/w"},
+            }
+        }
+        config = self.tmp / "git.json"
+        config.write_text(json.dumps(profiles))
+        self.env["JSH_GIT_PROFILES"] = str(config)
+        ssh = self.tmp / "home/.ssh"
+        ssh.mkdir()
+        (ssh / "id_personal").write_text("key\n")
+
+    def config(self, key):
+        return self.out("config", "--get", key, cwd=self.path)
+
+
+class ProfileTests(ProfileTestCase):
+    def test_profile_sets_identity_key_and_ssh_github_remotes(self):
+        self.run_git("remote", "add", "origin", "https://github.com/jay/repo.git", cwd=self.path)
+        self.run_git("remote", "add", "upstream", "https://github.com/acme/repo", cwd=self.path)
+        self.run_git("remote", "add", "mirror", "https://gitlab.com/jay/repo.git", cwd=self.path)
+        self.run_git("profile", "personal", cwd=self.path)
+        self.assertEqual(self.config("user.name"), "Jay Personal")
+        self.assertEqual(self.config("user.email"), "jay@example.net")
+        key = self.tmp / "home/.ssh/id_personal"
+        self.assertEqual(self.config("core.sshCommand"), f"ssh -i {key} -o IdentitiesOnly=yes")
+        self.assertEqual(self.config("remote.origin.url"), "git@github.com:jay/repo.git")
+        self.assertEqual(self.config("remote.upstream.url"), "git@github.com:acme/repo.git")
+        self.assertEqual(self.config("remote.mirror.url"), "https://gitlab.com/jay/repo.git")
+
+    def test_home_relative_key_is_expanded(self):
+        self.run_git("profile", "work", cwd=self.path)
+        key = self.tmp / "home/keys/w"
+        self.assertEqual(self.config("core.sshCommand"), f"ssh -i {key} -o IdentitiesOnly=yes")
+
+    def test_foreign_origin_without_upstream_gets_a_fork_hint(self):
+        self.run_git("remote", "add", "origin", "git@github.com:acme/repo.git", cwd=self.path)
+        result = self.run_git("profile", "personal", cwd=self.path)
+        self.assertIn("origin belongs to acme", result.stdout)
+        self.assertEqual(self.config("remote.origin.url"), "git@github.com:acme/repo.git")
+
+    def test_list_marks_the_profile_in_use(self):
+        self.run_git("config", "user.email", "jay@example.org", cwd=self.path)
+        lines = self.run_git("profile", "--list", cwd=self.path).stdout.splitlines()
+        self.assertEqual(lines[0], "  personal     Jay Personal <jay@example.net>")
+        self.assertEqual(lines[1], "* work         Jay Work <jay@example.org>")
+
+    def test_unknown_profile_changes_nothing(self):
+        result = self.run_git("profile", "nope", cwd=self.path, check=False)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("unknown profile: nope (have: personal work)", result.stderr)
+        unset = self.run_git("config", "--get", "user.name", cwd=self.path, check=False)
+        self.assertEqual(unset.stdout, "")
+
+
+class StatusTests(ProfileTestCase):
+    def setUp(self):
+        super().setUp()
+        for name in ("AUTHOR", "COMMITTER"):
+            del self.env[f"GIT_{name}_NAME"], self.env[f"GIT_{name}_EMAIL"]
+        self.env["GIT_PAGER"] = "cat"
+        self.env["COLUMNS"] = "60"
+
+    def tty_status(self, *args):
+        leader, follower = pty.openpty()
+        try:
+            subprocess.run(
+                [str(SHIM), "status", *args],
+                cwd=self.path,
+                env=self.env,
+                stdout=follower,
+                stderr=follower,
+                check=True,
+            )
+            # Read before closing the follower: macOS discards unread output once it closes.
+            output = b""
+            while select.select([leader], [], [], 0)[0]:
+                output += os.read(leader, 4096)
+        finally:
+            os.close(follower)
+            os.close(leader)
+        return output.decode().splitlines()
+
+    def with_origin(self):
+        bare = self.tmp / "origin.git"
+        self.run_git("clone", "--quiet", "--bare", str(self.path), str(bare), cwd=self.tmp)
+        self.run_git("remote", "add", "origin", str(bare), cwd=self.path)
+        self.run_git("fetch", "--quiet", "origin", cwd=self.path)
+        self.run_git("remote", "set-head", "origin", "main", cwd=self.path)
+
+    def empty_commit(self, *args, env=None):
+        self.run_git("commit", "--quiet", "--allow-empty", "-m", "x", *args, cwd=self.path, env=env)
+
+    def test_terminal_status_starts_with_the_profile_in_use(self):
+        self.run_git("profile", "personal", cwd=self.path)
+        lines = self.tty_status()
+        self.assertEqual(lines[0], "profile personal: Jay Personal <jay@example.net>")
+        self.assertEqual(lines[1], "On branch main")
+
+    def test_identity_without_profile_names_its_config_scope(self):
+        self.run_git("config", "--global", "user.name", "Someone", cwd=self.path)
+        self.run_git("config", "--global", "user.email", "someone@example.com", cwd=self.path)
+        lines = self.tty_status()
+        self.assertEqual(lines[0], "profile none: Someone <someone@example.com> (global)")
+
+    def test_identity_without_its_ssh_key_says_how_to_fix_it(self):
+        self.run_git("config", "user.name", "Jay Work", cwd=self.path)
+        self.run_git("config", "user.email", "jay@example.org", cwd=self.path)
+        lines = self.tty_status()
+        self.assertEqual(
+            lines[0],
+            "profile work: Jay Work <jay@example.org>; SSH key not set, run git profile work",
+        )
+
+    def test_porcelain_on_a_terminal_is_unchanged(self):
+        self.run_git("profile", "personal", cwd=self.path)
+        self.assertEqual(self.tty_status("--porcelain"), [])
+
+    def test_piped_status_is_unchanged(self):
+        self.run_git("profile", "personal", cwd=self.path)
+        result = self.run_git("status", cwd=self.path)
+        self.assertTrue(result.stdout.startswith("On branch main\n"), result.stdout)
+
+    def test_unpushed_commits_by_another_identity_are_flagged(self):
+        self.with_origin()
+        self.run_git("profile", "personal", cwd=self.path)
+        self.empty_commit("--author", "Other <other@example.com>")
+        self.empty_commit()
+        self.empty_commit("--author", "Other <other@example.com>")
+        lines = self.tty_status()
+        self.assertEqual(lines[1], "! 2 unpushed commits authored as other@example.com")
+        self.assertEqual(lines[2], "On branch main")
+
+    def test_https_github_origin_bypasses_the_profile_key(self):
+        self.run_git("profile", "personal", cwd=self.path)
+        self.run_git("remote", "add", "origin", "https://github.com/jay/repo.git", cwd=self.path)
+        lines = self.tty_status()
+        self.assertEqual(
+            lines[0],
+            "profile personal: Jay Personal <jay@example.net>; "
+            "origin uses HTTPS, run git profile personal",
+        )
+
+    def test_branch_behind_the_default_branch_suggests_refresh(self):
+        self.with_origin()
+        self.run_git("profile", "personal", cwd=self.path)
+        self.empty_commit()
+        self.run_git("push", "--quiet", "origin", "main", cwd=self.path)
+        self.run_git("checkout", "--quiet", "-b", "feature", "HEAD~1", cwd=self.path)
+        lines = self.tty_status()
+        self.assertEqual(lines[1], "1 commit behind origin/main; git refresh rebases onto it")
+
+    def test_future_dated_head_is_flagged(self):
+        self.run_git("profile", "personal", cwd=self.path)
+        self.empty_commit(env={"GIT_COMMITTER_DATE": "2099-01-01 12:00:00 +0000"})
+        lines = self.tty_status()
+        self.assertEqual(
+            lines[1],
+            "! HEAD is dated 2099-01-01 12:00, in the future; new commits will predate it",
+        )
+
+    def test_stashes_are_counted(self):
+        self.run_git("profile", "personal", cwd=self.path)
+        for text in ("two\n", "three\n"):
+            (self.path / "a.txt").write_text(text)
+            self.run_git("stash", "--quiet", cwd=self.path)
+        lines = self.tty_status()
+        self.assertEqual(lines[1], "2 stashes (git stash list)")
+
+    def write(self, *names, text="one\n"):
+        for name in names:
+            (self.path / name).parent.mkdir(parents=True, exist_ok=True)
+            (self.path / name).write_text(text)
+
+    def test_file_lists_are_grouped_by_change_and_folded_into_braces(self):
+        self.run_git("profile", "personal", cwd=self.path)
+        self.write("mods/a/conf.toml", "mods/b/conf.toml", "lib/x.py", "lib/y.py")
+        self.commit(self.path, "more")
+        self.run_git("rm", "--quiet", "mods/a/conf.toml", "mods/b/conf.toml", cwd=self.path)
+        self.write("a.txt", "lib/x.py", "lib/y.py", text="two\n")
+        self.write("new.txt", "notes/n.md")
+        self.assertEqual(
+            self.tty_status()[1:],
+            [
+                "On branch main",
+                "Changes to be committed:",
+                "  deleted (2): mods/{a,b}/conf.toml",
+                "",
+                "Changes not staged for commit:",
+                "  modified (3): a.txt  lib/{x,y}.py",
+                "",
+                "Untracked files (2):",
+                "  new.txt  notes/",
+                "",
+            ],
+        )
+
+    def test_large_groups_split_into_whole_brace_expressions(self):
+        self.run_git("profile", "personal", cwd=self.path)
+        names = ("alpha", "bravo", "charlie", "delta", "echo", "foxtrot")
+        self.write(*(f"modules/{name}/module.toml" for name in names))
+        self.commit(self.path, "more")
+        self.run_git("rm", "--quiet", "-r", "modules", cwd=self.path)
+        self.assertEqual(
+            self.tty_status()[3:5],
+            [
+                "  deleted (6): modules/{alpha,bravo,charlie}/module.toml",
+                "               modules/{delta,echo,foxtrot}/module.toml",
+            ],
+        )
+
+    def test_lists_wrap_between_paths(self):
+        self.run_git("profile", "personal", cwd=self.path)
+        names = [letter * 20 + ".txt" for letter in "abc"]
+        self.write(*names)
+        lines = self.tty_status()
+        self.assertEqual(lines[-4:-2], [f"  {names[0]}  {names[1]}", f"  {names[2]}"])
+
+    def test_status_with_arguments_keeps_git_format(self):
+        self.run_git("profile", "personal", cwd=self.path)
+        self.run_git("config", "color.status", "never", cwd=self.path)
+        self.write("lib/x.py", "lib/y.py")
+        self.assertEqual(self.tty_status("--short")[1:], ["?? lib/"])
 
 
 if __name__ == "__main__":
