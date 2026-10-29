@@ -164,6 +164,11 @@ else
 fi
 unset _jsh_compdump
 (( ${+functions[_jsh_after_compinit]} )) && _jsh_after_compinit
+# The cached dump may predate jsh's own completion, so register it explicitly.
+if [[ -r ${JSH}/modules/shell/completions/_jsh ]]; then
+  fpath=("${JSH}/modules/shell/completions" "${fpath[@]}")
+  autoload -Uz _jsh && compdef _jsh jsh
+fi
 
 # shellcheck disable=SC1090  # Vendored repository
 [[ -r "${JSH_VENDOR}/fzf-tab/fzf-tab.plugin.zsh" && -n ${commands[fzf]:-} ]] && \

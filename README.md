@@ -45,7 +45,8 @@ With no module names a command covers every module that applies to this machine.
 `--dry-run` reports what would change without changing anything. A failed step is
 reported with the end of its log and the log path under `local/logs/`; later steps
 still run. Root changes use `sudo -n`, so authorize sudo first (`sudo -v`); jsh never
-prompts for a password and never asks for confirmation.
+prompts for a password and never asks for confirmation. Zsh completes `jsh` commands,
+module names, and module commands.
 
 ## Modules
 

@@ -1,0 +1,52 @@
+#compdef jsh
+# Completion for jsh: commands, module names, and each module's own commands.
+
+_jsh() {
+  local root=${JSH:-${${(%):-%x}:A:h:h:h:h}} line
+  local -a commands modules runnable fields
+  local -A module_commands
+  # One line per module: name, description, and its commands, tab-separated.
+  for line in "${(@f)$(command python3 -c '
+import json, sys
+for path in sys.argv[1:]:
+    with open(path, encoding="utf-8") as stream:
+        data = json.load(stream)
+    commands = " ".join(data.get("commands") or {})
+    print(path.split("/")[-2], data.get("description", ""), commands, sep="\t")
+' "${root}"/modules/*/module.json(N) 2>/dev/null)}"; do
+    fields=("${(@ps:\t:)line}")
+    modules+=("${fields[1]}:${fields[2]}")
+    [[ -n ${fields[3]} ]] && runnable+=("${fields[1]}:${fields[2]}")
+    module_commands[${fields[1]}]=${fields[3]}
+  done
+
+  if (( CURRENT == 2 )); then
+    commands=(
+      'setup:install, link, and configure'
+      'install:install missing software'
+      'link:link module files into your home directory'
+      'configure:apply settings'
+      'update:upgrade declared software'
+      'status:show checkout state, missing software, and unlinked files'
+      'list:list modules and their commands'
+      'runtime:open the isolated jsh shell'
+      'reload:reload .zshrc in this shell'
+    )
+    _describe -t commands 'jsh command' commands
+    _describe -t modules 'module command' runnable
+    return
+  fi
+
+  case ${words[2]} in
+    setup | install | link | configure | update | status)
+      _describe -t modules 'module' modules
+      compadd -- --dry-run
+      ;;
+    *)
+      [[ ${CURRENT} == 3 && -n ${module_commands[${words[2]}]} ]] || return 1
+      compadd -- ${=module_commands[${words[2]}]}
+      ;;
+  esac
+}
+
+_jsh "$@"
