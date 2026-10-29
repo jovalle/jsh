@@ -5,7 +5,8 @@ This checkout is live: it lives at `~/.jsh`, module `home/` files are symlinked 
 and `bin/` is on `PATH`, so edits take effect on the developer's machine immediately.
 
 This is the only agent instruction file. Do not create `CLAUDE.md`, `GEMINI.md`, or
-`.github/copilot-instructions.md`; jsh does not manage agent tools, skills, or prompts.
+`.github/copilot-instructions.md`. Agent skills come from the `skills` and `ai` modules;
+custom agents and prompts stay in VS Code Settings Sync, not here.
 
 ## commands
 

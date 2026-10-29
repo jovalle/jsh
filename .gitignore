@@ -97,7 +97,6 @@ modules/*/home/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-screensaver.xml
 modules/*/home/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-screenshooter.xml
 modules/*/home/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-taskmanager.xml
 git.json
-graphify-out/
 mounts.json
 node_modules/
 oscrypto-ca-bundle.crt

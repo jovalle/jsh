@@ -112,8 +112,9 @@ files, policies, downloads, and desktop settings. Bash scripts source
 | `core`                                                 | Bash, curl, Git, Python, Zsh                                                 |
 | `shell`                                                | `.zshrc` and friends, Zsh plugins in `local/vendor`, fzf, the `jsh` launcher |
 | `tools`                                                | Everyday CLI tools and their settings (Homebrew on Linux when installed)     |
-| `dev`, `kube`, `containers`, `ai`                      | Linters, Kubernetes, container, and AI CLIs                                  |
+| `dev`, `kube`, `containers`, `ai`                      | Linters, Kubernetes, container, and AI CLIs, plus graphify and REA skills    |
 | `git`                                                  | `.gitconfig`                                                                 |
+| `skills`                                               | Agent skill repos in `local/vendor/skills`, linked into `~/.agents/skills`   |
 | `fonts`                                                | JetBrains Mono Nerd Font                                                     |
 | `apps`                                                 | Apps without managed settings; extra casks on the `archon` host              |
 | `helium`, `waterfox`, `vscode`, `sublime`, `ghostty`   | The app plus its managed settings                                            |
