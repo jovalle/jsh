@@ -146,7 +146,13 @@ MAILCHECK=0                         # Disable mail checking
 # ============================================================================
 
 # brew shellenv prepends site-functions to fpath, so run it before the repo entries.
-command -v brew &>/dev/null && eval "$(brew shellenv)"
+if command -v brew &>/dev/null; then
+  _jsh_path=${PATH}
+  eval "$(brew shellenv)"
+  # shellenv also prepends Homebrew to PATH, which would shadow jsh wrappers such as bin/git.
+  export PATH=${_jsh_path}:${HOMEBREW_PREFIX}/bin:${HOMEBREW_PREFIX}/sbin
+  unset _jsh_path
+fi
 
 # Add user and vendored completions to fpath.
 fpath=(~/.zsh/completions "${JSH_VENDOR}/zsh-completions/src" "${fpath[@]}")
