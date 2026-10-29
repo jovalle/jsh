@@ -1,4 +1,10 @@
 {
   "description": "AI assistants and coding agent CLIs",
-  "install": [{ "brew": { "formulae": ["opencode"], "casks": ["antigravity-cli", "chatgpt", "codex", "copilot-cli"] } }]
+  "install": [
+    { "brew": { "formulae": ["opencode"], "casks": ["antigravity-cli", "chatgpt", "codex", "copilot-cli"] } },
+    { "uv": { "graphify": "graphifyy" } },
+    { "script": "skills.sh" }
+  ],
+  "configure": [{ "script": "skills.sh" }],
+  "update": [{ "script": "skills.sh" }]
 }

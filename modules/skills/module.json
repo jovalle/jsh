@@ -1,0 +1,114 @@
+{
+  "description": "Agent skills: clones in local/vendor/skills linked into ~/.agents/skills",
+  "install": [
+    {
+      "git": {
+        "skills/anthropics-skills": "https://github.com/anthropics/skills.git",
+        "skills/archify": "https://github.com/tt-a1i/archify.git",
+        "skills/better-icons": "https://github.com/better-auth/better-icons.git",
+        "skills/chrome-agent": "https://github.com/sderosiaux/chrome-agent.git",
+        "skills/cloudflare-skills": "https://github.com/cloudflare/skills.git",
+        "skills/hallmark": "https://github.com/Nutlope/hallmark.git",
+        "skills/impeccable": "https://github.com/pbakaus/impeccable.git",
+        "skills/mattpocock-skills": "https://github.com/mattpocock/skills.git",
+        "skills/openai-skills": "https://github.com/openai/skills.git",
+        "skills/thesysdev-skills": "https://github.com/thesysdev/skills.git",
+        "skills/ui-ux-pro-max-skill": "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill.git"
+      }
+    }
+  ],
+  "link": [
+    { "from": "github-actions-hardening", "to": "~/.agents/skills/github-actions-hardening" },
+    { "from": "show-me-your-work", "to": "~/.agents/skills/show-me-your-work" },
+    {
+      "from": "../../local/vendor/skills/anthropics-skills/skills/frontend-design",
+      "to": "~/.agents/skills/frontend-design"
+    },
+    {
+      "from": "../../local/vendor/skills/anthropics-skills/skills/skill-creator",
+      "to": "~/.agents/skills/skill-creator"
+    },
+    { "from": "../../local/vendor/skills/archify/archify", "to": "~/.agents/skills/archify" },
+    { "from": "../../local/vendor/skills/better-icons/skills", "to": "~/.agents/skills/better-icons" },
+    {
+      "from": "../../local/vendor/skills/chrome-agent/skills/scrape-structured-data",
+      "to": "~/.agents/skills/scrape-structured-data"
+    },
+    { "from": "../../local/vendor/skills/cloudflare-skills/skills/agents-sdk", "to": "~/.agents/skills/agents-sdk" },
+    { "from": "../../local/vendor/skills/cloudflare-skills/skills/basin", "to": "~/.agents/skills/basin" },
+    { "from": "../../local/vendor/skills/cloudflare-skills/skills/cf-cli", "to": "~/.agents/skills/cf-cli" },
+    { "from": "../../local/vendor/skills/cloudflare-skills/skills/cloudflare", "to": "~/.agents/skills/cloudflare" },
+    {
+      "from": "../../local/vendor/skills/cloudflare-skills/skills/cloudflare-email-service",
+      "to": "~/.agents/skills/cloudflare-email-service"
+    },
+    {
+      "from": "../../local/vendor/skills/cloudflare-skills/skills/cloudflare-one",
+      "to": "~/.agents/skills/cloudflare-one"
+    },
+    {
+      "from": "../../local/vendor/skills/cloudflare-skills/skills/cloudflare-one-migrations",
+      "to": "~/.agents/skills/cloudflare-one-migrations"
+    },
+    {
+      "from": "../../local/vendor/skills/cloudflare-skills/skills/durable-objects",
+      "to": "~/.agents/skills/durable-objects"
+    },
+    {
+      "from": "../../local/vendor/skills/cloudflare-skills/skills/gateway-workers",
+      "to": "~/.agents/skills/gateway-workers"
+    },
+    { "from": "../../local/vendor/skills/cloudflare-skills/skills/k2", "to": "~/.agents/skills/k2" },
+    {
+      "from": "../../local/vendor/skills/cloudflare-skills/skills/nextjs-on-cloudflare",
+      "to": "~/.agents/skills/nextjs-on-cloudflare"
+    },
+    {
+      "from": "../../local/vendor/skills/cloudflare-skills/skills/sandbox-migrate-to-next",
+      "to": "~/.agents/skills/sandbox-migrate-to-next"
+    },
+    {
+      "from": "../../local/vendor/skills/cloudflare-skills/skills/sandbox-next",
+      "to": "~/.agents/skills/sandbox-next"
+    },
+    {
+      "from": "../../local/vendor/skills/cloudflare-skills/skills/sandbox-stable",
+      "to": "~/.agents/skills/sandbox-stable"
+    },
+    {
+      "from": "../../local/vendor/skills/cloudflare-skills/skills/turnstile-spin",
+      "to": "~/.agents/skills/turnstile-spin"
+    },
+    { "from": "../../local/vendor/skills/cloudflare-skills/skills/web-perf", "to": "~/.agents/skills/web-perf" },
+    {
+      "from": "../../local/vendor/skills/cloudflare-skills/skills/workers-best-practices",
+      "to": "~/.agents/skills/workers-best-practices"
+    },
+    {
+      "from": "../../local/vendor/skills/cloudflare-skills/skills/workers-profiling",
+      "to": "~/.agents/skills/workers-profiling"
+    },
+    { "from": "../../local/vendor/skills/cloudflare-skills/skills/wrangler", "to": "~/.agents/skills/wrangler" },
+    { "from": "../../local/vendor/skills/hallmark/skills/hallmark", "to": "~/.agents/skills/hallmark" },
+    { "from": "../../local/vendor/skills/impeccable/.agents/skills/impeccable", "to": "~/.agents/skills/impeccable" },
+    {
+      "from": "../../local/vendor/skills/mattpocock-skills/skills/engineering/research",
+      "to": "~/.agents/skills/research"
+    },
+    {
+      "from": "../../local/vendor/skills/mattpocock-skills/skills/productivity/handoff",
+      "to": "~/.agents/skills/handoff"
+    },
+    { "from": "../../local/vendor/skills/mattpocock-skills/skills/productivity/teach", "to": "~/.agents/skills/teach" },
+    {
+      "from": "../../local/vendor/skills/openai-skills/skills/.curated/gh-address-comments",
+      "to": "~/.agents/skills/gh-address-comments"
+    },
+    { "from": "../../local/vendor/skills/openai-skills/skills/.curated/gh-fix-ci", "to": "~/.agents/skills/gh-fix-ci" },
+    { "from": "../../local/vendor/skills/thesysdev-skills/skills/openui", "to": "~/.agents/skills/openui" },
+    {
+      "from": "../../local/vendor/skills/ui-ux-pro-max-skill/.claude/skills/ui-ux-pro-max",
+      "to": "~/.agents/skills/ui-ux-pro-max"
+    }
+  ]
+}
