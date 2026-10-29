@@ -3,22 +3,60 @@
 Reads Git's long format (no color, no hints) on stdin; argv[1] is "true" for color.
 """
 
+import functools
 import re
 import shutil
 import sys
 
 ENTRY = re.compile(r"\t([a-z ]+):\s+(.*)$")
 INDENT = "  "
+# SGR codes; labels missing here are merge conflicts ("both modified", "added by us", ...).
+TYPES = {
+    "new file": "32",
+    "modified": "33",
+    "deleted": "31",
+    "renamed": "36",
+    "copied": "36",
+    "typechange": "35",
+}
+CONFLICT = "1;31"
+SECTIONS = {
+    "Changes to be committed:": "1;32",
+    "Changes not staged for commit:": "1;31",
+    "Unmerged paths:": "1;31",
+    "Untracked files:": "2",
+    "Ignored files:": "2",
+}
+LOOSE = {"Untracked files:": "", "Ignored files:": "2"}
 
 
 def brace(values):
-    """Folds values into {a,b}, keeping a shared extension outside: {a,b}.py."""
+    """Returns (names, extension) for {a,b}.py, keeping a shared extension outside the braces."""
     dots = [value.rfind(".") for value in values]
     extensions = {value[dot:] for value, dot in zip(values, dots) if dot > 0}
     if len(extensions) == 1 and all(dot > 0 for dot in dots):
         extension = extensions.pop()
-        return "{" + ",".join(value[: -len(extension)] for value in values) + "}" + extension
-    return "{" + ",".join(values) + "}"
+        return [value[: -len(extension)] for value in values], extension
+    return values, ""
+
+
+def leaf(path, name, dim):
+    """Paints a path's last component with name() and its directories with dim()."""
+    if " -> " in path:
+        return dim(" -> ").join(leaf(side, name, dim) for side in path.split(" -> "))
+    stem = path.rstrip("/")
+    folder, slash, base = stem.rpartition("/")
+    return dim(folder + slash) + name(base) + dim(path[len(stem) :])
+
+
+def shade(head, chunk, tail, name, dim):
+    """Paints the names that vary with name() and the shared structure with dim()."""
+    if len(chunk) == 1:
+        return leaf("/".join(head + (chunk[0],) + tail), name, dim)
+    names, extension = brace(chunk)
+    prefix = "".join(part + "/" for part in head) + "{"
+    suffix = "}" + extension + "".join("/" + part for part in tail)
+    return dim(prefix) + dim(",").join(map(name, names)) + dim(suffix)
 
 
 def group(paths):
@@ -44,60 +82,75 @@ def group(paths):
 
 
 def fold(head, values, tail, room):
-    """Returns whole brace expressions for one group, values spread evenly across lines."""
+    """Returns (text, head, chunk, tail) per brace expression, values spread evenly across lines."""
 
     def token(chunk):
-        return "/".join(head + (brace(chunk) if len(chunk) > 1 else chunk[0],) + tail)
+        if len(chunk) == 1:
+            return "/".join(head + (chunk[0],) + tail)
+        names, extension = brace(chunk)
+        return "/".join(head + ("{" + ",".join(names) + "}" + extension,) + tail)
 
-    tokens, chunk = [], []
+    chunks, chunk = [], []
     for value in values:
         if chunk and len(token(chunk + [value])) > room:
-            tokens.append(token(chunk))
+            chunks.append(chunk)
             chunk = []
         chunk.append(value)
-    tokens.append(token(chunk))
-    size = -(-len(values) // len(tokens))
-    even = [token(values[start : start + size]) for start in range(0, len(values), size)]
-    return even if len(even) == len(tokens) and max(map(len, even)) <= room else tokens
+    chunks.append(chunk)
+    size = -(-len(values) // len(chunks))
+    even = [values[start : start + size] for start in range(0, len(values), size)]
+    if len(even) == len(chunks) and max(len(token(part)) for part in even) <= room:
+        chunks = even
+    return [(token(part), head, part, tail) for part in chunks]
 
 
-def render(first, paths, width, paint):
+def render(first, indent, paths, name, dim):
     """Prints one change type, wrapping only between paths so each stays whole for copying."""
-    indent = len(first)
-    room = width - len(INDENT) - indent
-    lines, line = [], ""
-    for head, values, tail in group(paths):
-        for token in fold(head, values, tail, room):
-            if " " in token:
-                lines += [line, token] if line else [token]
-                line = ""
-            elif line and len(line) + 2 + len(token) > room:
+    room = shutil.get_terminal_size().columns - len(INDENT) - indent
+    lines, line, used = [], [], 0
+    for spec in group(paths):
+        for text, *parts in fold(*spec, room):
+            painted = shade(*parts, name, dim)
+            if " " in text:
+                lines += [line, [painted]] if line else [[painted]]
+                line, used = [], 0
+            elif line and used + 2 + len(text) > room:
                 lines.append(line)
-                line = token
+                line, used = [painted], len(text)
             else:
-                line = f"{line}  {token}" if line else token
+                used += len(text) + (2 if line else 0)
+                line.append(painted)
     lines += [line] if line else []
-    for number, text in enumerate(lines):
-        print(INDENT + (first if number == 0 else " " * indent) + paint(text))
+    for number, tokens in enumerate(lines):
+        print(INDENT + (first if number == 0 else " " * indent) + "  ".join(tokens))
 
 
 def main():
     color = sys.argv[1:] == ["true"]
-    width = shutil.get_terminal_size().columns
-    sgr, header, entries = "31", None, {}
+    header, entries = None, {}
 
-    def paint(text):
-        return f"\033[{sgr}m{text}\033[0m" if color else text
+    def paint(code, text):
+        return f"\033[{code}m{text}\033[0m" if color and code and text else text
+
+    dim = functools.partial(paint, "2")
+
+    def counted(code, text, count):
+        return paint(code, f"{text} (") + paint("1", str(count)) + paint(code, "):")
 
     def flush():
         nonlocal header
+        loose = LOOSE.get(header, "")
         if header:
-            print(f"{header[:-1]} ({len(entries.get('', []))}):")
+            print(counted(SECTIONS[header], header[:-1], len(entries.get("", []))))
             header = None
-        labels = {label: f"{label} ({len(paths)}):" for label, paths in entries.items() if label}
-        pad = max(map(len, labels.values()), default=0) + 1
+        plain = {label: f"{label} ({len(paths)}):" for label, paths in entries.items() if label}
+        pad = max(map(len, plain.values()), default=0) + 1
         for label, paths in entries.items():
-            render(labels[label].ljust(pad) if label else "", paths, width, paint)
+            code, first, indent = loose, "", 0
+            if label:
+                code, indent = TYPES.get(label, CONFLICT), pad
+                first = counted(code, label, len(paths)) + " " * (pad - len(plain[label]))
+            render(first, indent, paths, functools.partial(paint, code), dim)
         entries.clear()
 
     for raw in sys.stdin:
@@ -109,12 +162,10 @@ def main():
                 entries.setdefault(label, []).append(path)
                 continue
         flush()
-        if line in ("Untracked files:", "Ignored files:"):
+        if line in LOOSE:
             header = line
         else:
-            print(line)
-        if line.endswith(":") and not line.startswith(("\t", " ")):
-            sgr = "32" if line == "Changes to be committed:" else "31"
+            print(paint(SECTIONS.get(line, ""), line))
     flush()
 
 
