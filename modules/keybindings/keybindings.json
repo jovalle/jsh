@@ -21,10 +21,12 @@
   ],
   "xfce": [
     {
+      "name": "Ghostty",
       "binding": "<Super>Return",
       "command": "ghostty"
     },
     {
+      "name": "Helium",
       "binding": "<Super>b",
       "command": "helium"
     }

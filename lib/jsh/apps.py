@@ -1,11 +1,15 @@
 """Helpers for app modules: detect installed or running apps and publish root-owned policies."""
 
 import json
+import os
 import plistlib
+import signal
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
+from contextlib import contextmanager
 from pathlib import Path
 
 from jsh import system
@@ -19,9 +23,64 @@ def present(command, *paths):
 
 def running(*names):
     return any(
-        subprocess.run(["pgrep", "-x", name], check=False, capture_output=True).returncode == 0
+        subprocess.run(["pgrep", "-u", str(os.getuid()), "-x", name],
+                       check=False, capture_output=True).returncode == 0
         for name in names
     )
+
+
+def terminate(names):
+    for name in names:
+        output = system.query(["pgrep", "-u", str(os.getuid()), "-x", name])
+        for pid in output.split():
+            try:
+                os.kill(int(pid), signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+
+
+@contextmanager
+def closed_for_changes(ctx, label, names, command):
+    """Close a running app only for pending changes, and reopen it after the write."""
+    if not running(*names):
+        yield True
+        return
+    if ctx.dry_run:
+        ctx.notice(f"{label} must close and reopen for pending changes")
+        yield True
+        return
+    if not command or not shutil.which(command[0]):
+        ctx.notice(f"cannot reopen {label}; close it and rerun")
+        yield False
+        return
+    if MACOS:
+        try:
+            result = subprocess.run(["osascript", "-e", f'tell application "{label}" to quit'],
+                                    check=False, capture_output=True, timeout=10)
+            refused = result.returncode != 0
+        except subprocess.TimeoutExpired:
+            refused = True
+        # A quit Apple event can be vetoed (Waterfox answers "User canceled"); SIGTERM still
+        # shuts the app down cleanly.
+        if refused:
+            terminate(names)
+    else:
+        terminate(names)
+    deadline = time.monotonic() + 10
+    while running(*names) and time.monotonic() < deadline:
+        time.sleep(0.1)
+    if running(*names):
+        ctx.notice(f"{label} did not close; changes were skipped")
+        yield False
+        return
+    try:
+        yield True
+    finally:
+        try:
+            subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True)  # pylint: disable=consider-using-with
+        except OSError:
+            ctx.notice(f"could not reopen {label}; open it manually")
 
 
 def install_root(path, data):
