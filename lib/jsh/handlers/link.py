@@ -30,7 +30,7 @@ def units(step):
 
 
 def pairs(step):
-    source = Path(os.path.normpath(step.module.path / step.args["from"]))
+    source = Path(os.path.normpath(step.module.path / os.path.expanduser(step.args["from"])))
     target = Path(os.path.expanduser(step.args["to"]))
     if not step.args.get("tree") or not source.is_dir() or source.is_symlink():
         yield source, target

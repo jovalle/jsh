@@ -77,6 +77,7 @@ def load(path):
         raise ManifestError(f"{source}: unknown keys {', '.join(sorted(unknown))}")
     if not isinstance(data.get("description"), str):
         raise ManifestError(f"{source}: description is required")
+    data = overlay(data, path.parent.parent / "local" / name / "module.json")
     check_when(data.get("when"), source)
     module = Module(name, path, data)
     for phase in (*PHASES, "link"):
@@ -91,6 +92,28 @@ def load(path):
         if not isinstance(spec, dict) or not isinstance(spec.get("run"), str):
             raise ManifestError(f"{source}: commands.{command} needs run")
     return module
+
+
+def overlay(data, source):
+    """Append the steps of an optional machine-local local/<name>/module.json to data."""
+    if not source.is_file():
+        return data
+    try:
+        with open(source, encoding="utf-8") as stream:
+            extra = json.load(stream)
+    except json.JSONDecodeError as error:
+        raise ManifestError(f"{source}: {error}") from error
+    if not isinstance(extra, dict):
+        raise ManifestError(f"{source}: the manifest must be an object")
+    unknown = set(extra) - {*PHASES, "link"}
+    if unknown:
+        raise ManifestError(f"{source}: unknown keys {', '.join(sorted(unknown))}")
+    merged = dict(data)
+    for phase, entries in extra.items():
+        if not isinstance(entries, list):
+            raise ManifestError(f"{source}: {phase} must be a list of step objects")
+        merged[phase] = [*(data.get(phase) or []), *entries]
+    return merged
 
 
 def step(module, phase, entry, source):

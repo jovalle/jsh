@@ -23,7 +23,7 @@ def write(path, text, mode=0o644):
     path.chmod(mode)
 
 
-class EngineTests(unittest.TestCase):
+class EngineTests(unittest.TestCase):  # pylint: disable=too-many-public-methods
     def test_terminal_header_embeds_command_in_banner(self):
         stream = io.StringIO()
         stream.isatty = lambda: True
@@ -279,6 +279,19 @@ class EngineTests(unittest.TestCase):
         self.assertIn("! link: ~/.agents/skills/absent: ", out)
         self.assertIn("is missing; run jsh install first", out)
         self.assertFalse((self.home / ".agents/skills/absent").is_symlink())
+
+    def test_local_manifest_appends_machine_local_links(self):
+        self.module("skills", {"description": "Skills", "link": [{"from": "kit", "to": "~/kit"}]})
+        write(self.base / "modules/skills/kit/SKILL.md", "kit\n")
+        write(self.home / "private/SKILL.md", "private\n")
+        write(
+            self.base / "local/skills/module.json",
+            json.dumps({"link": [{"from": "~/private", "to": "~/.agents/skills/private"}]}),
+        )
+        self.run_phases(("link",))
+        self.assertTrue((self.home / "kit").is_symlink())
+        target = self.home / ".agents/skills/private"
+        self.assertEqual(os.readlink(target), str(self.home / "private"))
 
     def test_stale_link_into_the_checkout_is_replaced_without_backup(self):
         self.module("shell", {"description": "Shell"}, {"home/.zshrc": "zsh\n"})
