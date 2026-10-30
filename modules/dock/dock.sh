@@ -84,7 +84,8 @@ find_xfce_dock_panel() {
 }
 
 write_pins() {
-  local target=$1 pins=$2 temporary
+  local target=$1 pins=$2 temporary old_pins
+  old_pins=$(sed -n '/^\[user\]$/,/^\[/{s/^pinned=//p;}' "${target}" 2>/dev/null || true)
   temporary=$(mktemp "${target}.XXXXXX")
   awk -v pins="${pins}" '
     BEGIN { section=0; found=0 }
@@ -101,6 +102,12 @@ write_pins() {
   install -m 0644 "${temporary}" "${target}"
   rm -f -- "${temporary}"
   dock_file_changed=1
+  if [[ ${old_pins} != "${pins}" ]]; then
+    old_pins=$(printf '%s' "${old_pins}" | tr ';' '\n' | sed '/^$/d' | paste -sd ',' - | sed 's/,/, /g')
+    local new_pins
+    new_pins=$(printf '%s' "${pins}" | tr ';' '\n' | sed '/^$/d' | paste -sd ',' - | sed 's/,/, /g')
+    dock_details+=("pins: ${old_pins:-(empty)} → ${new_pins:-(empty)}")
+  fi
 }
 
 configure_gnome_dock() {
@@ -185,8 +192,9 @@ configure_xfce_dock() {
   done
   write_pins "${target}" "${pins}"
   panel_after=$(xfconf-query -c xfce4-panel -lv 2>/dev/null || true)
-  [[ ${panel_before} != "${panel_after}" || ${dock_file_changed} != 0 ]] || return
+  [[ ${panel_before} != "${panel_after}" || ${dock_file_changed} != 0 ]] || return 0
   dock_changed=1
+  [[ ${panel_before} == "${panel_after}" ]] || dock_details+=("panel: dock plugin configuration updated")
   if pgrep -x xfce4-panel >/dev/null 2>&1; then
     timeout 5 xfce4-panel -r >/dev/null 2>&1 || true
     sleep 1
@@ -196,6 +204,7 @@ configure_xfce_dock() {
 
 desktop=${JSH_DESKTOP:-}
 dock_changed=0
+dock_details=()
 pins=$(dock_pins)
 [[ -n ${pins} ]] || exit 0
 case ${desktop} in
@@ -209,6 +218,7 @@ if [[ ${JSH_DRY_RUN:-0} == 1 ]]; then
 fi
 "configure_${desktop}_dock" "${pins}"
 if ((dock_changed)); then
+  for detail in "${dock_details[@]}"; do jsh::detail "${detail}"; done
   jsh::changed "${desktop^^} dock pins"
 else
   jsh::current

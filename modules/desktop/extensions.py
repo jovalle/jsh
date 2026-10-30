@@ -1,4 +1,4 @@
-"""GNOME Shell extensions: install pinned builds for the running shell, then enable them."""
+"""Install pinned GNOME Shell extensions and configure the enabled set."""
 
 import json
 import os
@@ -9,6 +9,7 @@ from pathlib import Path
 from jsh import desktop, system, web
 
 HERE = Path(__file__).resolve().parent
+DESKTOP_ICONS = ("ding@rastersoft.com", "desktop-icons@csoriano")
 
 
 def data():
@@ -50,7 +51,7 @@ def install(ctx):
 def configure(ctx):
     spec = data()
     enabled = desktop.gnome_list("org.gnome.shell", "enabled-extensions")
-    wanted = list(enabled)
+    wanted = [uuid for uuid in enabled if uuid not in DESKTOP_ICONS]
     for uuid in spec["enable"]:
         if not present(uuid):
             ctx.notice(f"{uuid} is not installed; run: jsh install desktop")
@@ -61,6 +62,11 @@ def configure(ctx):
     else:
         label = "GNOME extensions"
         desktop.gsetting(ctx, "org.gnome.shell", "enabled-extensions", str(wanted), label)
+    disabled = desktop.gnome_list("org.gnome.shell", "disabled-extensions")
+    wanted_disabled = disabled + [uuid for uuid in DESKTOP_ICONS if uuid not in disabled]
+    if wanted_disabled != disabled:
+        desktop.gsetting(ctx, "org.gnome.shell", "disabled-extensions", str(wanted_disabled),
+                         "desktop icons")
     desktop.gsetting(ctx, "org.gnome.shell", "disable-user-extensions", "false")
     schemas = roots()[0] / "Vitals@CoreCoding.com/schemas"
     if schemas.is_dir():
