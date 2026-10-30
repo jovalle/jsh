@@ -110,7 +110,46 @@ class AiConfigureTests(unittest.TestCase):
         self.module.configure(self.ctx)
         self.assertEqual(json.loads(opencode.read_text())["mcp"], {"rea": {}})
         self.assertIs(json.loads(opencode.read_text())["autoupdate"], True)
-        self.assertEqual(codex.read_text(), "check_for_update_on_startup = true\n")
+        self.assertEqual(
+            codex.read_text(),
+            "check_for_update_on_startup = true\n\n[desktop]\n"
+            'open-link-in-target-preference = "external-browser"\n'
+            'open-local-url-in-target-preference = "external-browser"\n',
+        )
+
+    def test_toml_keys_updates_existing_table(self):
+        text = (
+            '[desktop]\nopen-link-in-target-preference = "in-app-browser"\nx = 1\n\n'
+            "[tui]\ny = 2\n"
+        )
+        result = self.module.toml_keys(text, self.module.CODEX_DESKTOP, "desktop")
+        self.assertEqual(
+            result,
+            '[desktop]\nopen-link-in-target-preference = "external-browser"\nx = 1\n'
+            'open-local-url-in-target-preference = "external-browser"\n\n[tui]\ny = 2\n',
+        )
+        again = self.module.toml_keys(result, self.module.CODEX_DESKTOP, "desktop")
+        self.assertEqual(again, result)
+
+    def test_helium_host_mirrors_codex_registry(self):
+        helium = self.home / "Library/Application Support/net.imput.helium"
+        helium.mkdir(parents=True)
+        registry = self.home / ".codex/chrome-native-hosts-v2.json"
+        registry.parent.mkdir()
+        entry = {
+            "extensionIds": ["abc"],
+            "nativeHostNames": ["com.openai.codexextension"],
+            "paths": {"extensionHostPath": "/host"},
+            "updatedAt": "2026",
+        }
+        registry.write_text(json.dumps({"entries": [entry]}), encoding="utf-8")
+        with mock.patch.object(self.module.apps, "MACOS", True):
+            self.module.helium_host(self.ctx)
+        manifest = json.loads(
+            (helium / "NativeMessagingHosts/com.openai.codexextension.json").read_text()
+        )
+        self.assertEqual(manifest["allowed_origins"], ["chrome-extension://abc/"])
+        self.assertEqual(manifest["path"], "/host")
 
 
 if __name__ == "__main__":
