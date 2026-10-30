@@ -165,6 +165,9 @@ Notes:
   `~/.local/state/jsh/backups`); a stale link into this checkout is replaced without
   one. Targets under a symlinked directory are left for you to review.
 - Personal shell additions belong in `~/.jshrc`, `~/.local/.jshrc`, or `local/.jshrc`.
+- `local/<module>/module.json` adds machine-local steps to a module: its `install`, `configure`,
+  `update`, and `link` lists are appended to the module's own. Link sources may start with `~`,
+  so `local/skills/module.json` can link private skills from elsewhere into `~/.agents/skills`.
 - Machine-local browser additions go in `local/waterfox/policies.json`, `local/waterfox/user.js`,
   and `local/helium/policy.json`; `jsh configure` merges them over the managed files. On macOS,
   `local/helium/unpacked.json` lists extension directories that Helium keeps loaded unpacked,
