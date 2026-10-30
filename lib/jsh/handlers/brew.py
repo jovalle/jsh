@@ -62,6 +62,8 @@ def flag(kind):
 
 def missing(kind, names):
     current = set(system.query(["brew", "list", flag(kind), "-1"]).splitlines())
+    if kind == "casks" and os.path.isdir("/Applications/Sublime Text.app"):
+        current.add("sublime-text")
     absent = [name for name in names if name not in current]
     if not absent:
         return []
@@ -134,6 +136,8 @@ def update(ctx, steps):
         stale = {}
         for entry in outdated.get(kind, []):
             names = {entry["name"], entry["name"].rsplit("/", 1)[-1]}
+            if kind == "casks" and "sublime-text" in names:
+                continue  # Preserve the patched application.
             match = next(iter(names & declared), None)
             if match:
                 old = entry.get("installed_versions")

@@ -74,6 +74,18 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual(brew.add(ctx, "formulae", ["good", "bad"]), ["bad"])
         self.assertEqual(self.changes(), [("+", "good")])
 
+    def test_brew_tolerates_existing_sublime_app_without_a_cask_record(self):
+        with mock.patch.object(brew.system, "query", return_value=""), mock.patch.object(
+            brew.os.path, "isdir", return_value=True
+        ) as isdir:
+            self.assertEqual(brew.missing("casks", ["sublime-text", "other"]), ["other"])
+        isdir.assert_called_once_with("/Applications/Sublime Text.app")
+
+        with mock.patch.object(brew.system, "query", return_value=""), mock.patch.object(
+            brew.os.path, "isdir", return_value=False
+        ):
+            self.assertEqual(brew.missing("casks", ["sublime-text"]), ["sublime-text"])
+
     def test_brew_update_upgrades_only_declared_outdated_packages(self):
         outdated = {
             "formulae": [
@@ -89,6 +101,28 @@ class HandlerTests(unittest.TestCase):
             brew.update(ctx, steps({"formulae": ["jq", "git"]}))
         ctx.run.assert_any_call(["brew", "upgrade", "--formula", "jq"])
         self.assertEqual(self.changes(), [("~", "jq 1.6 → 1.7")])
+
+    def test_brew_update_preserves_sublime_while_upgrading_other_casks(self):
+        outdated = {
+            "casks": [
+                {
+                    "name": "homebrew/cask/sublime-text",
+                    "installed_versions": "1",
+                    "current_version": "2",
+                },
+                {"name": "ghostty", "installed_versions": "1", "current_version": "2"},
+            ]
+        }
+        ctx = self.context("update")
+        with mock.patch.object(brew.shutil, "which", return_value="/brew"), mock.patch.object(
+            brew.system, "query", return_value=json.dumps(outdated)
+        ):
+            brew.update(ctx, steps({"casks": ["sublime-text", "ghostty"]}))
+        self.assertEqual(ctx.run.call_args_list, [
+            mock.call(["brew", "update", "--quiet"]),
+            mock.call(["brew", "upgrade", "--cask", "ghostty"]),
+        ])
+        self.assertEqual(self.changes(), [("~", "ghostty 1 → 2")])
 
     def test_brew_is_required_on_macos_but_optional_on_linux(self):
         with mock.patch.object(brew.shutil, "which", return_value=None):
