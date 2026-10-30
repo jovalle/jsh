@@ -9,9 +9,11 @@
         "skills/chrome-agent": "https://github.com/sderosiaux/chrome-agent.git",
         "skills/cloudflare-skills": "https://github.com/cloudflare/skills.git",
         "skills/hallmark": "https://github.com/Nutlope/hallmark.git",
+        "skills/humanizer": "https://github.com/blader/humanizer.git",
         "skills/impeccable": "https://github.com/pbakaus/impeccable.git",
         "skills/mattpocock-skills": "https://github.com/mattpocock/skills.git",
         "skills/openai-skills": "https://github.com/openai/skills.git",
+        "skills/superpowers": "https://github.com/obra/superpowers.git",
         "skills/thesysdev-skills": "https://github.com/thesysdev/skills.git",
         "skills/ui-ux-pro-max-skill": "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill.git"
       }
@@ -90,6 +92,7 @@
     },
     { "from": "../../local/vendor/skills/cloudflare-skills/skills/wrangler", "to": "~/.agents/skills/wrangler" },
     { "from": "../../local/vendor/skills/hallmark/skills/hallmark", "to": "~/.agents/skills/hallmark" },
+    { "from": "../../local/vendor/skills/humanizer", "to": "~/.agents/skills/humanizer" },
     { "from": "../../local/vendor/skills/impeccable/.agents/skills/impeccable", "to": "~/.agents/skills/impeccable" },
     {
       "from": "../../local/vendor/skills/mattpocock-skills/skills/engineering/research",
@@ -105,6 +108,20 @@
       "to": "~/.agents/skills/gh-address-comments"
     },
     { "from": "../../local/vendor/skills/openai-skills/skills/.curated/gh-fix-ci", "to": "~/.agents/skills/gh-fix-ci" },
+    { "from": "../../local/vendor/skills/superpowers/skills/brainstorming", "to": "~/.agents/skills/brainstorming" },
+    { "from": "../../local/vendor/skills/superpowers/skills/dispatching-parallel-agents", "to": "~/.agents/skills/dispatching-parallel-agents" },
+    { "from": "../../local/vendor/skills/superpowers/skills/executing-plans", "to": "~/.agents/skills/executing-plans" },
+    { "from": "../../local/vendor/skills/superpowers/skills/finishing-a-development-branch", "to": "~/.agents/skills/finishing-a-development-branch" },
+    { "from": "../../local/vendor/skills/superpowers/skills/receiving-code-review", "to": "~/.agents/skills/receiving-code-review" },
+    { "from": "../../local/vendor/skills/superpowers/skills/requesting-code-review", "to": "~/.agents/skills/requesting-code-review" },
+    { "from": "../../local/vendor/skills/superpowers/skills/subagent-driven-development", "to": "~/.agents/skills/subagent-driven-development" },
+    { "from": "../../local/vendor/skills/superpowers/skills/systematic-debugging", "to": "~/.agents/skills/systematic-debugging" },
+    { "from": "../../local/vendor/skills/superpowers/skills/test-driven-development", "to": "~/.agents/skills/test-driven-development" },
+    { "from": "../../local/vendor/skills/superpowers/skills/using-git-worktrees", "to": "~/.agents/skills/using-git-worktrees" },
+    { "from": "../../local/vendor/skills/superpowers/skills/using-superpowers", "to": "~/.agents/skills/using-superpowers" },
+    { "from": "../../local/vendor/skills/superpowers/skills/verification-before-completion", "to": "~/.agents/skills/verification-before-completion" },
+    { "from": "../../local/vendor/skills/superpowers/skills/writing-plans", "to": "~/.agents/skills/writing-plans" },
+    { "from": "../../local/vendor/skills/superpowers/skills/writing-skills", "to": "~/.agents/skills/writing-skills" },
     { "from": "../../local/vendor/skills/thesysdev-skills/skills/openui", "to": "~/.agents/skills/openui" },
     {
       "from": "../../local/vendor/skills/ui-ux-pro-max-skill/.claude/skills/ui-ux-pro-max",
