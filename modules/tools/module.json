@@ -1,5 +1,6 @@
 {
   "description": "Everyday command-line tools and their settings",
+  "configure": [{ "script": "syncthing.py" }],
   "install": [
     {
       "brew": {
