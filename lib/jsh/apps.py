@@ -59,6 +59,9 @@ def apply_policy(ctx, path, desired, keep_unmanaged=False):
     if current == updated:
         ctx.current()
         return
+    if getattr(ctx, "user_only", False):
+        ctx.defer_system()
+        return
     if not ctx.dry_run:
         if not ctx.admin():
             ctx.notice(f"{path} needs sudo; run sudo -v first, then rerun")

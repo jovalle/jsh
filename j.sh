@@ -1,10 +1,39 @@
 #!/usr/bin/env bash
-# Set up this machine from the modules in this checkout (see: ./j.sh --help).
+# Set up this machine from this checkout, or clone it first when piped from curl.
 
 set -euo pipefail
 
-JSH_ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+source_path=${BASH_SOURCE[0]:-}
+# Piped from curl: clone the checkout, then run its copy of this script.
+if [[ -z ${source_path} || ! -d $(dirname -- "${source_path}")/lib/jsh ]]; then
+  target=${JSH_HOME:-${HOME}/.jsh}
+  if [[ -e ${target} || -L ${target} ]]; then
+    printf 'jsh: %s already exists; run its j.sh to open setup\n' "${target}" >&2
+    exit 1
+  fi
+  command -v git >/dev/null 2>&1 || {
+    printf 'jsh: Git is required to clone the checkout; install it first\n' >&2
+    exit 1
+  }
+  [[ -r /dev/tty ]] || {
+    printf 'jsh: setup needs an interactive terminal\n' >&2
+    exit 1
+  }
+  git clone https://github.com/jovalle/jsh.git "${target}"
+  exec "${target}/j.sh" </dev/tty
+fi
+
+JSH_ROOT=$(cd -- "$(dirname -- "${source_path}")" && pwd -P)
 export JSH_ROOT
+unset source_path
+
+# Find a standard Homebrew installation even before shell startup has added it to PATH.
+for brew_prefix in /opt/homebrew /home/linuxbrew/.linuxbrew; do
+  if ! command -v brew >/dev/null 2>&1 && [[ -x ${brew_prefix}/bin/brew ]]; then
+    export PATH="${brew_prefix}/bin:${brew_prefix}/sbin:${PATH}"
+  fi
+done
+unset brew_prefix
 
 if [[ ${1:-} == runtime ]]; then
   shift
@@ -60,6 +89,10 @@ if ! python=$(find_python); then
     printf 'jsh: Python 3.9 or later is required; run without --dry-run to install it\n' >&2
     exit 1
   fi
+  if [[ $# == 0 ]]; then
+    printf 'jsh: install Python 3.9 or later, then run ./j.sh again\n' >&2
+    exit 1
+  fi
   printf 'jsh: installing Python 3.9 or later\n' >&2
   if ! install_python || ! python=$(find_python); then
     printf 'jsh: could not install Python 3.9+; see %s\n' "${JSH_ROOT}/local/logs/python.log" >&2
@@ -67,4 +100,5 @@ if ! python=$(find_python); then
   fi
 fi
 export PYTHONPATH="${JSH_ROOT}/lib${PYTHONPATH:+:${PYTHONPATH}}" PYTHONDONTWRITEBYTECODE=1
+[[ $# != 0 ]] || set -- wizard
 exec "${python}" -m jsh "$@"

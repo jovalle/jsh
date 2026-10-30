@@ -22,7 +22,7 @@ PHASES = {
 USAGE = """\
 Usage: jsh COMMAND [MODULE...] [--dry-run]
 
-  setup [MODULE...]       Install, link, and configure (default: every module)
+  setup [MODULE...]       Install, link, and configure
   install [MODULE...]     Install missing software
   link [MODULE...]        Link module home/ files into your home directory
   configure [MODULE...]   Apply settings
@@ -31,54 +31,94 @@ Usage: jsh COMMAND [MODULE...] [--dry-run]
   list                    List modules and their commands
   MODULE COMMAND [ARG...] Run a module command
   runtime                 Open an isolated zsh with this checkout's dotfiles
+  wizard                  Choose what to set up on this machine
 
 --dry-run shows what would change without changing anything. Root changes need an
 authorized sudo session (run sudo -v first); jsh never prompts for a password.
 """
 
 
-def main(argv):
+def main(argv):  # pylint: disable=too-many-return-statements
     if not argv or argv[0] in ("-h", "--help", "help"):
+        if sys.stdout.isatty():
+            Display().header("jsh " + (argv[0] if argv else "--help"), "")
         sys.stdout.write(USAGE)
         return 0
     command, rest = argv[0], argv[1:]
     try:
         found = catalog.discover()
+        if command == "wizard" and not rest:
+            from jsh import wizard  # pylint: disable=import-outside-toplevel
+
+            return wizard.start(found)
         if command in PHASES:
-            options = [argument for argument in rest if argument.startswith("-")]
-            if set(options) - {"--dry-run"}:
-                raise ValueError(f"Unknown option: {(set(options) - {'--dry-run'}).pop()}")
-            names = [argument for argument in rest if not argument.startswith("-")]
-            return run(command, catalog.select(found, names), bool(names), "--dry-run" in options)
+            return phase(command, rest, found)
         if command == "list" and not rest:
+            if sys.stdout.isatty():
+                Display().header("jsh list", describe(system.Facts(), False))
             return show(found, system.Facts())
         module = next((module for module in found if module.name == command), None)
         if module is None:
             raise ValueError(f"Unknown command: {command} (see: jsh --help)")
+        if sys.stdout.isatty():
+            label = "jsh " + " ".join([command, *rest[:1]])
+            Display().header(label, describe(system.Facts(), False))
         return invoke(module, rest)
-    except (ManifestError, ValueError, RuntimeError) as error:
+    except (ManifestError, ValueError, RuntimeError, OSError) as error:
         paint = "\033[31m{}\033[0m" if styled(sys.stderr) else "{}"
         print(paint.format(f"✗ {error}"), file=sys.stderr)
         return 2
+    except (EOFError, KeyboardInterrupt):
+        print("\nSetup cancelled.", file=sys.stderr)
+        return 130
 
 
-def run(command, selected, named, dry_run):
+def phase(command, rest, found):
+    """Run a phase command on the named modules, or on the wizard's saved selection."""
+    options = [argument for argument in rest if argument.startswith("-")]
+    if set(options) - {"--dry-run"}:
+        raise ValueError(f"Unknown option: {(set(options) - {'--dry-run'}).pop()}")
+    names = [argument for argument in rest if not argument.startswith("-")]
+    if names:
+        selected, explicit = catalog.select(found, names), names
+    else:
+        from jsh import wizard  # pylint: disable=import-outside-toplevel
+
+        saved = wizard.load()
+        selected = catalog.select(found, saved["modules"]) if saved is not None else found
+        explicit = saved["optional"] if saved is not None else []
+    dry_run = "--dry-run" in options
+    result = run(command, selected, explicit, dry_run)
+    if command == "setup" and not dry_run and result == 0 and sys.stdin.isatty():
+        enter_runtime()
+    return result
+
+
+def enter_runtime():
+    """Replace the setup process with the isolated interactive shell."""
+    sys.stdout.flush()
+    launcher = str(system.ROOT / "bin/jsh")
+    os.execv(launcher, [launcher])
+
+
+def run(command, selected, explicit, dry_run, user_only=False):
     status = command == "status"
     dry_run = dry_run or status
     facts = system.Facts()
-    explicit = [module.name for module in selected] if named else ()
     tasks = runner.plan(selected, PHASES[command], facts, explicit)
     display = Display(dry_run=dry_run)
-    display.header(f"jsh {command}", describe(facts, dry_run and not status))
+    detail = describe(facts, dry_run and not status)
+    if explicit:
+        detail += " · " + ", ".join(explicit)
+    display.header(f"jsh {command}", detail)
     if status:
         checkout(display)
-    if named:
-        for module in selected:
-            if not facts.matches(module.when):
-                display.notice(module.name, "does not apply to this machine")
+    for module in selected:
+        if module.name in explicit and not facts.matches(module.when):
+            display.notice(module.name, "does not apply to this machine")
     interrupted = False
     try:
-        ok = runner.execute(tasks, display, facts, dry_run)
+        ok = runner.execute(tasks, display, facts, dry_run, user_only=user_only)
     except KeyboardInterrupt:
         ok, interrupted = False, True
     display.summary(interrupted)
