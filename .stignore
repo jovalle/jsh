@@ -1,3 +1,7 @@
+.git
+node_modules
+/local/
+/tmp/
 (?d).cache
 (?d)*.ipc
 (?d)*.sock
