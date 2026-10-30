@@ -37,21 +37,26 @@ class WizardTests(unittest.TestCase):
         ]
 
     def wizard(self, answers):
-        with mock.patch.object(sys.stdin, "isatty", return_value=True), \
-             mock.patch("builtins.input", side_effect=answers), \
-             mock.patch.object(system, "Facts", return_value=self.facts), \
-             mock.patch.object(cli, "run", return_value=0) as run, \
-             mock.patch("sys.stdout", new_callable=io.StringIO):
+        with (
+            mock.patch.object(sys.stdin, "isatty", return_value=True),
+            mock.patch("builtins.input", side_effect=answers),
+            mock.patch.object(system, "Facts", return_value=self.facts),
+            mock.patch.object(cli, "run", return_value=0) as run,
+            mock.patch("sys.stdout", new_callable=io.StringIO),
+        ):
             result = wizard.start(self.found)
         return result, run.call_args_list
 
     def test_preview_then_apply_and_save_optional_selection(self):
         result, calls = self.wizard(["all", "extra", "link", "yes"])
         self.assertEqual(result, 0)
-        self.assertEqual([(c.args[0], c.args[2], c.args[3]) for c in calls],
-                         [("link", ["extra"], True), ("link", ["extra"], False)])
-        self.assertEqual(wizard.load(), {"modules": ["core", "shell", "extra"],
-                                         "optional": ["extra"]})
+        self.assertEqual(
+            [(c.args[0], c.args[2], c.args[3]) for c in calls],
+            [("link", ["extra"], True), ("link", ["extra"], False)],
+        )
+        self.assertEqual(
+            wizard.load(), {"modules": ["core", "shell", "extra"], "optional": ["extra"]}
+        )
 
     def test_cancel_does_not_save_or_apply(self):
         _, calls = self.wizard(["", "", "n"])
@@ -62,8 +67,10 @@ class WizardTests(unittest.TestCase):
     def test_saved_selection_scopes_unnamed_commands_but_not_explicit_ones(self):
         wizard.path().parent.mkdir(parents=True)
         wizard.path().write_text(json.dumps({"modules": ["core"], "optional": []}))
-        with mock.patch.object(cli.catalog, "discover", return_value=self.found), \
-             mock.patch.object(cli, "run", return_value=0) as run:
+        with (
+            mock.patch.object(cli.catalog, "discover", return_value=self.found),
+            mock.patch.object(cli, "run", return_value=0) as run,
+        ):
             cli.main(["update"])
             self.assertEqual([m.name for m in run.call_args.args[1]], ["core"])
             cli.main(["install", "extra"])
@@ -82,13 +89,14 @@ class WizardTests(unittest.TestCase):
         ]
         tasks = runner.plan(self.found[:1], ("install",), self.facts)
         stream = io.StringIO()
-        with mock.patch.object(system, "ROOT", self.base), \
-             mock.patch.object(system, "admin", return_value=True), \
-             mock.patch.object(tasks[0].handler, "install") as install:
+        with (
+            mock.patch.object(system, "ROOT", self.base),
+            mock.patch.object(system, "admin", return_value=True),
+            mock.patch.object(tasks[0].handler, "install") as install,
+        ):
             runner.execute(tasks, Display(stream), self.facts, False, user_only=True)
         install.assert_not_called()
-        self.assertIn("use `jsh setup core`",
-                      stream.getvalue())
+        self.assertIn("use `jsh setup core`", stream.getvalue())
 
     def test_skipped_system_steps_are_reported_once_with_modules(self):
         self.found[0].steps["install"] = [
@@ -106,11 +114,13 @@ class WizardTests(unittest.TestCase):
         self.assertIn("jsh setup core shell", stream.getvalue())
 
     def test_interactive_preview_precedes_user_only_apply(self):
-        with mock.patch.object(wizard.menu, "choose", side_effect=["minimal", ["core"]]), \
-             mock.patch.object(wizard.menu, "view", return_value="apply") as view, \
-             mock.patch.object(cli, "run", return_value=0) as run, \
-             mock.patch.object(cli, "enter_runtime") as runtime, \
-             mock.patch("sys.stdout", new_callable=io.StringIO):
+        with (
+            mock.patch.object(wizard.menu, "choose", side_effect=["minimal", ["core"]]),
+            mock.patch.object(wizard.menu, "view", return_value="apply") as view,
+            mock.patch.object(cli, "run", return_value=0) as run,
+            mock.patch.object(cli, "enter_runtime") as runtime,
+            mock.patch("sys.stdout", new_callable=io.StringIO),
+        ):
             self.assertEqual(wizard.interactive(self.found, self.facts, None), 0)
         self.assertEqual([call.args[3] for call in run.call_args_list], [True, False])
         self.assertTrue(all(call.kwargs["user_only"] for call in run.call_args_list))
@@ -120,17 +130,21 @@ class WizardTests(unittest.TestCase):
         self.assertEqual(wizard.load()["modules"], ["core"])
 
     def test_runtime_is_not_opened_after_failed_setup_or_other_phase(self):
-        with mock.patch.object(cli, "run", side_effect=[1, 0]), \
-             mock.patch.object(cli, "enter_runtime") as runtime:
+        with (
+            mock.patch.object(cli, "run", side_effect=[1, 0]),
+            mock.patch.object(cli, "enter_runtime") as runtime,
+        ):
             self.assertEqual(wizard.apply("setup", self.found, []), 1)
             self.assertEqual(wizard.apply("link", self.found, []), 0)
         runtime.assert_not_called()
 
     def test_direct_setup_opens_runtime_only_after_successful_interactive_run(self):
-        with mock.patch.object(cli.catalog, "discover", return_value=self.found), \
-             mock.patch.object(cli, "run", side_effect=[0, 0, 1]), \
-             mock.patch.object(sys.stdin, "isatty", return_value=True), \
-             mock.patch.object(cli, "enter_runtime") as runtime:
+        with (
+            mock.patch.object(cli.catalog, "discover", return_value=self.found),
+            mock.patch.object(cli, "run", side_effect=[0, 0, 1]),
+            mock.patch.object(sys.stdin, "isatty", return_value=True),
+            mock.patch.object(cli, "enter_runtime") as runtime,
+        ):
             cli.main(["setup", "core"])
             cli.main(["setup", "core", "--dry-run"])
             cli.main(["setup", "core"])
@@ -144,11 +158,14 @@ class WizardTests(unittest.TestCase):
         self.assertNotIn("Your workstation", pick.call_args.args[0])
 
     def test_change_from_preview_returns_to_modules(self):
-        with mock.patch.object(wizard.menu, "choose",
-                               side_effect=["minimal", ["core"], None, None]) as pick, \
-             mock.patch.object(wizard.menu, "view", return_value="change"), \
-             mock.patch.object(cli, "run", return_value=0), \
-             mock.patch("sys.stdout", new_callable=io.StringIO):
+        with (
+            mock.patch.object(
+                wizard.menu, "choose", side_effect=["minimal", ["core"], None, None]
+            ) as pick,
+            mock.patch.object(wizard.menu, "view", return_value="change"),
+            mock.patch.object(cli, "run", return_value=0),
+            mock.patch("sys.stdout", new_callable=io.StringIO),
+        ):
             self.assertEqual(wizard.interactive(self.found, self.facts, None), 0)
         self.assertEqual(pick.call_args_list[2].args[0], "Setup · Choose modules")
 

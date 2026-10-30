@@ -65,7 +65,10 @@ ssh_agent_service_socket_path() {
   read -r -a assignments <<<"${environment}"
   for assignment in "${assignments[@]}"; do
     case ${assignment} in
-      SSH_AUTH_SOCK=*) printf '%s\n' "${assignment#SSH_AUTH_SOCK=}"; return ;;
+      SSH_AUTH_SOCK=*)
+        printf '%s\n' "${assignment#SSH_AUTH_SOCK=}"
+        return
+        ;;
     esac
   done
 }
@@ -98,7 +101,7 @@ enable_user_unit() {
     return
   fi
   state=$(systemctl --user is-enabled "${unit}" 2>/dev/null || true)
-  if [[ ${state} == enabled || ${state} == static ]] && \
+  if [[ ${state} == enabled || ${state} == static ]] &&
     systemctl --user is-active --quiet "${unit}"; then
     jsh::current
     return

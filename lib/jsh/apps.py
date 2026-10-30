@@ -23,8 +23,10 @@ def present(command, *paths):
 
 def running(*names):
     return any(
-        subprocess.run(["pgrep", "-u", str(os.getuid()), "-x", name],
-                       check=False, capture_output=True).returncode == 0
+        subprocess.run(
+            ["pgrep", "-u", str(os.getuid()), "-x", name], check=False, capture_output=True
+        ).returncode
+        == 0
         for name in names
     )
 
@@ -55,8 +57,12 @@ def closed_for_changes(ctx, label, names, command):
         return
     if MACOS:
         try:
-            result = subprocess.run(["osascript", "-e", f'tell application "{label}" to quit'],
-                                    check=False, capture_output=True, timeout=10)
+            result = subprocess.run(
+                ["osascript", "-e", f'tell application "{label}" to quit'],
+                check=False,
+                capture_output=True,
+                timeout=10,
+            )
             refused = result.returncode != 0
         except subprocess.TimeoutExpired:
             refused = True
@@ -77,8 +83,13 @@ def closed_for_changes(ctx, label, names, command):
         yield True
     finally:
         try:
-            subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL, start_new_session=True)  # pylint: disable=consider-using-with
+            subprocess.Popen(
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )  # pylint: disable=consider-using-with
         except OSError:
             ctx.notice(f"could not reopen {label}; open it manually")
 

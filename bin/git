@@ -13,41 +13,41 @@
 set -euo pipefail
 
 git_bin=
-IFS=: read -ra path_dirs <<< "${PATH}"
+IFS=: read -ra path_dirs <<<"${PATH}"
 for dir in "${path_dirs[@]}"; do
-  candidate=${dir:-.}/git
-  if [[ -x ${candidate} && ! -d ${candidate} && ! ${candidate} -ef ${BASH_SOURCE[0]} ]]; then
-    git_bin=${candidate}
-    break
-  fi
+	candidate=${dir:-.}/git
+	if [[ -x ${candidate} && ! -d ${candidate} && ! ${candidate} -ef ${BASH_SOURCE[0]} ]]; then
+		git_bin=${candidate}
+		break
+	fi
 done
 if [[ -z ${git_bin} ]]; then
-  printf 'git: no git found on PATH besides %s\n' "${BASH_SOURCE[0]}" >&2
-  exit 127
+	printf 'git: no git found on PATH besides %s\n' "${BASH_SOURCE[0]}" >&2
+	exit 127
 fi
 
 case ${1:-} in
-  save | load | refresh | profile | handoff) ;;
-  commit)
-    case " $* " in
-      *' -t'* | *' --timestamp'*) ;;
-      *) exec "${git_bin}" "$@" ;;
-    esac
-    ;;
-  status)
-    [[ -t 1 ]] || exec "${git_bin}" "$@"
-    case " $* " in
-      *' --raw '*)
-        args=()
-        for arg in "$@"; do [[ ${arg} == --raw ]] || args+=("${arg}"); done
-        exec "${git_bin}" "${args[@]}"
-        ;;
-    esac
-    case " $* " in
-      *' --porcelain'* | *' -z '* | *' --null '* | *' -h '* | *' --help '*) exec "${git_bin}" "$@" ;;
-    esac
-    ;;
-  *) exec "${git_bin}" "$@" ;;
+save | load | refresh | profile | handoff) ;;
+commit)
+	case " $* " in
+	*' -t'* | *' --timestamp'*) ;;
+	*) exec "${git_bin}" "$@" ;;
+	esac
+	;;
+status)
+	[[ -t 1 ]] || exec "${git_bin}" "$@"
+	case " $* " in
+	*' --raw '*)
+		args=()
+		for arg in "$@"; do [[ ${arg} == --raw ]] || args+=("${arg}"); done
+		exec "${git_bin}" "${args[@]}"
+		;;
+	esac
+	case " $* " in
+	*' --porcelain'* | *' -z '* | *' --null '* | *' -h '* | *' --help '*) exec "${git_bin}" "$@" ;;
+	esac
+	;;
+*) exec "${git_bin}" "$@" ;;
 esac
 
 JSH_ROOT=$(CDPATH='' cd -P "${BASH_SOURCE[0]%/*}/.." && pwd -P)
@@ -56,194 +56,194 @@ JSH_ROOT=$(CDPATH='' cd -P "${BASH_SOURCE[0]%/*}/.." && pwd -P)
 jsh::color_init
 
 die() {
-  jsh::log_error "$*"
-  exit 1
+	jsh::log_error "$*"
+	exit 1
 }
 
 run_git() {
-  "${git_bin}" "$@"
+	"${git_bin}" "$@"
 }
 
 # ---- commit -t ----
 
-if date --version > /dev/null 2>&1; then gnu_date=1; else gnu_date=0; fi
+if date --version >/dev/null 2>&1; then gnu_date=1; else gnu_date=0; fi
 
 format_epoch() {
-  if ((gnu_date)); then date -d "@$1" "+$2"; else date -r "$1" "+$2"; fi
+	if ((gnu_date)); then date -d "@$1" "+$2"; else date -r "$1" "+$2"; fi
 }
 
 # Usage: to_epoch 'YYYY-MM-DD HH:MM:SS'. Rejects times that do not exist, like 2026-02-30.
 to_epoch() {
-  local epoch
-  if ((gnu_date)); then
-    epoch=$(date -d "$1" +%s 2> /dev/null) || return 1
-  else
-    epoch=$(date -j -f '%Y-%m-%d %H:%M:%S' "$1" +%s 2> /dev/null) || return 1
-  fi
-  [[ $(format_epoch "${epoch}" '%Y-%m-%d %H:%M:%S') == "$1" ]] || return 1
-  printf '%s\n' "${epoch}"
+	local epoch
+	if ((gnu_date)); then
+		epoch=$(date -d "$1" +%s 2>/dev/null) || return 1
+	else
+		epoch=$(date -j -f '%Y-%m-%d %H:%M:%S' "$1" +%s 2>/dev/null) || return 1
+	fi
+	[[ $(format_epoch "${epoch}" '%Y-%m-%d %H:%M:%S') == "$1" ]] || return 1
+	printf '%s\n' "${epoch}"
 }
 
 # Prints "SECONDS PRECISION" for offsets like +40m, -1h30m, or 2d; precision is the smallest unit.
 parse_offset() {
-  local rest=${1#[+-]} total=0 precision=86400 number size
-  [[ -n ${rest} ]] || return 1
-  while [[ -n ${rest} ]]; do
-    [[ ${rest} =~ ^([0-9]+)([smhdw])(.*)$ ]] || return 1
-    number=$((10#${BASH_REMATCH[1]}))
-    case ${BASH_REMATCH[2]} in
-      s) size=1 ;;
-      m) size=60 ;;
-      h) size=3600 ;;
-      d) size=86400 ;;
-      w) size=604800 ;;
-    esac
-    rest=${BASH_REMATCH[3]}
-    total=$((total + number * size))
-    ((size >= precision)) || precision=${size}
-  done
-  [[ $1 != -* ]] || total=$((-total))
-  printf '%s %s\n' "${total}" "${precision}"
+	local rest=${1#[+-]} total=0 precision=86400 number size
+	[[ -n ${rest} ]] || return 1
+	while [[ -n ${rest} ]]; do
+		[[ ${rest} =~ ^([0-9]+)([smhdw])(.*)$ ]] || return 1
+		number=$((10#${BASH_REMATCH[1]}))
+		case ${BASH_REMATCH[2]} in
+		s) size=1 ;;
+		m) size=60 ;;
+		h) size=3600 ;;
+		d) size=86400 ;;
+		w) size=604800 ;;
+		esac
+		rest=${BASH_REMATCH[3]}
+		total=$((total + number * size))
+		((size >= precision)) || precision=${size}
+	done
+	[[ $1 != -* ]] || total=$((-total))
+	printf '%s %s\n' "${total}" "${precision}"
 }
 
 # Truncates EPOCH to the start of its local minute, hour, or day.
 floor_epoch() {
-  local format
-  case $2 in
-    1)
-      printf '%s\n' "$1"
-      return
-      ;;
-    60) format='%Y-%m-%d %H:%M:00' ;;
-    3600) format='%Y-%m-%d %H:00:00' ;;
-    *) format='%Y-%m-%d 00:00:00' ;;
-  esac
-  to_epoch "$(format_epoch "$1" "${format}")"
+	local format
+	case $2 in
+	1)
+		printf '%s\n' "$1"
+		return
+		;;
+	60) format='%Y-%m-%d %H:%M:00' ;;
+	3600) format='%Y-%m-%d %H:00:00' ;;
+	*) format='%Y-%m-%d 00:00:00' ;;
+	esac
+	to_epoch "$(format_epoch "$1" "${format}")"
 }
 
 # Picks a random second in [START, START+SPAN), but not past now when the span includes now.
 fill_epoch() {
-  local start=$1 span=$2 now
-  now=$(date +%s)
-  ((start > now || start + span <= now)) || span=$((now - start + 1))
-  printf '%s\n' "$((start + ((RANDOM << 15) | RANDOM) % span))"
+	local start=$1 span=$2 now
+	now=$(date +%s)
+	((start > now || start + span <= now)) || span=$((now - start + 1))
+	printf '%s\n' "$((start + ((RANDOM << 15) | RANDOM) % span))"
 }
 
 weekday_number() {
-  case $1 in
-    mon | monday) printf '1\n' ;;
-    tue | tues | tuesday) printf '2\n' ;;
-    wed | wednesday) printf '3\n' ;;
-    thu | thur | thurs | thursday) printf '4\n' ;;
-    fri | friday) printf '5\n' ;;
-    sat | saturday) printf '6\n' ;;
-    sun | sunday) printf '7\n' ;;
-    *) return 1 ;;
-  esac
+	case $1 in
+	mon | monday) printf '1\n' ;;
+	tue | tues | tuesday) printf '2\n' ;;
+	wed | wednesday) printf '3\n' ;;
+	thu | thur | thurs | thursday) printf '4\n' ;;
+	fri | friday) printf '5\n' ;;
+	sat | saturday) printf '6\n' ;;
+	sun | sunday) printf '7\n' ;;
+	*) return 1 ;;
+	esac
 }
 
 # Prints YYYY-MM-DD for a date, today, yesterday, tomorrow, or [last|next] WEEKDAY.
 # A bare weekday is the most recent one, today included.
 resolve_day() {
-  local word=$1 noon offset today target
-  if [[ ${word} =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
-    to_epoch "${word} 00:00:00" > /dev/null || return 1
-    printf '%s\n' "${word}"
-    return
-  fi
-  word=$(printf '%s' "${word}" | tr '[:upper:]' '[:lower:]')
-  case ${word} in
-    today) offset=0 ;;
-    yesterday) offset=-1 ;;
-    tomorrow) offset=1 ;;
-    *)
-      today=$(date +%u)
-      case ${word} in
-        last\ *)
-          target=$(weekday_number "${word#last }") || return 1
-          offset=$((-((today - target + 6) % 7 + 1)))
-          ;;
-        next\ *)
-          target=$(weekday_number "${word#next }") || return 1
-          offset=$(((target - today + 6) % 7 + 1))
-          ;;
-        *)
-          target=$(weekday_number "${word}") || return 1
-          offset=$((-((today - target + 7) % 7)))
-          ;;
-      esac
-      ;;
-  esac
-  # Noon keeps day arithmetic on the right date across daylight saving changes.
-  noon=$(to_epoch "$(date +%Y-%m-%d) 12:00:00") || return 1
-  format_epoch "$((noon + offset * 86400))" '%Y-%m-%d'
+	local word=$1 noon offset today target
+	if [[ ${word} =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+		to_epoch "${word} 00:00:00" >/dev/null || return 1
+		printf '%s\n' "${word}"
+		return
+	fi
+	word=$(printf '%s' "${word}" | tr '[:upper:]' '[:lower:]')
+	case ${word} in
+	today) offset=0 ;;
+	yesterday) offset=-1 ;;
+	tomorrow) offset=1 ;;
+	*)
+		today=$(date +%u)
+		case ${word} in
+		last\ *)
+			target=$(weekday_number "${word#last }") || return 1
+			offset=$((-((today - target + 6) % 7 + 1)))
+			;;
+		next\ *)
+			target=$(weekday_number "${word#next }") || return 1
+			offset=$(((target - today + 6) % 7 + 1))
+			;;
+		*)
+			target=$(weekday_number "${word}") || return 1
+			offset=$((-((today - target + 7) % 7)))
+			;;
+		esac
+		;;
+	esac
+	# Noon keeps day arithmetic on the right date across daylight saving changes.
+	noon=$(to_epoch "$(date +%Y-%m-%d) 12:00:00") || return 1
+	format_epoch "$((noon + offset * 86400))" '%Y-%m-%d'
 }
 
 # Prints the epoch for a -t value; unspecified lower fields are random.
 resolve_timestamp() {
-  local spec=$1 now last base parsed day clock='' hour minute second precision start
-  now=$(date +%s)
-  last=$(run_git log -1 --format=%ct 2> /dev/null) || last=${now}
-  case ${spec} in
-    now)
-      printf '%s\n' "${now}"
-      return
-      ;;
-    now[+-]*)
-      base=${now}
-      parsed=$(parse_offset "${spec#now}") || return 1
-      ;;
-    [+-]*)
-      base=${last}
-      parsed=$(parse_offset "${spec}") || return 1
-      ;;
-    *)
-      if parsed=$(parse_offset "+${spec}"); then
-        base=$((last > now ? last : now))
-      fi
-      ;;
-  esac
-  if [[ -n ${base:-} ]]; then
-    start=$(floor_epoch "$((base + ${parsed% *}))" "${parsed#* }") || return 1
-    fill_epoch "${start}" "${parsed#* }"
-    return
-  fi
+	local spec=$1 now last base parsed day clock='' hour minute second precision start
+	now=$(date +%s)
+	last=$(run_git log -1 --format=%ct 2>/dev/null) || last=${now}
+	case ${spec} in
+	now)
+		printf '%s\n' "${now}"
+		return
+		;;
+	now[+-]*)
+		base=${now}
+		parsed=$(parse_offset "${spec#now}") || return 1
+		;;
+	[+-]*)
+		base=${last}
+		parsed=$(parse_offset "${spec}") || return 1
+		;;
+	*)
+		if parsed=$(parse_offset "+${spec}"); then
+			base=$((last > now ? last : now))
+		fi
+		;;
+	esac
+	if [[ -n ${base:-} ]]; then
+		start=$(floor_epoch "$((base + ${parsed% *}))" "${parsed#* }") || return 1
+		fill_epoch "${start}" "${parsed#* }"
+		return
+	fi
 
-  day=${spec}
-  if [[ ${spec} =~ ^(.+)\ ([0-9:]+)$ ]]; then
-    day=${BASH_REMATCH[1]}
-    clock=${BASH_REMATCH[2]}
-  elif [[ ${spec} =~ ^[0-9]{1,2}(:[0-9]{2}){0,2}$ ]]; then
-    day=today
-    clock=${spec}
-  fi
-  day=$(resolve_day "${day}") || return 1
-  precision=86400
-  hour=0 minute=0 second=0
-  if [[ -n ${clock} ]]; then
-    [[ ${clock} =~ ^([0-9]{1,2})(:([0-9]{2}))?(:([0-9]{2}))?$ ]] || return 1
-    hour=$((10#${BASH_REMATCH[1]}))
-    precision=3600
-    if [[ -n ${BASH_REMATCH[3]} ]]; then
-      minute=$((10#${BASH_REMATCH[3]}))
-      precision=60
-    fi
-    if [[ -n ${BASH_REMATCH[5]} ]]; then
-      second=$((10#${BASH_REMATCH[5]}))
-      precision=1
-    fi
-  fi
-  start=$(to_epoch "$(printf '%s %02d:%02d:%02d' "${day}" "${hour}" "${minute}" "${second}")") ||
-    return 1
-  if ((precision == 1)); then
-    printf '%s\n' "${start}"
-  else
-    fill_epoch "${start}" "${precision}"
-  fi
+	day=${spec}
+	if [[ ${spec} =~ ^(.+)\ ([0-9:]+)$ ]]; then
+		day=${BASH_REMATCH[1]}
+		clock=${BASH_REMATCH[2]}
+	elif [[ ${spec} =~ ^[0-9]{1,2}(:[0-9]{2}){0,2}$ ]]; then
+		day=today
+		clock=${spec}
+	fi
+	day=$(resolve_day "${day}") || return 1
+	precision=86400
+	hour=0 minute=0 second=0
+	if [[ -n ${clock} ]]; then
+		[[ ${clock} =~ ^([0-9]{1,2})(:([0-9]{2}))?(:([0-9]{2}))?$ ]] || return 1
+		hour=$((10#${BASH_REMATCH[1]}))
+		precision=3600
+		if [[ -n ${BASH_REMATCH[3]} ]]; then
+			minute=$((10#${BASH_REMATCH[3]}))
+			precision=60
+		fi
+		if [[ -n ${BASH_REMATCH[5]} ]]; then
+			second=$((10#${BASH_REMATCH[5]}))
+			precision=1
+		fi
+	fi
+	start=$(to_epoch "$(printf '%s %02d:%02d:%02d' "${day}" "${hour}" "${minute}" "${second}")") ||
+		return 1
+	if ((precision == 1)); then
+		printf '%s\n' "${start}"
+	else
+		fill_epoch "${start}" "${precision}"
+	fi
 }
 
 commit_help() {
-  cat << 'EOF'
+	cat <<'EOF'
 usage: git commit -t TIME [git commit options]
 
 Sets the author and committer date. Fields left out are filled in at random.
@@ -263,239 +263,239 @@ EOF
 }
 
 commit_at() {
-  local spec='' arg epoch stamp
-  local -a args=()
-  while (($#)); do
-    arg=$1
-    shift
-    case ${arg} in
-      --)
-        args+=(-- "$@")
-        break
-        ;;
-      -t | --timestamp)
-        if (($# == 0)) || [[ $1 == -h || $1 == --help ]]; then
-          commit_help
-          return
-        fi
-        spec=$1
-        shift
-        ;;
-      --timestamp=*) spec=${arg#*=} ;;
-      -t?*) spec=${arg#-t} ;;
-      -[mFCc] | -[!-]*[mFCc] | --message | --file | --reuse-message | --reedit-message | --author | \
-        --date | --cleanup | --trailer | --fixup | --squash | --template)
-        args+=("${arg}")
-        if (($#)); then
-          args+=("$1")
-          shift
-        fi
-        ;;
-      *) args+=("${arg}") ;;
-    esac
-  done
-  [[ -n ${spec} ]] || exec "${git_bin}" commit ${args[@]+"${args[@]}"}
+	local spec='' arg epoch stamp
+	local -a args=()
+	while (($#)); do
+		arg=$1
+		shift
+		case ${arg} in
+		--)
+			args+=(-- "$@")
+			break
+			;;
+		-t | --timestamp)
+			if (($# == 0)) || [[ $1 == -h || $1 == --help ]]; then
+				commit_help
+				return
+			fi
+			spec=$1
+			shift
+			;;
+		--timestamp=*) spec=${arg#*=} ;;
+		-t?*) spec=${arg#-t} ;;
+		-[mFCc] | -[!-]*[mFCc] | --message | --file | --reuse-message | --reedit-message | --author | \
+			--date | --cleanup | --trailer | --fixup | --squash | --template)
+			args+=("${arg}")
+			if (($#)); then
+				args+=("$1")
+				shift
+			fi
+			;;
+		*) args+=("${arg}") ;;
+		esac
+	done
+	[[ -n ${spec} ]] || exec "${git_bin}" commit ${args[@]+"${args[@]}"}
 
-  epoch=$(resolve_timestamp "${spec}") || die "invalid timestamp: ${spec} (see git commit -t --help)"
-  stamp=$(format_epoch "${epoch}" '%Y-%m-%d %H:%M:%S %z')
-  jsh::log_info "Commit date ${stamp}"
-  GIT_AUTHOR_DATE=${stamp} GIT_COMMITTER_DATE=${stamp} \
-    exec "${git_bin}" commit --date="${stamp}" ${args[@]+"${args[@]}"}
+	epoch=$(resolve_timestamp "${spec}") || die "invalid timestamp: ${spec} (see git commit -t --help)"
+	stamp=$(format_epoch "${epoch}" '%Y-%m-%d %H:%M:%S %z')
+	jsh::log_info "Commit date ${stamp}"
+	GIT_AUTHOR_DATE=${stamp} GIT_COMMITTER_DATE=${stamp} \
+		exec "${git_bin}" commit --date="${stamp}" ${args[@]+"${args[@]}"}
 }
 
 # ---- refresh ----
 
 refresh() {
-  local branch target state
-  case ${1:-} in
-    '') ;;
-    -h | --help)
-      printf 'usage: git refresh\n\nFetch origin and rebase the current branch onto origin/HEAD.\n'
-      return
-      ;;
-    *) die 'usage: git refresh' ;;
-  esac
-  run_git rev-parse --git-dir > /dev/null 2>&1 || die 'not in a Git repository'
-  branch=$(run_git symbolic-ref --quiet --short HEAD) || die 'refresh needs a branch checkout'
-  for state in rebase-merge rebase-apply; do
-    [[ ! -e $(run_git rev-parse --path-format=absolute --git-path "${state}") ]] ||
-      die 'a rebase is already in progress'
-  done
+	local branch target state
+	case ${1:-} in
+	'') ;;
+	-h | --help)
+		printf 'usage: git refresh\n\nFetch origin and rebase the current branch onto origin/HEAD.\n'
+		return
+		;;
+	*) die 'usage: git refresh' ;;
+	esac
+	run_git rev-parse --git-dir >/dev/null 2>&1 || die 'not in a Git repository'
+	branch=$(run_git symbolic-ref --quiet --short HEAD) || die 'refresh needs a branch checkout'
+	for state in rebase-merge rebase-apply; do
+		[[ ! -e $(run_git rev-parse --path-format=absolute --git-path "${state}") ]] ||
+			die 'a rebase is already in progress'
+	done
 
-  run_git fetch --prune origin || die 'could not fetch origin'
-  if ! target=$(run_git symbolic-ref --quiet --short refs/remotes/origin/HEAD); then
-    run_git remote set-head origin --auto > /dev/null 2>&1 || true
-    target=$(run_git symbolic-ref --quiet --short refs/remotes/origin/HEAD) ||
-      die 'cannot tell the default branch of origin'
-  fi
+	run_git fetch --prune origin || die 'could not fetch origin'
+	if ! target=$(run_git symbolic-ref --quiet --short refs/remotes/origin/HEAD); then
+		run_git remote set-head origin --auto >/dev/null 2>&1 || true
+		target=$(run_git symbolic-ref --quiet --short refs/remotes/origin/HEAD) ||
+			die 'cannot tell the default branch of origin'
+	fi
 
-  jsh::log_info "Rebasing ${branch} onto ${target}"
-  run_git rebase --autostash "${target}" && return
-  for state in rebase-merge rebase-apply; do
-    if [[ -e $(run_git rev-parse --path-format=absolute --git-path "${state}") ]]; then
-      run_git rebase --abort
-      die "Rebase onto ${target} stopped on conflicts; aborted, ${branch} is unchanged"
-    fi
-  done
-  die "Rebase onto ${target} failed"
+	jsh::log_info "Rebasing ${branch} onto ${target}"
+	run_git rebase --autostash "${target}" && return
+	for state in rebase-merge rebase-apply; do
+		if [[ -e $(run_git rev-parse --path-format=absolute --git-path "${state}") ]]; then
+			run_git rebase --abort
+			die "Rebase onto ${target} stopped on conflicts; aborted, ${branch} is unchanged"
+		fi
+	done
+	die "Rebase onto ${target} failed"
 }
 
 # ---- save / load ----
 
 # Prints a remote URL without scheme, credentials, port, or .git, so SSH and HTTPS clones match.
 origin_key() {
-  local url host
-  url=$(run_git remote get-url origin 2> /dev/null) || die 'save and load need an origin remote'
-  url=${url%/}
-  url=${url%.git}
-  if [[ ${url} == *://* ]]; then
-    url=${url#*://}
-    host=${url%%/*}
-    url=${url#"${host}"}
-  elif [[ ${url} =~ ^([^/:]+):(.*)$ ]]; then
-    host=${BASH_REMATCH[1]}
-    url=/${BASH_REMATCH[2]}
-  else
-    printf '%s\n' "${url}"
-    return
-  fi
-  host=${host##*@}
-  host=${host%%:*}
-  printf '%s%s\n' "$(printf '%s' "${host}" | tr '[:upper:]' '[:lower:]')" "${url}"
+	local url host
+	url=$(run_git remote get-url origin 2>/dev/null) || die 'save and load need an origin remote'
+	url=${url%/}
+	url=${url%.git}
+	if [[ ${url} == *://* ]]; then
+		url=${url#*://}
+		host=${url%%/*}
+		url=${url#"${host}"}
+	elif [[ ${url} =~ ^([^/:]+):(.*)$ ]]; then
+		host=${BASH_REMATCH[1]}
+		url=/${BASH_REMATCH[2]}
+	else
+		printf '%s\n' "${url}"
+		return
+	fi
+	host=${host##*@}
+	host=${host%%:*}
+	printf '%s%s\n' "$(printf '%s' "${host}" | tr '[:upper:]' '[:lower:]')" "${url}"
 }
 
 # Prints the IDs of gists whose description is exactly $1, most recently updated first.
 find_gists() {
-  gh api --paginate gists --jq '.[] | [.id, .description] | @tsv' |
-    awk -F '\t' -v wanted="$1" '$2 == wanted { print $1 }'
+	gh api --paginate gists --jq '.[] | [.id, .description] | @tsv' |
+		awk -F '\t' -v wanted="$1" '$2 == wanted { print $1 }'
 }
 
 tree_patch() {
-  run_git diff-tree -p --binary --full-index --ignore-submodules=all "$1" "$2"
+	run_git diff-tree -p --binary --full-index --ignore-submodules=all "$1" "$2"
 }
 
 open_repository() {
-  local top
-  command -v gh > /dev/null 2>&1 || die "git $1 needs the GitHub CLI (gh)"
-  top=$(run_git rev-parse --show-toplevel 2> /dev/null) || die 'not in a Git repository'
-  cd "${top}"
-  description="git save: $(origin_key)"
-  scratch=$(mktemp -d "${TMPDIR:-/tmp}/gitsave.XXXXXX")
-  trap 'rm -rf "${scratch}"' EXIT
+	local top
+	command -v gh >/dev/null 2>&1 || die "git $1 needs the GitHub CLI (gh)"
+	top=$(run_git rev-parse --show-toplevel 2>/dev/null) || die 'not in a Git repository'
+	cd "${top}"
+	description="git save: $(origin_key)"
+	scratch=$(mktemp -d "${TMPDIR:-/tmp}/gitsave.XXXXXX")
+	trap 'rm -rf "${scratch}"' EXIT
 }
 
 save() {
-  local base branch index staged_tree worktree_tree url id stat
-  local -a old=() files=()
-  case ${1:-} in
-    '') ;;
-    -h | --help)
-      printf 'usage: git save\n\nBack up staged, unstaged, and untracked changes to a secret gist,\n'
-      printf 'replacing the previous save for this origin. Secret gists are unlisted, not encrypted.\n'
-      return
-      ;;
-    *) die 'usage: git save' ;;
-  esac
-  open_repository save
-  base=$(run_git rev-parse --verify --quiet HEAD) || die 'save needs at least one commit'
-  [[ -z $(run_git ls-files --unmerged) ]] || die 'resolve merge conflicts before saving'
-  branch=$(run_git symbolic-ref --quiet --short HEAD) || branch=HEAD
+	local base branch index staged_tree worktree_tree url id stat
+	local -a old=() files=()
+	case ${1:-} in
+	'') ;;
+	-h | --help)
+		printf 'usage: git save\n\nBack up staged, unstaged, and untracked changes to a secret gist,\n'
+		printf 'replacing the previous save for this origin. Secret gists are unlisted, not encrypted.\n'
+		return
+		;;
+	*) die 'usage: git save' ;;
+	esac
+	open_repository save
+	base=$(run_git rev-parse --verify --quiet HEAD) || die 'save needs at least one commit'
+	[[ -z $(run_git ls-files --unmerged) ]] || die 'resolve merge conflicts before saving'
+	branch=$(run_git symbolic-ref --quiet --short HEAD) || branch=HEAD
 
-  staged_tree=$(run_git write-tree)
-  index=$(run_git rev-parse --path-format=absolute --git-path index)
-  # A copy of the index keeps its stat cache, so adding untracked files stays fast.
-  if [[ -f ${index} ]]; then
-    cp "${index}" "${scratch}/index"
-  else
-    GIT_INDEX_FILE=${scratch}/index run_git read-tree "${staged_tree}"
-  fi
-  GIT_INDEX_FILE=${scratch}/index run_git -c advice.addEmbeddedRepo=false add --all
-  worktree_tree=$(GIT_INDEX_FILE=${scratch}/index run_git write-tree)
-  rm -f "${scratch}/index"
+	staged_tree=$(run_git write-tree)
+	index=$(run_git rev-parse --path-format=absolute --git-path index)
+	# A copy of the index keeps its stat cache, so adding untracked files stays fast.
+	if [[ -f ${index} ]]; then
+		cp "${index}" "${scratch}/index"
+	else
+		GIT_INDEX_FILE=${scratch}/index run_git read-tree "${staged_tree}"
+	fi
+	GIT_INDEX_FILE=${scratch}/index run_git -c advice.addEmbeddedRepo=false add --all
+	worktree_tree=$(GIT_INDEX_FILE=${scratch}/index run_git write-tree)
+	rm -f "${scratch}/index"
 
-  tree_patch "${base}" "${staged_tree}" > "${scratch}/staged.patch"
-  tree_patch "${staged_tree}" "${worktree_tree}" > "${scratch}/unstaged.patch"
-  if [[ ! -s ${scratch}/staged.patch && ! -s ${scratch}/unstaged.patch ]]; then
-    jsh::log_note 'Nothing to save'
-    return
-  fi
-  [[ -n $(run_git branch --remotes --contains "${base}" 2> /dev/null) ]] ||
-    jsh::log_warn "HEAD ${base:0:12} is not on any remote branch; push it so other clones can load this"
+	tree_patch "${base}" "${staged_tree}" >"${scratch}/staged.patch"
+	tree_patch "${staged_tree}" "${worktree_tree}" >"${scratch}/unstaged.patch"
+	if [[ ! -s ${scratch}/staged.patch && ! -s ${scratch}/unstaged.patch ]]; then
+		jsh::log_note 'Nothing to save'
+		return
+	fi
+	[[ -n $(run_git branch --remotes --contains "${base}" 2>/dev/null) ]] ||
+		jsh::log_warn "HEAD ${base:0:12} is not on any remote branch; push it so other clones can load this"
 
-  printf 'origin %s\nbranch %s\nbase %s\nhost %s\ndate %s\n' "${description#git save: }" \
-    "${branch}" "${base}" "$(uname -n)" "$(date '+%Y-%m-%d %H:%M:%S %z')" > "${scratch}/info"
-  files=("${scratch}/info")
-  [[ ! -s ${scratch}/staged.patch ]] || files+=("${scratch}/staged.patch")
-  [[ ! -s ${scratch}/unstaged.patch ]] || files+=("${scratch}/unstaged.patch")
+	printf 'origin %s\nbranch %s\nbase %s\nhost %s\ndate %s\n' "${description#git save: }" \
+		"${branch}" "${base}" "$(uname -n)" "$(date '+%Y-%m-%d %H:%M:%S %z')" >"${scratch}/info"
+	files=("${scratch}/info")
+	[[ ! -s ${scratch}/staged.patch ]] || files+=("${scratch}/staged.patch")
+	[[ ! -s ${scratch}/unstaged.patch ]] || files+=("${scratch}/unstaged.patch")
 
-  while IFS= read -r id; do old+=("${id}"); done < <(find_gists "${description}")
-  url=$(gh gist create --desc "${description}" "${files[@]}" 2> "${scratch}/error") || {
-    cat "${scratch}/error" >&2
-    die 'could not create the gist'
-  }
-  for id in ${old[@]+"${old[@]}"}; do
-    gh gist delete --yes "${id}" > /dev/null 2>&1 || jsh::log_warn "Could not delete old gist ${id}"
-  done
-  stat=$(run_git diff-tree --shortstat --ignore-submodules=all "${base}" "${worktree_tree}")
-  jsh::log_success "Saved${stat:+ ${stat# }} to ${url}"
+	while IFS= read -r id; do old+=("${id}"); done < <(find_gists "${description}")
+	url=$(gh gist create --desc "${description}" "${files[@]}" 2>"${scratch}/error") || {
+		cat "${scratch}/error" >&2
+		die 'could not create the gist'
+	}
+	for id in ${old[@]+"${old[@]}"}; do
+		gh gist delete --yes "${id}" >/dev/null 2>&1 || jsh::log_warn "Could not delete old gist ${id}"
+	done
+	stat=$(run_git diff-tree --shortstat --ignore-submodules=all "${base}" "${worktree_tree}")
+	jsh::log_success "Saved${stat:+ ${stat# }} to ${url}"
 }
 
 load() {
-  local force=0 id count base branch current staged_tree
-  local -a ids=()
-  while (($#)); do
-    case $1 in
-      -f | --force) force=1 ;;
-      -h | --help)
-        printf 'usage: git load [--force]\n\nApply the changes last saved for this origin.\n'
-        printf 'Refuses a dirty working tree unless --force.\n'
-        return
-        ;;
-      *) die 'usage: git load [--force]' ;;
-    esac
-    shift
-  done
-  open_repository load
-  if ((force == 0)) && [[ -n $(run_git status --porcelain --ignore-submodules=all) ]]; then
-    die 'working tree has changes; commit or save them first, or use --force to apply on top'
-  fi
+	local force=0 id count base branch current staged_tree
+	local -a ids=()
+	while (($#)); do
+		case $1 in
+		-f | --force) force=1 ;;
+		-h | --help)
+			printf 'usage: git load [--force]\n\nApply the changes last saved for this origin.\n'
+			printf 'Refuses a dirty working tree unless --force.\n'
+			return
+			;;
+		*) die 'usage: git load [--force]' ;;
+		esac
+		shift
+	done
+	open_repository load
+	if ((force == 0)) && [[ -n $(run_git status --porcelain --ignore-submodules=all) ]]; then
+		die 'working tree has changes; commit or save them first, or use --force to apply on top'
+	fi
 
-  while IFS= read -r id; do ids+=("${id}"); done < <(find_gists "${description}")
-  count=${#ids[@]}
-  ((count > 0)) || die "no saved changes for ${description#git save: }"
-  id=${ids[0]}
-  ((count == 1)) || jsh::log_warn "Found ${count} saves for this origin; loading the newest (${id})"
-  gh gist clone "${id}" "${scratch}/gist" -- --quiet > /dev/null || die "could not download gist ${id}"
-  [[ -f ${scratch}/gist/info ]] || die "gist ${id} is not a git save"
+	while IFS= read -r id; do ids+=("${id}"); done < <(find_gists "${description}")
+	count=${#ids[@]}
+	((count > 0)) || die "no saved changes for ${description#git save: }"
+	id=${ids[0]}
+	((count == 1)) || jsh::log_warn "Found ${count} saves for this origin; loading the newest (${id})"
+	gh gist clone "${id}" "${scratch}/gist" -- --quiet >/dev/null || die "could not download gist ${id}"
+	[[ -f ${scratch}/gist/info ]] || die "gist ${id} is not a git save"
 
-  base=$(awk '$1 == "base" { print $2 }' "${scratch}/gist/info")
-  branch=$(awk '$1 == "branch" { print $2 }' "${scratch}/gist/info")
-  current=$(run_git symbolic-ref --quiet --short HEAD) || current=HEAD
-  [[ ${branch} == "${current}" ]] || jsh::log_warn "Saved on ${branch}; applying to ${current}"
-  run_git cat-file -e "${base}^{commit}" 2> /dev/null || run_git fetch --quiet origin || true
-  [[ ${base} == "$(run_git rev-parse HEAD)" ]] ||
-    jsh::log_info "Saved on ${base:0:12}; merging onto HEAD"
+	base=$(awk '$1 == "base" { print $2 }' "${scratch}/gist/info")
+	branch=$(awk '$1 == "branch" { print $2 }' "${scratch}/gist/info")
+	current=$(run_git symbolic-ref --quiet --short HEAD) || current=HEAD
+	[[ ${branch} == "${current}" ]] || jsh::log_warn "Saved on ${branch}; applying to ${current}"
+	run_git cat-file -e "${base}^{commit}" 2>/dev/null || run_git fetch --quiet origin || true
+	[[ ${base} == "$(run_git rev-parse HEAD)" ]] ||
+		jsh::log_info "Saved on ${base:0:12}; merging onto HEAD"
 
-  if [[ -f ${scratch}/gist/staged.patch ]]; then
-    run_git apply --3way --index "${scratch}/gist/staged.patch" ||
-      die 'staged changes did not apply cleanly; see git status'
-  fi
-  if [[ -f ${scratch}/gist/unstaged.patch ]]; then
-    staged_tree=$(run_git write-tree)
-    run_git apply --3way "${scratch}/gist/unstaged.patch" ||
-      die 'unstaged changes did not apply cleanly; see git status'
-    # --3way stages what it applies; put the index back so these stay unstaged as saved.
-    run_git read-tree "${staged_tree}"
-    run_git update-index -q --refresh > /dev/null || true
-  fi
-  jsh::log_success "Loaded changes from gist ${id}"
-  run_git status --short
+	if [[ -f ${scratch}/gist/staged.patch ]]; then
+		run_git apply --3way --index "${scratch}/gist/staged.patch" ||
+			die 'staged changes did not apply cleanly; see git status'
+	fi
+	if [[ -f ${scratch}/gist/unstaged.patch ]]; then
+		staged_tree=$(run_git write-tree)
+		run_git apply --3way "${scratch}/gist/unstaged.patch" ||
+			die 'unstaged changes did not apply cleanly; see git status'
+		# --3way stages what it applies; put the index back so these stay unstaged as saved.
+		run_git read-tree "${staged_tree}"
+		run_git update-index -q --refresh >/dev/null || true
+	fi
+	jsh::log_success "Loaded changes from gist ${id}"
+	run_git status --short
 }
 
 # ---- handoff ----
 
 handoff_help() {
-  cat << 'EOF'
+	cat <<'EOF'
 usage: git handoff [--dry-run | --clean]
 
 Carry the current branch's commits to another workstation that shares this working tree
@@ -519,125 +519,131 @@ EOF
 
 # Prints "SHA BRANCH" from a single-branch bundle.
 bundle_head() {
-  local sha ref
-  read -r sha ref < <(run_git bundle list-heads "$1" 2> /dev/null) || return 1
-  [[ ${ref} == refs/heads/* ]] || return 1
-  printf '%s %s\n' "${sha}" "${ref#refs/heads/}"
+	local sha ref
+	read -r sha ref < <(run_git bundle list-heads "$1" 2>/dev/null) || return 1
+	[[ ${ref} == refs/heads/* ]] || return 1
+	printf '%s %s\n' "${sha}" "${ref#refs/heads/}"
 }
 
 handoff_write() {
-  local file=$1 branch=$2 temp
-  mkdir -p "${file%/*}"
-  # Syncthing never syncs .syncthing.*.tmp, so the bundle only appears once it is complete.
-  temp=${file%/*}/.syncthing.${file##*/}.$$.tmp
-  if ! run_git bundle create --quiet "${temp}" "refs/heads/${branch}" 2> /dev/null; then
-    rm -f "${temp}"
-    die "could not write ${file}"
-  fi
-  mv -f "${temp}" "${file}"
+	local file=$1 branch=$2 temp
+	mkdir -p "${file%/*}"
+	# Syncthing never syncs .syncthing.*.tmp, so the bundle only appears once it is complete.
+	temp=${file%/*}/.syncthing.${file##*/}.$$.tmp
+	if ! run_git bundle create --quiet "${temp}" "refs/heads/${branch}" 2>/dev/null; then
+		rm -f "${temp}"
+		die "could not write ${file}"
+	fi
+	mv -f "${temp}" "${file}"
 }
 
 handoff() {
-  local dry=0 clean=0 top home dir rel file branch head sha theirs mine tracked line
-  local -a conflicts=()
-  while (($#)); do
-    case $1 in
-      -n | --dry-run) dry=1 ;;
-      --clean) clean=1 ;;
-      -h | --help)
-        handoff_help
-        return
-        ;;
-      *) die 'usage: git handoff [--dry-run | --clean]' ;;
-    esac
-    shift
-  done
-  top=$(run_git rev-parse --show-toplevel 2> /dev/null) || die 'not in a Git repository'
-  top=$(cd "${top}" && pwd -P)
-  home=$(cd "${HOME}" && pwd -P)
-  [[ ${top} == "${home}"/* ]] || die "handoff needs a repository under ${HOME}"
-  rel=${top#"${home}"/}
-  dir=$(run_git config handoff.dir 2> /dev/null) || dir=${HOME}/Sync/handoff
-  dir=${dir/#\~\//${HOME}/}
-  file=${dir}/${rel}.bundle
+	local dry=0 clean=0 top home dir rel file branch head sha theirs mine tracked line
+	local -a conflicts=()
+	while (($#)); do
+		case $1 in
+		-n | --dry-run) dry=1 ;;
+		--clean) clean=1 ;;
+		-h | --help)
+			handoff_help
+			return
+			;;
+		*) die 'usage: git handoff [--dry-run | --clean]' ;;
+		esac
+		shift
+	done
+	top=$(run_git rev-parse --show-toplevel 2>/dev/null) || die 'not in a Git repository'
+	top=$(cd "${top}" && pwd -P)
+	home=$(cd "${HOME}" && pwd -P)
+	[[ ${top} == "${home}"/* ]] || die "handoff needs a repository under ${HOME}"
+	rel=${top#"${home}"/}
+	dir=$(run_git config handoff.dir 2>/dev/null) || dir=${HOME}/Sync/handoff
+	dir=${dir/#\~\//${HOME}/}
+	file=${dir}/${rel}.bundle
 
-  if ((clean)); then
-    if [[ ! -e ${file} ]]; then
-      jsh::log_current "no bundle for ${rel}"
-    elif ((dry)); then
-      jsh::log_info "would delete ${file}"
-    else
-      rm -f "${file}"
-      jsh::log_success "deleted ${file}"
-    fi
-    return
-  fi
+	if ((clean)); then
+		if [[ ! -e ${file} ]]; then
+			jsh::log_current "no bundle for ${rel}"
+		elif ((dry)); then
+			jsh::log_info "would delete ${file}"
+		else
+			rm -f "${file}"
+			jsh::log_success "deleted ${file}"
+		fi
+		return
+	fi
 
-  branch=$(run_git symbolic-ref --quiet --short HEAD) || die 'handoff needs a branch checkout'
-  head=$(run_git rev-parse --verify --quiet HEAD) || die 'handoff needs at least one commit'
-  for line in MERGE_HEAD rebase-merge rebase-apply CHERRY_PICK_HEAD REVERT_HEAD; do
-    [[ ! -e $(run_git rev-parse --path-format=absolute --git-path "${line}") ]] ||
-      die 'finish or abort the merge, rebase, or cherry-pick in progress first'
-  done
+	branch=$(run_git symbolic-ref --quiet --short HEAD) || die 'handoff needs a branch checkout'
+	head=$(run_git rev-parse --verify --quiet HEAD) || die 'handoff needs at least one commit'
+	for line in MERGE_HEAD rebase-merge rebase-apply CHERRY_PICK_HEAD REVERT_HEAD; do
+		[[ ! -e $(run_git rev-parse --path-format=absolute --git-path "${line}") ]] ||
+			die 'finish or abort the merge, rebase, or cherry-pick in progress first'
+	done
 
-  for line in "${file%.bundle}".sync-conflict-*.bundle; do
-    [[ -e ${line} ]] && conflicts+=("${line}")
-  done
-  if ((${#conflicts[@]})); then
-    jsh::log_error 'two workstations wrote a bundle; Syncthing kept both:'
-    for line in "${file}" "${conflicts[@]}"; do
-      [[ -e ${line} ]] || continue
-      read -r sha theirs < <(bundle_head "${line}") || sha='unreadable'
-      printf '  %s  %s %s\n' "${line}" "${theirs:-}" "${sha:0:12}" >&2
-    done
-    die 'fetch the commits you need (git fetch FILE BRANCH), delete the copies, then run again'
-  fi
+	for line in "${file%.bundle}".sync-conflict-*.bundle; do
+		[[ -e ${line} ]] && conflicts+=("${line}")
+	done
+	if ((${#conflicts[@]})); then
+		jsh::log_error 'two workstations wrote a bundle; Syncthing kept both:'
+		for line in "${file}" "${conflicts[@]}"; do
+			[[ -e ${line} ]] || continue
+			read -r sha theirs < <(bundle_head "${line}") || sha='unreadable'
+			printf '  %s  %s %s\n' "${line}" "${theirs:-}" "${sha:0:12}" >&2
+		done
+		die 'fetch the commits you need (git fetch FILE BRANCH), delete the copies, then run again'
+	fi
 
-  if [[ ! -e ${file} ]]; then
-    ((dry)) && { jsh::log_info "would write ${branch} ${head:0:7} to ${file}"; return; }
-    handoff_write "${file}" "${branch}"
-    jsh::log_success "handoff ${branch} ${head:0:7} written"
-    return
-  fi
+	if [[ ! -e ${file} ]]; then
+		((dry)) && {
+			jsh::log_info "would write ${branch} ${head:0:7} to ${file}"
+			return
+		}
+		handoff_write "${file}" "${branch}"
+		jsh::log_success "handoff ${branch} ${head:0:7} written"
+		return
+	fi
 
-  read -r sha theirs < <(bundle_head "${file}") || die "${file} is not a handoff bundle"
-  if [[ ${sha} == "${head}" && ${theirs} == "${branch}" ]]; then
-    jsh::log_current "handoff ${branch} ${head:0:7} up to date"
-    return
-  fi
-  run_git fetch --quiet --no-write-fetch-head "${file}" \
-    "+refs/heads/${theirs}:refs/remotes/handoff/${theirs}" || die "could not read ${file}"
+	read -r sha theirs < <(bundle_head "${file}") || die "${file} is not a handoff bundle"
+	if [[ ${sha} == "${head}" && ${theirs} == "${branch}" ]]; then
+		jsh::log_current "handoff ${branch} ${head:0:7} up to date"
+		return
+	fi
+	run_git fetch --quiet --no-write-fetch-head "${file}" \
+		"+refs/heads/${theirs}:refs/remotes/handoff/${theirs}" || die "could not read ${file}"
 
-  if [[ ${sha} != "${head}" ]] && run_git merge-base --is-ancestor "${sha}" "${head}"; then
-    ((dry)) && { jsh::log_info "would write ${branch} ${head:0:7} over ${theirs} ${sha:0:7}"; return; }
-    handoff_write "${file}" "${branch}"
-    jsh::log_success "handoff ${branch} $(run_git rev-list --count "${sha}..${head}") commit(s)" \
-      "ahead, ${sha:0:7} → ${head:0:7} written"
-    return
-  fi
+	if [[ ${sha} != "${head}" ]] && run_git merge-base --is-ancestor "${sha}" "${head}"; then
+		((dry)) && {
+			jsh::log_info "would write ${branch} ${head:0:7} over ${theirs} ${sha:0:7}"
+			return
+		}
+		handoff_write "${file}" "${branch}"
+		jsh::log_success "handoff ${branch} $(run_git rev-list --count "${sha}..${head}") commit(s)" \
+			"ahead, ${sha:0:7} → ${head:0:7} written"
+		return
+	fi
 
-  if ! run_git merge-base --is-ancestor "${head}" "${sha}"; then
-    jsh::log_error "${branch} ${head:0:7} and the bundle's ${theirs} ${sha:0:7} have split:"
-    run_git log --oneline --left-right "${head}...${sha}" | sed 's/^/  /' >&2
-    die "merge or rebase onto refs/remotes/handoff/${theirs}, then run git handoff again"
-  fi
-  mine=$(run_git rev-parse --verify --quiet "refs/heads/${theirs}") || mine=''
-  if [[ -n ${mine} ]] && ! run_git merge-base --is-ancestor "${mine}" "${sha}"; then
-    die "${theirs} here has commits the bundle lacks; merge refs/remotes/handoff/${theirs} into it"
-  fi
-  if ((dry)); then
-    jsh::log_info "would move ${theirs} to ${sha:0:7} and check it out without touching files"
-    return
-  fi
-  tracked=0
-  run_git diff --cached --quiet --ignore-submodules=all || tracked=1
-  run_git update-ref -m "handoff: fetch ${file}" "refs/heads/${theirs}" "${sha}" "${mine}"
-  [[ ${theirs} == "${branch}" ]] || run_git symbolic-ref -m "handoff: ${branch} → ${theirs}" \
-    HEAD "refs/heads/${theirs}"
-  run_git reset --quiet
-  ((tracked == 0)) || jsh::log_note 'staged changes are now unstaged'
-  [[ ${theirs} == "${branch}" ]] || jsh::log_note "switched from ${branch} to ${theirs}"
-  jsh::log_success "handoff ${theirs} ${head:0:7} → ${sha:0:7} fetched"
+	if ! run_git merge-base --is-ancestor "${head}" "${sha}"; then
+		jsh::log_error "${branch} ${head:0:7} and the bundle's ${theirs} ${sha:0:7} have split:"
+		run_git log --oneline --left-right "${head}...${sha}" | sed 's/^/  /' >&2
+		die "merge or rebase onto refs/remotes/handoff/${theirs}, then run git handoff again"
+	fi
+	mine=$(run_git rev-parse --verify --quiet "refs/heads/${theirs}") || mine=''
+	if [[ -n ${mine} ]] && ! run_git merge-base --is-ancestor "${mine}" "${sha}"; then
+		die "${theirs} here has commits the bundle lacks; merge refs/remotes/handoff/${theirs} into it"
+	fi
+	if ((dry)); then
+		jsh::log_info "would move ${theirs} to ${sha:0:7} and check it out without touching files"
+		return
+	fi
+	tracked=0
+	run_git diff --cached --quiet --ignore-submodules=all || tracked=1
+	run_git update-ref -m "handoff: fetch ${file}" "refs/heads/${theirs}" "${sha}" "${mine}"
+	[[ ${theirs} == "${branch}" ]] || run_git symbolic-ref -m "handoff: ${branch} → ${theirs}" \
+		HEAD "refs/heads/${theirs}"
+	run_git reset --quiet
+	((tracked == 0)) || jsh::log_note 'staged changes are now unstaged'
+	[[ ${theirs} == "${branch}" ]] || jsh::log_note "switched from ${branch} to ${theirs}"
+	jsh::log_success "handoff ${theirs} ${head:0:7} → ${sha:0:7} fetched"
 }
 
 # ---- profile ----
@@ -645,9 +651,9 @@ handoff() {
 # Prints NAME, display name, email, GitHub user, and SSH key per profile, split by \x1f
 # (tabs would let `read` collapse empty fields).
 read_profiles() {
-  local file=${JSH_GIT_PROFILES:-${JSH_ROOT}/conf/git.json}
-  [[ -r ${file} ]] || die "no profiles: create ${file} from conf/git.example.json"
-  python3 - "${file}" <<'EOF'
+	local file=${JSH_GIT_PROFILES:-${JSH_ROOT}/conf/git.json}
+	[[ -r ${file} ]] || die "no profiles: create ${file} from conf/git.example.json"
+	python3 - "${file}" <<'EOF'
 import json, sys
 
 for name, profile in json.load(open(sys.argv[1], encoding="utf-8")).get("profiles", {}).items():
@@ -658,177 +664,176 @@ EOF
 
 # Prints the path of a profile ssh_key: a ~/ path, any other path, or a name under ~/.ssh.
 key_path() {
-  local key=${1/#\~\//${HOME}/}
-  [[ ${key} == */* ]] || key=${HOME}/.ssh/${key}
-  printf '%s\n' "${key}"
+	local key=${1/#\~\//${HOME}/}
+	[[ ${key} == */* ]] || key=${HOME}/.ssh/${key}
+	printf '%s\n' "${key}"
 }
 
 # Prints a GitHub HTTPS URL as SSH; any other URL is printed unchanged.
 ssh_url() {
-  local path
-  case $1 in
-    https://github.com/*)
-      path=${1#https://github.com/}
-      path=${path%/}
-      printf 'git@github.com:%s.git\n' "${path%.git}"
-      ;;
-    *) printf '%s\n' "$1" ;;
-  esac
+	local path
+	case $1 in
+	https://github.com/*)
+		path=${1#https://github.com/}
+		path=${path%/}
+		printf 'git@github.com:%s.git\n' "${path%.git}"
+		;;
+	*) printf '%s\n' "$1" ;;
+	esac
 }
 
 profile() {
-  local wanted='' line chosen='' name display email user key current remote url push owner
-  local -a lines names
-  case ${1:-} in
-    -h | --help)
-      printf 'usage: git profile [NAME | --list]\n\nSet user.name, user.email, and core.sshCommand from a conf/git.json\n'
-      printf 'profile, and switch GitHub HTTPS origin and upstream remotes to SSH.\n'
-      return
-      ;;
-  esac
-  (($# <= 1)) || die 'usage: git profile [NAME | --list]'
-  wanted=${1:-}
-  while IFS= read -r line; do
-    [[ -n ${line} ]] && lines+=("${line}") && names+=("${line%%$'\x1f'*}")
-  done < <(read_profiles)
-  ((${#lines[@]})) || die 'no profiles in conf/git.json'
-  if [[ -z ${wanted} || ${wanted} == --list ]]; then
-    current=$(run_git config user.email 2> /dev/null || true)
-    if [[ ${wanted} == --list || ! -t 0 || ! -t 1 ]]; then
-      for line in "${lines[@]}"; do
-        IFS=$'\x1f' read -r name display email user key <<< "${line}"
-        printf '%s %-12s %s <%s>\n' "$([[ ${email} == "${current}" ]] && echo '*' || echo ' ')" \
-          "${name}" "${display}" "${email}"
-      done
-      return
-    fi
-    wanted=$(jsh::choose profile "${names[@]}") || exit 1
-  fi
-  for line in "${lines[@]}"; do
-    [[ ${line%%$'\x1f'*} == "${wanted}" ]] && chosen=${line}
-  done
-  [[ -n ${chosen} ]] || die "unknown profile: ${wanted} (have: ${names[*]})"
-  run_git rev-parse --git-dir > /dev/null 2>&1 || die 'not a Git repository'
-  IFS=$'\x1f' read -r name display email user key <<< "${chosen}"
-  [[ -z ${display} ]] || run_git config user.name "${display}"
-  [[ -z ${email} ]] || run_git config user.email "${email}"
-  if [[ -n ${key} ]]; then
-    key=$(key_path "${key}")
-    [[ -r ${key} ]] || jsh::log_warn "SSH key not found: ${key}"
-    run_git config core.sshCommand "ssh -i $(printf '%q' "${key}") -o IdentitiesOnly=yes"
-  fi
-  for remote in origin upstream; do
-    url=$(run_git remote get-url "${remote}" 2> /dev/null) || continue
-    [[ $(ssh_url "${url}") == "${url}" ]] || run_git remote set-url "${remote}" "$(ssh_url "${url}")"
-    push=$(run_git config --get "remote.${remote}.pushurl" 2> /dev/null) || continue
-    [[ $(ssh_url "${push}") == "${push}" ]] ||
-      run_git remote set-url --push "${remote}" "$(ssh_url "${push}")"
-  done
-  jsh::log_success "profile ${name}: ${display} <${email}>"
-  url=$(run_git remote get-url origin 2> /dev/null) || return 0
-  owner=${url#git@github.com:}
-  owner=${owner%%/*}
-  if [[ ${url} == git@github.com:* && -n ${user} && ${owner} != "${user}" ]] &&
-    ! run_git remote get-url upstream > /dev/null 2>&1; then
-    jsh::log_note "origin belongs to ${owner}; for a fork, rename it to upstream and add origin"
-  fi
+	local wanted='' line chosen='' name display email user key current remote url push owner
+	local -a lines names
+	case ${1:-} in
+	-h | --help)
+		printf 'usage: git profile [NAME | --list]\n\nSet user.name, user.email, and core.sshCommand from a conf/git.json\n'
+		printf 'profile, and switch GitHub HTTPS origin and upstream remotes to SSH.\n'
+		return
+		;;
+	esac
+	(($# <= 1)) || die 'usage: git profile [NAME | --list]'
+	wanted=${1:-}
+	while IFS= read -r line; do
+		[[ -n ${line} ]] && lines+=("${line}") && names+=("${line%%$'\x1f'*}")
+	done < <(read_profiles)
+	((${#lines[@]})) || die 'no profiles in conf/git.json'
+	if [[ -z ${wanted} || ${wanted} == --list ]]; then
+		current=$(run_git config user.email 2>/dev/null || true)
+		if [[ ${wanted} == --list || ! -t 0 || ! -t 1 ]]; then
+			for line in "${lines[@]}"; do
+				IFS=$'\x1f' read -r name display email user key <<<"${line}"
+				printf '%s %-12s %s <%s>\n' "$([[ ${email} == "${current}" ]] && echo '*' || echo ' ')" \
+					"${name}" "${display}" "${email}"
+			done
+			return
+		fi
+		wanted=$(jsh::choose profile "${names[@]}") || exit 1
+	fi
+	for line in "${lines[@]}"; do
+		[[ ${line%%$'\x1f'*} == "${wanted}" ]] && chosen=${line}
+	done
+	[[ -n ${chosen} ]] || die "unknown profile: ${wanted} (have: ${names[*]})"
+	run_git rev-parse --git-dir >/dev/null 2>&1 || die 'not a Git repository'
+	IFS=$'\x1f' read -r name display email user key <<<"${chosen}"
+	[[ -z ${display} ]] || run_git config user.name "${display}"
+	[[ -z ${email} ]] || run_git config user.email "${email}"
+	if [[ -n ${key} ]]; then
+		key=$(key_path "${key}")
+		[[ -r ${key} ]] || jsh::log_warn "SSH key not found: ${key}"
+		run_git config core.sshCommand "ssh -i $(printf '%q' "${key}") -o IdentitiesOnly=yes"
+	fi
+	for remote in origin upstream; do
+		url=$(run_git remote get-url "${remote}" 2>/dev/null) || continue
+		[[ $(ssh_url "${url}") == "${url}" ]] || run_git remote set-url "${remote}" "$(ssh_url "${url}")"
+		push=$(run_git config --get "remote.${remote}.pushurl" 2>/dev/null) || continue
+		[[ $(ssh_url "${push}") == "${push}" ]] ||
+			run_git remote set-url --push "${remote}" "$(ssh_url "${push}")"
+	done
+	jsh::log_success "profile ${name}: ${display} <${email}>"
+	url=$(run_git remote get-url origin 2>/dev/null) || return 0
+	owner=${url#git@github.com:}
+	owner=${owner%%/*}
+	if [[ ${url} == git@github.com:* && -n ${user} && ${owner} != "${user}" ]] &&
+		! run_git remote get-url upstream >/dev/null 2>&1; then
+		jsh::log_note "origin belongs to ${owner}; for a fork, rename it to upstream and add origin"
+	fi
 }
 
 # ---- status ----
 
 # Prints who commits here are authored as, where that comes from, and the matching profile.
 status_identity() {
-  local ident scope name display pemail user key url fix profile=none note=''
-  run_git rev-parse --git-dir > /dev/null 2>&1 || return 0
-  if ! ident=$(run_git var GIT_AUTHOR_IDENT 2> /dev/null); then
-    jsh::log_warn 'No commit identity here; set one with git profile'
-    return 0
-  fi
-  ident=${ident% * *}
-  author_email=${ident##*<}
-  author_email=${author_email%>}
-  if [[ -n ${GIT_AUTHOR_EMAIL:-} ]]; then
-    scope=environment
-  elif scope=$(run_git config --show-scope --get user.email 2> /dev/null); then
-    scope=${scope%%$'\t'*}
-  else
-    scope=guessed
-  fi
-  [[ ${scope} == local ]] || note=" (${scope})"
-  if [[ -r ${JSH_GIT_PROFILES:-${JSH_ROOT}/conf/git.json} ]]; then
-    while IFS=$'\x1f' read -r name display pemail user key; do
-      [[ ${pemail} == "${author_email}" ]] || continue
-      profile=${name}
-      [[ -n ${key} ]] || break
-      fix=''
-      [[ $(run_git config core.sshCommand 2> /dev/null) == \
-        "ssh -i $(printf '%q' "$(key_path "${key}")") -o IdentitiesOnly=yes" ]] ||
-        fix='SSH key not set'
-      url=$(run_git remote get-url origin 2> /dev/null) || url=''
-      [[ $(ssh_url "${url}") == "${url}" ]] || fix+="${fix:+, }origin uses HTTPS"
-      [[ -z ${fix} ]] || note+="; ${fix}, run git profile ${name}"
-      break
-    done < <(read_profiles)
-  fi
-  jsh::log_note "profile ${profile}: ${ident}${note}"
+	local ident scope name display pemail user key url fix profile=none note=''
+	run_git rev-parse --git-dir >/dev/null 2>&1 || return 0
+	if ! ident=$(run_git var GIT_AUTHOR_IDENT 2>/dev/null); then
+		jsh::log_warn 'No commit identity here; set one with git profile'
+		return 0
+	fi
+	ident=${ident% * *}
+	author_email=${ident##*<}
+	author_email=${author_email%>}
+	if [[ -n ${GIT_AUTHOR_EMAIL:-} ]]; then
+		scope=environment
+	elif scope=$(run_git config --show-scope --get user.email 2>/dev/null); then
+		scope=${scope%%$'\t'*}
+	else
+		scope=guessed
+	fi
+	[[ ${scope} == local ]] || note=" (${scope})"
+	if [[ -r ${JSH_GIT_PROFILES:-${JSH_ROOT}/conf/git.json} ]]; then
+		while IFS=$'\x1f' read -r name display pemail user key; do
+			[[ ${pemail} == "${author_email}" ]] || continue
+			profile=${name}
+			[[ -n ${key} ]] || break
+			fix=''
+			[[ $(run_git config core.sshCommand 2>/dev/null) == "ssh -i $(printf '%q' "$(key_path "${key}")") -o IdentitiesOnly=yes" ]] ||
+				fix='SSH key not set'
+			url=$(run_git remote get-url origin 2>/dev/null) || url=''
+			[[ $(ssh_url "${url}") == "${url}" ]] || fix+="${fix:+, }origin uses HTTPS"
+			[[ -z ${fix} ]] || note+="; ${fix}, run git profile ${name}"
+			break
+		done < <(read_profiles)
+	fi
+	jsh::log_note "profile ${profile}: ${ident}${note}"
 }
 
 # Usage: plural COUNT SINGULAR PLURAL
 plural() {
-  if (($1 == 1)); then printf '1 %s\n' "$2"; else printf '%s %s\n' "$1" "$3"; fi
+	if (($1 == 1)); then printf '1 %s\n' "$2"; else printf '%s %s\n' "$1" "$3"; fi
 }
 
 # Prints what git status leaves out: unpushed commits by another identity, distance from the
 # default branch, a future-dated HEAD, and stashes.
 status_history() {
-  local others count target upstream stamp
-  run_git rev-parse --verify --quiet HEAD > /dev/null || return 0
-  if [[ -n ${author_email} && -n $(run_git remote) ]]; then
-    others=$(run_git log --format=%ae HEAD --not --remotes | grep -vxF -- "${author_email}") ||
-      others=''
-    if [[ -n ${others} ]]; then
-      count=$(printf '%s\n' "${others}" | wc -l)
-      jsh::log_warn "$(plural $((count)) 'unpushed commit' 'unpushed commits') authored as" \
-        "$(printf '%s\n' "${others}" | sort -u | paste -sd ',' - | sed 's/,/, /g')"
-    fi
-  fi
-  if target=$(run_git symbolic-ref --quiet --short refs/remotes/origin/HEAD); then
-    upstream=$(run_git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2> /dev/null) ||
-      upstream=''
-    count=$(run_git rev-list --count "HEAD..${target}")
-    [[ ${upstream} == "${target}" ]] || ((count == 0)) ||
-      jsh::log_note "$(plural "${count}" commit commits) behind ${target}; git refresh rebases onto it"
-  fi
-  stamp=$(run_git log -1 --format=%ct HEAD)
-  ((stamp <= $(date +%s) + 60)) || jsh::log_warn \
-    "HEAD is dated $(format_epoch "${stamp}" '%Y-%m-%d %H:%M'), in the future; new commits will predate it"
-  count=$(run_git rev-list --walk-reflogs --count refs/stash 2> /dev/null) || count=0
-  ((count == 0)) || jsh::log_note "$(plural "${count}" stash stashes) (git stash list)"
+	local others count target upstream stamp
+	run_git rev-parse --verify --quiet HEAD >/dev/null || return 0
+	if [[ -n ${author_email} && -n $(run_git remote) ]]; then
+		others=$(run_git log --format=%ae HEAD --not --remotes | grep -vxF -- "${author_email}") ||
+			others=''
+		if [[ -n ${others} ]]; then
+			count=$(printf '%s\n' "${others}" | wc -l)
+			jsh::log_warn "$(plural $((count)) 'unpushed commit' 'unpushed commits') authored as" \
+				"$(printf '%s\n' "${others}" | sort -u | paste -sd ',' - | sed 's/,/, /g')"
+		fi
+	fi
+	if target=$(run_git symbolic-ref --quiet --short refs/remotes/origin/HEAD); then
+		upstream=$(run_git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null) ||
+			upstream=''
+		count=$(run_git rev-list --count "HEAD..${target}")
+		[[ ${upstream} == "${target}" ]] || ((count == 0)) ||
+			jsh::log_note "$(plural "${count}" commit commits) behind ${target}; git refresh rebases onto it"
+	fi
+	stamp=$(run_git log -1 --format=%ct HEAD)
+	((stamp <= $(date +%s) + 60)) || jsh::log_warn \
+		"HEAD is dated $(format_epoch "${stamp}" '%Y-%m-%d %H:%M'), in the future; new commits will predate it"
+	count=$(run_git rev-list --walk-reflogs --count refs/stash 2>/dev/null) || count=0
+	((count == 0)) || jsh::log_note "$(plural "${count}" stash stashes) (git stash list)"
 }
 
 # Prints git status without hints, with paths from the root, grouped by change type.
 condense_status() {
-  local color=false
-  [[ -n ${NO_COLOR:-} ]] || color=$(run_git config --get-colorbool color.status true)
-  run_git -c advice.statusHints=false -c status.relativePaths=false -c color.status=never status |
-    python3 "${JSH_ROOT}/lib/jsh/status.py" "${color}"
-  exit 0
+	local color=false
+	[[ -n ${NO_COLOR:-} ]] || color=$(run_git config --get-colorbool color.status true)
+	run_git -c advice.statusHints=false -c status.relativePaths=false -c color.status=never status |
+		python3 "${JSH_ROOT}/lib/jsh/status.py" "${color}"
+	exit 0
 }
 
 command=$1
 shift
 case ${command} in
-  save) save "$@" ;;
-  load) load "$@" ;;
-  refresh) refresh "$@" ;;
-  profile) profile "$@" ;;
-  handoff) handoff "$@" ;;
-  commit) commit_at "$@" ;;
-  status)
-    author_email=''
-    status_identity
-    status_history
-    (($#)) || condense_status
-    exec "${git_bin}" status "$@"
-    ;;
+save) save "$@" ;;
+load) load "$@" ;;
+refresh) refresh "$@" ;;
+profile) profile "$@" ;;
+handoff) handoff "$@" ;;
+commit) commit_at "$@" ;;
+status)
+	author_email=''
+	status_identity
+	status_history
+	(($#)) || condense_status
+	exec "${git_bin}" status "$@"
+	;;
 esac

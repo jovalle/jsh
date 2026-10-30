@@ -42,7 +42,10 @@ if jsh::root test -e "${sudoers_file}"; then
   backup="${XDG_STATE_HOME:-${HOME}/.local/state}/jsh/backups/$(date +%s)-$$/sudoers"
   mkdir -p -- "${backup%/*}"
   # Keep this private backup owned by the invoking user.
-  (umask 077; jsh::root cat "${sudoers_file}" >"${backup}")
+  (
+    umask 077
+    jsh::root cat "${sudoers_file}" >"${backup}"
+  )
   jsh::log_note "  › backup ${backup}"
 fi
 staging=$(jsh::root mktemp /etc/sudoers.d/.jsh-XXXXXX)

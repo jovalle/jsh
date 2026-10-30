@@ -19,9 +19,7 @@ units = _native.units
 
 def present(app):
     return any(
-        subprocess.run(
-            ["flatpak", "info", scope, app], check=False, capture_output=True
-        ).returncode
+        subprocess.run(["flatpak", "info", scope, app], check=False, capture_output=True).returncode
         == 0
         for scope in ("--user", "--system")
     )

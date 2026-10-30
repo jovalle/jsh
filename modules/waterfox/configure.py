@@ -53,9 +53,14 @@ def registered_profiles(directory):
     parser = configparser.ConfigParser(interpolation=None)
     parser.read(directory / "profiles.ini")
     return [
-        (section.get("Name", section.name),
-         (directory / section["Path"]).resolve() if section.get("IsRelative", "1") == "1"
-         else Path(section["Path"]).resolve())
+        (
+            section.get("Name", section.name),
+            (
+                (directory / section["Path"]).resolve()
+                if section.get("IsRelative", "1") == "1"
+                else Path(section["Path"]).resolve()
+            ),
+        )
         for section in (parser[key] for key in parser.sections() if key.startswith("Profile"))
         if section.get("Path")
     ]
@@ -63,8 +68,12 @@ def registered_profiles(directory):
 
 def choose_profile(ctx):
     """Ask only on an interactive terminal; leave the spinner paused while reading."""
-    choices = [(directory, name, path) for directory in directories()
-               for name, path in registered_profiles(directory) if path.is_dir()]
+    choices = [
+        (directory, name, path)
+        for directory in directories()
+        for name, path in registered_profiles(directory)
+        if path.is_dir()
+    ]
     if ctx.dry_run or not menu.available() or not ctx.display.stream.isatty() or not choices:
         ctx.notice("choose a profile from Waterfox about:profiles; rerun with "
                    "JSH_WATERFOX_PROFILE='name' jsh configure waterfox")
@@ -148,8 +157,9 @@ def configure(ctx):  # pylint: disable=too-many-branches
             launch = ["flatpak", "run", "net.waterfox.waterfox"]
         else:
             launch = ["waterfox"]
-        with apps.closed_for_changes(ctx, "Waterfox", ("waterfox", "waterfox-bin", "Waterfox"),
-                                     launch) as ready:
+        with apps.closed_for_changes(
+            ctx, "Waterfox", ("waterfox", "waterfox-bin", "Waterfox"), launch
+        ) as ready:
             if ready:
                 files.write(ctx, target, text)
         return

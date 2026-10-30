@@ -13,7 +13,7 @@ ZSH_FILES := modules/shell/home/.zshrc modules/shell/completions/_jsh lib/j.zsh 
   lib/startup.zsh
 PYTHON_FILES := $(shell find lib modules tests -type f -name '*.py')
 
-.PHONY: help check syntax headers readme modules lint test hooks
+.PHONY: help check syntax headers readme modules lint test fmt hooks
 
 help:
 	@printf '%s\n' \
@@ -24,6 +24,7 @@ help:
 	  'make modules  Load every module.json and plan it for each platform' \
 	  'make lint     Run shellcheck, pylint, yamllint, and markdownlint' \
 	  'make test     Run the Python unittest suite' \
+	  'make fmt      Format Python (black), shell (shfmt), and JSON/YAML/Markdown (prettier)' \
 	  'make hooks    Run the pre-commit hooks on every file'
 
 check: syntax headers readme modules lint test
@@ -65,6 +66,14 @@ lint:
 
 test:
 	$(PYTHON) -m unittest discover -s tests -p 'test_*.py' < /dev/null
+
+# shfmt takes its style from .editorconfig; prettier rejects symlinks and deleted paths.
+fmt:
+	black --line-length 100 --target-version py39 $(PYTHON_FILES)
+	shfmt --write $(SHELL_FILES)
+	git ls-files -co --exclude-standard -- '*.js' '*.json' '*.jsonc' '*.md' '*.yaml' '*.yml' \
+	  ':!:modules/skills/' | while read -r f; do [[ -L $$f || ! -f $$f ]] || printf '%s\0' "$$f"; done | \
+	  xargs -0 prettier --write --log-level warn
 
 hooks:
 	pre-commit run --all-files

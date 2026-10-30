@@ -15,8 +15,14 @@ output_is_excluded() {
     $1 =~ ^alsa_output\.usb-Elgato_Systems_Elgato_Wave_3_.*$ ]]
 }
 
-[[ ${1:-cycle} == cycle ]] || { jsh::log_error "Usage: $0 [cycle]"; exit 2; }
-command -v pactl >/dev/null 2>&1 || { jsh::log_error 'pactl is required to cycle audio outputs.'; exit 1; }
+[[ ${1:-cycle} == cycle ]] || {
+  jsh::log_error "Usage: $0 [cycle]"
+  exit 2
+}
+command -v pactl >/dev/null 2>&1 || {
+  jsh::log_error 'pactl is required to cycle audio outputs.'
+  exit 1
+}
 if [[ ${JSH_DRY_RUN:-0} == 1 ]]; then
   jsh::log_note '  › would cycle the default audio output'
   exit 0
@@ -27,7 +33,10 @@ while IFS=$'\t' read -r _ sink _; do
   [[ -n ${sink} ]] || continue
   output_is_excluded "${sink}" || sinks+=("${sink}")
 done < <(pactl list short sinks)
-((${#sinks[@]})) || { jsh::log_error 'No enabled audio output is available.'; exit 1; }
+((${#sinks[@]})) || {
+  jsh::log_error 'No enabled audio output is available.'
+  exit 1
+}
 current=$(pactl get-default-sink 2>/dev/null || true)
 target=${sinks[0]}
 for index in "${!sinks[@]}"; do

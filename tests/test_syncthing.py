@@ -43,8 +43,14 @@ class SyncthingTests(unittest.TestCase):
         self.facts = system.Facts(platform="debian", desktop="", host="test")
 
     def context(self, dry_run=False):
-        ctx = Context(Display(io.StringIO(), dry_run), self.facts, "configure", "tools",
-                      self.home / "logs", dry_run)
+        ctx = Context(
+            Display(io.StringIO(), dry_run),
+            self.facts,
+            "configure",
+            "tools",
+            self.home / "logs",
+            dry_run,
+        )
         ctx.root = self.root
         ctx.run = self.run_command
         return ctx
@@ -62,30 +68,40 @@ class SyncthingTests(unittest.TestCase):
         self.defaults = Path(args[-1]).read_text().splitlines()
 
     def test_all_folders_and_defaults_are_protected_idempotently(self):
-        with mock.patch.object(SYNCTHING.shutil, "which", return_value="syncthing"), \
-             mock.patch.object(SYNCTHING, "query", side_effect=self.query):
+        with (
+            mock.patch.object(SYNCTHING.shutil, "which", return_value="syncthing"),
+            mock.patch.object(SYNCTHING, "query", side_effect=self.query),
+        ):
             ctx = self.context()
             SYNCTHING.configure(ctx)
             self.assertEqual(self.defaults, [".git", "node_modules"])
-            self.assertTrue((self.root / ".stignore").read_text().startswith(
-                ".git\nnode_modules\n/local/\n/tmp/\n(?d).cache\n"
-            ))
-            self.assertEqual((self.projects / ".stignore").read_text(),
-                             ".git\nnode_modules\n!.git/config\nnode_modules\n")
+            self.assertTrue(
+                (self.root / ".stignore")
+                .read_text()
+                .startswith(".git\nnode_modules\n/local/\n/tmp/\n(?d).cache\n")
+            )
+            self.assertEqual(
+                (self.projects / ".stignore").read_text(),
+                ".git\nnode_modules\n!.git/config\nnode_modules\n",
+            )
             SYNCTHING.configure(ctx)
             self.assertEqual(len(ctx.display.changes), 3)
 
     def test_dry_run_changes_no_files_or_defaults(self):
         before = (self.projects / ".stignore").read_text()
-        with mock.patch.object(SYNCTHING.shutil, "which", return_value="syncthing"), \
-             mock.patch.object(SYNCTHING, "query", side_effect=self.query):
+        with (
+            mock.patch.object(SYNCTHING.shutil, "which", return_value="syncthing"),
+            mock.patch.object(SYNCTHING, "query", side_effect=self.query),
+        ):
             SYNCTHING.configure(self.context(dry_run=True))
         self.assertEqual((self.projects / ".stignore").read_text(), before)
         self.assertEqual(self.defaults, ["node_modules"])
 
     def test_unavailable_service_is_reported(self):
-        with mock.patch.object(SYNCTHING.shutil, "which", return_value="syncthing"), \
-             mock.patch.object(SYNCTHING, "query", side_effect=RuntimeError):
+        with (
+            mock.patch.object(SYNCTHING.shutil, "which", return_value="syncthing"),
+            mock.patch.object(SYNCTHING, "query", side_effect=RuntimeError),
+        ):
             ctx = self.context()
             SYNCTHING.configure(ctx)
         self.assertTrue(ctx.noticed)

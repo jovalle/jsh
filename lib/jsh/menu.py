@@ -10,6 +10,7 @@ import tty
 
 from jsh.output import styled
 
+
 def paint(text, color, enabled):
     return f"\033[{color}m{text}\033[0m" if enabled and text else text
 
@@ -68,8 +69,9 @@ def choose(title, items, selected=(), multiple=False, title_color=None):
         tty.setcbreak(fd)
         sys.stdout.write("\033[?25l")
         while True:
-            filtered = [item for item in items if query.lower() in
-                        (item[1] + " " + item[2]).lower()]
+            filtered = [
+                item for item in items if query.lower() in (item[1] + " " + item[2]).lower()
+            ]
             cursor = min(cursor, max(0, len(filtered) - 1))
             rows = max(1, shutil.get_terminal_size((80, 24)).lines - len(title.splitlines()) - 6)
             start = max(0, cursor - rows + 1)
@@ -137,26 +139,36 @@ def view(title, text, actions=False):  # pylint: disable=too-many-locals
         sys.stdout.write("\033[?25l")
         while True:
             width, height = shutil.get_terminal_size((80, 24))
-            lines = [part for line in text.splitlines()
-                     for part in (textwrap.wrap(line, max(1, width - 1),
-                                                replace_whitespace=False) or [""])]
+            lines = [
+                part
+                for line in text.splitlines()
+                for part in (
+                    textwrap.wrap(line, max(1, width - 1), replace_whitespace=False) or [""]
+                )
+            ]
             count = max(1, height - 4)
             offset = min(offset, max(0, len(lines) - count))
             color = styled(sys.stdout)
             visible = []
-            for line in lines[offset:offset + count]:
+            for line in lines[offset : offset + count]:
                 if line.startswith(("+ ", "~ ", "- ", "! ", "✗ ")):
-                    code = {"+": "32", "~": "33", "-": "31", "!": "33",
-                            "✗": "31"}[line[0]]
+                    code = {"+": "32", "~": "33", "-": "31", "!": "33", "✗": "31"}[line[0]]
                     line = paint(line[0], code, color) + line[1:]
-                elif line in ("Packages", "Repositories", "Links", "Configuration",
-                              "Other changes"):
+                elif line in (
+                    "Packages",
+                    "Repositories",
+                    "Links",
+                    "Configuration",
+                    "Other changes",
+                ):
                     line = paint(line, "1", color)
                 visible.append(line)
-            controls = ("↑↓ scroll | a apply | d details | c change | esc cancel" if actions else
-                        "↑↓ scroll | enter or esc back")
-            screen = [paint(title[:max(width - 1, 1)], "1;36", color), "", *visible,
-                      "", controls]
+            controls = (
+                "↑↓ scroll | a apply | d details | c change | esc cancel"
+                if actions
+                else "↑↓ scroll | enter or esc back"
+            )
+            screen = [paint(title[: max(width - 1, 1)], "1;36", color), "", *visible, "", controls]
             sys.stdout.write("\033[H\033[2J" + "\r\n".join(screen))
             sys.stdout.flush()
             pressed = key(sys.stdin)
