@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Install the REA CLI and keep the graphify and REA skills in ~/.agents/skills current.
+# Install the REA CLI, keep the graphify and REA skills in ~/.agents/skills current, and
+# register the REA MCP server with OpenCode, Codex, and Antigravity.
 
 set -euo pipefail
 
@@ -10,6 +11,27 @@ readonly SCRIPT_DIR JSH_ROOT
 . "${JSH_ROOT}/lib/core.sh"
 
 readonly SKILLS="${HOME}/.agents/skills"
+
+select_node() {
+  local node directory
+  for node in "$(command -v node || :)" "${HOMEBREW_PREFIX:-/nonexistent}/opt/node/bin/node" \
+    /opt/homebrew/opt/node/bin/node \
+    /home/linuxbrew/.linuxbrew/opt/node/bin/node /usr/local/opt/node/bin/node; do
+    [[ -n ${node} && -x ${node} ]] || continue
+    if "${node}" -e 'process.exit(typeof require("node:zlib").zstdDecompress === "function" ? 0 : 1)' \
+      >/dev/null 2>&1; then
+      directory=${node%/*}
+      if command -v rea >/dev/null 2>&1 && \
+        ! PATH="${directory}:${PATH}" rea --version >/dev/null 2>&1; then
+        continue
+      fi
+      export PATH="${directory}:${PATH}"
+      return 0
+    fi
+  done
+  jsh::notice 'REA needs a newer Node.js with zstd support; install or select a compatible Node.js, then rerun jsh update ai'
+  return 1
+}
 
 install_rea() {
   if command -v rea >/dev/null 2>&1; then
@@ -68,9 +90,13 @@ sync_graphify() {
 
 sync_rea() {
   local existed=0 planned=1
+  local -a args=(--skill-client shared)
   [[ -d ${SKILLS}/reverse-engineer-anything ]] && existed=1
+  command -v opencode >/dev/null 2>&1 && args+=(--client opencode)
+  command -v codex >/dev/null 2>&1 && args+=(--client codex)
+  command -v agy >/dev/null 2>&1 && args+=(--client antigravity)
   if command -v rea >/dev/null 2>&1; then
-    planned=$(rea setup --dry-run --skill-client shared --format json </dev/null |
+    planned=$(rea setup --dry-run "${args[@]}" --format json </dev/null |
       python3 -c 'import json, sys; print(len(json.load(sys.stdin)["plannedActions"]))')
   fi
   if [[ ${planned} == 0 ]]; then
@@ -78,19 +104,20 @@ sync_rea() {
     return
   fi
   jsh::progress "skill reverse-engineer-anything"
-  jsh::run rea setup --yes --skill-client shared
+  jsh::run rea setup --yes "${args[@]}"
   report reverse-engineer-anything "${existed}"
 }
 
 case ${JSH_PHASE:-configure} in
-  install) install_rea ;;
+  install) if select_node; then install_rea; fi ;;
   update)
-    update_rea
+    node_ready=0
+    if select_node; then node_ready=1; update_rea; fi
     sync_graphify
-    sync_rea
+    if [[ ${node_ready} == 1 ]]; then sync_rea; fi
     ;;
   *)
     sync_graphify
-    sync_rea
+    if select_node; then sync_rea; fi
     ;;
 esac
