@@ -146,13 +146,18 @@ def set_xfce_sleep(allowed: bool) -> None:
 
 def show_xfce_status() -> None:
     if running_pid() is None:
-        icon = "cafe-off.svg"
+        icon = "cafe-off"
         tip = "Cafe: Inactive (Normal sleep - Click to disable sleep)"
     else:
-        icon = "cafe-on.svg"
+        icon = "cafe-on"
         tip = "Cafe: Active (Sleep disabled - Click to allow sleep)"
-    icon_path = SCRIPT.parents[1] / "assets" / "icons" / icon
-    print(f"<img>{icon_path}</img><tool>{tip}</tool><click>{SCRIPT} --xfce-toggle</click>")
+    icon_path = Path.home() / ".local/share/icons/hicolor/scalable/status" / f"{icon}-symbolic.svg"
+    if icon_path.is_file():
+        image = f"<icon>{icon}-symbolic</icon><iconclick>{SCRIPT} --xfce-toggle</iconclick>"
+    else:
+        image = f"<img>{SCRIPT.parents[1] / 'assets/icons' / (icon + '.svg')}</img>"
+        image += f"<click>{SCRIPT} --xfce-toggle</click>"
+    print(f"{image}<tool>{tip}</tool>")
 
 
 def toggle_xfce() -> None:
