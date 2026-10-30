@@ -334,6 +334,141 @@ class SaveLoadTests(GitTestCase):
         self.assertEqual(self.gists(), [])
 
 
+class HandoffTests(GitTestCase):
+    """Two workstations share a Syncthing folder and a synced working tree, but not .git."""
+
+    def setUp(self):
+        super().setUp()
+        self.shared = self.tmp / "sync/handoff"
+        self.homes = {}
+        self.repos = {}
+        for host in ("leave", "arrive"):
+            home = self.tmp / host
+            home.mkdir()
+            self.homes[host] = {"HOME": str(home)}
+            self.repos[host] = home / "projects/app"
+        self.repos["leave"].parent.mkdir()
+        self.run_git("init", "--quiet", "-b", "main", str(self.repos["leave"]), cwd=self.tmp)
+        self.commit(self.repos["leave"], "base", ("a.txt", "one\n"))
+        self.repos["arrive"].parent.mkdir()
+        self.run_git(
+            "clone", "--quiet", str(self.repos["leave"]), str(self.repos["arrive"]), cwd=self.tmp
+        )
+        for repo in self.repos.values():
+            self.run_git("config", "handoff.dir", str(self.shared), cwd=repo)
+
+    def handoff(self, host, *args, check=True):
+        return self.run_git(
+            "handoff", *args, cwd=self.repos[host], env=self.homes[host], check=check
+        )
+
+    def sync_files(self, source="leave", target="arrive"):
+        src, dst = self.repos[source], self.repos[target]
+        for path in dst.rglob("*"):
+            if ".git" not in path.relative_to(dst).parts and path.is_file():
+                path.unlink()
+        for path in src.rglob("*"):
+            relative = path.relative_to(src)
+            if ".git" not in relative.parts and path.is_file():
+                (dst / relative).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(path, dst / relative)
+
+    def head(self, host):
+        return self.out("rev-parse", "HEAD", cwd=self.repos[host])
+
+    def bundle(self):
+        return self.shared / "projects/app.bundle"
+
+    def test_leaving_writes_and_arriving_fetches_with_matching_status(self):
+        leave, arrive = self.repos["leave"], self.repos["arrive"]
+        self.commit(leave, "work", ("b.txt", "two\n"))
+        (leave / "a.txt").write_text("unfinished\n")
+        (leave / "new.txt").write_text("untracked\n")
+        self.sync_files()
+
+        self.assertIn("written", self.handoff("leave").stdout)
+        self.assertTrue(self.bundle().is_file())
+        self.assertEqual(list(self.shared.rglob(".syncthing.*")), [])
+        self.assertIn("fetched", self.handoff("arrive").stdout)
+
+        self.assertEqual(self.head("arrive"), self.head("leave"))
+        status = ("status", "--porcelain", "--untracked-files=all")
+        self.assertEqual(self.out(*status, cwd=arrive), self.out(*status, cwd=leave))
+        self.assertEqual((arrive / "a.txt").read_text(), "unfinished\n")
+
+    def test_running_again_on_either_host_changes_nothing(self):
+        self.commit(self.repos["leave"], "work", ("b.txt", "two\n"))
+        self.sync_files()
+        self.handoff("leave")
+        self.handoff("arrive")
+        before = self.bundle().stat().st_mtime_ns
+
+        for host in ("arrive", "leave"):
+            self.assertIn("up to date", self.handoff(host).stdout)
+        self.assertEqual(self.bundle().stat().st_mtime_ns, before)
+
+    def test_work_continues_back_and_forth(self):
+        self.handoff("leave")
+        self.handoff("arrive")
+        self.commit(self.repos["arrive"], "there", ("c.txt", "three\n"))
+        self.sync_files("arrive", "leave")
+
+        self.assertIn("written", self.handoff("arrive").stdout)
+        self.assertIn("fetched", self.handoff("leave").stdout)
+        self.assertEqual(self.head("leave"), self.head("arrive"))
+
+    def test_split_history_stops_without_changing_anything(self):
+        self.commit(self.repos["leave"], "here", ("b.txt", "here\n"))
+        self.handoff("leave")
+        self.commit(self.repos["arrive"], "there", ("b.txt", "there\n"))
+        head = self.head("arrive")
+        before = self.bundle().read_bytes()
+
+        result = self.handoff("arrive", check=False)
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("have split", result.stderr)
+        self.assertEqual(self.head("arrive"), head)
+        self.assertEqual(self.bundle().read_bytes(), before)
+
+    def test_arriving_switches_to_the_branch_in_use(self):
+        leave = self.repos["leave"]
+        self.run_git("switch", "--quiet", "-c", "feature", cwd=leave)
+        self.commit(leave, "feature", ("b.txt", "two\n"))
+        self.sync_files()
+        self.handoff("leave")
+
+        result = self.handoff("arrive")
+
+        self.assertIn("switched from main to feature", result.stdout)
+        self.assertEqual(self.out("branch", "--show-current", cwd=self.repos["arrive"]), "feature")
+        self.assertEqual(self.head("arrive"), self.head("leave"))
+        self.assertEqual(self.out("status", "--porcelain", cwd=self.repos["arrive"]), "")
+
+    def test_sync_conflict_copy_stops(self):
+        self.handoff("leave")
+        shutil.copy(self.bundle(), self.shared / "projects/app.sync-conflict-20261029-1-ABC.bundle")
+
+        result = self.handoff("arrive", check=False)
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Syncthing kept both", result.stderr)
+
+    def test_dry_run_and_clean(self):
+        self.assertIn("would write", self.handoff("leave", "--dry-run").stdout)
+        self.assertFalse(self.bundle().exists())
+        self.handoff("leave")
+        self.handoff("leave", "--clean")
+        self.assertFalse(self.bundle().exists())
+
+    def test_repository_outside_home_is_refused(self):
+        result = self.run_git(
+            "handoff", cwd=self.repos["leave"], env={"HOME": str(self.tmp / "home")}, check=False
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("under", result.stderr)
+
+
 class ProfileTestCase(GitTestCase):
     def setUp(self):
         super().setUp()
@@ -530,10 +665,12 @@ class StatusTests(ProfileTestCase):
             [
                 "On branch main",
                 "Changes to be committed:",
-                "  deleted (2): mods/{a,b}/conf.toml",
+                "  deleted (2):",
+                "    mods/{a,b}/conf.toml",
                 "",
                 "Changes not staged for commit:",
-                "  modified (3): a.txt  lib/{x,y}.py",
+                "  modified (3):",
+                "    a.txt  lib/{x,y}.py",
                 "",
                 "Untracked files (2):",
                 "  new.txt  notes/",
@@ -548,10 +685,11 @@ class StatusTests(ProfileTestCase):
         self.commit(self.path, "more")
         self.run_git("rm", "--quiet", "-r", "modules", cwd=self.path)
         self.assertEqual(
-            self.tty_status()[3:5],
+            self.tty_status()[3:6],
             [
-                "  deleted (6): modules/{alpha,bravo,charlie}/module.toml",
-                "               modules/{delta,echo,foxtrot}/module.toml",
+                "  deleted (6):",
+                "    modules/{alpha,bravo,charlie}/module.toml",
+                "    modules/{delta,echo,foxtrot}/module.toml",
             ],
         )
 

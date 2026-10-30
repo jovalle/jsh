@@ -7,6 +7,8 @@
 #   git profile [NAME]    Use a conf/git.json profile: identity, SSH key, SSH GitHub remotes
 #   git commit -t TIME    Commit with a chosen date (see `git commit -t --help`)
 #   git status            On a terminal, adds identity and branch notes and condenses file lists
+#   git status --raw      Plain git status, untouched
+#   git handoff           Carry unpushed commits to another workstation through a Syncthing folder
 
 set -euo pipefail
 
@@ -25,7 +27,7 @@ if [[ -z ${git_bin} ]]; then
 fi
 
 case ${1:-} in
-  save | load | refresh | profile) ;;
+  save | load | refresh | profile | handoff) ;;
   commit)
     case " $* " in
       *' -t'* | *' --timestamp'*) ;;
@@ -34,6 +36,13 @@ case ${1:-} in
     ;;
   status)
     [[ -t 1 ]] || exec "${git_bin}" "$@"
+    case " $* " in
+      *' --raw '*)
+        args=()
+        for arg in "$@"; do [[ ${arg} == --raw ]] || args+=("${arg}"); done
+        exec "${git_bin}" "${args[@]}"
+        ;;
+    esac
     case " $* " in
       *' --porcelain'* | *' -z '* | *' --null '* | *' -h '* | *' --help '*) exec "${git_bin}" "$@" ;;
     esac
@@ -483,6 +492,154 @@ load() {
   run_git status --short
 }
 
+# ---- handoff ----
+
+handoff_help() {
+  cat << 'EOF'
+usage: git handoff [--dry-run | --clean]
+
+Carry the current branch's commits to another workstation that shares this working tree
+through Syncthing, without pushing them anywhere. Run it on the machine you leave and again
+on the machine you arrive at; it works out which to do:
+
+  no bundle, or this branch is ahead     write the bundle
+  the bundle is ahead                    fetch it, move the branch there, and rebuild the index
+  both match                             nothing
+  both have commits the other lacks      stop and change nothing
+
+Files are left alone (Syncthing carries them); only the staged/unstaged split is lost.
+
+The bundle is HANDOFF_DIR/PATH.bundle, where PATH is the repository's path under $HOME and
+HANDOFF_DIR is git config handoff.dir, else ~/Sync/handoff.
+
+  -n, --dry-run   Say what would happen
+      --clean     Delete this repository's bundle, for example once its commits are pushed
+EOF
+}
+
+# Prints "SHA BRANCH" from a single-branch bundle.
+bundle_head() {
+  local sha ref
+  read -r sha ref < <(run_git bundle list-heads "$1" 2> /dev/null) || return 1
+  [[ ${ref} == refs/heads/* ]] || return 1
+  printf '%s %s\n' "${sha}" "${ref#refs/heads/}"
+}
+
+handoff_write() {
+  local file=$1 branch=$2 temp
+  mkdir -p "${file%/*}"
+  # Syncthing never syncs .syncthing.*.tmp, so the bundle only appears once it is complete.
+  temp=${file%/*}/.syncthing.${file##*/}.$$.tmp
+  if ! run_git bundle create --quiet "${temp}" "refs/heads/${branch}" 2> /dev/null; then
+    rm -f "${temp}"
+    die "could not write ${file}"
+  fi
+  mv -f "${temp}" "${file}"
+}
+
+handoff() {
+  local dry=0 clean=0 top home dir rel file branch head sha theirs mine tracked line
+  local -a conflicts=()
+  while (($#)); do
+    case $1 in
+      -n | --dry-run) dry=1 ;;
+      --clean) clean=1 ;;
+      -h | --help)
+        handoff_help
+        return
+        ;;
+      *) die 'usage: git handoff [--dry-run | --clean]' ;;
+    esac
+    shift
+  done
+  top=$(run_git rev-parse --show-toplevel 2> /dev/null) || die 'not in a Git repository'
+  top=$(cd "${top}" && pwd -P)
+  home=$(cd "${HOME}" && pwd -P)
+  [[ ${top} == "${home}"/* ]] || die "handoff needs a repository under ${HOME}"
+  rel=${top#"${home}"/}
+  dir=$(run_git config handoff.dir 2> /dev/null) || dir=${HOME}/Sync/handoff
+  dir=${dir/#\~\//${HOME}/}
+  file=${dir}/${rel}.bundle
+
+  if ((clean)); then
+    if [[ ! -e ${file} ]]; then
+      jsh::log_current "no bundle for ${rel}"
+    elif ((dry)); then
+      jsh::log_info "would delete ${file}"
+    else
+      rm -f "${file}"
+      jsh::log_success "deleted ${file}"
+    fi
+    return
+  fi
+
+  branch=$(run_git symbolic-ref --quiet --short HEAD) || die 'handoff needs a branch checkout'
+  head=$(run_git rev-parse --verify --quiet HEAD) || die 'handoff needs at least one commit'
+  for line in MERGE_HEAD rebase-merge rebase-apply CHERRY_PICK_HEAD REVERT_HEAD; do
+    [[ ! -e $(run_git rev-parse --path-format=absolute --git-path "${line}") ]] ||
+      die 'finish or abort the merge, rebase, or cherry-pick in progress first'
+  done
+
+  for line in "${file%.bundle}".sync-conflict-*.bundle; do
+    [[ -e ${line} ]] && conflicts+=("${line}")
+  done
+  if ((${#conflicts[@]})); then
+    jsh::log_error 'two workstations wrote a bundle; Syncthing kept both:'
+    for line in "${file}" "${conflicts[@]}"; do
+      [[ -e ${line} ]] || continue
+      read -r sha theirs < <(bundle_head "${line}") || sha='unreadable'
+      printf '  %s  %s %s\n' "${line}" "${theirs:-}" "${sha:0:12}" >&2
+    done
+    die 'fetch the commits you need (git fetch FILE BRANCH), delete the copies, then run again'
+  fi
+
+  if [[ ! -e ${file} ]]; then
+    ((dry)) && { jsh::log_info "would write ${branch} ${head:0:7} to ${file}"; return; }
+    handoff_write "${file}" "${branch}"
+    jsh::log_success "handoff ${branch} ${head:0:7} written"
+    return
+  fi
+
+  read -r sha theirs < <(bundle_head "${file}") || die "${file} is not a handoff bundle"
+  if [[ ${sha} == "${head}" && ${theirs} == "${branch}" ]]; then
+    jsh::log_current "handoff ${branch} ${head:0:7} up to date"
+    return
+  fi
+  run_git fetch --quiet --no-write-fetch-head "${file}" \
+    "+refs/heads/${theirs}:refs/remotes/handoff/${theirs}" || die "could not read ${file}"
+
+  if [[ ${sha} != "${head}" ]] && run_git merge-base --is-ancestor "${sha}" "${head}"; then
+    ((dry)) && { jsh::log_info "would write ${branch} ${head:0:7} over ${theirs} ${sha:0:7}"; return; }
+    handoff_write "${file}" "${branch}"
+    jsh::log_success "handoff ${branch} $(run_git rev-list --count "${sha}..${head}") commit(s)" \
+      "ahead, ${sha:0:7} → ${head:0:7} written"
+    return
+  fi
+
+  if ! run_git merge-base --is-ancestor "${head}" "${sha}"; then
+    jsh::log_error "${branch} ${head:0:7} and the bundle's ${theirs} ${sha:0:7} have split:"
+    run_git log --oneline --left-right "${head}...${sha}" | sed 's/^/  /' >&2
+    die "merge or rebase onto refs/remotes/handoff/${theirs}, then run git handoff again"
+  fi
+  mine=$(run_git rev-parse --verify --quiet "refs/heads/${theirs}") || mine=''
+  if [[ -n ${mine} ]] && ! run_git merge-base --is-ancestor "${mine}" "${sha}"; then
+    die "${theirs} here has commits the bundle lacks; merge refs/remotes/handoff/${theirs} into it"
+  fi
+  if ((dry)); then
+    jsh::log_info "would move ${theirs} to ${sha:0:7} and check it out without touching files"
+    return
+  fi
+  tracked=0
+  run_git diff --cached --quiet --ignore-submodules=all || tracked=1
+  run_git update-ref -m "handoff: fetch ${file}" "refs/heads/${theirs}" "${sha}" "${mine}"
+  [[ ${theirs} == "${branch}" ]] || run_git symbolic-ref -m "handoff: ${branch} → ${theirs}" \
+    HEAD "refs/heads/${theirs}"
+  run_git reset --quiet
+  ((tracked == 0)) || jsh::log_note 'staged changes are now unstaged'
+  [[ ${theirs} == "${branch}" ]] || jsh::log_note "switched from ${branch} to ${theirs}"
+  jsh::log_success "handoff ${theirs} ${head:0:7} → ${sha:0:7} fetched"
+}
+
 # ---- profile ----
 
 # Prints NAME, display name, email, GitHub user, and SSH key per profile, split by \x1f
@@ -665,6 +822,7 @@ case ${command} in
   load) load "$@" ;;
   refresh) refresh "$@" ;;
   profile) profile "$@" ;;
+  handoff) handoff "$@" ;;
   commit) commit_at "$@" ;;
   status)
     author_email=''
