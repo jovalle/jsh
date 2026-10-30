@@ -47,9 +47,9 @@ settle_xfce_layout() {
   for ((attempt = 0; attempt < 50; attempt++)); do
     actual=$(xwininfo -root -tree | awk '
       /\("xfdesktop" "Xfdesktop"\)/ {
-        for (index=1; index<=NF; index++) {
-          if ($index ~ /^[0-9]+x[0-9]+[+-][0-9]+[+-][0-9]+$/) {
-            split($index, size, /x|\+|-/)
+        for (i=1; i<=NF; i++) {
+          if ($i ~ /^[0-9]+x[0-9]+[+-][0-9]+[+-][0-9]+$/) {
+            split($i, size, /x|\+|-/)
             if (size[1] > 10 && size[2] > 10) print size[1] "x" size[2] $NF
             break
           }
@@ -67,12 +67,25 @@ settle_xfce_layout() {
   return 1
 }
 
+span_xfce_wallpaper() {
+  local property
+  while IFS= read -r property; do
+    case ${property} in
+      /backdrop/screen*/monitorjsh-left/workspace*/image-style | \
+        /backdrop/screen*/monitorjsh-right/workspace*/image-style)
+        [[ $(xfconf-query -c xfce4-desktop -p "${property}") == 6 ]] ||
+          xfconf-query -c xfce4-desktop -p "${property}" -s 6 ;;
+    esac
+  done < <(xfconf-query -c xfce4-desktop -l)
+}
+
 finish_layout() {
   local desktop
   desktop=$(linux_desktop)
   [[ ${desktop} != xfce ]] || settle_xfce_layout || return
   "${JSH_ROOT}/j.sh" configure wallpaper >/dev/null 2>&1 || true
   if [[ ${desktop} == xfce ]]; then
+    [[ ${1:-} != split ]] || span_xfce_wallpaper
     sleep 0.2
     xfdesktop --reload
   fi
@@ -108,9 +121,9 @@ if grep -Eq "[+*]?${LEFT_NAME}([[:space:]]|$)" <<<"${monitors}"; then
 fi
 record=$(xrandr --query | awk '
   $2 == "connected" {
-    for (index=3; index<=NF; index++) {
-      if ($index ~ /^[0-9]+x[0-9]+[+-][0-9]+[+-][0-9]+$/) {
-        split($index, geometry, /x|\+|-/)
+    for (i=3; i<=NF; i++) {
+      if ($i ~ /^[0-9]+x[0-9]+[+-][0-9]+[+-][0-9]+$/) {
+        split($i, geometry, /x|\+|-/)
         if (geometry[1] >= geometry[2] * 3) {
           print $1 "|" geometry[1] "|" geometry[2] "|0|0"; exit
         }
@@ -122,14 +135,14 @@ IFS='|' read -r output width height x y <<<"${record}"
 half=$((width / 2))
 mm_width=$(xrandr --query | awk -v output="${output}" '
   $1 == output && $2 == "connected" {
-    for (index=1; index<=NF-2; index++) if ($index ~ /^[0-9]+mm$/ && $(index+1) == "x") {
-      sub(/mm$/, "", $index); print $index; exit
+    for (i=1; i<=NF-2; i++) if ($i ~ /^[0-9]+mm$/ && $(i+1) == "x") {
+      sub(/mm$/, "", $i); print $i; exit
     }
   }')
 mm_height=$(xrandr --query | awk -v output="${output}" '
   $1 == output && $2 == "connected" {
-    for (index=1; index<=NF-2; index++) if ($index ~ /^[0-9]+mm$/ && $(index+1) == "x") {
-      sub(/mm$/, "", $(index+2)); print $(index+2); exit
+    for (i=1; i<=NF-2; i++) if ($i ~ /^[0-9]+mm$/ && $(i+1) == "x") {
+      sub(/mm$/, "", $(i+2)); print $(i+2); exit
     }
   }')
 [[ ${mm_width:-} =~ ^[0-9]+$ ]] || mm_width=${width}
@@ -140,5 +153,5 @@ xrandr --setmonitor "*${LEFT_NAME}" \
 xrandr --setmonitor "${RIGHT_NAME}" \
   "${half}/${half_mm}x${height}/${mm_height}+$((x + half))+${y}" "${output}"
 refresh_layout || true
-finish_layout
+finish_layout split
 notify_layout 'Split the ultrawide display into two logical monitors.'
