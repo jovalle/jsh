@@ -5,6 +5,6 @@
     { "uv": { "graphify": "graphifyy" } },
     { "script": "skills.sh" }
   ],
-  "configure": [{ "script": "skills.sh" }],
+  "configure": [{ "script": "configure.py" }, { "script": "skills.sh" }],
   "update": [{ "script": "skills.sh" }]
 }
