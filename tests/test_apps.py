@@ -148,29 +148,41 @@ class AppTests(unittest.TestCase):  # pylint: disable=too-many-public-methods
     @unittest.skipUnless(sys.platform == "darwin", "unpacked extensions are macOS-only")
     def test_helium_loads_local_unpacked_extensions_with_valid_macs(self):
         self.seed(".config/helium/Default/Preferences", "{}")
-        secure = self.seed(".config/helium/Default/Secure Preferences", json.dumps({
-            "extensions": {"settings": {}},
-            "protection": {"macs": {"extensions": {"settings_encrypted_hash": {"x": "y"}}},
-                           "super_encrypted_hash": "z"},
-        }))
+        secure = self.seed(
+            ".config/helium/Default/Secure Preferences",
+            json.dumps(
+                {
+                    "extensions": {"settings": {}},
+                    "protection": {
+                        "macs": {"extensions": {"settings_encrypted_hash": {"x": "y"}}},
+                        "super_encrypted_hash": "z",
+                    },
+                }
+            ),
+        )
         source = self.home / "ext"
         source.mkdir()
         (source / "manifest.json").write_text("{}")
         self.seed("local/helium/unpacked.json", json.dumps([str(source)]))
         key = HELIUM.extension_id(HELIUM.canonical(source))
         entry = {"location": 8, "path": HELIUM.canonical(source), "preferences": {}}
-        with mock.patch.object(apps, "MACOS", True), \
-             mock.patch.object(HELIUM, "directory", lambda: self.home / ".config/helium"), \
-             mock.patch.object(HELIUM, "device_id", return_value="DEVICE"), \
-             mock.patch.object(HELIUM, "unpacked_entries", return_value={key: entry}):
+        with (
+            mock.patch.object(apps, "MACOS", True),
+            mock.patch.object(HELIUM, "directory", lambda: self.home / ".config/helium"),
+            mock.patch.object(HELIUM, "device_id", return_value="DEVICE"),
+            mock.patch.object(HELIUM, "unpacked_entries", return_value={key: entry}),
+        ):
             HELIUM.configure(self.context())
             data = json.loads(secure.read_text())
             self.assertEqual(data["extensions"]["settings"][key]["location"], 4)
             self.assertTrue(data["extensions"]["ui"]["developer_mode"])
             macs = data["protection"]["macs"]
-            self.assertEqual(macs["extensions"]["settings"][key], HELIUM.mac(
-                "DEVICE", f"extensions.settings.{key}",
-                {"location": 4, "path": entry["path"]}))
+            self.assertEqual(
+                macs["extensions"]["settings"][key],
+                HELIUM.mac(
+                    "DEVICE", f"extensions.settings.{key}", {"location": 4, "path": entry["path"]}
+                ),
+            )
             self.assertNotIn("settings_encrypted_hash", macs["extensions"])
             self.assertEqual(data["protection"]["super_mac"], HELIUM.mac("DEVICE", "", macs))
             self.assertFalse(HELIUM.unpacked_pending(secure, [entry["path"]]))
@@ -262,8 +274,10 @@ class AppTests(unittest.TestCase):  # pylint: disable=too-many-public-methods
         self.assertIn("JSH_WATERFOX_PROFILE='name' jsh configure waterfox", self.stream.getvalue())
 
     def test_waterfox_can_select_a_named_profile(self):
-        self.seed(".waterfox/profiles.ini", "[Profile0]\nName=one\nPath=one\n"
-                  "[Profile1]\nName=two\nPath=two\n")
+        self.seed(
+            ".waterfox/profiles.ini",
+            "[Profile0]\nName=one\nPath=one\n[Profile1]\nName=two\nPath=two\n",
+        )
         first = self.seed(".waterfox/one/user.js", "unmanaged")
         second = self.seed(".waterfox/two/user.js", "unmanaged")
         with mock.patch.dict(os.environ, {"JSH_WATERFOX_PROFILE": "two"}):
@@ -272,13 +286,17 @@ class AppTests(unittest.TestCase):  # pylint: disable=too-many-public-methods
         self.assertIn(WATERFOX.BEGIN, second.read_text())
 
     def test_waterfox_prompts_for_ambiguous_profiles(self):
-        self.seed(".waterfox/profiles.ini", "[Profile0]\nName=one\nPath=one\n"
-                  "[Profile1]\nName=two\nPath=two\n")
+        self.seed(
+            ".waterfox/profiles.ini",
+            "[Profile0]\nName=one\nPath=one\n[Profile1]\nName=two\nPath=two\n",
+        )
         first = self.seed(".waterfox/one/user.js", "unmanaged")
         second = self.seed(".waterfox/two/user.js", "unmanaged")
         self.stream.isatty = lambda: True
-        with mock.patch.object(WATERFOX.menu, "available", return_value=True), \
-             mock.patch.object(WATERFOX.menu, "choose", return_value=1) as choose:
+        with (
+            mock.patch.object(WATERFOX.menu, "available", return_value=True),
+            mock.patch.object(WATERFOX.menu, "choose", return_value=1) as choose,
+        ):
             WATERFOX.configure(self.context())
         self.assertEqual(first.read_text(), "unmanaged")
         self.assertIn(WATERFOX.BEGIN, second.read_text())
@@ -289,8 +307,10 @@ class AppTests(unittest.TestCase):  # pylint: disable=too-many-public-methods
         self.assertIn("\033[?1049l", self.stream.getvalue())
 
     def test_waterfox_skips_profile_selection_on_dry_run(self):
-        self.seed(".waterfox/profiles.ini", "[Profile0]\nName=one\nPath=one\n"
-                  "[Profile1]\nName=two\nPath=two\n")
+        self.seed(
+            ".waterfox/profiles.ini",
+            "[Profile0]\nName=one\nPath=one\n[Profile1]\nName=two\nPath=two\n",
+        )
         self.seed(".waterfox/one/user.js", "unmanaged")
         self.seed(".waterfox/two/user.js", "unmanaged")
         self.stream.isatty = lambda: True
@@ -300,23 +320,32 @@ class AppTests(unittest.TestCase):  # pylint: disable=too-many-public-methods
         self.assertIn("JSH_WATERFOX_PROFILE", self.stream.getvalue())
 
     def test_waterfox_skips_configuration_when_profile_selection_is_cancelled(self):
-        self.seed(".waterfox/profiles.ini", "[Profile0]\nName=one\nPath=one\n"
-                  "[Profile1]\nName=two\nPath=two\n")
+        self.seed(
+            ".waterfox/profiles.ini",
+            "[Profile0]\nName=one\nPath=one\n[Profile1]\nName=two\nPath=two\n",
+        )
         first = self.seed(".waterfox/one/user.js", "unmanaged")
         second = self.seed(".waterfox/two/user.js", "unmanaged")
         self.stream.isatty = lambda: True
-        with mock.patch.object(WATERFOX.menu, "available", return_value=True), \
-             mock.patch.object(WATERFOX.menu, "choose", return_value=None):
+        with (
+            mock.patch.object(WATERFOX.menu, "available", return_value=True),
+            mock.patch.object(WATERFOX.menu, "choose", return_value=None),
+        ):
             WATERFOX.configure(self.context())
         self.assertEqual(first.read_text(), "unmanaged")
         self.assertEqual(second.read_text(), "unmanaged")
         self.assertIn("profile selection skipped", self.stream.getvalue())
 
     def test_waterfox_uses_profile_default_when_install_defaults_agree(self):
-        self.seed(".waterfox/profiles.ini", "[InstallA]\nDefault=one\n"
-                  "[InstallB]\nDefault=two\n[Profile0]\nPath=two\nDefault=1\n")
-        self.assertEqual(WATERFOX.default_profiles(self.home / ".waterfox"),
-                         [(self.home / ".waterfox/two").resolve()])
+        self.seed(
+            ".waterfox/profiles.ini",
+            "[InstallA]\nDefault=one\n"
+            "[InstallB]\nDefault=two\n[Profile0]\nPath=two\nDefault=1\n",
+        )
+        self.assertEqual(
+            WATERFOX.default_profiles(self.home / ".waterfox"),
+            [(self.home / ".waterfox/two").resolve()],
+        )
 
     def test_macos_waterfox_policy_keeps_unmanaged_keys_and_drops_stale_addons(self):
         current = {

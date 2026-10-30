@@ -51,7 +51,7 @@ managed_plugin() {
     managed=$(xfconf-query -c xfce4-panel -p "/plugins/plugin-${id}/jsh-managed" 2>/dev/null || true)
     plugin_role=$(xfconf-query -c xfce4-panel -p "/plugins/plugin-${id}/jsh-role" 2>/dev/null || true)
     if [[ ${plugin_type} == "${type}" && ${managed} == true &&
-      ( ${plugin_role} == "${role}" || ( -z ${plugin_role} && ${role} == "${type}" ) ) ]]; then
+      (${plugin_role} == "${role}" || (-z ${plugin_role} && ${role} == "${type}")) ]]; then
       xfconf_set xfce4-panel "/plugins/plugin-${id}/jsh-role" string "${role}"
       managed_id=${id}
       return
@@ -83,7 +83,8 @@ configure_panel() {
   managed_plugin pulseaudio; audio_id=${managed_id}
   managed_plugin genmon cafe; cafe_id=${managed_id}
   while IFS= read -r id; do [[ ${id} =~ ^[0-9]+$ ]] && existing_ids+=("${id}"); done < <(
-    xfconf-query -c xfce4-panel -p "/panels/panel-${panel_id}/plugin-ids" 2>/dev/null)
+    xfconf-query -c xfce4-panel -p "/panels/panel-${panel_id}/plugin-ids" 2>/dev/null
+  )
   for plugin_id in "${existing_ids[@]}"; do
     plugin_type=$(xfconf-query -c xfce4-panel -p "/plugins/plugin-${plugin_id}" 2>/dev/null || true)
     case ${plugin_type} in
@@ -94,7 +95,10 @@ configure_panel() {
       *) base_ids+=("${plugin_id}") ;;
     esac
   done
-  if [[ -z ${clock_id} ]]; then managed_plugin clock; clock_id=${managed_id}; fi
+  if [[ -z ${clock_id} ]]; then
+    managed_plugin clock
+    clock_id=${managed_id}
+  fi
   plugin_ids=("${base_ids[@]}" "${cpu_id}" "${load_id}" "${fs_id}" "${net_id}")
   [[ -z ${systray_id} ]] || plugin_ids+=("${systray_id}")
   plugin_ids+=("${cafe_id}" "${audio_id}")
@@ -206,7 +210,8 @@ configure_xfce() {
   xfconf_set xfce4-appfinder /always-center bool true
   xfconf_set xfce4-appfinder /enable-service bool true
   distro_id=$(awk -F= '$1 == "ID" {gsub(/["\047]/, "", $2); print $2}' /etc/os-release)
-  if [[ ${distro_id} == debian ]]; then menu_icon=emblem-debian-white
+  if [[ ${distro_id} == debian ]]; then
+    menu_icon=emblem-debian-white
   elif [[ -f /usr/share/icons/Papirus/24x24/apps/distributor-logo-${distro_id}.svg ]]; then
     menu_icon=distributor-logo-${distro_id}
   fi
@@ -221,7 +226,8 @@ configure_xfce() {
   }
   for icon_theme in Papirus-Dark Qogir-Dark Arc; do
     if [[ -d /usr/share/icons/${icon_theme} || -d ${HOME}/.icons/${icon_theme} ]]; then
-      xfconf_set xsettings /Net/IconThemeName string "${icon_theme}"; break
+      xfconf_set xsettings /Net/IconThemeName string "${icon_theme}"
+      break
     fi
   done
   xfconf_set xfce4-terminal /color-foreground string '#D7DAE0'
@@ -244,7 +250,7 @@ configure_gnome() {
     changes=$((changes + 1))
   }
   if [[ $(gsettings writable org.gnome.desktop.interface gtk-theme 2>/dev/null) == true &&
-    ( -d /usr/share/themes/Arc-Dark || -d ${HOME}/.themes/Arc-Dark ) ]]; then
+  (-d /usr/share/themes/Arc-Dark || -d ${HOME}/.themes/Arc-Dark) ]]; then
     [[ $(gsettings get org.gnome.desktop.interface gtk-theme) == "'Arc-Dark'" ]] || {
       gsettings set org.gnome.desktop.interface gtk-theme Arc-Dark
       changes=$((changes + 1))

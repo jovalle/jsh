@@ -34,8 +34,10 @@ refresh_layout() {
     /^Screen [0-9]+:/ { gsub(/,/, ""); print $8 "|" $10 "|" $12 "|" $14; exit }')
   [[ ${record} =~ ^[0-9]+\|[0-9]+\|[0-9]+\|[0-9]+$ ]] || return 1
   IFS='|' read -r width height max_width max_height <<<"${record}"
-  if ((width < max_width)); then xrandr --fb "$((width + 1))x${height}"
-  elif ((height < max_height)); then xrandr --fb "${width}x$((height + 1))"
+  if ((width < max_width)); then
+    xrandr --fb "$((width + 1))x${height}"
+  elif ((height < max_height)); then
+    xrandr --fb "${width}x$((height + 1))"
   else return 1; fi
   xrandr --fb "${width}x${height}"
 }
@@ -74,7 +76,8 @@ span_xfce_wallpaper() {
       /backdrop/screen*/monitorjsh-left/workspace*/image-style | \
         /backdrop/screen*/monitorjsh-right/workspace*/image-style)
         [[ $(xfconf-query -c xfce4-desktop -p "${property}") == 6 ]] ||
-          xfconf-query -c xfce4-desktop -p "${property}" -s 6 ;;
+          xfconf-query -c xfce4-desktop -p "${property}" -s 6
+        ;;
     esac
   done < <(xfconf-query -c xfce4-desktop -l)
 }
@@ -91,9 +94,18 @@ finish_layout() {
   fi
 }
 
-[[ ${1:-toggle} == toggle ]] || { jsh::log_error "Usage: $0 [toggle]"; exit 2; }
-command -v xrandr >/dev/null 2>&1 || { jsh::log_error 'xrandr is required to toggle the display layout.'; exit 1; }
-command -v flock >/dev/null 2>&1 || { jsh::log_error 'flock is required to serialize display changes.'; exit 1; }
+[[ ${1:-toggle} == toggle ]] || {
+  jsh::log_error "Usage: $0 [toggle]"
+  exit 2
+}
+command -v xrandr >/dev/null 2>&1 || {
+  jsh::log_error 'xrandr is required to toggle the display layout.'
+  exit 1
+}
+command -v flock >/dev/null 2>&1 || {
+  jsh::log_error 'flock is required to serialize display changes.'
+  exit 1
+}
 desktop=$(linux_desktop)
 if [[ ${desktop} == xfce ]] &&
   { ! command -v xwininfo >/dev/null 2>&1 || ! command -v xfdesktop >/dev/null 2>&1; }; then
@@ -109,7 +121,10 @@ lock_directory=${XDG_RUNTIME_DIR:-${JSH_ROOT}/tmp}
 display_name=${DISPLAY:-default}
 mkdir -p -- "${lock_directory}"
 exec {layout_lock}>>"${lock_directory}/jsh-display-${display_name//[^[:alnum:]]/_}.lock"
-flock -n "${layout_lock}" || { jsh::log_note '  › display layout change already in progress'; exit 0; }
+flock -n "${layout_lock}" || {
+  jsh::log_note '  › display layout change already in progress'
+  exit 0
+}
 monitors=$(xrandr --listmonitors)
 if grep -Eq "[+*]?${LEFT_NAME}([[:space:]]|$)" <<<"${monitors}"; then
   xrandr --delmonitor "${LEFT_NAME}" 2>/dev/null || true
@@ -130,7 +145,10 @@ record=$(xrandr --query | awk '
       }
     }
   }')
-[[ -n ${record} ]] || { jsh::log_error 'No active display with an aspect ratio of at least 3:1 was found.'; exit 1; }
+[[ -n ${record} ]] || {
+  jsh::log_error 'No active display with an aspect ratio of at least 3:1 was found.'
+  exit 1
+}
 IFS='|' read -r output width height x y <<<"${record}"
 half=$((width / 2))
 mm_width=$(xrandr --query | awk -v output="${output}" '

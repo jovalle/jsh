@@ -65,8 +65,9 @@ def configure(ctx):
     disabled = desktop.gnome_list("org.gnome.shell", "disabled-extensions")
     wanted_disabled = disabled + [uuid for uuid in DESKTOP_ICONS if uuid not in disabled]
     if wanted_disabled != disabled:
-        desktop.gsetting(ctx, "org.gnome.shell", "disabled-extensions", str(wanted_disabled),
-                         "desktop icons")
+        desktop.gsetting(
+            ctx, "org.gnome.shell", "disabled-extensions", str(wanted_disabled), "desktop icons"
+        )
     desktop.gsetting(ctx, "org.gnome.shell", "disable-user-extensions", "false")
     schemas = roots()[0] / "Vitals@CoreCoding.com/schemas"
     if schemas.is_dir():

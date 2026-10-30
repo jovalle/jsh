@@ -78,7 +78,8 @@ fi
 if [[ ${carrier} != 1 ]]; then
   led="<span color='#888888'>●</span>" status_str='Disconnected (no link)'
 elif [[ ${online} == 0 ]]; then
-  if ((tick < 5)); then led="<span color='#FFCC00' font_weight='bold'>●</span>"
+  if ((tick < 5)); then
+    led="<span color='#FFCC00' font_weight='bold'>●</span>"
   else led="<span color='#554400'>●</span>"; fi
   status_str='No Internet Access'
 elif ((rx_activity > 0 || tx_activity > 0)); then

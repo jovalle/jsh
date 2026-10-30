@@ -32,9 +32,13 @@ def load():
         data = json.loads(file.read_text(encoding="utf-8"))
         modules = data["modules"]
         optional = data["optional"]
-        if (not isinstance(modules, list) or not modules or
-                not all(isinstance(name, str) for name in modules) or
-                not isinstance(optional, list) or not all(name in modules for name in optional)):
+        if (
+            not isinstance(modules, list)
+            or not modules
+            or not all(isinstance(name, str) for name in modules)
+            or not isinstance(optional, list)
+            or not all(name in modules for name in optional)
+        ):
             raise ValueError("invalid module selection")
         return data
     except (ValueError, KeyError, TypeError) as error:
@@ -65,9 +69,14 @@ def choose(prompt, choices, default):
 
 
 def optional_steps(module, facts):
-    return [step for phase in ("install", "configure", "update")
-            for step in module.steps[phase] if step.optional and facts.matches(step.when)
-            and handlers.applies(handlers.get(step.handler), facts)]
+    return [
+        step
+        for phase in ("install", "configure", "update")
+        for step in module.steps[phase]
+        if step.optional
+        and facts.matches(step.when)
+        and handlers.applies(handlers.get(step.handler), facts)
+    ]
 
 
 def banner():
@@ -87,8 +96,11 @@ def details(selected, facts, optional):  # pylint: disable=too-many-locals
                 from jsh.handlers import link  # pylint: disable=import-outside-toplevel
 
                 for source, target in link.pairs(step):
-                    state = "Existing target will be reviewed or backed up" if (
-                        target.exists() or target.is_symlink()) else "New link"
+                    state = (
+                        "Existing target will be reviewed or backed up"
+                        if (target.exists() or target.is_symlink())
+                        else "New link"
+                    )
                     description = f"Source: {source}\nDestination: {target}\n{state}"
                     result.append((step.module.name, f"{prefix}link {target}", description))
             elif step.handler == "script":
@@ -96,16 +108,24 @@ def details(selected, facts, optional):  # pylint: disable=too-many-locals
                 description = "Individual changes are not fully available in preview."
                 if step.module.path.resolve() in script.parents and script.is_file():
                     description += f"\n\nSource: {script}\n\n" + script.read_text(encoding="utf-8")
-                for name in ("preferences.json", "policy.json", "policies.json", "state.json",
-                             "keybindings.json", "user.js"):
+                for name in (
+                    "preferences.json",
+                    "policy.json",
+                    "policies.json",
+                    "state.json",
+                    "keybindings.json",
+                    "user.js",
+                ):
                     data = step.module.path / name
                     if data.is_file():
                         description += f"\n\nManaged data: {data}\n\n" + data.read_text(
-                            encoding="utf-8")
+                            encoding="utf-8"
+                        )
                 result.append((step.module.name, f"{prefix}{step.phase}: {step.args}", description))
             else:
-                result.append((step.module.name, f"{prefix}{step.phase} {step.handler}",
-                               str(step.args)))
+                result.append(
+                    (step.module.name, f"{prefix}{step.phase} {step.handler}", str(step.args))
+                )
     return result
 
 
@@ -119,55 +139,94 @@ def apply(command, modules, optional):
     return status
 
 
-def interactive(found, facts, saved):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
+def interactive(
+    found, facts, saved
+):  # pylint: disable=too-many-locals,too-many-branches,too-many-statements
     from jsh import cli  # pylint: disable=import-outside-toplevel,cyclic-import
 
     available = [module for module in found if facts.matches(module.when)]
     names = {module.name for module in available}
     saved_names = [name for name in (saved["modules"] if saved else []) if name in names]
     minimal = [name for name in ("core", "shell") if name in names]
-    workstation = [name for name in ("core", "shell", "tools", "fonts", "desktop",
-                                      "dock", "keybindings", "wallpaper", "audio", "display")
-                   if name in names]
-    choices = [("minimal", "Minimal", "Core tools and shell"),
-               ("workstation", "Workstation", "Shell, tools and desktop"),
-               ("custom", "Custom", "Choose modules yourself")]
+    workstation = [
+        name
+        for name in (
+            "core",
+            "shell",
+            "tools",
+            "fonts",
+            "desktop",
+            "dock",
+            "keybindings",
+            "wallpaper",
+            "audio",
+            "display",
+        )
+        if name in names
+    ]
+    choices = [
+        ("minimal", "Minimal", "Core tools and shell"),
+        ("workstation", "Workstation", "Shell, tools and desktop"),
+        ("custom", "Custom", "Choose modules yourself"),
+    ]
     if saved_names:
         choices.append(("previous", "Previous", "Use saved choices"))
     preset = menu.choose("\n" + banner(), choices, title_color="36")
     if preset is None:
         return 0
-    selected = {"minimal": minimal, "workstation": workstation, "custom": [],
-                "previous": saved_names}[preset]
+    selected = {
+        "minimal": minimal,
+        "workstation": workstation,
+        "custom": [],
+        "previous": saved_names,
+    }[preset]
     categories = {name: group for group, members in GROUPS.items() for name in members}
     order = {name: index for index, name in enumerate(GROUPS)}
-    items = [(module.name, f"{categories.get(module.name, 'Other')} / {module.name}",
-              module.description) for module in sorted(
-                  available, key=lambda item: (order.get(categories.get(item.name), len(order)),
-                                               item.name))]
+    items = [
+        (module.name, f"{categories.get(module.name, 'Other')} / {module.name}", module.description)
+        for module in sorted(
+            available,
+            key=lambda item: (order.get(categories.get(item.name), len(order)), item.name),
+        )
+    ]
     while True:
         chosen = menu.choose("Setup · Choose modules", items, selected, multiple=True)
         if chosen is None:
             preset = menu.choose("\n" + banner(), choices, title_color="36")
             if preset is None:
                 return 0
-            selected = {"minimal": minimal, "workstation": workstation, "custom": [],
-                        "previous": saved_names}[preset]
+            selected = {
+                "minimal": minimal,
+                "workstation": workstation,
+                "custom": [],
+                "previous": saved_names,
+            }[preset]
             continue
         selected = chosen
         if not selected:
             return 0
         modules = [module for module in available if module.name in selected]
         extras = [module for module in modules if optional_steps(module, facts)]
-        optional = [name for name in (saved["optional"] if saved else [])
-                    if name in selected] if preset == "previous" else []
+        optional = (
+            [name for name in (saved["optional"] if saved else []) if name in selected]
+            if preset == "previous"
+            else []
+        )
         if extras:
-            items_extra = [(module.name, module.name, "; ".join(
-                f"{step.phase} {step.handler}: {step.args}"
-                for step in optional_steps(module, facts)))
-                for module in extras]
-            optional = menu.choose("Setup · Choose optional steps", items_extra, optional,
-                                   multiple=True)
+            items_extra = [
+                (
+                    module.name,
+                    module.name,
+                    "; ".join(
+                        f"{step.phase} {step.handler}: {step.args}"
+                        for step in optional_steps(module, facts)
+                    ),
+                )
+                for module in extras
+            ]
+            optional = menu.choose(
+                "Setup · Choose optional steps", items_extra, optional, multiple=True
+            )
             if optional is None:
                 continue
         print("Checking the selected changes…", flush=True)
@@ -176,9 +235,11 @@ def interactive(found, facts, saved):  # pylint: disable=too-many-locals,too-man
             preview_status = cli.run("setup", modules, optional, True, user_only=True)
         preview_text = preview.getvalue()
         while True:
-            decision = menu.view("Setup · Preview and approve", preview_text +
-                                 "\nExisting files may be backed up; apps may close and reopen.\n",
-                                 actions=True)
+            decision = menu.view(
+                "Setup · Preview and approve",
+                preview_text + "\nExisting files may be backed up; apps may close and reopen.\n",
+                actions=True,
+            )
             if decision is None:
                 return 0
             if decision == "change":
@@ -186,8 +247,10 @@ def interactive(found, facts, saved):  # pylint: disable=too-many-locals,too-man
             if decision == "details":
                 entries = details(modules, facts, optional)
                 while entries:
-                    options = [(str(index), f"{module}: {label}", description.splitlines()[0])
-                               for index, (module, label, description) in enumerate(entries)]
+                    options = [
+                        (str(index), f"{module}: {label}", description.splitlines()[0])
+                        for index, (module, label, description) in enumerate(entries)
+                    ]
                     picked = menu.choose("Setup · Plan details", options)
                     if picked is None:
                         break
@@ -199,8 +262,10 @@ def interactive(found, facts, saved):  # pylint: disable=too-many-locals,too-man
                     continue
                 file = path()
                 file.parent.mkdir(parents=True, exist_ok=True)
-                file.write_text(json.dumps({"modules": selected, "optional": optional}, indent=2)
-                                + "\n", encoding="utf-8")
+                file.write_text(
+                    json.dumps({"modules": selected, "optional": optional}, indent=2) + "\n",
+                    encoding="utf-8",
+                )
                 return apply("setup", modules, optional)
 
 
@@ -223,8 +288,11 @@ def start(found):  # pylint: disable=too-many-locals,too-many-branches
     print("Choose modules by number or name, separated by spaces or commas.")
     for index, module in enumerate(available, 1):
         print(f"  {index:2}. {module.name:12} {module.description}")
-    defaults = [name for name in (saved["modules"] if saved else [])
-                if name in {module.name for module in available}]
+    defaults = [
+        name
+        for name in (saved["modules"] if saved else [])
+        if name in {module.name for module in available}
+    ]
     if not defaults:
         defaults = [module.name for module in available if module.name in ("core", "shell")]
     print(f"Default: {', '.join(defaults)}. Enter 'all' for everything.")
@@ -260,6 +328,7 @@ def start(found):  # pylint: disable=too-many-locals,too-many-branches
         return 0
     file = path()
     file.parent.mkdir(parents=True, exist_ok=True)
-    file.write_text(json.dumps({"modules": names, "optional": optional}, indent=2) + "\n",
-                    encoding="utf-8")
+    file.write_text(
+        json.dumps({"modules": names, "optional": optional}, indent=2) + "\n", encoding="utf-8"
+    )
     return apply(command, selected, optional)

@@ -118,7 +118,8 @@ configure_gnome_dock() {
     return 1
   }
   while IFS= read -r existing; do [[ -z ${existing} ]] || favorites+=("${existing}"); done < <(
-    grep -o "'[^']*'" <<<"${current}" | tr -d "'")
+    grep -o "'[^']*'" <<<"${current}" | tr -d "'"
+  )
   while IFS= read -r file; do
     [[ -n ${file} ]] || continue
     desktop_id=${file##*/}
@@ -145,7 +146,10 @@ configure_xfce_dock() {
   panel_dir=${HOME}/.config/xfce4/panel
   mkdir -p "${panel_dir}"
   panel_id=$(find_xfce_dock_panel)
-  [[ ${panel_id} =~ ^[0-9]+$ ]] || { jsh::log_error 'No XFCE dock panel is available.'; return 1; }
+  [[ ${panel_id} =~ ^[0-9]+$ ]] || {
+    jsh::log_error 'No XFCE dock panel is available.'
+    return 1
+  }
   target=$(managed_dock_target "${panel_dir}" || true)
   if [[ -z ${target} ]]; then
     plugin_id=$(xfconf-query -c xfce4-panel -lv 2>/dev/null |
@@ -165,9 +169,13 @@ configure_xfce_dock() {
     existing_ids+=("${id}")
     plugin_type=$(xfconf-query -c xfce4-panel -p "/plugins/plugin-${id}" 2>/dev/null || true)
     if [[ ${id} == "${plugin_id}" ]]; then
-      dock_present=1; plugin_ids+=("${id}")
+      dock_present=1
+      plugin_ids+=("${id}")
     elif [[ ${plugin_type} == launcher ]]; then
-      if ((dock_present == 0)); then plugin_ids+=("${plugin_id}"); dock_present=1; fi
+      if ((dock_present == 0)); then
+        plugin_ids+=("${plugin_id}")
+        dock_present=1
+      fi
     else
       plugin_ids+=("${id}")
     fi

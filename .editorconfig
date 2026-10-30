@@ -56,6 +56,7 @@ max_line_length = 100
 [*.{sh,bash,zsh}]
 indent_style = space
 indent_size = 2
+switch_case_indent = true
 
 # GraphQL - Prettier formatting
 [*.{graphql,gql}]

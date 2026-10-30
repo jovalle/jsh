@@ -21,7 +21,7 @@ select_node() {
     if "${node}" -e 'process.exit(typeof require("node:zlib").zstdDecompress === "function" ? 0 : 1)' \
       >/dev/null 2>&1; then
       directory=${node%/*}
-      if command -v rea >/dev/null 2>&1 && \
+      if command -v rea >/dev/null 2>&1 &&
         ! PATH="${directory}:${PATH}" rea --version >/dev/null 2>&1; then
         continue
       fi
@@ -112,7 +112,10 @@ case ${JSH_PHASE:-configure} in
   install) if select_node; then install_rea; fi ;;
   update)
     node_ready=0
-    if select_node; then node_ready=1; update_rea; fi
+    if select_node; then
+      node_ready=1
+      update_rea
+    fi
     sync_graphify
     if [[ ${node_ready} == 1 ]]; then sync_rea; fi
     ;;

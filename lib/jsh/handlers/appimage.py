@@ -20,8 +20,10 @@ PLATFORMS = ("linux",)
 
 
 def check(args):
-    if not isinstance(args, dict) or not isinstance(args.get("name"), str) or not isinstance(
-        args.get("release"), str
+    if (
+        not isinstance(args, dict)
+        or not isinstance(args.get("name"), str)
+        or not isinstance(args.get("release"), str)
     ):
         raise ValueError("appimage needs name: and release:")
 
@@ -38,9 +40,7 @@ def asset(args):
     wanted = args.get("architectures", {}).get(machine, machine)
     release = web.metadata(args["release"])
     found = [
-        item
-        for item in release["assets"]
-        if item["name"].lower().endswith(f"-{wanted}.appimage")
+        item for item in release["assets"] if item["name"].lower().endswith(f"-{wanted}.appimage")
     ]
     if len(found) != 1:
         raise RuntimeError(f"{args['name']}: expected one {wanted} AppImage in the release")

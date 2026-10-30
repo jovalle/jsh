@@ -81,17 +81,31 @@ def unpacked_pending(secure, paths):
     if paths and not extensions.get("ui", {}).get("developer_mode"):
         return True
     settings = extensions.get("settings", {})
-    return any(settings.get(extension_id(path), {}).get("location") != UNPACKED or
-               settings[extension_id(path)].get("path") != path for path in paths)
+    return any(
+        settings.get(extension_id(path), {}).get("location") != UNPACKED
+        or settings[extension_id(path)].get("path") != path
+        for path in paths
+    )
 
 
 def unpacked_entries(paths):
     """Let a throwaway headless Helium load the directories and record their settings."""
     (system.ROOT / "tmp").mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(dir=system.ROOT / "tmp") as scratch:
-        subprocess.run([BINARY, f"--user-data-dir={scratch}", "--no-first-run", "--headless=new",
-                        "--load-extension=" + ",".join(paths), "--dump-dom", "about:blank"],
-                       check=False, capture_output=True, timeout=60)
+        subprocess.run(
+            [
+                BINARY,
+                f"--user-data-dir={scratch}",
+                "--no-first-run",
+                "--headless=new",
+                "--load-extension=" + ",".join(paths),
+                "--dump-dom",
+                "about:blank",
+            ],
+            check=False,
+            capture_output=True,
+            timeout=60,
+        )
         secure = Path(scratch) / "Default/Secure Preferences"
         data = json.loads(secure.read_text()) if secure.exists() else {}
     settings = data.get("extensions", {}).get("settings", {})
@@ -113,8 +127,9 @@ def load_unpacked(ctx, secure, paths):
         if entry:
             entry = {**entry, "location": UNPACKED, "disable_reasons": []}
             extensions.setdefault("settings", {})[key] = entry
-            macs.setdefault("settings", {})[key] = mac(device, f"extensions.settings.{key}",
-                                                       prune(entry))
+            macs.setdefault("settings", {})[key] = mac(
+                device, f"extensions.settings.{key}", prune(entry)
+            )
     extensions.setdefault("ui", {})["developer_mode"] = True
     macs.setdefault("ui", {})["developer_mode"] = mac(device, "extensions.ui.developer_mode", True)
     # Helium re-creates these OS-encrypted hashes from the MACs on its next start.
@@ -145,8 +160,11 @@ def configure(ctx):  # pylint: disable=too-many-locals
     preferences = json.loads((HERE / "preferences.json").read_text())
     state = json.loads((HERE / "state.json").read_text())
     targets = [(profiles[0], preferences), (profile_root / "Local State", state)]
-    pending = any(not path.exists() or files.merge(files.jsonc(path.read_text()), desired) !=
-                  files.jsonc(path.read_text()) for path, desired in targets)
+    pending = any(
+        not path.exists()
+        or files.merge(files.jsonc(path.read_text()), desired) != files.jsonc(path.read_text())
+        for path, desired in targets
+    )
     paths = unpacked_directories() if apps.MACOS else []
     secure = profiles[0].parent / "Secure Preferences"
     unpacked = bool(paths) and unpacked_pending(secure, paths)
@@ -154,8 +172,9 @@ def configure(ctx):  # pylint: disable=too-many-locals
         ctx.current(2 + bool(paths))
         return
     launch = ["open", "-a", "Helium"] if apps.MACOS else ["helium"]
-    with apps.closed_for_changes(ctx, "Helium", ("helium", "Helium", "helium-bin"),
-                                 launch) as ready:
+    with apps.closed_for_changes(
+        ctx, "Helium", ("helium", "Helium", "helium-bin"), launch
+    ) as ready:
         if ready:
             for path, desired in targets:
                 files.update_json(ctx, path, desired)

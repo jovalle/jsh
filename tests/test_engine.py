@@ -115,8 +115,11 @@ class EngineTests(unittest.TestCase):
         ok, out = self.run_phases(("configure",))
         self.assertTrue(ok)
         self.assertIn("! demo: close the app first\n", out)
-        self.assertIn("\nConfiguration\n~ demo setting\n  theme:\n    - light\n    + dark\n"
-                      "  font:\n    - old\n    + new\n\n1 configured [", out)
+        self.assertIn(
+            "\nConfiguration\n~ demo setting\n  theme:\n    - light\n    + dark\n"
+            "  font:\n    - old\n    + new\n\n1 configured [",
+            out,
+        )
 
     def test_failed_task_is_reported_and_later_tasks_still_run(self):
         bad = {"description": "Bad", "configure": [{"script": "fail.sh"}]}
@@ -189,30 +192,40 @@ class EngineTests(unittest.TestCase):
         display.change("~", "atuin 18.24.2 → 18.24.3", "updated", "Packages", "Homebrew")
         display.change("~", "jq → 1.7", "updated", "Packages", "dnf")
         display.change(
-            "~", "skills/example dbd4588 (2026-10-09) → ca45fc4 (2026-10-28)",
-            "updated", "Repositories",
+            "~",
+            "skills/example dbd4588 (2026-10-09) → ca45fc4 (2026-10-28)",
+            "updated",
+            "Repositories",
         )
         display.summary()
         out = stream.getvalue()
-        self.assertIn("atuin \033[31m18.24.2\033[0m → \033[32m18.24.3\033[0m "
-                      "\033[2mHomebrew\033[0m", out)
+        self.assertIn(
+            "atuin \033[31m18.24.2\033[0m → \033[32m18.24.3\033[0m \033[2mHomebrew\033[0m", out
+        )
         self.assertIn("jq → \033[32m1.7\033[0m \033[2mdnf\033[0m", out)
-        self.assertIn("skills/example \033[31mdbd4588\033[0m\033[2m (2026-10-09)\033[0m"
-                      " → \033[32mca45fc4\033[0m\033[2m (2026-10-28)\033[0m", out)
+        self.assertIn(
+            "skills/example \033[31mdbd4588\033[0m\033[2m (2026-10-09)\033[0m"
+            " → \033[32mca45fc4\033[0m\033[2m (2026-10-28)\033[0m",
+            out,
+        )
         display.color = False
-        self.assertEqual(display.change_text("example v1 → v2", "Repositories"),
-                         "example v1 → v2")
+        self.assertEqual(display.change_text("example v1 → v2", "Repositories"), "example v1 → v2")
 
     def test_configuration_details_show_colored_before_and_after(self):
         display = Display(io.StringIO())
         display.color = True
-        self.assertEqual(display.detail_lines("pins: /old/app.desktop → /new/app.desktop"), [
-            "  pins:", "    \033[31m- /old/app.desktop\033[0m",
-            "    \033[32m+ /new/app.desktop\033[0m",
-        ])
+        self.assertEqual(
+            display.detail_lines("pins: /old/app.desktop → /new/app.desktop"),
+            [
+                "  pins:",
+                "    \033[31m- /old/app.desktop\033[0m",
+                "    \033[32m+ /new/app.desktop\033[0m",
+            ],
+        )
         display.color = False
-        self.assertEqual(display.detail_lines("setting: old → new"),
-                         ["  setting:", "    - old", "    + new"])
+        self.assertEqual(
+            display.detail_lines("setting: old → new"), ["  setting:", "    - old", "    + new"]
+        )
 
     def test_update_reuses_install_steps_of_updatable_handlers(self):
         self.module(

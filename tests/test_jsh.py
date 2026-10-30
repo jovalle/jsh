@@ -25,8 +25,11 @@ class LauncherTests(unittest.TestCase):
             launcher = base / "jsh"
             launcher.symlink_to(checkout / "bin/jsh")
             env = {**os.environ, "HOME": str(base), "PATH": f"{base}:/usr/bin:/bin"}
-            for args, expected in ((["update"], "command:update"), ([], "zsh:-d -i"),
-                                   (["-c", "true"], "zsh:-d -c true")):
+            for args, expected in (
+                (["update"], "command:update"),
+                ([], "zsh:-d -i"),
+                (["-c", "true"], "zsh:-d -c true"),
+            ):
                 result = subprocess.run(
                     [str(launcher), *args], env=env, text=True, capture_output=True, check=True
                 )

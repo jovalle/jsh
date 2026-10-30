@@ -41,12 +41,11 @@ class DesktopTests(unittest.TestCase):
                 lists[key] = ast.literal_eval(value)
 
         missing = ROOT / "missing"
-        with mock.patch.object(extensions, "data", return_value={"enable": []}), mock.patch.object(
-            extensions.desktop, "gnome_list", side_effect=read_list
-        ), mock.patch.object(
-            extensions.desktop, "gsetting", side_effect=set_value
-        ) as setting, mock.patch.object(
-            extensions, "roots", return_value=(missing, missing)
+        with (
+            mock.patch.object(extensions, "data", return_value={"enable": []}),
+            mock.patch.object(extensions.desktop, "gnome_list", side_effect=read_list),
+            mock.patch.object(extensions.desktop, "gsetting", side_effect=set_value) as setting,
+            mock.patch.object(extensions, "roots", return_value=(missing, missing)),
         ):
             extensions.configure(ctx)
             self.assertEqual(lists["enabled-extensions"], ["other@example"])

@@ -13,7 +13,11 @@ def query(ctx, *arguments):
     command = ["syncthing", "cli", *arguments]
     try:
         result = subprocess.run(
-            command, stdin=subprocess.DEVNULL, capture_output=True, text=True, check=False,
+            command,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            check=False,
             timeout=15,
         )
     except subprocess.TimeoutExpired as error:

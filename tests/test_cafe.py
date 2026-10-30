@@ -29,15 +29,19 @@ class CafeStatusTest(unittest.TestCase):
                             output = io.StringIO()
                             with contextlib.redirect_stdout(output):
                                 cafe.show_xfce_status()
-                            self.assertIn(f"<img>{ROOT}/assets/icons/cafe-{state}.svg</img>",
-                                          output.getvalue())
+                            self.assertIn(
+                                f"<img>{ROOT}/assets/icons/cafe-{state}.svg</img>",
+                                output.getvalue(),
+                            )
                             (icons / f"cafe-{state}-symbolic.svg").touch()
                             output = io.StringIO()
                             with contextlib.redirect_stdout(output):
                                 cafe.show_xfce_status()
                             self.assertIn(f"<icon>cafe-{state}-symbolic</icon>", output.getvalue())
-                            self.assertIn(f"<iconclick>{ROOT}/bin/cafe --xfce-toggle</iconclick>",
-                                          output.getvalue())
+                            self.assertIn(
+                                f"<iconclick>{ROOT}/bin/cafe --xfce-toggle</iconclick>",
+                                output.getvalue(),
+                            )
 
 
 if __name__ == "__main__":
