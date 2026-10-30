@@ -22,7 +22,7 @@ TYPES = {
 CONFLICT = "1;31"
 SECTIONS = {
     "Changes to be committed:": "1;32",
-    "Changes not staged for commit:": "1;31",
+    "Changes not staged for commit:": "1",
     "Unmerged paths:": "1;31",
     "Untracked files:": "2",
     "Ignored files:": "2",
@@ -143,13 +143,11 @@ def main():
         if header:
             print(counted(SECTIONS[header], header[:-1], len(entries.get("", []))))
             header = None
-        plain = {label: f"{label} ({len(paths)}):" for label, paths in entries.items() if label}
-        pad = max(map(len, plain.values()), default=0) + 1
         for label, paths in entries.items():
             code, first, indent = loose, "", 0
             if label:
-                code, indent = TYPES.get(label, CONFLICT), pad
-                first = counted(code, label, len(paths)) + " " * (pad - len(plain[label]))
+                code, first, indent = TYPES.get(label, CONFLICT), INDENT, len(INDENT)
+                print(INDENT + counted(code, label, len(paths)))
             render(first, indent, paths, functools.partial(paint, code), dim)
         entries.clear()
 
