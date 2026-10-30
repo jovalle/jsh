@@ -82,12 +82,25 @@ def choose(title, items, selected=(), multiple=False, title_color=None):
                 lines.append(f"Search: {query}")
             lines.append("")
             label_width = max((len(item[1]) for item in items), default=0)
-            for index, (name, label, detail) in enumerate(filtered[start:start + rows], start):
-                lines.append(item_line((name, label, detail), index == cursor, name in marked,
-                                       multiple, label_width, width, color))
-            controls = "↑↓ move | space select | " + ("a toggle all | " if multiple else "")
-            lines += ["", (f"{len(marked)} selected | " if multiple else "") + controls +
-                      "/ search | enter continue | esc back"]
+            for index, (name, label, detail) in enumerate(filtered[start : start + rows], start):
+                lines.append(
+                    item_line(
+                        (name, label, detail),
+                        index == cursor,
+                        name in marked,
+                        multiple,
+                        label_width,
+                        width,
+                        color,
+                    )
+                )
+            controls = "↑↓ move | " + ("space select | a toggle all | " if multiple else "")
+            lines += [
+                "",
+                (f"{len(marked)} selected | " if multiple else "")
+                + controls
+                + "/ search | enter continue | esc back",
+            ]
             sys.stdout.write("\033[H\033[2J" + "\r\n".join(lines))
             sys.stdout.flush()
             pressed = key(sys.stdin)
