@@ -9,6 +9,7 @@ import tempfile
 import time
 from pathlib import Path
 
+from jsh import system
 from jsh.output import tilde
 
 STAMP = f"{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}"
@@ -87,3 +88,15 @@ def update_json(ctx, path, desired):
         ctx.current()
         return False
     return write(ctx, path, json.dumps(updated, indent=2, ensure_ascii=False) + "\n")
+
+
+def local(module, name):
+    """Return the text of an optional machine-local overlay at local/MODULE/NAME, or ""."""
+    path = system.ROOT / "local" / module / name
+    return path.read_text() if path.is_file() else ""
+
+
+def local_json(module, name, desired):
+    """Deep-merge an optional local/MODULE/NAME JSON overlay into desired."""
+    text = local(module, name)
+    return merge(desired, jsonc(text)) if text.strip() else desired
