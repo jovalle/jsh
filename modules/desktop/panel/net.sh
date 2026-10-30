@@ -10,7 +10,7 @@ if [[ -r ${state_dir}/iface ]]; then
 fi
 if [[ -z ${iface} || ! -d /sys/class/net/${iface} ]]; then
   iface=$(ip route show default 2>/dev/null |
-    awk '{for (index=1; index<=NF; index++) if ($index=="dev") print $(index+1); exit}')
+    awk '{for (i=1; i<=NF; i++) if ($i=="dev") print $(i+1); exit}')
   [[ -n ${iface} ]] || iface=$(find /sys/class/net -mindepth 1 -maxdepth 1 -printf '%f\n' 2>/dev/null |
     grep -v -E '^(lo|docker|veth|br-)' | head -n 1)
   printf '%s\n' "${iface}" >"${state_dir}/iface"
