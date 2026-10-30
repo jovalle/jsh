@@ -11,18 +11,20 @@ readonly SCRIPT_DIR JSH_ROOT
 
 panel_files_changed=0
 changes=0
+details=()
 
 xfconf_set() {
-  local channel=$1 property=$2 type=$3 value=$4
-  if xfconf-query -c "${channel}" -p "${property}" >/dev/null 2>&1; then
-    [[ $(xfconf-query -c "${channel}" -p "${property}") == "${value}" ]] || {
-      xfconf-query -c "${channel}" -p "${property}" -s "${value}" >/dev/null
-      changes=$((changes + 1))
-    }
+  local channel=$1 property=$2 type=$3 value=$4 before
+  if before=$(xfconf-query -c "${channel}" -p "${property}" 2>/dev/null); then
+    [[ ${before} != "${value}" ]] || return 0
+    xfconf-query -c "${channel}" -p "${property}" -s "${value}" >/dev/null
   else
+    before='(unset)'
     xfconf-query -c "${channel}" -p "${property}" -n -t "${type}" -s "${value}" >/dev/null
-    changes=$((changes + 1))
   fi
+  before=${before//$'\n'/, }
+  details+=("${channel}${property}: ${before} → ${value}")
+  changes=$((changes + 1))
 }
 
 write_if_changed() {
@@ -37,6 +39,7 @@ write_if_changed() {
   install -m "${mode}" "${temporary}" "${target}"
   rm -f -- "${temporary}"
   panel_files_changed=1
+  details+=("${target/#${HOME}/\~}: updated")
   changes=$((changes + 1))
 }
 
@@ -50,7 +53,7 @@ managed_plugin() {
     if [[ ${plugin_type} == "${type}" && ${managed} == true &&
       ( ${plugin_role} == "${role}" || ( -z ${plugin_role} && ${role} == "${type}" ) ) ]]; then
       xfconf_set xfce4-panel "/plugins/plugin-${id}/jsh-role" string "${role}"
-      printf '%s\n' "${id}"
+      managed_id=${id}
       return
     fi
   done < <(xfconf-query -c xfce4-panel -lv 2>/dev/null |
@@ -61,7 +64,9 @@ managed_plugin() {
   xfconf-query -c xfce4-panel -p "/plugins/plugin-${id}" -n -t string -s "${type}" >/dev/null
   xfconf_set xfce4-panel "/plugins/plugin-${id}/jsh-managed" bool true
   xfconf_set xfce4-panel "/plugins/plugin-${id}/jsh-role" string "${role}"
-  printf '%s\n' "${id}"
+  managed_id=${id}
+  details+=("xfce4-panel/plugins/plugin-${id}: (unset) → ${type}")
+  changes=$((changes + 1))
 }
 
 configure_panel() {
@@ -71,12 +76,12 @@ configure_panel() {
   panel_before=$(xfconf-query -c xfce4-panel -lv 2>/dev/null || true)
   panel_id=$(xfconf-query -c xfce4-panel -p /panels 2>/dev/null | grep -E '^[0-9]+$' | head -n 1)
   [[ ${panel_id} =~ ^[0-9]+$ ]] || { jsh::log_note '  › skipped panel: unavailable'; return; }
-  cpu_id=$(managed_plugin cpugraph)
-  load_id=$(managed_plugin systemload)
-  fs_id=$(managed_plugin fsguard)
-  net_id=$(managed_plugin genmon net)
-  audio_id=$(managed_plugin pulseaudio)
-  cafe_id=$(managed_plugin genmon cafe)
+  managed_plugin cpugraph; cpu_id=${managed_id}
+  managed_plugin systemload; load_id=${managed_id}
+  managed_plugin fsguard; fs_id=${managed_id}
+  managed_plugin genmon net; net_id=${managed_id}
+  managed_plugin pulseaudio; audio_id=${managed_id}
+  managed_plugin genmon cafe; cafe_id=${managed_id}
   while IFS= read -r id; do [[ ${id} =~ ^[0-9]+$ ]] && existing_ids+=("${id}"); done < <(
     xfconf-query -c xfce4-panel -p "/panels/panel-${panel_id}/plugin-ids" 2>/dev/null)
   for plugin_id in "${existing_ids[@]}"; do
@@ -89,15 +94,18 @@ configure_panel() {
       *) base_ids+=("${plugin_id}") ;;
     esac
   done
-  [[ -n ${clock_id} ]] || clock_id=$(managed_plugin clock)
+  if [[ -z ${clock_id} ]]; then managed_plugin clock; clock_id=${managed_id}; fi
   plugin_ids=("${base_ids[@]}" "${cpu_id}" "${load_id}" "${fs_id}" "${net_id}")
   [[ -z ${systray_id} ]] || plugin_ids+=("${systray_id}")
   plugin_ids+=("${cafe_id}" "${audio_id}")
   [[ -z ${clock_id} ]] || plugin_ids+=("${clock_id}")
   [[ -z ${actions_id} ]] || plugin_ids+=("${actions_id}")
   for id in "${plugin_ids[@]}"; do arguments+=(-t int -s "${id}"); done
-  [[ ${plugin_ids[*]} == "${existing_ids[*]}" ]] ||
+  if [[ ${plugin_ids[*]} != "${existing_ids[*]}" ]]; then
     xfconf-query -c xfce4-panel -p "/panels/panel-${panel_id}/plugin-ids" -a "${arguments[@]}" >/dev/null
+    details+=("panel ${panel_id} plugins: ${existing_ids[*]:-(empty)} → ${plugin_ids[*]}")
+    changes=$((changes + 1))
+  fi
 
   xfconf_set xfce4-panel "/plugins/plugin-${cpu_id}/mode" int 0
   xfconf_set xfce4-panel "/plugins/plugin-${cpu_id}/per-core" int 1
@@ -147,7 +155,7 @@ EOF
   xfconf_set xfce4-panel "/plugins/plugin-${clock_id}/digital-layout" int 3
   xfconf_set xfce4-panel "/plugins/plugin-${clock_id}/digital-time-format" string '%Y-%m-%d %H:%M:%S'
   panel_after=$(xfconf-query -c xfce4-panel -lv 2>/dev/null || true)
-  [[ ${panel_before} != "${panel_after}" || ${panel_files_changed} != 0 ]] || return
+  [[ ${panel_before} != "${panel_after}" || ${panel_files_changed} != 0 ]] || return 0
   if pgrep -x xfce4-panel >/dev/null 2>&1; then
     DISPLAY=${DISPLAY:-:0} timeout 5 xfce4-panel -r >/dev/null 2>&1 || true
     sleep 1
@@ -184,11 +192,17 @@ EOF
 
 configure_xfce() {
   local distro_id menu_icon=tux menu_id icon_theme target_zsh
+  xfconf_set xfce4-desktop /desktop-icons/style int 0
   xfconf_set xfce4-terminal /font-name string 'JetBrainsMono Nerd Font, JetBrainsMono Nerd Font Mono, FiraCode Nerd Font, Hack Nerd Font, MesloLGS Nerd Font, JetBrains Mono, DejaVu Sans Mono, Symbols Nerd Font, monospace 11'
   xfconf_set xfce4-terminal /font-use-system bool false
   xfconf_set xsettings /Gtk/MonospaceFontName string 'JetBrainsMono Nerd Font 11'
   xfconf_set xfce4-keyboard-shortcuts '/commands/custom/<Super>space' string xfce4-appfinder
   xfconf_set xfce4-keyboard-shortcuts '/commands/custom/<Super><Shift>s' string 'xfce4-screenshooter -rc'
+  xfconf_set xfce4-keyboard-shortcuts '/xfwm4/custom/<Super>Left' string tile_left_key
+  xfconf_set xfce4-keyboard-shortcuts '/xfwm4/custom/<Super>Right' string tile_right_key
+  xfconf_set xfce4-keyboard-shortcuts '/xfwm4/custom/<Super>Up' string tile_up_key
+  xfconf_set xfce4-keyboard-shortcuts '/xfwm4/custom/<Super>Down' string tile_down_key
+  xfconf_set xfwm4 /general/tile_on_move bool true
   xfconf_set xfce4-appfinder /always-center bool true
   xfconf_set xfce4-appfinder /enable-service bool true
   distro_id=$(awk -F= '$1 == "ID" {gsub(/["\047]/, "", $2); print $2}' /etc/os-release)
@@ -252,6 +266,7 @@ fi
 avatar=${JSH_USER_AVATAR:-${JSH_ROOT}/assets/icons/j.jpg}
 [[ ! -r ${avatar} ]] || write_if_changed "${HOME}/.face" 0644 <"${avatar}"
 if ((changes)); then
+  for detail in "${details[@]}"; do jsh::detail "${detail}"; done
   jsh::changed "${desktop^^} desktop (${changes} settings)"
 else
   jsh::current
