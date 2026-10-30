@@ -271,7 +271,7 @@ class AppTests(unittest.TestCase):  # pylint: disable=too-many-public-methods
         target = self.seed(".waterfox/one/user.js", "unmanaged")
         WATERFOX.configure(self.context())
         self.assertEqual(target.read_text(), "unmanaged")
-        self.assertIn("JSH_WATERFOX_PROFILE='name' jsh configure waterfox", self.stream.getvalue())
+        self.assertIn("JSH_WATERFOX_PROFILE='name or path'", self.stream.getvalue())
 
     def test_waterfox_can_select_a_named_profile(self):
         self.seed(
@@ -305,6 +305,37 @@ class AppTests(unittest.TestCase):  # pylint: disable=too-many-public-methods
         self.assertEqual([item[1] for item in items], ["one", "two"])
         self.assertIn("\033[?1049h", self.stream.getvalue())
         self.assertIn("\033[?1049l", self.stream.getvalue())
+        self.assertEqual(WATERFOX.selection_path().read_text().strip(), str(second.parent))
+        with mock.patch.object(WATERFOX.menu, "choose") as again:
+            WATERFOX.configure(self.context())
+        again.assert_not_called()
+
+    def test_waterfox_stale_selection_prompts_again(self):
+        self.seed(
+            ".waterfox/profiles.ini",
+            "[Profile0]\nName=one\nPath=one\n[Profile1]\nName=two\nPath=two\n",
+        )
+        self.seed(".waterfox/one/user.js", "unmanaged")
+        second = self.seed(".waterfox/two/user.js", "unmanaged")
+        self.seed("state/jsh/waterfox-profile", str(self.home / ".waterfox/missing"))
+        self.stream.isatty = lambda: True
+        with (
+            mock.patch.object(WATERFOX.menu, "available", return_value=True),
+            mock.patch.object(WATERFOX.menu, "choose", return_value=1) as choose,
+        ):
+            WATERFOX.configure(self.context())
+        choose.assert_called_once()
+        self.assertEqual(WATERFOX.selection_path().read_text().strip(), str(second.parent))
+
+    def test_waterfox_profile_path_disambiguates_duplicate_names(self):
+        for base in (".waterfox", ".var/app/net.waterfox.waterfox/.waterfox"):
+            self.seed(f"{base}/profiles.ini", "[Profile0]\nName=default-release\nPath=main\n")
+            self.seed(f"{base}/main/user.js", "unmanaged")
+        target = self.home / ".var/app/net.waterfox.waterfox/.waterfox/main"
+        with mock.patch.dict(os.environ, {"JSH_WATERFOX_PROFILE": str(target)}):
+            WATERFOX.configure(self.context())
+        self.assertIn(WATERFOX.BEGIN, (target / "user.js").read_text())
+        self.assertEqual(WATERFOX.selection_path().read_text().strip(), str(target))
 
     def test_waterfox_skips_profile_selection_on_dry_run(self):
         self.seed(

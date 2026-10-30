@@ -66,6 +66,16 @@ def registered_profiles(directory):
     ]
 
 
+def selection_path():
+    state = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"))
+    return state / "jsh/waterfox-profile"
+
+
+def saved_profile():
+    path = selection_path()
+    return path.read_text().strip() if path.is_file() else ""
+
+
 def choose_profile(ctx):
     """Ask only on an interactive terminal; leave the spinner paused while reading."""
     choices = [
@@ -75,8 +85,10 @@ def choose_profile(ctx):
         if path.is_dir()
     ]
     if ctx.dry_run or not menu.available() or not ctx.display.stream.isatty() or not choices:
-        ctx.notice("choose a profile from Waterfox about:profiles; rerun with "
-                   "JSH_WATERFOX_PROFILE='name' jsh configure waterfox")
+        ctx.notice(
+            "choose a profile from Waterfox about:profiles; rerun with "
+            "JSH_WATERFOX_PROFILE='name or path' jsh configure waterfox"
+        )
         return None
     display = ctx.display
     display.end()
@@ -117,7 +129,7 @@ def managed_prefs():
     return managed + ("\n" + extra if extra else "")
 
 
-def configure(ctx):  # pylint: disable=too-many-branches
+def configure(ctx):  # pylint: disable=too-many-branches,too-many-locals
     flatpak = Path("/var/lib/flatpak/app/net.waterfox.waterfox")
     if not apps.present("waterfox", *directories(), flatpak, "/Applications/Waterfox.app"):
         return
@@ -127,11 +139,30 @@ def configure(ctx):  # pylint: disable=too-many-branches
         desired["EnterprisePoliciesEnabled"] = True
         apps.apply_policy(ctx, POLICY, desired, keep_unmanaged=True)
     requested = os.environ.get("JSH_WATERFOX_PROFILE")
+    saved = saved_profile() if not requested else ""
+    choices = [
+        (directory, profile)
+        for directory in directories()
+        for _, profile in registered_profiles(directory)
+        if profile.is_dir()
+    ]
+    if saved:
+        saved_matches = [
+            (directory, profile) for directory, profile in choices if str(profile) == saved
+        ]
+        if len(saved_matches) == 1:
+            requested = saved
+    selected_explicitly = bool(os.environ.get("JSH_WATERFOX_PROFILE"))
     if requested:
-        matches = [(directory, profile) for directory in directories()
-                   for name, profile in registered_profiles(directory) if name == requested]
+        matches = [
+            (directory, profile)
+            for directory in directories()
+            for name, profile in registered_profiles(directory)
+            if (name == requested or str(profile) == os.path.expanduser(requested))
+            and profile.is_dir()
+        ]
         if len(matches) != 1:
-            ctx.notice("profile name must match exactly one profile in Waterfox about:profiles")
+            ctx.notice("profile name or path must match exactly one existing Waterfox profile")
             return
     for directory in directories():
         if not (directory / "profiles.ini").exists():
@@ -145,11 +176,14 @@ def configure(ctx):  # pylint: disable=too-many-branches
                 return
             directory, profile = choice
             profiles = [profile]
+            selected_explicitly = True
         target = profiles[0] / "user.js"
         current = target.read_text() if target.exists() else ""
         text = user_js(current, managed_prefs())
         if text == current:
             ctx.current()
+            if selected_explicitly:
+                files.write(ctx, selection_path(), str(profiles[0]) + "\n")
             return
         if apps.MACOS:
             launch = ["open", "-a", "Waterfox"]
@@ -162,5 +196,7 @@ def configure(ctx):  # pylint: disable=too-many-branches
         ) as ready:
             if ready:
                 files.write(ctx, target, text)
+                if selected_explicitly:
+                    files.write(ctx, selection_path(), str(profiles[0]) + "\n")
         return
     ctx.notice("open Waterfox once to create a profile, then rerun: jsh configure waterfox")
