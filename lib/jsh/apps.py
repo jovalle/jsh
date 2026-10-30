@@ -118,6 +118,14 @@ def install_root(path, data):
         subprocess.run(["killall", "cfprefsd"], check=False, capture_output=True)
 
 
+def defer(ctx):
+    """Record a system change the user-only wizard leaves for later; True when deferred."""
+    if getattr(ctx, "user_only", False):
+        ctx.defer_system()
+        return True
+    return False
+
+
 def apply_policy(ctx, path, desired, keep_unmanaged=False):
     """Replace managed policy keys; keep_unmanaged preserves keys jsh does not manage."""
     path = Path(path)
@@ -129,8 +137,7 @@ def apply_policy(ctx, path, desired, keep_unmanaged=False):
     if current == updated:
         ctx.current()
         return
-    if getattr(ctx, "user_only", False):
-        ctx.defer_system()
+    if defer(ctx):
         return
     if not ctx.dry_run:
         if not ctx.admin():

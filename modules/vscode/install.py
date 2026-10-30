@@ -5,7 +5,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from jsh import system, web
+from jsh import apps, system, web
 
 METADATA = "https://update.code.visualstudio.com/api/update/linux-{channel}-{arch}/stable/latest"
 
@@ -19,8 +19,7 @@ def install(ctx):
     arch = {"x86_64": "x64", "aarch64": "arm64", "arm64": "arm64"}.get(platform.machine())
     if not arch:
         raise RuntimeError("VS Code requires x86_64 or aarch64")
-    if getattr(ctx, "user_only", False):
-        ctx.defer_system()
+    if apps.defer(ctx):
         return
     if not ctx.dry_run and not ctx.admin():
         ctx.notice("needs sudo to install the VS Code package; run sudo -v first, then rerun")
