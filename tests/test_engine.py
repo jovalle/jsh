@@ -24,6 +24,25 @@ def write(path, text, mode=0o644):
 
 
 class EngineTests(unittest.TestCase):
+    def test_terminal_header_embeds_command_in_banner(self):
+        stream = io.StringIO()
+        stream.isatty = lambda: True
+        with mock.patch.dict(os.environ, {"NO_COLOR": "1"}):
+            Display(stream).header("jsh setup", "commit (debian, xfce)")
+        lines = stream.getvalue().splitlines()
+        self.assertIn("setup", lines[-2])
+        self.assertNotIn("jsh", lines[-2])
+        self.assertTrue(lines[-2].startswith(" =   :-=-:"))
+        self.assertEqual(lines[-1], "commit (debian, xfce)")
+
+    def test_terminal_header_keeps_long_command(self):
+        stream = io.StringIO()
+        stream.isatty = lambda: True
+        command = "jsh module a-long-command-name"
+        with mock.patch.dict(os.environ, {"NO_COLOR": "1"}):
+            Display(stream).header(command, "details")
+        self.assertIn("module a-long-command-name", stream.getvalue().splitlines()[-2])
+
     def setUp(self):
         (ROOT / "tmp").mkdir(exist_ok=True)
         scratch = tempfile.TemporaryDirectory(dir=ROOT / "tmp")  # pylint: disable=R1732
@@ -84,6 +103,8 @@ class EngineTests(unittest.TestCase):
             {"apply.sh": """\
                 . "${JSH_ROOT}/lib/core.sh"
                 [[ $1 == 'two words' && ${JSH_PHASE} == configure ]] || exit 9
+                jsh::detail "theme: light → dark"
+                jsh::detail "font: old → new"
                 jsh::changed "demo setting"
                 jsh::current 2
                 jsh::notice "close the app first"
@@ -94,7 +115,8 @@ class EngineTests(unittest.TestCase):
         ok, out = self.run_phases(("configure",))
         self.assertTrue(ok)
         self.assertIn("! demo: close the app first\n", out)
-        self.assertIn("\n~ demo setting\n\n1 configured [", out)
+        self.assertIn("\nConfiguration\n~ demo setting\n  theme:\n    - light\n    + dark\n"
+                      "  font:\n    - old\n    + new\n\n1 configured [", out)
 
     def test_failed_task_is_reported_and_later_tasks_still_run(self):
         bad = {"description": "Bad", "configure": [{"script": "fail.sh"}]}
@@ -121,6 +143,76 @@ class EngineTests(unittest.TestCase):
         self.assertTrue(ok)
         self.assertIn("! sys: needs sudo; run sudo -v first, then rerun", out)
         self.assertNotIn("should not run", out)
+
+    def test_missing_script_key_has_a_descriptive_failure(self):
+        self.module(
+            "bad",
+            {"description": "Bad", "configure": [{"script": "bad.py"}]},
+            {"bad.py": "def configure(ctx):\n    return {}['name']\n"},
+        )
+        ok, out = self.run_phases(("configure",))
+        self.assertFalse(ok)
+        self.assertIn("✗ bad: missing required key 'name'", out)
+
+    def test_summary_groups_changes_by_kind_and_avoids_redundant_sources(self):
+        stream = io.StringIO()
+        display = Display(stream, dry_run=True)
+        display.begin(10)
+        for phase, label, handler, mark, text in (
+            ("configure", "audio", "script", "changed", "Jsh audio output"),
+            ("configure", "desktop", "script", "changed", "XFCE desktop (17 settings)"),
+            ("configure", "vscode", "script", "changed", "~/.config/Code/User/settings.json"),
+            ("install", "brew", "brew", "added", "fzf"),
+            ("install", "flatpak", "flatpak", "added", "com.example.App"),
+            ("install", "git", "git", "added", "skills/example"),
+            ("link", "link", "link", "added", "~/.zshrc"),
+            ("update", "ai", "script", "removed", "old skill"),
+        ):
+            ctx = runner.Context(display, self.facts, phase, label, self.base, True)
+            ctx.handler = handler
+            getattr(ctx, mark)(text)
+        display.summary()
+        out = stream.getvalue()
+        self.assertIn("Packages\n+ fzf Homebrew\n+ com.example.App Flatpak", out)
+        self.assertIn("Repositories\n+ skills/example", out)
+        self.assertIn("Links\n+ ~/.zshrc", out)
+        self.assertIn("~ Jsh audio output\n~ XFCE desktop (17 settings)\n", out)
+        self.assertIn("~ ~/.config/Code/User/settings.json [vscode]", out)
+        self.assertIn("Other changes\n- old skill [ai]", out)
+        self.assertIn("3 to configure", out)
+        self.assertIn("1 to remove", out)
+
+    def test_summary_colors_versions_dates_and_package_sources(self):
+        stream = io.StringIO()
+        display = Display(stream)
+        display.color = True
+        display.change("~", "atuin 18.24.2 → 18.24.3", "updated", "Packages", "Homebrew")
+        display.change("~", "jq → 1.7", "updated", "Packages", "dnf")
+        display.change(
+            "~", "skills/example dbd4588 (2026-10-09) → ca45fc4 (2026-10-28)",
+            "updated", "Repositories",
+        )
+        display.summary()
+        out = stream.getvalue()
+        self.assertIn("atuin \033[31m18.24.2\033[0m → \033[32m18.24.3\033[0m "
+                      "\033[2mHomebrew\033[0m", out)
+        self.assertIn("jq → \033[32m1.7\033[0m \033[2mdnf\033[0m", out)
+        self.assertIn("skills/example \033[31mdbd4588\033[0m\033[2m (2026-10-09)\033[0m"
+                      " → \033[32mca45fc4\033[0m\033[2m (2026-10-28)\033[0m", out)
+        display.color = False
+        self.assertEqual(display.change_text("example v1 → v2", "Repositories"),
+                         "example v1 → v2")
+
+    def test_configuration_details_show_colored_before_and_after(self):
+        display = Display(io.StringIO())
+        display.color = True
+        self.assertEqual(display.detail_lines("pins: /old/app.desktop → /new/app.desktop"), [
+            "  pins:", "    \033[31m- /old/app.desktop\033[0m",
+            "    \033[32m+ /new/app.desktop\033[0m",
+        ])
+        display.color = False
+        self.assertEqual(display.detail_lines("setting: old → new"),
+                         ["  setting:", "    - old", "    + new"])
 
     def test_update_reuses_install_steps_of_updatable_handlers(self):
         self.module(
@@ -155,7 +247,7 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(os.readlink(self.home / ".zshrc"), str(source))
         backups = list((self.base / "state/jsh/backups").glob("*/.zshrc"))
         self.assertEqual([path.read_text() for path in backups], ["mine\n"])
-        self.assertIn("+ ~/.config/a/b\n+ ~/.zshrc\n\n2 linked [", out)
+        self.assertIn("Links\n+ ~/.config/a/b\n+ ~/.zshrc\n\n2 linked [", out)
         ok, out = self.run_phases(("link",))
         self.assertIn("Checked 2 items (no changes)", out)
 

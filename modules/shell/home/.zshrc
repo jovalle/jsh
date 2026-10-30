@@ -1812,10 +1812,6 @@ ZSH_HIGHLIGHT_STYLES[hashed-command]='fg=green'
   [[ ! -r "${JSH_VENDOR}/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" ]] || \
   source "${JSH_VENDOR}/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
 
-if (( _jsh_runtime_active )) && [[ ${JSH_RELOADING:-0} != 1 ]]; then
-  jsh_banner
-fi
-
 # Agent shells and reloads skip start-up work.
 if [[ -o interactive && ${JSH_RELOADING:-0} != 1 && -r ${JSH}/lib/startup.zsh ]] &&
   (( ! _jsh_agent_shell )); then

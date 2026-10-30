@@ -2,6 +2,7 @@
 
 import itertools
 import os
+import re
 import shutil
 import sys
 import threading
@@ -56,8 +57,47 @@ class Display:  # pylint: disable=too-many-instance-attributes
     def paint(self, text, code):
         return f"\033[{code}m{text}\033[0m" if self.color else text
 
+    def change_text(self, text, group):
+        """Color version transitions while keeping repository dates subdued."""
+        if group not in ("Packages", "Repositories"):
+            return text
+        match = re.fullmatch(
+            r"(\S+) (\S+)( \(\d{4}-\d{2}-\d{2}\))? → (\S+)( \(\d{4}-\d{2}-\d{2}\))?",
+            text,
+        )
+        if not match:
+            match = re.fullmatch(r"(\S+) → (\S+)", text)
+            if match:
+                return f"{match[1]} → {self.paint(match[2], '32')}"
+            return text
+        name, old, old_date, new, new_date = match.groups()
+        old_date = self.paint(old_date, "2") if old_date else ""
+        new_date = self.paint(new_date, "2") if new_date else ""
+        return f"{name} {self.paint(old, '31')}{old_date} → {self.paint(new, '32')}{new_date}"
+
+    def detail_lines(self, detail):
+        """Render before and after values as a readable terminal diff."""
+        label, separator, values = detail.partition(": ")
+        old, arrow, new = values.partition(" → ")
+        if not separator or not arrow:
+            return [f"  {detail}"]
+        return [
+            f"  {label}:",
+            f"    {self.paint('- ' + old, '31')}",
+            f"    {self.paint('+ ' + new, '32')}",
+        ]
+
     def header(self, command, detail):
-        self._write(f"{self.paint(command, '1')} {self.paint(detail, '2')}\n")
+        if self.stream.isatty():
+            source = (Path(__file__).resolve().parents[2] / "lib/output.sh").read_text()
+            banner = source.split("<<'BANNER'\n", 1)[1].split("\nBANNER", 1)[0]
+            lines = banner.splitlines()
+            title = command.removeprefix("jsh ")
+            lines[-1] = f" =   :-=-:{title:^26}-:"
+            self._write(self.paint("\n".join(lines), "1;36") + "\n")
+            self._write(f"{self.paint(detail, '2')}\n")
+        else:
+            self._write(f"{self.paint(command, '1')} {self.paint(detail, '2')}\n")
 
     def begin(self, total):
         self.total = total
@@ -87,9 +127,9 @@ class Display:  # pylint: disable=too-many-instance-attributes
         with self._lock:
             self.done = max(self.done, min(units, self.total))
 
-    def change(self, mark, text, verb):
+    def change(self, mark, text, verb, group, source=None, *, details=()):
         with self._lock:
-            self.changes.append((mark, text))
+            self.changes.append((mark, text, group, source, tuple(details)))
             self.counts[verb] += 1
             self.checked += 1
 
@@ -115,8 +155,27 @@ class Display:  # pylint: disable=too-many-instance-attributes
         self.end()
         out = []
         if self.changes:
-            out.append("")
-            out += [f"{self.paint(mark, MARKS[mark])} {text}" for mark, text in self.changes]
+            for group in ("Packages", "Repositories", "Links", "Configuration", "Other changes"):
+                entries = [change for change in self.changes if change[2] == group]
+                if not entries:
+                    continue
+                out += ["", self.paint(group, "1")]
+                for mark, text, _, source, details in entries:
+                    redundant = (
+                        group != "Packages"
+                        and source
+                        and re.search(rf"\b{re.escape(source)}\b", text, re.IGNORECASE)
+                    )
+                    if group == "Packages" and source:
+                        label = " " + self.paint(source, "2")
+                    else:
+                        label = f" [{source}]" if source and not redundant else ""
+                    out.append(
+                        f"{self.paint(mark, MARKS[mark])} "
+                        f"{self.change_text(text, group)}{label}"
+                    )
+                    for detail in details:
+                        out.extend(self.detail_lines(detail))
         elapsed = self.paint(f"[{duration(time.monotonic() - self.started)}]", "2")
         if self.counts:
             parts = [

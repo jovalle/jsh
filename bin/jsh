@@ -4,7 +4,7 @@
 set -eu
 launcher=$0
 case ${launcher} in /*) ;; *) launcher=${PWD}/${launcher} ;; esac
-while [[ -L "${launcher}" ]]; do
+while [ -L "${launcher}" ]; do
   parent=$(CDPATH='' cd -P "${launcher%/*}" && pwd)
   target=$(readlink "${launcher}")
   case ${target} in /*) launcher=${target} ;; *) launcher=${parent}/${target} ;; esac
@@ -18,10 +18,10 @@ command -v zsh >/dev/null 2>&1 || {
   printf 'jsh: zsh is required. Run: ./j.sh install core\n' >&2
   exit 127
 }
-[[ -d "${root}/local/vendor/zsh-autosuggestions" ]] ||
+[ -d "${root}/local/vendor/zsh-autosuggestions" ] ||
   printf 'jsh: shell plugins are missing. Run: ./j.sh install shell\n' >&2
 JSH_RUNTIME_DIR=${JSH_RUNTIME_DIR:-${root}/local/runtime}
 ZDOTDIR=${root}/modules/shell/home
 export JSH_RUNTIME_DIR ZDOTDIR
-[[ "$#" -gt 0 ]] || set -- -i
+[ "$#" -gt 0 ] || set -- -i
 exec zsh -d "$@"

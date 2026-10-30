@@ -45,7 +45,7 @@ class HandlerTests(unittest.TestCase):
         return ctx
 
     def changes(self):
-        return self.display.changes
+        return [(mark, text) for mark, text, _, _, _ in self.display.changes]
 
     def test_brew_installs_only_missing_formulae_including_aliases(self):
         listed = {"--formula": "git\npython@3.13\n", "--cask": ""}

@@ -26,10 +26,12 @@ jsh::emit() {
     changed) printf '%s %s\n' "$(jsh::paint 1 33 '~')" "$2" ;;
     removed) printf '%s %s\n' "$(jsh::paint 1 31 -)" "$2" ;;
     notice) jsh::log_warn "$2" ;;
+    detail) printf '  %s\n' "$2" ;;
   esac
 }
 
 jsh::added() { jsh::emit added "$*"; }
+jsh::detail() { jsh::emit detail "$*"; }
 jsh::changed() { jsh::emit changed "$*"; }
 jsh::removed() { jsh::emit removed "$*"; }
 jsh::current() { jsh::emit current "${1:-1}"; }
@@ -47,6 +49,10 @@ jsh::run() {
 }
 
 jsh::root() {
+  if [[ ${JSH_USER_ONLY:-0} == 1 ]]; then
+    jsh::notice 'System changes are available through jsh.'
+    return 1
+  fi
   if [[ ${JSH_DRY_RUN:-0} == 1 || ${EUID} == 0 ]]; then
     jsh::run "$@"
   else

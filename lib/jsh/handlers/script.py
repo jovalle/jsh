@@ -38,6 +38,7 @@ def environment(ctx, step):
         "JSH_DESKTOP": ctx.facts.desktop,
         "JSH_HOST": ctx.facts.host,
         "JSH_DRY_RUN": "1" if ctx.dry_run else "0",
+        "JSH_USER_ONLY": "1" if getattr(ctx, "user_only", False) else "0",
     }
 
 
@@ -91,6 +92,7 @@ def listen(ctx, reader, finished):
         "progress": ctx.progress,
         "notice": ctx.notice,
     }
+    details = []
     buffer = b""
     try:
         while True:
@@ -106,7 +108,12 @@ def listen(ctx, reader, finished):
             while b"\n" in buffer:
                 line, buffer = buffer.split(b"\n", 1)
                 event, _, text = line.decode(errors="replace").partition(" ")
-                if event == "current":
+                if event == "detail":
+                    details.append(text)
+                elif event == "changed":
+                    ctx.changed(text, details)
+                    details = []
+                elif event == "current":
                     ctx.current(int(text) if text.isdigit() else 1)
                 elif event in actions:
                     actions[event](text)
