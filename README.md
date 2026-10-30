@@ -1,5 +1,7 @@
 # jsh
 
+![jsh banner](assets/jsh.png)
+
 A small workstation setup tool for macOS, Debian-family Linux, and RHEL-family Linux.
 Everything it sets up lives in a module: one folder under [modules/](modules) with a
 `module.json` that says what to install, which files to link, and what to configure.
@@ -17,17 +19,33 @@ jsh setup 1d5a32f (darwin)
 
 ## Getting started
 
-Clone this repository to `~/.jsh`. Jsh needs Bash and Python 3.9 or later. When no such
-Python is on the machine, `j.sh`
-installs one first: with Homebrew on macOS (install [Homebrew](https://brew.sh) first),
-or with apt or dnf on Linux (run `sudo -v` first). Then:
+From an interactive terminal, install Git and curl, then run:
 
 ```sh
-~/.jsh/j.sh setup --dry-run   # Show what would change
-~/.jsh/j.sh setup             # Install, link, and configure every module
+curl -fsSL https://raw.githubusercontent.com/jovalle/jsh/main/j.sh | bash
 ```
 
-`setup` links `~/.local/bin/jsh`, so later runs are just `jsh COMMAND`:
+The installer clones into `~/.jsh` and opens the setup wizard. It refuses to replace an
+existing checkout. To choose another destination, set `JSH_HOME` in the shell running the
+installer. You can also clone manually and run `~/.jsh/j.sh`.
+
+The wizard detects your platform and desktop, offers starting points and a searchable
+module picker, and lets you review or preview the plan before applying it. Use the arrow
+keys and space to select modules; `/` searches, Enter continues, and Escape goes back.
+The preview is a best estimate: some scripts can only describe their changes. Existing
+files may be backed up, and browsers may close and reopen when required for changes.
+System-level work is deferred to direct `jsh` commands. Install Python 3.9 or later before
+running the wizard if it is not already available. A successful setup opens the isolated
+jsh shell automatically; exit it to return to your previous shell.
+
+Your choices are saved in `$XDG_STATE_HOME/jsh/selection.json` (normally
+`~/.local/state/jsh/selection.json`) after confirmation. Unqualified commands use this
+machine's saved selection; explicitly naming modules works independently and includes
+those modules' optional steps. Run `~/.jsh/j.sh` again to change the selection. Without a
+saved selection, unqualified commands continue to cover all applicable modules.
+
+The `shell` module links `~/.local/bin/jsh`; make sure `~/.local/bin` is on your `PATH`.
+Thereafter, use direct commands for everyday work:
 
 | Command                     | Does                                                            |
 | --------------------------- | --------------------------------------------------------------- |
@@ -41,12 +59,14 @@ or with apt or dnf on Linux (run `sudo -v` first). Then:
 | `jsh MODULE COMMAND`        | Run a module command, for example `jsh audio cycle`             |
 | `jsh`                       | Open the isolated jsh Zsh shell (history under `local/runtime`) |
 
-With no module names a command covers every module that applies to this machine.
-`--dry-run` reports what would change without changing anything. A failed step is
-reported with the end of its log and the log path under `local/logs/`; later steps
-still run. Root changes use `sudo -n`, so authorize sudo first (`sudo -v`); jsh never
-prompts for a password and never asks for confirmation. Zsh completes `jsh` commands,
-module names, and module commands.
+With no module names a command uses the saved selection, or every applicable module if
+there is no selection. `--dry-run` reports what would change without changing anything.
+A failed step is reported with the end of its log and the log path under `local/logs/`;
+later steps still run. Root changes use `sudo -n`, so authorize sudo first (`sudo -v`);
+jsh never prompts for a password. Direct commands do not ask for confirmation. Zsh
+completes `jsh` commands, module names, and module commands.
+
+![jsh terminal](assets/terminal.png)
 
 ## Modules
 
@@ -97,6 +117,8 @@ the problem.
 | `git`      | `path: url` pairs under `local/vendor` | Shallow clones                       | Reset to the remote `HEAD`    |
 | `script`   | `NAME [ARGS]`, a file in the module    | Runs in whichever phase lists it     | Only from `update:`           |
 
+The Brew update skips Sublime Text to preserve the patched application.
+
 Batched handlers (`brew`, `apt`, `dnf`, `flatpak`, `uv`, `git`) collect every module's
 steps into one call per run. Python scripts define `install(ctx)`, `configure(ctx)`,
 or `update(ctx)` and report through `ctx.added`, `ctx.changed`, `ctx.current`,
@@ -112,7 +134,8 @@ files, policies, downloads, and desktop settings. Bash scripts source
 | `core`                                                 | Bash, curl, Git, Python, Zsh                                                 |
 | `shell`                                                | `.zshrc` and friends, Zsh plugins in `local/vendor`, fzf, the `jsh` launcher |
 | `tools`                                                | Everyday CLI tools and their settings (Homebrew on Linux when installed)     |
-| `dev`, `kube`, `containers`, `ai`                      | Linters, Kubernetes, container, and AI CLIs, plus graphify and REA skills    |
+| `dev`, `kube`, `containers`                            | Linters, Kubernetes, and container CLIs                                      |
+| `ai`                                                   | AI CLIs and their settings, graphify and REA skills, REA MCP registration    |
 | `git`                                                  | `.gitconfig`                                                                 |
 | `skills`                                               | Agent skill repos in `local/vendor/skills`, linked into `~/.agents/skills`   |
 | `fonts`                                                | JetBrains Mono Nerd Font                                                     |
@@ -126,18 +149,26 @@ files, policies, downloads, and desktop settings. Bash scripts source
 
 Notes:
 
+- When Syncthing is running, `jsh configure tools` excludes `.git` and `node_modules` from
+  every configured folder and new-folder defaults. It also excludes this checkout's
+  `local/` and `tmp/`.
+  Syncthing ignore rules are per-device; run it on each machine.
 - Linux AppImages need x86_64 or aarch64 and a working FUSE runtime. Ghostty's Linux
   AppImage is a [community build](https://github.com/pkgforge-dev/ghostty-appimage).
-- Sublime Text's cask is optional, so a manual macOS install is left alone.
 - `JSH_TIMEZONE` (default `America/New_York`), `JSH_WALLPAPER` (no default), and
   `JSH_AUDIO_POLICY` adjust the `linux`, `wallpaper`, and `audio` modules.
-- Browsers are never closed for you; open each once to create a profile, close it,
-  then run `jsh configure helium waterfox`. Policies are root-owned and replaced
+- Open each browser once to create a profile, then run `jsh configure helium waterfox`.
+  Browsers are closed and reopened only when pending profile changes require it; a browser
+  that cannot be closed is left for manual attention. Policies are root-owned and replaced
   wholesale; app settings files are merged, keeping unrelated settings.
 - Replaced files go to `$XDG_STATE_HOME/jsh/backups` (normally
   `~/.local/state/jsh/backups`); a stale link into this checkout is replaced without
   one. Targets under a symlinked directory are left for you to review.
 - Personal shell additions belong in `~/.jshrc`, `~/.local/.jshrc`, or `local/.jshrc`.
+- Machine-local browser additions go in `local/waterfox/policies.json`, `local/waterfox/user.js`,
+  and `local/helium/policy.json`; `jsh configure` merges them over the managed files. On macOS,
+  `local/helium/unpacked.json` lists extension directories that Helium keeps loaded unpacked,
+  with developer mode on.
   Git identities live in `conf/git.json` (see [conf/git.example.json](conf/git.example.json)).
 
 ## Commands
