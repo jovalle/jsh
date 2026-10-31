@@ -70,25 +70,43 @@ managed_plugin() {
 }
 
 configure_panel() {
-  local panel_id cpu_id load_id net_id fs_id audio_id cafe_id id plugin_id plugin_type
-  local panel_before panel_after systray_id='' clock_id='' actions_id=''
+  local panel_id cpu_id load_id net_id fs_id audio_id cafe_id mic_id='' id plugin_id plugin_type
+  local panel_before panel_after systray_id='' clock_id='' actions_id='' panel_stopped=0
+  local audio_type=pulseaudio
   local -a plugin_ids=() existing_ids=() base_ids=() arguments=()
   panel_before=$(xfconf-query -c xfce4-panel -lv 2>/dev/null || true)
   panel_id=$(xfconf-query -c xfce4-panel -p /panels 2>/dev/null | grep -E '^[0-9]+$' | head -n 1)
-  [[ ${panel_id} =~ ^[0-9]+$ ]] || { jsh::log_note '  › skipped panel: unavailable'; return; }
-  managed_plugin cpugraph; cpu_id=${managed_id}
-  managed_plugin systemload; load_id=${managed_id}
-  managed_plugin fsguard; fs_id=${managed_id}
-  managed_plugin genmon net; net_id=${managed_id}
-  managed_plugin pulseaudio; audio_id=${managed_id}
-  managed_plugin genmon cafe; cafe_id=${managed_id}
+  [[ ${panel_id} =~ ^[0-9]+$ ]] || {
+    jsh::log_note '  › skipped panel: unavailable'
+    return
+  }
+  managed_plugin cpugraph
+  cpu_id=${managed_id}
+  managed_plugin systemload
+  load_id=${managed_id}
+  managed_plugin fsguard
+  fs_id=${managed_id}
+  managed_plugin genmon net
+  net_id=${managed_id}
+  if [[ ${JSH_HOST:-} == colossus && -f /usr/share/xfce4/panel/plugins/jsh-pulseaudio.desktop ]] &&
+    compgen -G '/usr/lib/*/xfce4/panel/plugins/libjsh-pulseaudio.so' >/dev/null; then
+    audio_type=jsh-pulseaudio
+  fi
+  managed_plugin "${audio_type}" pulseaudio
+  audio_id=${managed_id}
+  managed_plugin genmon cafe
+  cafe_id=${managed_id}
+  if [[ ${JSH_HOST:-} == colossus && ${audio_type} == pulseaudio ]]; then
+    managed_plugin genmon microphone
+    mic_id=${managed_id}
+  fi
   while IFS= read -r id; do [[ ${id} =~ ^[0-9]+$ ]] && existing_ids+=("${id}"); done < <(
     xfconf-query -c xfce4-panel -p "/panels/panel-${panel_id}/plugin-ids" 2>/dev/null
   )
   for plugin_id in "${existing_ids[@]}"; do
     plugin_type=$(xfconf-query -c xfce4-panel -p "/plugins/plugin-${plugin_id}" 2>/dev/null || true)
     case ${plugin_type} in
-      docklike | netload | cpugraph | systemload | fsguard | genmon | pulseaudio) ;;
+      docklike | netload | cpugraph | systemload | fsguard | genmon | pulseaudio | jsh-pulseaudio) ;;
       systray) systray_id=${plugin_id} ;;
       clock) clock_id=${plugin_id} ;;
       actions) actions_id=${plugin_id} ;;
@@ -101,7 +119,9 @@ configure_panel() {
   fi
   plugin_ids=("${base_ids[@]}" "${cpu_id}" "${load_id}" "${fs_id}" "${net_id}")
   [[ -z ${systray_id} ]] || plugin_ids+=("${systray_id}")
-  plugin_ids+=("${cafe_id}" "${audio_id}")
+  plugin_ids+=("${cafe_id}")
+  plugin_ids+=("${audio_id}")
+  [[ -z ${mic_id} ]] || plugin_ids+=("${mic_id}")
   [[ -z ${clock_id} ]] || plugin_ids+=("${clock_id}")
   [[ -z ${actions_id} ]] || plugin_ids+=("${actions_id}")
   for id in "${plugin_ids[@]}"; do arguments+=(-t int -s "${id}"); done
@@ -150,6 +170,56 @@ Text=
 UpdatePeriod=500
 Action=${JSH_ROOT}/bin/cafe --xfce-toggle
 EOF
+  if [[ -n ${mic_id} ]]; then
+    # Genmon saves its in-memory settings on exit; stop it before changing its interval.
+    if ! grep -Fqx 'UpdatePeriod=250' "${HOME}/.config/xfce4/panel/genmon-${mic_id}.rc" 2>/dev/null &&
+      pgrep -x xfce4-panel >/dev/null 2>&1; then
+      if DISPLAY=${DISPLAY:-:0} timeout 5 xfce4-panel --quit >/dev/null 2>&1; then
+        panel_stopped=1
+        trap 'DISPLAY=${DISPLAY:-:0} nohup xfce4-panel >/dev/null 2>&1 &' EXIT
+      fi
+    fi
+    write_if_changed "${HOME}/.config/xfce4/panel/genmon-${mic_id}.rc" 0644 <<EOF
+Command=python3 ${JSH_ROOT}/modules/audio/microphone.py --panel
+UseLabel=false
+Text=
+UpdatePeriod=250
+EOF
+    # XFCE colors this icon for recording activity, independently of microphone mute.
+    local gtk_css=${HOME}/.config/gtk-3.0/gtk.css
+    if [[ ! -f ${gtk_css} ]] || ! grep -Fqx '/* jsh: hide recording indicator */' "${gtk_css}"; then
+      write_if_changed "${gtk_css}" 0644 < <(
+        [[ ! -f ${gtk_css} ]] || cat "${gtk_css}"
+        printf '\n%s\n%s\n' '/* jsh: hide recording indicator */' \
+          '.recording-indicator { opacity: 0; }'
+      )
+    fi
+    if ! grep -Fqx '/* jsh: white speaker icon */' "${gtk_css}"; then
+      write_if_changed "${gtk_css}" 0644 < <(
+        cat "${gtk_css}"
+        printf '\n%s\n%s\n' '/* jsh: white speaker icon */' \
+          '#pulseaudio-button > box > image:not(.recording-indicator) { color: #ffffff; }'
+      )
+    fi
+  fi
+  if [[ ${audio_type} == jsh-pulseaudio ]]; then
+    local gtk_css=${HOME}/.config/gtk-3.0/gtk.css
+    if [[ -f ${gtk_css} ]] &&
+      grep -Fqx '#pulseaudio-button image:not(.recording-indicator) { color: #ffffff; }' "${gtk_css}"; then
+      write_if_changed "${gtk_css}" 0644 < <(
+        sed 's/^#pulseaudio-button image:not(.recording-indicator) { color: #ffffff; }$/#pulseaudio-button > box > image:not(.recording-indicator) { color: #ffffff; }/' "${gtk_css}"
+      )
+    fi
+    if [[ -f ${gtk_css} ]] && grep -Fqx '/* jsh: hide recording indicator */' "${gtk_css}"; then
+      write_if_changed "${gtk_css}" 0644 < <(
+        awk '
+          $0 == "/* jsh: hide recording indicator */" { managed=1; next }
+          managed && $0 == ".recording-indicator { opacity: 0; }" { managed=0; next }
+          { managed=0; print }
+        ' "${gtk_css}"
+      )
+    fi
+  fi
   xfconf_set xfce4-panel "/plugins/plugin-${audio_id}/enable-keyboard-shortcuts" bool true
   xfconf_set xfce4-panel "/plugins/plugin-${audio_id}/enable-mpris" bool true
   xfconf_set xfce4-panel "/plugins/plugin-${audio_id}/enable-multimedia-keys" bool true
@@ -160,7 +230,10 @@ EOF
   xfconf_set xfce4-panel "/plugins/plugin-${clock_id}/digital-time-format" string '%Y-%m-%d %H:%M:%S'
   panel_after=$(xfconf-query -c xfce4-panel -lv 2>/dev/null || true)
   [[ ${panel_before} != "${panel_after}" || ${panel_files_changed} != 0 ]] || return 0
-  if pgrep -x xfce4-panel >/dev/null 2>&1; then
+  if ((panel_stopped)); then
+    DISPLAY=${DISPLAY:-:0} nohup xfce4-panel >/dev/null 2>&1 &
+    trap - EXIT
+  elif pgrep -x xfce4-panel >/dev/null 2>&1; then
     DISPLAY=${DISPLAY:-:0} timeout 5 xfce4-panel -r >/dev/null 2>&1 || true
     sleep 1
     pgrep -x xfce4-panel >/dev/null 2>&1 || DISPLAY=${DISPLAY:-:0} nohup xfce4-panel >/dev/null 2>&1 &
