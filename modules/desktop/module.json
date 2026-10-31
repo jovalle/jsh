@@ -44,7 +44,30 @@
       ],
       "when": { "desktop": "xfce" }
     },
-    { "script": "extensions.py", "when": { "desktop": "gnome" } }
+    { "script": "extensions.py", "when": { "desktop": "gnome" } },
+    {
+      "apt": [
+        "build-essential",
+        "pkg-config",
+        "patch",
+        "intltool",
+        "libgtk-3-dev",
+        "libpulse-dev",
+        "libxfce4panel-2.0-dev",
+        "libxfce4ui-2-dev",
+        "libxfconf-0-dev",
+        "libkeybinder-3.0-dev",
+        "libnotify-dev",
+        "libwnck-3-dev",
+        "libexo-2-dev",
+        "libxfce4windowing-0-dev"
+      ],
+      "when": { "desktop": "xfce", "platform": "debian", "host": "colossus" }
+    }
   ],
-  "configure": [{ "script": "desktop.sh" }, { "script": "extensions.py", "when": { "desktop": "gnome" } }]
+  "configure": [
+    { "script": "plugin.py", "when": { "desktop": "xfce", "platform": "debian", "host": "colossus" } },
+    { "script": "desktop.sh" },
+    { "script": "extensions.py", "when": { "desktop": "gnome" } }
+  ]
 }

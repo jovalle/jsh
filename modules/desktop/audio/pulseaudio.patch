@@ -1,0 +1,467 @@
+--- a/panel-plugin/pulseaudio-button.c
++++ b/panel-plugin/pulseaudio-button.c
+@@ -118,6 +118,12 @@
+   gulong                recording_changed_id;
+   gulong                deactivate_id;
+   gulong                configuration_changed_id;
++  guint                 jsh_timer;
++  gboolean              jsh_pending;
++  gboolean              jsh_setting;
++  gboolean              jsh_destroyed;
++  gint                  jsh_state;
++  gint                  jsh_desired;
+ };
+
+ struct _PulseaudioButtonClass
+@@ -146,14 +152,123 @@
+
+
+
+-static void pulseaudio_set_recording_indicator_state (PulseaudioButton *button)
++
++/* jsh: read hardware-aware microphone status without blocking the panel. */
++static gboolean jsh_mic_poll (gpointer data);
++
++static void
++jsh_mic_done (GObject *object, GAsyncResult *result, gpointer data)
++{
++  PulseaudioButton *button = data;
++  gchar *output = NULL;
++  GError *error = NULL;
++  const gchar *state = "unavailable";
++  gchar *path;
++
++  if (g_subprocess_communicate_utf8_finish (G_SUBPROCESS (object), result,
++                                            &output, NULL, &error) &&
++      g_subprocess_get_successful (G_SUBPROCESS (object)))
++    {
++      if (strstr (output, "microphone-muted.svg") != NULL)
++        state = "muted";
++      else if (strstr (output, "microphone-live.svg") != NULL)
++        state = "live";
++    }
++  if (!button->jsh_destroyed && !button->jsh_setting && button->jsh_desired < 0)
++    {
++      button->jsh_state = g_str_equal (state, "muted") ? 1 :
++                          g_str_equal (state, "live") ? 0 : -1;
++      if (button->menu != NULL)
++        pulseaudio_menu_set_jsh_mic_state (button->menu, button->jsh_state);
++      path = g_strdup_printf ("%s/.jsh/modules/audio/microphone-%s.svg",
++                              g_get_home_dir (), state);
++      gtk_image_set_from_file (GTK_IMAGE (button->recording_indicator), path);
++      g_free (path);
++    }
++  g_free (output);
++  g_clear_error (&error);
++  button->jsh_pending = FALSE;
++  if (!button->jsh_destroyed && (button->jsh_setting || button->jsh_desired >= 0))
++    {
++      button->jsh_setting = FALSE;
++      jsh_mic_poll (button);
++    }
++  else
++    button->jsh_setting = FALSE;
++  g_object_unref (button);
++}
++
++static gboolean
++jsh_mic_poll (gpointer data)
++{
++  PulseaudioButton *button = data;
++  GSubprocess *process;
++  gchar *script;
++  GError *error = NULL;
++
++  if (button->jsh_pending)
++    return G_SOURCE_CONTINUE;
++  script = g_build_filename (g_get_home_dir (), ".jsh", "modules", "audio",
++                             "microphone.py", NULL);
++  button->jsh_setting = button->jsh_desired >= 0;
++  process = g_subprocess_new (G_SUBPROCESS_FLAGS_STDOUT_PIPE |
++                              G_SUBPROCESS_FLAGS_STDERR_SILENCE,
++                              &error, "python3", script,
++                              button->jsh_setting ?
++                                (button->jsh_desired ? "--mute" : "--unmute") : "--panel",
++                              NULL);
++  if (button->jsh_setting)
++    button->jsh_desired = -1;
++  g_free (script);
++  if (process == NULL)
++    {
++      g_clear_error (&error);
++      button->jsh_setting = FALSE;
++      button->jsh_state = -1;
++      if (button->menu != NULL)
++        pulseaudio_menu_set_jsh_mic_state (button->menu, -1);
++      return G_SOURCE_CONTINUE;
++    }
++  button->jsh_pending = TRUE;
++  g_subprocess_communicate_utf8_async (process, NULL, NULL, jsh_mic_done,
++                                       g_object_ref (button));
++  g_object_unref (process);
++  return G_SOURCE_CONTINUE;
++}
++
++gint
++pulseaudio_button_get_jsh_mic_state (PulseaudioButton *button)
++{
++  return button->jsh_state;
++}
++
++void
++pulseaudio_button_set_jsh_mic_state (PulseaudioButton *button, gboolean muted)
+ {
+-  gtk_css_provider_load_from_data (button->recording_indicator_style_css_provider,
+-                                   button->recording ? ".recording-indicator { color: @error_color; }" : "",
+-                                   -1, NULL);
++  if (button->jsh_state < 0 || button->jsh_setting || button->jsh_desired >= 0)
++    return;
++  button->jsh_desired = muted ? 1 : 0;
++  button->jsh_state = -1;
++  if (button->menu != NULL)
++    pulseaudio_menu_set_jsh_mic_state (button->menu, -1);
++  jsh_mic_poll (button);
++}
+
+-  gtk_widget_set_visible (button->recording_indicator,
+-                          button->recording || button->recording_indicator_persistent);
++static void
++jsh_mic_destroy (GtkWidget *widget, gpointer data)
++{
++  PulseaudioButton *button = data;
++  button->jsh_destroyed = TRUE;
++  if (button->jsh_timer)
++    {
++      g_source_remove (button->jsh_timer);
++      button->jsh_timer = 0;
++    }
++}
++
++static void pulseaudio_set_recording_indicator_state (PulseaudioButton *button)
++{
++  gtk_widget_set_visible (button->recording_indicator, TRUE);
+ }
+
+
+@@ -188,6 +303,8 @@
+   gtk_widget_add_events (GTK_WIDGET (button), GDK_SCROLL_MASK);
+
+   button->icon_size = 16;
++  button->jsh_state = -1;
++  button->jsh_desired = -1;
+
+   button->image = gtk_image_new ();
+   button->recording_indicator = gtk_image_new ();
+@@ -219,6 +336,8 @@
+       button->menu = NULL;
+     }
+
++  if (button->jsh_timer)
++    g_source_remove (button->jsh_timer);
+   g_object_unref (button->recording_indicator_style_css_provider);
+
+   (*G_OBJECT_CLASS (pulseaudio_button_parent_class)->finalize) (object);
+@@ -280,7 +399,13 @@
+   if (event->button == 2) /* middle button */
+     {
+       if (pulseaudio_button_mic_icon_under_pointer (button, event->x))
+-        pulseaudio_volume_toggle_muted_mic (button->volume);
++        {
++          const gchar *name = pulseaudio_volume_get_default_input (button->volume);
++          if (name != NULL && g_str_has_prefix (name, "alsa_input.usb-Elgato_Systems_Elgato_Wave_3_"))
++            pulseaudio_button_set_jsh_mic_state (button, button->jsh_state == 0);
++          else
++            pulseaudio_volume_toggle_muted_mic (button->volume);
++        }
+       else
+         pulseaudio_volume_toggle_muted (button->volume);
+       return TRUE;
+@@ -431,12 +556,10 @@
+     icon_name = icons[V_MUTED];
+   else if (volume <= 0.0)
+     icon_name = icons[V_MUTED];
+-  else if (volume <= 0.3)
+-    icon_name = icons[V_LOW];
+-  else if (volume <= 0.7)
+-    icon_name = icons[V_MEDIUM];
++  else if (pulseaudio_volume_get_jsh_headphones (button->volume))
++    icon_name = "audio-headphones-symbolic";
+   else
+-    icon_name = icons[V_HIGH];
++    icon_name = "audio-speakers-symbolic";
+
+   if (!connected)
+     recording_icon_name = recording_icons[V_MUTED];
+@@ -464,8 +587,7 @@
+   if (force_update || recording_icon_name != button->recording_icon_name)
+     {
+       button->recording_icon_name = recording_icon_name;
+-      gtk_image_set_from_icon_name (GTK_IMAGE (button->recording_indicator), recording_icon_name, GTK_ICON_SIZE_BUTTON);
+-      gtk_image_set_pixel_size (GTK_IMAGE (button->recording_indicator), button->icon_size);
++      /* Hardware state is supplied by jsh_mic_poll. */
+     }
+
+   if (force_update || button->recording != recording)
+@@ -596,6 +718,9 @@
+
+   button->recording_indicator_persistent = pulseaudio_config_get_rec_indicator_persistent (button->config);
+   pulseaudio_button_update (button, TRUE);
++  jsh_mic_poll (button);
++  button->jsh_timer = g_timeout_add (250, jsh_mic_poll, button);
++  g_signal_connect (button, "destroy", G_CALLBACK (jsh_mic_destroy), button);
+
+   return button;
+ }
+--- a/panel-plugin/pulseaudio-button.h
++++ b/panel-plugin/pulseaudio-button.h
+@@ -52,6 +52,10 @@
+
+ PulseaudioMenu         *pulseaudio_button_get_menu    (PulseaudioButton *button);
+
++gint                    pulseaudio_button_get_jsh_mic_state (PulseaudioButton *button);
++void                    pulseaudio_button_set_jsh_mic_state (PulseaudioButton *button,
++                                                               gboolean muted);
++
+ G_END_DECLS
+
+ #endif /* !__PULSEAUDIO_BUTTON_H__ */
+--- a/panel-plugin/pulseaudio-menu.c
++++ b/panel-plugin/pulseaudio-menu.c
+@@ -35,6 +35,7 @@
+ #include <libxfce4ui/libxfce4ui.h>
+
+ #include "pulseaudio-menu.h"
++#include "pulseaudio-button.h"
+ #include "pulseaudio-mpris.h"
+ #include "devicemenuitem.h"
+ #include "mprismenuitem.h"
+@@ -220,13 +221,37 @@
+
+
+
++static gboolean
++jsh_wave_input (PulseaudioMenu *menu)
++{
++  const gchar *name = pulseaudio_volume_get_default_input (menu->volume);
++  return name != NULL && g_str_has_prefix (name, "alsa_input.usb-Elgato_Systems_Elgato_Wave_3_");
++}
++
++void
++pulseaudio_menu_set_jsh_mic_state (PulseaudioMenu *menu, gint state)
++{
++  if (menu->input_scale == NULL || !jsh_wave_input (menu))
++    return;
++  gtk_widget_set_sensitive (menu->input_scale, state >= 0);
++  if (state >= 0 &&
++      scale_menu_item_get_muted (SCALE_MENU_ITEM (menu->input_scale)) != (state == 1))
++    {
++      scale_menu_item_set_muted (SCALE_MENU_ITEM (menu->input_scale), state == 1);
++    }
++}
++
+ static void
+ pulseaudio_menu_mute_input_item_toggled (PulseaudioMenu   *menu,
+                                          ScaleMenuItem    *menu_item)
+ {
+   g_return_if_fail (IS_PULSEAUDIO_MENU (menu));
+
+-  pulseaudio_volume_set_muted_mic (menu->volume, scale_menu_item_get_muted (menu_item));
++  if (jsh_wave_input (menu))
++    pulseaudio_button_set_jsh_mic_state (PULSEAUDIO_BUTTON (menu->button),
++                                         scale_menu_item_get_muted (menu_item));
++  else
++    pulseaudio_volume_set_muted_mic (menu->volume, scale_menu_item_get_muted (menu_item));
+ }
+
+
+@@ -330,8 +355,15 @@
+       g_signal_handlers_block_by_func (G_OBJECT (menu->input_scale),
+                                        pulseaudio_menu_mute_input_item_toggled,
+                                        menu);
+-      scale_menu_item_set_muted (SCALE_MENU_ITEM (menu->input_scale),
+-                                 pulseaudio_volume_get_muted_mic (volume));
++      if (jsh_wave_input (menu))
++        pulseaudio_menu_set_jsh_mic_state (menu,
++          pulseaudio_button_get_jsh_mic_state (PULSEAUDIO_BUTTON (menu->button)));
++      else
++        {
++          gtk_widget_set_sensitive (menu->input_scale, TRUE);
++          scale_menu_item_set_muted (SCALE_MENU_ITEM (menu->input_scale),
++                                     pulseaudio_volume_get_muted_mic (volume));
++        }
+       g_signal_handlers_unblock_by_func (G_OBJECT (menu->input_scale),
+                                          pulseaudio_menu_mute_input_item_toggled,
+                                          menu);
+--- a/panel-plugin/pulseaudio-menu.h
++++ b/panel-plugin/pulseaudio-menu.h
+@@ -44,6 +44,8 @@
+                                                      PulseaudioMpris  *mpris,
+                                                      GtkWidget        *widget);
+
++void pulseaudio_menu_set_jsh_mic_state (PulseaudioMenu *menu, gint state);
++
+ G_END_DECLS
+
+ #endif /* !__PULSEAUDIO_MENU_H__ */
+--- a/panel-plugin/pulseaudio-volume.c
++++ b/panel-plugin/pulseaudio-volume.c
+@@ -75,6 +75,7 @@
+
+   gdouble               volume;
+   gboolean              muted;
++  gboolean              jsh_headphones;
+   gboolean              recording;
+   gboolean              recording_last_state;
+
+@@ -238,6 +239,38 @@
+
+
+
++/* Prefer the active port, then device metadata for USB and Bluetooth devices. */
++static gint
++jsh_output_kind (const gchar *value)
++{
++  gchar *lower;
++  gint kind = 0;
++
++  if (value == NULL)
++    return 0;
++  lower = g_ascii_strdown (value, -1);
++  if (strstr (lower, "headphone") || strstr (lower, "headset"))
++    kind = 1;
++  else if (strstr (lower, "speaker"))
++    kind = -1;
++  g_free (lower);
++  return kind;
++}
++
++static gboolean
++jsh_is_headphones (const gchar *port, const gchar *port_description,
++                   const gchar *form_factor, const gchar *icon_name)
++{
++  gint kind = jsh_output_kind (port);
++  if (!kind)
++    kind = jsh_output_kind (port_description);
++  if (!kind)
++    kind = jsh_output_kind (form_factor);
++  if (!kind)
++    kind = jsh_output_kind (icon_name);
++  return kind == 1;
++}
++
+ /* sink event callbacks */
+ static void
+ pulseaudio_volume_sink_info_cb (pa_context         *context,
+@@ -247,6 +280,7 @@
+ {
+   gboolean  muted;
+   gdouble   vol = 0.0;
++  gboolean  headphones;
+
+   PulseaudioVolume *volume = PULSEAUDIO_VOLUME (userdata);
+
+@@ -260,13 +294,24 @@
+       return;
+     }
+
+-  if (i == NULL)
++  if (i == NULL || g_strcmp0 (i->name, volume->default_sink_name) != 0)
+     return;
+
+   pulseaudio_debug ("sink info: %s, %s", i->name, i->description);
+
+   volume->sink_index = (guint)i->index;
+
++  headphones = jsh_is_headphones (i->active_port ? i->active_port->name : NULL,
++                                  i->active_port ? i->active_port->description : NULL,
++                                  i->proplist ? pa_proplist_gets (i->proplist, "device.form_factor") : NULL,
++                                  i->proplist ? pa_proplist_gets (i->proplist, "device.icon_name") : NULL);
++  if (volume->jsh_headphones != headphones)
++    {
++      volume->jsh_headphones = headphones;
++      if (volume->sink_connected)
++        g_signal_emit (G_OBJECT (volume), pulseaudio_volume_signals[VOLUME_CHANGED], 0, FALSE);
++    }
++
+   muted = !!(i->mute);
+   for (guint j = 0; j < i->volume.channels; j++)
+     vol = MAX (vol, pulseaudio_volume_v2d (volume, i->volume.values[j]));
+@@ -682,6 +727,15 @@
+ }
+
+
++
++gboolean
++pulseaudio_volume_get_jsh_headphones (PulseaudioVolume *volume)
++{
++  g_return_val_if_fail (IS_PULSEAUDIO_VOLUME (volume), FALSE);
++  return volume->jsh_headphones;
++}
++
++
+
+ gboolean
+ pulseaudio_volume_get_connected (PulseaudioVolume *volume)
+--- a/panel-plugin/pulseaudio-volume.h
++++ b/panel-plugin/pulseaudio-volume.h
+@@ -40,6 +40,7 @@
+ PulseaudioVolume       *pulseaudio_volume_new                     (PulseaudioPlugin *plugin,
+                                                                    PulseaudioConfig *config);
+
++gboolean                pulseaudio_volume_get_jsh_headphones      (PulseaudioVolume *volume);
+ gboolean                pulseaudio_volume_get_connected           (PulseaudioVolume *volume);
+
+ gdouble                 pulseaudio_volume_get_volume              (PulseaudioVolume *volume);
+--- a/panel-plugin/scalemenuitem.c
++++ b/panel-plugin/scalemenuitem.c
+@@ -94,6 +94,30 @@
+
+
+
++/* Style only the audio menu's switches, keeping their existing GTK behavior. */
++static void
++jsh_style_audio_switch (GtkWidget *widget)
++{
++  static GtkCssProvider *provider = NULL;
++  if (provider == NULL)
++    {
++      provider = gtk_css_provider_new ();
++      gtk_css_provider_load_from_data (provider,
++        "switch#jsh-audio-switch {"
++        " min-width: 38px; min-height: 20px; background-image: none;"
++        " background-color: #606978; border: 1px solid #838c9a; border-radius: 12px; }"
++        "switch#jsh-audio-switch:checked { background-image: none;"
++        " background-color: #5294e2; border-color: #79aeea; }"
++        "switch#jsh-audio-switch slider { min-width: 16px; min-height: 16px;"
++        " margin: 1px; border: none; border-radius: 9px;"
++        " background-image: none; background-color: #ffffff; box-shadow: none; }"
++        "switch#jsh-audio-switch > image { color: transparent; -gtk-icon-source: none; }", -1, NULL);
++      gtk_style_context_add_provider_for_screen (gdk_screen_get_default (),
++        GTK_STYLE_PROVIDER (provider), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION + 1);
++    }
++  gtk_widget_set_name (widget, "jsh-audio-switch");
++}
++
+ /* Public API */
+ GtkWidget*
+ scale_menu_item_new_with_range (gdouble min,
+@@ -131,6 +155,7 @@
+
+   /* Configure the mute toggle */
+   priv->mute_toggle = gtk_switch_new ();
++  jsh_style_audio_switch (priv->mute_toggle);
+
+   /* Pack the scale widget */
+   priv->hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+@@ -213,6 +238,11 @@
+
+   gtk_switch_set_active (GTK_SWITCH (priv->mute_toggle), !muted);
+   gtk_switch_set_state (GTK_SWITCH (priv->mute_toggle), !muted);
++  gtk_widget_set_tooltip_text (priv->mute_toggle,
++                               muted ? "Muted — click to turn sound on"
++                                     : "Sound on — click to mute");
++  atk_object_set_name (gtk_widget_get_accessible (priv->mute_toggle),
++                       muted ? "Muted" : "Sound on");
+
+   scale_menu_item_update_icon (item);
+ }

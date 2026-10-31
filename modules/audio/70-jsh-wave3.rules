@@ -1,0 +1,2 @@
+# Allow the active desktop user to query Wave:3 hardware mute state.
+SUBSYSTEM=="usb", ATTR{idVendor}=="0fd9", ATTR{idProduct}=="0070", TAG+="uaccess"

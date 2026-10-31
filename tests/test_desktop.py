@@ -1,9 +1,11 @@
 """Desktop extension configuration preserves unrelated GNOME extensions."""
 
 import ast
+import hashlib
 import importlib.util
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -15,9 +17,46 @@ spec = importlib.util.spec_from_file_location(
 )
 extensions = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(extensions)
+spec = importlib.util.spec_from_file_location("desktop_plugin", ROOT / "modules/desktop/plugin.py")
+plugin = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(plugin)
 
 
 class DesktopTests(unittest.TestCase):
+    def test_audio_plugin_dry_run_and_current_install(self):
+        with tempfile.TemporaryDirectory(dir=ROOT / "tmp") as temporary:
+            root = Path(temporary)
+            stock = root / "stock.desktop"
+            stock.write_text("X-XFCE-Module=pulseaudio-plugin\n")
+            descriptor = root / "jsh.desktop"
+            library = root / "lib/xfce4/panel/plugins/libjsh-pulseaudio.so"
+            ctx = mock.Mock(dry_run=True, user_only=False)
+            ctx.facts.host = "colossus"
+            ctx.facts.platform = "debian"
+            with (
+                mock.patch.object(plugin, "STOCK_DESKTOP", stock),
+                mock.patch.object(plugin, "DESKTOP", descriptor),
+                mock.patch.object(plugin.shutil, "which", return_value="/usr/bin/pkg-config"),
+                mock.patch.object(plugin.subprocess, "run") as run,
+                mock.patch.object(plugin.web, "download") as download,
+            ):
+                run.return_value.stdout = str(root / "lib")
+                plugin.configure(ctx)
+                ctx.added.assert_called_once()
+                download.assert_not_called()
+                library.parent.mkdir(parents=True)
+                library.write_bytes(b"plugin")
+                fingerprint = hashlib.sha256(
+                    (plugin.HERE / "pulseaudio.patch").read_bytes() + plugin.SHA256.encode()
+                ).hexdigest()
+                descriptor.write_text(
+                    "X-XFCE-Module=jsh-pulseaudio\n" f"\nX-Jsh-Fingerprint={fingerprint}\n"
+                )
+                ctx.reset_mock()
+                plugin.configure(ctx)
+                ctx.current.assert_called_once()
+                download.assert_not_called()
+
     def test_unchanged_xfconf_setting_succeeds_under_errexit(self):
         source = (ROOT / "modules/desktop/desktop.sh").read_text()
         function = source.split("xfconf_set() {", 1)[1].split("\nwrite_if_changed()", 1)[0]
