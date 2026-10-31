@@ -88,7 +88,6 @@ if [[ -n ${COPILOT_AGENT:-}${CLAUDECODE:-}${GEMINI_CLI:-} ]]; then
   export PAGER=cat GIT_PAGER=cat BAT_PAGING=never
   setopt RM_STAR_SILENT
 fi
-setopt PROMPT_CR                            # Required for clean multiline prompt redraws
 
 # ============================================================================
 # 2. PLUGIN SYSTEM
