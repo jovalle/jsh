@@ -139,7 +139,7 @@ files, policies, downloads, and desktop settings. Bash scripts source
 | `git`                                                  | `.gitconfig`                                                                 |
 | `skills`                                               | Agent skill repos in `local/vendor/skills`, linked into `~/.agents/skills`   |
 | `fonts`                                                | JetBrains Mono Nerd Font                                                     |
-| `apps`                                                 | Apps without managed settings; extra casks on the `archon` host              |
+| `apps`                                                 | Desktop apps, foobar2000 DSD decoder, and extra casks on `archon`            |
 | `helium`, `waterfox`, `vscode`, `sublime`, `ghostty`   | The app plus its managed settings                                            |
 | `macos`                                                | `defaults` preferences, restarting Dock, Finder, or SystemUIServer           |
 | `linux`                                                | Kernel limits, memory, earlyoom, zram, coredump, sleep, timezone, sudo       |
