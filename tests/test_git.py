@@ -707,5 +707,144 @@ class StatusTests(ProfileTestCase):
         self.assertEqual(self.tty_status("--short")[1:], ["?? lib/"])
 
 
+class RepositorySummaryTests(GitTestCase):
+    def setUp(self):
+        super().setUp()
+        self.tmp = self.tmp.resolve()
+        self.top = self.tmp / "work"
+        self.top.mkdir()
+        self.env["GIT_BASE"] = str(self.tmp / "projects")
+        self.env.update(LC_ALL="en_US.UTF-8", JSH_PROMPT_MODE="unicode", COLUMNS="200")
+
+    def tty(self, *args, cwd=None):
+        leader, follower = pty.openpty()
+        try:
+            subprocess.run(
+                [str(SHIM), "status", *args],
+                cwd=cwd or self.top,
+                env=self.env,
+                stdout=follower,
+                stderr=follower,
+                check=True,
+            )
+            output = b""
+            while select.select([leader], [], [], 0)[0]:
+                output += os.read(leader, 4096)
+        finally:
+            os.close(follower)
+            os.close(leader)
+        return [line.rstrip() for line in output.decode().splitlines()]
+
+    def test_rows_use_prompt_symbols_in_aligned_columns(self):
+        self.repo("work/tidy")
+        dirty = self.repo("work/dirty")
+        (dirty / "a.txt").write_text("two\n")
+        (dirty / "b.txt").write_text("new\n")
+        (dirty / "c.txt").write_text("staged\n")
+        self.run_git("add", "c.txt", cwd=dirty)
+        stashed = self.repo("work/stashed")
+        (stashed / "a.txt").write_text("x\n")
+        self.run_git("stash", "--quiet", cwd=stashed)
+        self.assertEqual(
+            self.tty(),
+            [
+                f"{self.top} (3 repos)",
+                "  dirty    main      +1  !1  ?1",
+                "  stashed  main  *1",
+                "1 clean: tidy",
+            ],
+        )
+
+    def test_ahead_behind_and_ascii_symbols(self):
+        path = self.repo("work/one")
+        bare = self.tmp / "one.git"
+        self.run_git("clone", "--quiet", "--bare", str(path), str(bare), cwd=self.tmp)
+        self.run_git("remote", "add", "origin", str(bare), cwd=path)
+        self.run_git("fetch", "--quiet", "origin", cwd=path)
+        self.run_git("branch", "--quiet", "-u", "origin/main", cwd=path)
+        self.run_git("commit", "--quiet", "--allow-empty", "-m", "x", cwd=path)
+        self.run_git("push", "--quiet", "origin", "HEAD:main", cwd=path)
+        self.run_git("reset", "--quiet", "--hard", "HEAD~1", cwd=path)
+        self.run_git("commit", "--quiet", "--allow-empty", "-m", "y", cwd=path)
+        self.assertEqual(self.tty()[1], "  one  main  ⇣1⇡1")
+        self.env["LC_ALL"] = "C"
+        self.assertEqual(self.tty()[1], "  one  main  v1^1")
+
+    def test_conflicts_and_operation(self):
+        path = self.repo("work/one")
+        self.run_git("switch", "--quiet", "-c", "side", cwd=path)
+        self.commit(path, "side", ("a.txt", "side\n"))
+        self.run_git("switch", "--quiet", "main", cwd=path)
+        self.commit(path, "main", ("a.txt", "main\n"))
+        self.run_git("merge", "--quiet", "side", cwd=path, check=False)
+        self.assertEqual(self.tty()[1], "  one  main  MERGE  ~1")
+
+    def test_long_branches_continue_below_their_column(self):
+        long = self.repo("work/a-rather-long-repository-name")
+        self.run_git("switch", "--quiet", "-c", "feature/very-long-branch-name", cwd=long)
+        (long / "new.txt").write_text("x\n")
+        (self.repo("work/short") / "new.txt").write_text("x\n")
+        self.assertEqual(
+            self.tty()[1:4],
+            [
+                "  a-rather-long-repository-name  feature/very-long-branc…  ?1",
+                " " * 32 + "…feature/very-long-branch-name",
+                "  " + "short".ljust(29) + "  " + "main".ljust(24) + "  ?1",
+            ],
+        )
+        self.env["COLUMNS"] = "40"
+        lines = self.tty()[1:4]
+        self.assertTrue(all(len(line) <= 40 for line in lines))
+        self.assertTrue(lines[0].endswith("  fea…  ?1"))
+        self.assertEqual(lines[1], " " * 10 + "…feature/very-long-branch-name")
+        self.assertTrue(lines[2].endswith("main  ?1"))
+        self.env["COLUMNS"] = "16"
+        self.assertEqual(
+            self.tty()[1:5],
+            ["  …tory-name  ?1", "    feature/ver…", "  short       ?1", "    main"],
+        )
+
+    def test_narrow_terminals_collapse_status_cells(self):
+        path = self.repo("work/a-rather-long-repository-name")
+        (path / "a.txt").write_text("changed\n")
+        self.run_git("stash", "--quiet", cwd=path)
+        (path / "a.txt").write_text("again\n")
+        (path / "new.txt").write_text("x\n")
+        self.env["COLUMNS"] = "20"
+        self.assertEqual(self.tty()[1:3], ["  …-name  *1  !1  ?1", "    main"])
+        self.env["COLUMNS"] = "18"
+        self.assertEqual(self.tty()[1:3], ["  …-name  *1 !1 ?1", "    main"])
+
+    def test_one_level_unless_recursive(self):
+        self.repo("work/group/deep")
+        (self.tmp / "work/group/deep/new.txt").write_text("x\n")
+        self.repo("projects/fallback")
+        self.assertEqual(
+            self.tty()[0], f"No repositories in {self.top}; showing {self.tmp / 'projects'}"
+        )
+        lines = self.tty("-R")
+        self.assertEqual(lines[0], f"{self.top} (1 repo)")
+        self.assertRegex(lines[1], r"^  group/deep +main")
+
+    def test_does_not_descend_into_repositories(self):
+        outer = self.repo("work/outer")
+        self.run_git("init", "--quiet", str(outer / "inner"), cwd=self.tmp)
+        self.assertEqual(self.tty("-R")[0], f"{self.top} (1 repo)")
+
+    def test_directory_argument_and_empty_fallback(self):
+        self.repo("other/x")
+        self.assertEqual(self.tty(str(self.tmp / "other"))[0], f"{self.tmp / 'other'} (1 repo)")
+        self.assertEqual(self.tty(), [f"No repositories in {self.top}"])
+
+    def test_inside_a_repository_is_unchanged(self):
+        path = self.repo("work/one")
+        self.assertIn("On branch main", self.tty(cwd=path))
+
+    def test_piped_output_is_plain_git(self):
+        result = self.run_git("status", cwd=self.top, check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("not a git repository", result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

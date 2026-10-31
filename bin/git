@@ -8,6 +8,7 @@
 #   git commit -t TIME    Commit with a chosen date (see `git commit -t --help`)
 #   git status            On a terminal, adds identity and branch notes and condenses file lists
 #   git status --raw      Plain git status, untouched
+#   git status [-R] [DIR] Outside a repository, summarize the repositories below (or ~/Projects)
 #   git handoff           Carry unpushed commits to another workstation through a Syncthing folder
 
 set -euo pipefail
@@ -830,6 +831,11 @@ profile) profile "$@" ;;
 handoff) handoff "$@" ;;
 commit) commit_at "$@" ;;
 status)
+	if ! run_git rev-parse --git-dir >/dev/null 2>&1; then
+		color=false
+		[[ -n ${NO_COLOR:-} ]] || color=$(run_git config --get-colorbool color.status true)
+		JSH_GIT_BIN=${git_bin} exec python3 "${JSH_ROOT}/lib/jsh/repos.py" "${color}" "$@"
+	fi
 	author_email=''
 	status_identity
 	status_history
