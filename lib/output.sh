@@ -55,30 +55,19 @@ jsh::duration() {
   fi
 }
 
-# Usage: _jsh_menu LABEL ITEM... Prints a numbered menu on stderr and reads the reply from the terminal.
+# Usage: _jsh_menu MODE LABEL ITEM... Prints selected items on stdout.
 _jsh_menu() {
-  local label=$1 item index=0
-  shift
-  for item in "$@"; do
-    index=$((index + 1))
-    printf '%3d) %s\n' "${index}" "${item}" >&2
-  done
-  printf '%s %s: ' "$(jsh::paint 2 '1;36' '?')" "${label}" >&2
-  IFS= read -r _jsh_menu_reply </dev/tty
-}
-
-# Usage: _jsh_pick N ITEM... Prints the Nth item.
-_jsh_pick() {
-  local wanted=$1 item
-  shift
-  [[ ${wanted} =~ ^[0-9]+$ ]] && ((wanted >= 1 && wanted <= $#)) || return 1
-  for item in "$@"; do
-    wanted=$((wanted - 1))
-    if ((wanted == 0)); then
-      printf '%s\n' "${item}"
-      return 0
-    fi
-  done
+  PYTHONPATH="${JSH_ROOT:-${JSH}}/lib${PYTHONPATH:+:${PYTHONPATH}}" python3 -c '
+import sys
+from jsh import menu
+output = sys.stdout
+sys.stdout = sys.stderr
+mode, label, *items = sys.argv[1:]
+chosen = menu.choose(label, [(item, item, "") for item in items], multiple=mode == "many")
+if chosen is None:
+    sys.exit(1)
+print("\n".join(chosen) if mode == "many" else chosen, file=output)
+' "$@"
 }
 
 # Usage: jsh::choose LABEL ITEM... Prints the chosen item; fzf when installed, else a numbered menu.
@@ -90,23 +79,19 @@ jsh::choose() {
     printf '%s\n' "$@" | fzf --height=40% --reverse --prompt="${label}> "
     return
   fi
-  _jsh_menu "${label}" "$@" || return 1
-  _jsh_pick "${_jsh_menu_reply}" "$@"
+  _jsh_menu one "${label}" "$@"
 }
 
 # Usage: jsh::choose_many LABEL ITEM... Prints the chosen items, one per line.
 jsh::choose_many() {
-  local label=$1 number
+  local label=$1
   shift
   (($#)) || return 1
   if command -v fzf >/dev/null 2>&1; then
     printf '%s\n' "$@" | fzf --multi --height=40% --reverse --prompt="${label} (Tab marks)> "
     return
   fi
-  _jsh_menu "${label} (numbers separated by spaces)" "$@" || return 1
-  while IFS= read -r number; do
-    [[ -z ${number} ]] || _jsh_pick "${number}" "$@" || return 1
-  done < <(printf '%s\n' "${_jsh_menu_reply}" | tr -s ' ,' '\n\n')
+  _jsh_menu many "${label}" "$@"
 }
 
 jsh_banner() {
