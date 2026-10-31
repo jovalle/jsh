@@ -7,6 +7,7 @@
         "casks": [
           "android-platform-tools",
           "citrix-workspace",
+          "foobar2000",
           "signal",
           "spotify",
           "tailscale-app",
@@ -22,5 +23,6 @@
       "when": { "platform": "darwin", "host": "archon" }
     },
     { "flatpak": ["com.spotify.Client", "com.todoist.Todoist"] }
-  ]
+  ],
+  "configure": [{ "script": "foobar.py", "when": { "platform": "darwin" } }]
 }
