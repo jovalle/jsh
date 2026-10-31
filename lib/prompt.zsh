@@ -494,6 +494,8 @@ _jsh_prompt_git_async_callback() {
 	[[ ${directory} == ${PWD} ]] || return
 	_jsh_prompt_git_parse "${data}"
 	_JSH_PROMPT_GIT_VALID=1 _JSH_PROMPT_GIT_DIRTY=0
+	_jsh_prompt_render
+	zle reset-prompt
 }
 
 _jsh_prompt_git_async_start() {
