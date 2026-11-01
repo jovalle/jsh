@@ -175,6 +175,22 @@ if [[ -r ${JSH}/modules/shell/completions/_jsh ]]; then
   autoload -Uz _jsh && compdef _jsh jsh
 fi
 
+_jsh_git() {
+  local result=1
+  if (( CURRENT == 2 )); then
+    local -a commands=(
+      'create:create a project' 'get:clone a project' 'commits:browse history'
+      'amend:move commit timestamps' 'profile:select a profile' 'save:save changes'
+      'load:load changes' 'refresh:rebase onto the default branch' 'handoff:transfer commits'
+    )
+    _describe -t commands 'jsh Git command' commands && result=0
+  fi
+  _git "$@" && result=0
+  return ${result}
+}
+autoload -Uz _git
+compdef _jsh_git git
+
 # shellcheck disable=SC1090  # Vendored repository
 [[ -r "${JSH_VENDOR}/fzf-tab/fzf-tab.plugin.zsh" && -n ${commands[fzf]:-} ]] && \
   source "${JSH_VENDOR}/fzf-tab/fzf-tab.plugin.zsh"
@@ -258,6 +274,13 @@ _j_ui_message() {
 
 # shellcheck disable=SC1090  # Repository-owned Zsh module
 source "${JSH}/lib/j.zsh"
+
+git() {
+  command git "$@" || return
+  if [[ ${1:-} == create && $# -ge 2 && ${2} != -h && ${2} != --help ]]; then
+    cd -- "${GIT_BASE:-${HOME}/Projects}/${2}"
+  fi
+}
 
 # ============================================================================
 # 6. SHELL ALIASES

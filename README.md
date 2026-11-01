@@ -173,6 +173,13 @@ Notes:
   `local/helium/unpacked.json` lists extension directories that Helium keeps loaded unpacked,
   with developer mode on.
   Git identities live in `conf/git.json` (see [conf/git.example.json](conf/git.example.json)).
+  Use `git create NAME [PROFILE]` to create a repository under `$GIT_BASE` (default
+  `~/Projects`), selecting a profile when omitted. Zsh changes into the project, or
+  offers to enter it if it already exists. `git get OWNER/REPO` tries GitHub, then GitLab;
+  a full URL selects the host directly. `git commits` browses commit history, with Enter
+  toggling details and Ctrl-D/Ctrl-U scrolling them. `git amend -t TIME COMMIT` moves a
+  commit and its successors in time; add `-x` to move only that commit. This rewrites
+  the current branch's commit IDs; merged or signed commits are refused.
 
 ## Commands
 
@@ -194,18 +201,18 @@ hook.
 
 These commands are on `PATH` through `bin/`:
 
-| Command                    | Purpose                                                        |
-| -------------------------- | -------------------------------------------------------------- |
-| [cafe](bin/cafe)           | Keep the computer awake until interrupted                      |
-| [colours](bin/colours)     | Print the terminal's 256-color palette                         |
-| [git](bin/git)             | Git plus `save`, `load`, `refresh`, `profile`, and `commit -t` |
-| [jsh](bin/jsh)             | Open the jsh Zsh shell, or run `jsh COMMAND` from anywhere     |
-| [jssh](bin/jssh)           | Open an ephemeral jsh Zsh session on a Linux SSH host          |
-| [kubecolor](bin/kubecolor) | Colorize interactive `kubectl` output                          |
-| [kubectx](bin/kubectx)     | Switch between kubectl contexts                                |
-| [kubens](bin/kubens)       | Switch between Kubernetes namespaces                           |
-| [nukem](bin/nukem)         | Remove finalizers from a namespace stuck terminating           |
-| [proxy](bin/proxy)         | Run a command with proxy environment variables set             |
+| Command                    | Purpose                                                                                    |
+| -------------------------- | ------------------------------------------------------------------------------------------ |
+| [cafe](bin/cafe)           | Keep the computer awake until interrupted                                                  |
+| [colours](bin/colours)     | Print the terminal's 256-color palette                                                     |
+| [git](bin/git)             | Git plus `create`, `get`, `commits`, `save`, `load`, `refresh`, `profile`, and `commit -t` |
+| [jsh](bin/jsh)             | Open the jsh Zsh shell, or run `jsh COMMAND` from anywhere                                 |
+| [jssh](bin/jssh)           | Open an ephemeral jsh Zsh session on a Linux SSH host                                      |
+| [kubecolor](bin/kubecolor) | Colorize interactive `kubectl` output                                                      |
+| [kubectx](bin/kubectx)     | Switch between kubectl contexts                                                            |
+| [kubens](bin/kubens)       | Switch between Kubernetes namespaces                                                       |
+| [nukem](bin/nukem)         | Remove finalizers from a namespace stuck terminating                                       |
+| [proxy](bin/proxy)         | Run a command with proxy environment variables set                                         |
 
 ## Development
 

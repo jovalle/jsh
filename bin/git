@@ -4,6 +4,10 @@
 #   git save              Back up staged, unstaged, and untracked changes to a secret gist
 #   git load [--force]    Apply the changes saved for this repository's origin
 #   git refresh           Fetch origin and rebase the current branch onto its default branch
+#   git create NAME [PROFILE]  Create a project under $GIT_BASE with an optional profile
+#   git get REPOSITORY   Clone a GitHub or GitLab repository into the projects directory
+#   git commits          Browse formatted commit history
+#   git amend -t TIME COMMIT  Move a commit and its successors in time
 #   git profile [NAME]    Use a conf/git.json profile: identity, SSH key, SSH GitHub remotes
 #   git commit -t TIME    Commit with a chosen date (see `git commit -t --help`)
 #   git status            On a terminal, adds identity and branch notes and condenses file lists
@@ -27,8 +31,15 @@ if [[ -z ${git_bin} ]]; then
 	exit 127
 fi
 
+if [[ ${1:-} == help && $# -gt 1 ]]; then
+	case $2 in
+	create | get | commits | amend | save | load | refresh | profile | handoff) set -- "$2" --help ;;
+	*) exec "${git_bin}" "$@" ;;
+	esac
+fi
+
 case ${1:-} in
-save | load | refresh | profile | handoff) ;;
+save | load | refresh | create | get | commits | amend | profile | handoff | --help | -h | help) ;;
 commit)
 	case " $* " in
 	*' -t'* | *' --timestamp'*) ;;
@@ -52,8 +63,8 @@ status)
 esac
 
 JSH_ROOT=$(CDPATH='' cd -P "${BASH_SOURCE[0]%/*}/.." && pwd -P)
-# shellcheck source=../lib/output.sh
-. "${JSH_ROOT}/lib/output.sh"
+# shellcheck source=../lib/core.sh
+. "${JSH_ROOT}/lib/core.sh"
 jsh::color_init
 
 die() {
@@ -195,7 +206,7 @@ resolve_timestamp() {
 		parsed=$(parse_offset "${spec#now}") || return 1
 		;;
 	[+-]*)
-		base=${last}
+		base=${2:-${last}}
 		parsed=$(parse_offset "${spec}") || return 1
 		;;
 	*)
@@ -241,6 +252,34 @@ resolve_timestamp() {
 	else
 		fill_epoch "${start}" "${precision}"
 	fi
+}
+
+amend() {
+	local spec='' ref='' single=0 commit base epoch
+	while (($#)); do
+		case $1 in
+		-h | --help)
+			printf 'usage: git amend [-x] -t TIME COMMIT\n\nMove COMMIT and later commits in time; -x moves only COMMIT.\n'
+			printf 'TIME uses the same formats as git commit -t. This rewrites the current branch.\n'
+			return
+			;;
+		-x) single=1 ;;
+		-t | --timestamp)
+			(($# > 1)) || die 'usage: git amend [-x] -t TIME COMMIT'
+			spec=$2
+			shift
+			;;
+		--timestamp=*) spec=${1#*=} ;;
+		-*) die "unknown option: $1" ;;
+		*) [[ -z ${ref} ]] || die 'usage: git amend [-x] -t TIME COMMIT'; ref=$1 ;;
+		esac
+		shift
+	done
+	[[ -n ${spec} && -n ${ref} ]] || die 'usage: git amend [-x] -t TIME COMMIT'
+	commit=$(run_git rev-parse --verify --quiet --end-of-options "${ref}^{commit}") || die 'unknown commit'
+	base=$(run_git show -s --format=%ct "${commit}") || return 1
+	epoch=$(resolve_timestamp "${spec}" "${base}") || die "invalid timestamp: ${spec}"
+	python3 "${JSH_ROOT}/lib/jsh/amend.py" "${git_bin}" "${commit}" "${epoch}" "${single}"
 }
 
 commit_help() {
@@ -647,6 +686,118 @@ handoff() {
 	jsh::log_success "handoff ${theirs} ${head:0:7} → ${sha:0:7} fetched"
 }
 
+# ---- create and get ----
+
+create() {
+	if [[ ${1:-} == --help || ${1:-} == -h ]]; then
+		printf 'usage: git create NAME [PROFILE]\n\nCreate a repository under $GIT_BASE (default ~/Projects).\n'
+		return
+	fi
+	(($# >= 1 && $# <= 2)) && [[ -n $1 && $1 != */* && $1 != . && $1 != .. && $1 != -* ]] &&
+		[[ $# == 1 || ( -n $2 && $2 != -* ) ]] || die 'usage: git create NAME [PROFILE]'
+	local profiles line found='' target=${GIT_BASE:-${HOME}/Projects}/$1 wanted=${2:-}
+	local -a names=()
+	if [[ -e ${target} || -L ${target} ]]; then
+		jsh::log_warn "project already exists: ${target}"
+		[[ -d ${target} && -t 0 && -t 1 ]] || return 1
+		jsh::confirm 'Change into it?'
+		return
+	fi
+	profiles=$(read_profiles) || return 1
+	while IFS= read -r line; do
+		[[ -n ${line} ]] || continue
+		names+=("${line%%$'\x1f'*}")
+		[[ ${line%%$'\x1f'*} != "${wanted}" ]] || found=1
+	done <<<"${profiles}"
+	((${#names[@]})) || die 'no profiles in conf/git.json'
+	if [[ -z ${wanted} ]]; then
+		[[ -t 0 && -t 1 ]] || die 'specify a profile when not using a terminal'
+		wanted=$(jsh::choose profile "${names[@]}") || return 1
+	else
+		[[ -n ${found} ]] || die "unknown profile: ${wanted}"
+	fi
+	mkdir -- "${target}" || die "cannot create directory: ${target}"
+	(
+		cd -- "${target}"
+		run_git init --quiet
+		profile "${wanted}"
+	)
+}
+
+get() {
+	if [[ ${1:-} == -h || ${1:-} == --help ]]; then
+		printf 'usage: git get OWNER/REPO | URL\n\nClone a GitHub or GitLab repository into $GIT_BASE.\n'
+		return
+	fi
+	(($# == 1)) || die 'usage: git get OWNER/REPO | URL'
+	local input=$1 path url host target found=''
+	case ${input} in
+	https://github.com/* | https://gitlab.com/*) url=${input}; path=${input#https://*/} ;;
+	git@github.com:* | git@gitlab.com:*) url=${input}; path=${input#*:} ;;
+	*) path=${input}; url='' ;;
+	esac
+	[[ ${path} =~ ^[a-zA-Z0-9_.-]+(/[a-zA-Z0-9_.-]+)+$ && /${path}/ != */../* && /${path}/ != */./* ]] ||
+		die 'expected a GitHub or GitLab repository as OWNER/REPO or URL'
+	target=${path##*/}
+	target=${target%.git}
+	[[ -n ${target} && ${target} != . && ${target} != .. ]] || die 'invalid repository name'
+	target=${GIT_BASE:-${HOME}/Projects}/${target}
+	[[ ! -e ${target} && ! -L ${target} ]] || die "project already exists: ${target}"
+	if [[ -z ${url} ]]; then
+		for host in github.com gitlab.com; do
+			url=https://${host}/${path%.git}.git
+			if GIT_TERMINAL_PROMPT=0 run_git ls-remote "${url}" >/dev/null 2>&1; then
+				found=1
+				break
+			fi
+		done
+		[[ -n ${found} ]] || die 'repository not found or inaccessible on GitHub and GitLab'
+	fi
+	GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh} -o BatchMode=yes" \
+		run_git clone "${url}" "${target}"
+}
+
+# ---- commits ----
+
+commits() {
+	if [[ ${1:-} == -h || ${1:-} == --help ]]; then
+		printf 'usage: git commits\n\nEnter toggles details; Ctrl-D and Ctrl-U scroll them.\n'
+		return
+	fi
+	if [[ ${1:-} == --preview ]]; then
+		(($# == 2)) && [[ $2 =~ ^[[:xdigit:]]{4,64}$ ]] || return 1
+		local author committer author_date committer_date info format
+		info=$(run_git show -s --format='%an <%ae>%x1f%cn <%ce>%x1f%aI%x1f%cI' "$2") || return 1
+		IFS=$'\x1f' read -r author committer author_date committer_date <<<"${info}"
+		format='%C(yellow)commit %H%Creset%nAuthor: %an <%ae>%nDate:   %aI'
+		[[ ${author} == "${committer}" ]] || format+='%nCommitter: %cn <%ce>'
+		[[ ${author_date} == "${committer_date}" ]] || format+='%nCommitDate: %cI'
+		format+='%n%n%B'
+		run_git show --color="${JSH_COMMIT_COLOR:-never}" --format="${format}" --stat "$2" --
+		return
+	fi
+	if [[ ${1:-} == --rows ]]; then
+		local color=never
+		[[ -n ${NO_COLOR:-} ]] || color=always
+		run_git -c color.ui="${color}" log --color="${color}" --date=format-local:'%Y-%m-%d %H:%M' \
+			--format='%C(yellow)%h%Creset %C(dim)%ad%Creset %C(cyan)%<(18,trunc)%an%Creset %s'
+		return
+	fi
+	(($# == 0)) || die 'usage: git commits'
+	if [[ ! -t 0 || ! -t 1 ]]; then
+		NO_COLOR=1 commits --rows
+		return
+	fi
+	command -v fzf >/dev/null 2>&1 || die 'git commits needs fzf'
+	export JSH_GIT_VIEW=${JSH_ROOT}/bin/git JSH_COMMIT_COLOR=always
+	[[ -z ${NO_COLOR:-} ]] || JSH_COMMIT_COLOR=never
+	commits --rows | fzf --ansi --no-sort --no-multi --reverse \
+		--header='Enter: details  •  Ctrl-D/U: scroll details  •  Esc: quit' \
+		--preview-window='down,50%,hidden,wrap' \
+		--preview '"$JSH_GIT_VIEW" commits --preview {1}' \
+		--bind 'enter:toggle-preview,ctrl-d:preview-half-page-down,ctrl-u:preview-half-page-up' >/dev/null
+}
+
 # ---- profile ----
 
 # Prints NAME, display name, email, GitHub user, and SSH key per profile, split by \x1f
@@ -824,9 +975,18 @@ condense_status() {
 command=$1
 shift
 case ${command} in
+--help | -h | help)
+	run_git --help "$@"
+	printf '\njsh Git commands:\n'
+	sed -n '/^#   git /s/^#   /  /p' "${BASH_SOURCE[0]}"
+	;;
 save) save "$@" ;;
 load) load "$@" ;;
 refresh) refresh "$@" ;;
+create) create "$@" ;;
+get) get "$@" ;;
+commits) commits "$@" ;;
+amend) amend "$@" ;;
 profile) profile "$@" ;;
 handoff) handoff "$@" ;;
 commit) commit_at "$@" ;;

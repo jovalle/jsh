@@ -74,7 +74,16 @@ jsh::confirm() {
     return 1
   fi
   printf '%s %s %s ' "$(jsh::paint 1 '1;36' '?')" "$1" "$(jsh::paint 1 2 '(y/N)')"
-  IFS= read -r -s -n 1 answer || return 1
+  answer=$(python3 -c '
+import os, sys, termios, tty
+fd = sys.stdin.fileno()
+old = termios.tcgetattr(fd)
+try:
+    tty.setcbreak(fd, termios.TCSANOW)
+    print(os.read(fd, 1).decode("latin-1"), end="")
+finally:
+    termios.tcsetattr(fd, termios.TCSADRAIN, old)
+') || return 1
   if [[ ${answer} == [yY] ]]; then
     printf 'y\n'
     return 0

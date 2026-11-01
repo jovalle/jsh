@@ -8,6 +8,7 @@ import select
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -108,6 +109,21 @@ class GitTestCase(unittest.TestCase):
 
 
 class PassthroughTests(GitTestCase):
+    def test_help_lists_custom_commands(self):
+        result = self.run_git("--help", cwd=self.tmp)
+        for command in (
+            "create",
+            "get",
+            "commits",
+            "amend",
+            "profile",
+            "save",
+            "load",
+            "refresh",
+            "handoff",
+        ):
+            self.assertIn(command, result.stdout)
+
     def test_other_commands_reach_the_real_git(self):
         expected = subprocess.run(
             [real_git(), "--version"], capture_output=True, text=True, check=True
@@ -496,6 +512,70 @@ class ProfileTestCase(GitTestCase):
 
 
 class ProfileTests(ProfileTestCase):
+    def test_existing_project_accepts_y_without_enter(self):
+        self.env["GIT_BASE"] = str(self.tmp)
+        master, slave = pty.openpty()
+        self.addCleanup(os.close, master)
+        self.addCleanup(os.close, slave)
+        process = subprocess.Popen(  # pylint: disable=consider-using-with
+            [str(SHIM), "create", self.path.name],
+            cwd=self.tmp,
+            env=self.env,
+            stdin=slave,
+            stdout=slave,
+            stderr=slave,
+        )
+        self.addCleanup(lambda: process.kill() if process.poll() is None else None)
+        output = b""
+        while b"Change into it?" not in output:
+            self.assertTrue(select.select([master], [], [], 5)[0])
+            output += os.read(master, 4096)
+        os.write(master, b"y")
+        deadline = time.monotonic() + 5
+        while process.poll() is None and time.monotonic() < deadline:
+            if select.select([master], [], [], 0.1)[0]:
+                os.read(master, 4096)
+        self.assertEqual(process.wait(timeout=1), 0)
+
+    def test_create_initializes_a_project_with_the_named_profile(self):
+        projects = self.tmp / "projects"
+        projects.mkdir()
+        self.env["GIT_BASE"] = str(projects)
+        path = projects / "new project"
+        self.run_git("create", "new project", "personal", cwd=self.path)
+        self.assertTrue((path / ".git").is_dir())
+        self.assertEqual(self.out("config", "user.email", cwd=path), "jay@example.net")
+        self.assertIn("id_personal", self.out("config", "core.sshCommand", cwd=path))
+        self.assertEqual(self.out("remote", cwd=path), "")
+
+    def test_create_rejects_unknown_profile_before_creating_directory(self):
+        self.env["GIT_BASE"] = str(self.tmp)
+        path = self.tmp / "new"
+        result = self.run_git("create", "new", "missing", cwd=self.tmp, check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(path.exists())
+
+    def test_create_refuses_existing_directory(self):
+        self.env["GIT_BASE"] = str(self.tmp)
+        result = self.run_git("create", self.path.name, "personal", cwd=self.tmp, check=False)
+        self.assertNotEqual(result.returncode, 0)
+        result = self.run_git(
+            "config", "--local", "--get", "user.email", cwd=self.path, check=False
+        )
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_create_without_profile_uses_projects_root(self):
+        self.env["GIT_BASE"] = str(self.tmp)
+        result = self.run_git("create", "new", cwd=self.path, check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.tmp / "new").exists())
+
+    def test_create_rejects_paths_outside_projects_root(self):
+        self.env["GIT_BASE"] = str(self.tmp / "home")
+        result = self.run_git("create", "../outside", cwd=self.tmp, check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.tmp / "outside").exists())
+
     def test_profile_sets_identity_key_and_ssh_github_remotes(self):
         self.run_git("remote", "add", "origin", "https://github.com/jay/repo.git", cwd=self.path)
         self.run_git("remote", "add", "upstream", "https://github.com/acme/repo", cwd=self.path)
