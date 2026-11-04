@@ -1,106 +1,69 @@
 # AGENTS.md
 
-jsh sets up a workstation (macOS, Debian-family Linux, RHEL-family Linux) from modules.
-This checkout is live: it lives at `~/.jsh`, module `home/` files are symlinked into `$HOME`,
-and `bin/` is on `PATH`, so edits take effect on the developer's machine immediately.
+jsh sets up a workstation (macOS, Debian-family Linux, RHEL-family Linux) with Bash scripts.
+This checkout is live: `install.sh` links each file under `dotfiles/` into `$HOME` and each
+`bin/` command into `~/.local/bin`, so edits take effect on the developer's machine immediately.
 
 This is the only agent instruction file. Do not create `CLAUDE.md`, `GEMINI.md`, or
-`.github/copilot-instructions.md`. Agent skills come from the `skills` and `ai` modules;
+`.github/copilot-instructions.md`. Agent skills come from the `skills` and `ai` scripts;
 custom agents and prompts stay in VS Code Settings Sync, not here.
 
 ## commands
 
-| Task             | Command                                                                                |
-| ---------------- | -------------------------------------------------------------------------------------- |
-| All checks       | `make check`                                                                           |
-| One check        | `make syntax`, `make headers`, `make readme`, `make modules`, `make lint`, `make test` |
-| One shell file   | `bash -n FILE` or `zsh -n FILE`, then `shellcheck --severity=warning FILE`             |
-| One test module  | `python3 -m unittest tests.test_engine`                                                |
-| Preview setup    | `./j.sh setup --dry-run` (or one module: `./j.sh configure helium --dry-run`)          |
-| Pre-commit hooks | `make hooks`                                                                           |
+| Task             | Command                                                                       |
+| ---------------- | ----------------------------------------------------------------------------- |
+| All checks       | `make check`                                                                  |
+| One check        | `make syntax`, `make lint`, `make test-shell`                                 |
+| One shell file   | `bash -n FILE` or `zsh -n FILE`, then `shellcheck -x --severity=warning FILE` |
+| Preview setup    | `./install.sh --dry-run [GROUP ...]` or `./scripts/NAME.sh --dry-run`         |
+| Pre-commit hooks | `make hooks`                                                                  |
 
-`./j.sh setup|install|link|configure|update` without `--dry-run` changes the live machine.
-Run them only when asked.
+`./install.sh` and `./scripts/NAME.sh` without `--dry-run` change the live machine; `--update`
+also upgrades installed software. Run them only when asked.
 
 ## layout
 
-- `j.sh`: entry point. Finds Python 3.9+, installing one through
-  Homebrew, apt, or dnf when none exists, then runs `python -m jsh` with `lib/` on
-  `PYTHONPATH`. `j.sh runtime` and `bin/jsh` with no arguments open the isolated Zsh;
-  `bin/jsh COMMAND` delegates to `j.sh`.
-- `lib/jsh/`: the engine. `modules.py` (reads `module.json` and validates
-  it), `runner.py` (plans phases into tasks, runs them, gives
-  handlers a `Context`), `output.py` (bun-style display), `cli.py`, `system.py` (facts,
-  sudo, queries). Helpers for module scripts: `files.py`, `apps.py`, `web.py`, `desktop.py`.
-- `lib/jsh/handlers/`: one file per handler (`brew`, `apt`, `dnf`, `flatpak`, `appimage`,
-  `uv`, `git`, `link`, `script`). `_native.py` is shared apt/dnf code, not a handler.
-- `modules/NAME/`: `module.json`, optional `home/` (linked into `$HOME`), and the scripts
-  and data its steps use.
-- `lib/core.sh`, `lib/output.sh`: Bash helpers for module scripts and `bin/` tools.
-  `lib/j.zsh`, `lib/prompt.zsh`, `lib/startup.zsh`: the `j` jump function, the prompt, and
-  interactive start-up (SSH keys, `local/init.d`), sourced by `.zshrc`.
-  `modules/shell/completions/_jsh`: Zsh completion for `jsh`.
-- `conf/`: personal, gitignored machine data (`git.json`) and its example.
-- `tests/`: Python `unittest` modules. Generated or machine-local, never edit:
-  `local/` (vendor clones, logs, runtime), `.venv/`, `tmp/`. Scratch files go in `tmp/`.
-
-## modules and handlers
-
-- A module name is one lowercase word. Its manifest needs `description`; other keys are
-  `when`, `install`, `configure`, `update`, `link`, and `commands`. `make modules` loads
-  every manifest and plans it for each platform and desktop; run it after manifest edits.
-- Phases: `setup` = `install` → `link` → `configure`. `update` reuses `install` steps of
-  handlers with an `update` function, except `script` steps (declare those under `update`).
-- Prefer a declarative handler step over a script. Use a `script` step for one-off logic.
-- Steps must be idempotent: check current state, change only what differs, and report each
-  unit exactly once with `added`, `changed`, `removed`, or `current`. Use `notice` only for
-  something the user must act on. Honor `ctx.dry_run` (Python) or `JSH_DRY_RUN` (Bash; use
-  `jsh::run`/`jsh::root`). Command output belongs in the task log (`ctx.run`, or stdout in
-  Bash scripts), never on the terminal.
-- Privileged work uses `sudo -n` (`ctx.run(..., root=True)`, `jsh::root`) or a step with
-  `"root": true`. Never prompt for input or a password.
-- A new handler module defines phase functions taking `(ctx, steps)`, plus optional
-  `BATCH`, `PRIORITY`, `PLATFORMS`, `EXPLICIT`, `units(step)`, and `check(args)`; see
-  `lib/jsh/handlers/__init__.py`. Read `system.ROOT` at call time so tests can patch it.
+- `install.sh`: bootstrap. Installs `core` packages and shell plugins, links dotfiles and
+  `bin/`, then runs each named group's `scripts/GROUP.sh` (or just its packages).
+- `scripts/NAME.sh`: one standalone setup group; data it uses lives in `scripts/NAME/`.
+  `scripts/packages.sh` declares every group's packages in `install_group`.
+  `scripts/lib/`: shared Bash (`common.sh` helpers, `apps.sh`, `desktop.sh`).
+- `lib/shell/`: commands, navigation, prompt, and completion sourced by `.zshrc`/`.bashrc`.
+  `lib/git/`: Python helpers run by `bin/git`.
+- `bin/`: everyday commands and the isolated `jsh` runtime.
+- `dotfiles/`: home-relative configuration.
+- `scripts/check.py`: `unittest` smoke checks for interactive Bash and Zsh.
+- Generated or machine-local, never edit: `local/`, `archive/`, `.venv/`, `tmp/`.
+  Scratch files go in `tmp/`.
 
 ## conventions
 
-- Module Bash scripts at `modules/NAME/*.sh` start with this header (`make headers`):
+- Setup scripts start with `#!/usr/bin/env bash`, a one-line purpose comment,
+  `set -euo pipefail`, and source `scripts/lib/common.sh` (or `apps.sh`).
+- Steps must be idempotent: check current state, change only what differs, and report each
+  unit once with `jsh::added`, `jsh::changed`, `jsh::removed`, or `jsh::current`. Use
+  `jsh::notice` only for something the user must act on. Honor `JSH_DRY_RUN` through
+  `jsh::run`/`jsh::root`/`jsh::task`, and `JSH_UPDATE` for upgrades.
+- Output: one transient progress line, then `+`/`~`/`-` change lines and one summary. No
+  banners, prompts, or per-step success lines; command output goes to the task log.
+- Privileged work uses `jsh::root` (`sudo -n`). Never prompt for input or a password.
+- Runtime is Bash; Python (standard library only) is limited to `bin/` commands and
+  `lib/git/`. Shell is 2-space indented; see `.editorconfig`.
+- Names: commands read like speech, files and directories are one lowercase word when that
+  stays clear.
 
-  ```bash
-  #!/usr/bin/env bash
-  # Configure Example with the managed settings.
+## checks
 
-  set -euo pipefail
-
-  SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
-  JSH_ROOT=$(cd -- "${SCRIPT_DIR}/../.." && pwd -P)
-  readonly SCRIPT_DIR JSH_ROOT
-  # shellcheck source=lib/core.sh
-  . "${JSH_ROOT}/lib/core.sh"
-  ```
-
-- Output follows bun: one transient progress line, then `+`/`~`/`-` change lines and one
-  summary. Do not add banners, prompts, or per-step success lines.
-- Runtime is Bash and the Python 3.9+ standard library only. Python is 4-space indented with a
-  100-column limit; shell is 2-space indented; see `.editorconfig`.
-- Names: commands read like speech (`jsh install helium`), files and directories are one
-  lowercase word when that stays clear.
-
-## tests
-
-- Tests are Python `unittest` files at `tests/test_<name>.py`. Never add Bats.
-- Cover the engine, handlers, app module scripts, and standalone `bin/` programs. Do not
-  test shell-environment code (`lib/*.sh`, `lib/*.zsh`, `.zshrc`); validate it with
-  `bash -n`/`zsh -n` and ShellCheck.
-- Tests must not touch the real `$HOME` or system settings: point `HOME` and `XDG_*` at a
-  temporary directory under `tmp/` and mock commands. Never weaken a failing test.
+- `scripts/check.py` is the only test file. Never add Bats or a new suite unless asked;
+  otherwise validate with `bash -n`/`zsh -n` and ShellCheck.
+- Checks must not touch the real `$HOME` or system settings: point `HOME`, `XDG_*`, and
+  `JSH_*` at a temporary directory and mock commands. Never weaken a failing check.
 
 ## git
 
 - Conventional Commits, enforced by commitlint: `type(scope): subject`, header at most 72
-  characters, no trailing period, body lines at most 100. Scope names the module or
-  component, for example `fix(waterfox): ...` or `feat(engine): ...`.
+  characters, no trailing period, body lines at most 100. Scope names the script or
+  component, for example `fix(waterfox): ...` or `feat(prompt): ...`.
 - Commit only when asked. Stage only your files; the worktree often holds unrelated work,
   so never stash, reset, or revert it. Never bypass hooks, push, or rewrite published
   history without explicit approval.
