@@ -12,20 +12,28 @@ set -euo pipefail
 umask 077
 JSSH_VERSION=v0.2.0
 
-case $0 in
-  /*) jssh_launcher=$0 ;;
-  *) jssh_launcher=${PWD}/$0 ;;
+case ${BASH_SOURCE[0]} in
+/*) jssh_launcher=${BASH_SOURCE[0]} ;;
+*) jssh_launcher=${PWD}/${BASH_SOURCE[0]} ;;
 esac
+while [[ -L ${jssh_launcher} ]]; do
+  parent=$(CDPATH='' cd -P "${jssh_launcher%/*}" && pwd)
+  target=$(readlink "${jssh_launcher}")
+  case ${target} in
+  /*) jssh_launcher=${target} ;;
+  *) jssh_launcher=${parent}/${target} ;;
+  esac
+done
 
 if [[ -z ${JSH_ROOT:-} ]]; then
-  JSH_ROOT=$(CDPATH='' cd -P "${jssh_launcher%/*}/.." 2> /dev/null && pwd -P) || {
+  JSH_ROOT=$(CDPATH='' cd -P "${jssh_launcher%/*}/.." 2>/dev/null && pwd -P) || {
     printf 'jssh: cannot locate the repository root\n' >&2
     exit 1
   }
 fi
 
-# shellcheck source=../lib/output.sh
-. "${JSH_ROOT}/lib/output.sh"
+# shellcheck source=../lib/shell/output.sh
+. "${JSH_ROOT}/lib/shell/output.sh"
 
 JSSH_CACHE_DIR=${JSSH_CACHE_DIR:-${XDG_CACHE_HOME:-${HOME}/.cache}/jssh}
 JSSH_REMOTE_TMPDIR=${JSSH_REMOTE_TMPDIR:-/tmp}
@@ -63,9 +71,9 @@ _jssh_die() {
 
 _jssh_metadata() {
   local metadata
-  metadata=$(stat -f '%u %Lp' "$1" 2> /dev/null || true)
+  metadata=$(stat -f '%u %Lp' "$1" 2>/dev/null || true)
   if [[ ! ${metadata} =~ ^[0-9]+\ [0-7]{3,4}$ ]]; then
-    metadata=$(stat -c '%u %a' "$1" 2> /dev/null || true)
+    metadata=$(stat -c '%u %a' "$1" 2>/dev/null || true)
   fi
   [[ ${metadata} =~ ^[0-9]+\ [0-7]{3,4}$ ]] || _jssh_die "cannot inspect permissions: $1"
   printf '%s\n' "${metadata}"
@@ -90,9 +98,9 @@ _jssh_cache_file_safe() {
 }
 
 _jssh_sha256_stream() {
-  if command -v shasum > /dev/null 2>&1; then
+  if command -v shasum >/dev/null 2>&1; then
     shasum -a 256 | awk '{print $1}'
-  elif command -v sha256sum > /dev/null 2>&1; then
+  elif command -v sha256sum >/dev/null 2>&1; then
     sha256sum | awk '{print $1}'
   else
     _jssh_die 'shasum or sha256sum is required'
@@ -104,36 +112,42 @@ _jssh_validate_platform() {
   [[ ${kernel} == Linux ]] || _jssh_die "unsupported remote operating system: ${kernel}"
 }
 
+JSH_VENDOR=${JSH_VENDOR:-${XDG_DATA_HOME:-${HOME}/.local/share}/jsh/vendor}
+[[ -d ${JSH_VENDOR} || ! -d ${JSH_ROOT}/local/vendor ]] || JSH_VENDOR=${JSH_ROOT}/local/vendor
+
 _jssh_required_sources() {
   printf '%s\n' \
-    modules/shell/home/.zshrc \
-    lib/output.sh \
-    lib/j.zsh \
-    lib/prompt.zsh \
-    local/vendor/zsh-autosuggestions/LICENSE \
-    local/vendor/zsh-autosuggestions/zsh-autosuggestions.zsh \
-    local/vendor/zsh-completions/LICENSE \
-    local/vendor/zsh-syntax-highlighting/.revision-hash \
-    local/vendor/zsh-syntax-highlighting/.version \
-    local/vendor/zsh-syntax-highlighting/COPYING.md \
-    local/vendor/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+    "${JSH_ROOT}/dotfiles/.zshrc" \
+    "${JSH_ROOT}/dotfiles/.bashrc" \
+    "${JSH_ROOT}/lib/shell/output.sh" \
+    "${JSH_ROOT}/lib/shell/commands.sh" \
+    "${JSH_ROOT}/lib/shell/navigation.sh" \
+    "${JSH_ROOT}/lib/shell/prompt.sh" \
+    "${JSH_ROOT}/lib/shell/completion.sh" \
+    "${JSH_VENDOR}/zsh-autosuggestions/LICENSE" \
+    "${JSH_VENDOR}/zsh-autosuggestions/zsh-autosuggestions.zsh" \
+    "${JSH_VENDOR}/zsh-completions/LICENSE" \
+    "${JSH_VENDOR}/zsh-syntax-highlighting/.revision-hash" \
+    "${JSH_VENDOR}/zsh-syntax-highlighting/.version" \
+    "${JSH_VENDOR}/zsh-syntax-highlighting/COPYING.md" \
+    "${JSH_VENDOR}/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
 }
 
 _jssh_check_sources() {
   local source
   while IFS= read -r source; do
-    [[ -e ${JSH_ROOT}/${source} ]] || _jssh_die "missing runtime source: ${source}"
+    [[ -e ${source} ]] || _jssh_die "missing runtime source: ${source}"
   done < <(_jssh_required_sources)
-  [[ -d ${JSH_ROOT}/local/vendor/zsh-completions/src ]] || \
-    _jssh_die 'missing runtime source: local/vendor/zsh-completions/src'
-  [[ -d ${JSH_ROOT}/local/vendor/zsh-syntax-highlighting/highlighters ]] || \
-    _jssh_die 'missing runtime source: local/vendor/zsh-syntax-highlighting/highlighters'
+  [[ -d ${JSH_VENDOR}/zsh-completions/src ]] ||
+    _jssh_die "missing runtime source: ${JSH_VENDOR}/zsh-completions/src"
+  [[ -d ${JSH_VENDOR}/zsh-syntax-highlighting/highlighters ]] ||
+    _jssh_die "missing runtime source: ${JSH_VENDOR}/zsh-syntax-highlighting/highlighters"
 }
 
 _jssh_payload_files() {
   _jssh_required_sources
-  find local/vendor/zsh-completions/src \
-    local/vendor/zsh-syntax-highlighting/highlighters -type f -print
+  find "${JSH_VENDOR}/zsh-completions/src" \
+    "${JSH_VENDOR}/zsh-syntax-highlighting/highlighters" -type f -print
 }
 
 _jssh_payload_hash() {
@@ -163,37 +177,33 @@ _jssh_build_payload() {
   mkdir -p "${JSSH_CACHE_DIR}"
   build_dir=$(mktemp -d "${JSSH_CACHE_DIR}/build.XXXXXX")
   root=${build_dir}/jsh
+  mkdir -p "${root}/dotfiles" "${root}/lib/shell" "${root}/vendor"
+  cp "${JSH_ROOT}/dotfiles/.zshrc" "${JSH_ROOT}/dotfiles/.bashrc" "${root}/dotfiles/"
+  cp "${JSH_ROOT}/lib/shell/output.sh" \
+    "${JSH_ROOT}/lib/shell/commands.sh" "${JSH_ROOT}/lib/shell/navigation.sh" \
+    "${JSH_ROOT}/lib/shell/prompt.sh" "${JSH_ROOT}/lib/shell/completion.sh" \
+    "${root}/lib/shell/"
   mkdir -p \
-    "${root}/modules/shell/home" \
-    "${root}/lib" \
-    "${root}/local/vendor"
-
-  cp "${JSH_ROOT}/modules/shell/home/.zshrc" "${root}/modules/shell/home/.zshrc"
-  cp "${JSH_ROOT}/lib/output.sh" "${JSH_ROOT}/lib/j.zsh" "${JSH_ROOT}/lib/prompt.zsh" \
-    "${root}/lib/"
-  mkdir -p \
-    "${root}/local/vendor/zsh-autosuggestions" \
-    "${root}/local/vendor/zsh-completions" \
-    "${root}/local/vendor/zsh-syntax-highlighting"
-  cp "${JSH_ROOT}/local/vendor/zsh-autosuggestions/LICENSE" \
-    "${JSH_ROOT}/local/vendor/zsh-autosuggestions/zsh-autosuggestions.zsh" \
-    "${root}/local/vendor/zsh-autosuggestions/"
-  cp "${JSH_ROOT}/local/vendor/zsh-completions/LICENSE" \
-    "${root}/local/vendor/zsh-completions/"
-  cp -R "${JSH_ROOT}/local/vendor/zsh-completions/src" \
-    "${root}/local/vendor/zsh-completions/src"
-  cp "${JSH_ROOT}/local/vendor/zsh-syntax-highlighting/.revision-hash" \
-    "${JSH_ROOT}/local/vendor/zsh-syntax-highlighting/.version" \
-    "${JSH_ROOT}/local/vendor/zsh-syntax-highlighting/COPYING.md" \
-    "${JSH_ROOT}/local/vendor/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" \
-    "${root}/local/vendor/zsh-syntax-highlighting/"
-  cp -R "${JSH_ROOT}/local/vendor/zsh-syntax-highlighting/highlighters" \
-    "${root}/local/vendor/zsh-syntax-highlighting/highlighters"
+    "${root}/vendor/zsh-autosuggestions" \
+    "${root}/vendor/zsh-completions" \
+    "${root}/vendor/zsh-syntax-highlighting"
+  cp "${JSH_VENDOR}/zsh-autosuggestions/LICENSE" \
+    "${JSH_VENDOR}/zsh-autosuggestions/zsh-autosuggestions.zsh" \
+    "${root}/vendor/zsh-autosuggestions/"
+  cp "${JSH_VENDOR}/zsh-completions/LICENSE" "${root}/vendor/zsh-completions/"
+  cp -R "${JSH_VENDOR}/zsh-completions/src" "${root}/vendor/zsh-completions/src"
+  cp "${JSH_VENDOR}/zsh-syntax-highlighting/.revision-hash" \
+    "${JSH_VENDOR}/zsh-syntax-highlighting/.version" \
+    "${JSH_VENDOR}/zsh-syntax-highlighting/COPYING.md" \
+    "${JSH_VENDOR}/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" \
+    "${root}/vendor/zsh-syntax-highlighting/"
+  cp -R "${JSH_VENDOR}/zsh-syntax-highlighting/highlighters" \
+    "${root}/vendor/zsh-syntax-highlighting/highlighters"
   if COPYFILE_DISABLE=1 tar --no-xattrs --uid 0 --gid 0 --uname root --gname root \
-    -cf "${payload}.tmp.$$" -C "${build_dir}" jsh 2> /dev/null; then
+    -cf "${payload}.tmp.$$" -C "${build_dir}" jsh 2>/dev/null; then
     :
   elif COPYFILE_DISABLE=1 tar --no-xattrs --owner=0 --group=0 --numeric-owner \
-    -cf "${payload}.tmp.$$" -C "${build_dir}" jsh 2> /dev/null; then
+    -cf "${payload}.tmp.$$" -C "${build_dir}" jsh 2>/dev/null; then
     :
   else
     rm -f "${payload}.tmp.$$"
@@ -225,8 +235,10 @@ mkdir "\${probe}" || exit 1
 rmdir "\${probe}"
 if command -v zsh >/dev/null 2>&1; then
   remote_shell=zsh
+elif command -v bash >/dev/null 2>&1; then
+  remote_shell=bash
 else
-  echo 'jssh: remote zsh is required' >&2
+  echo 'jssh: remote Zsh or Bash is required' >&2
   exit 127
 fi
 printf '%s %s\n' "\$(uname -s)" "\${remote_shell}"
@@ -253,7 +265,7 @@ cleanup() {
 trap cleanup 0 1 2 15
 touch "\${JSSH_SESSION}/.jssh-marker"
 tar -xf - -C "\${JSSH_SESSION}"
-[ -f "\${JSSH_SESSION}/jsh/modules/shell/home/.zshrc" ] || exit 1
+[ -f "\${JSSH_SESSION}/jsh/dotfiles/.zshrc" ] || exit 1
 complete=1
 printf '%s\n' "\${JSSH_SESSION}"
 EOF
@@ -284,12 +296,16 @@ for locale_name in \$(locale -a); do
   case \${locale_name} in C.UTF-8 | C.utf8) utf8_locale=\${locale_name} ;; esac
 done
 [ "\${JSH_LANG}" != C ] || JSH_LANG=\${utf8_locale:-C}
-export JSH_ROOT JSH_RUNTIME_DIR JSH_LOAD_CONFIG JSH_LANG
+JSH_VENDOR="\${JSH_ROOT}/vendor"
+export JSH_ROOT JSH_RUNTIME_DIR JSH_LOAD_CONFIG JSH_LANG JSH_VENDOR
 mkdir -p "\${JSH_RUNTIME_DIR}"
 [ ! -t 1 ] || printf '\033[2J\033[H'
-ZDOTDIR="\${JSH_ROOT}/modules/shell/home"
+ZDOTDIR="\${JSH_ROOT}/dotfiles"
 export ZDOTDIR
-zsh -d -i
+case '${JSSH_REMOTE_SHELL}' in
+  zsh) zsh -d -i ;;
+  bash) bash --noprofile --rcfile "\${JSH_ROOT}/dotfiles/.bashrc" -i ;;
+esac
 exit \$?
 EOF
 }
@@ -300,17 +316,17 @@ _jssh_quote() {
 
 _jssh_cleanup() {
   local command_text
-  if [[ -n ${JSSH_CONTROL_PATH} && -n ${JSSH_TARGET} ]] && \
+  if [[ -n ${JSSH_CONTROL_PATH} && -n ${JSSH_TARGET} ]] &&
     ssh "${JSSH_SSH_OPTIONS[@]}" -S "${JSSH_CONTROL_PATH}" -O check \
-      "${JSSH_TARGET}" > /dev/null 2>&1; then
+      "${JSSH_TARGET}" >/dev/null 2>&1; then
     if [[ -n ${JSSH_REMOTE_DIR} && ${JSSH_REMOTE_DIR} == "${JSSH_REMOTE_PREFIX}"-* &&
       ${JSSH_REMOTE_DIR} != *[!A-Za-z0-9._/-]* && ${JSSH_REMOTE_DIR} != *..* ]]; then
       command_text="[ -f '${JSSH_REMOTE_DIR}/.jssh-marker' ] && rm -rf '${JSSH_REMOTE_DIR}' || :"
       ssh "${JSSH_SSH_OPTIONS[@]}" -S "${JSSH_CONTROL_PATH}" "${JSSH_TARGET}" \
-        "sh -c '$(_jssh_quote "${command_text}")'" > /dev/null 2>&1 || true
+        "sh -c '$(_jssh_quote "${command_text}")'" >/dev/null 2>&1 || true
     fi
     ssh "${JSSH_SSH_OPTIONS[@]}" -S "${JSSH_CONTROL_PATH}" -O exit \
-      "${JSSH_TARGET}" > /dev/null 2>&1 || true
+      "${JSSH_TARGET}" >/dev/null 2>&1 || true
   fi
   [[ -z ${JSSH_CONTROL_DIR} ]] || rm -rf "${JSSH_CONTROL_DIR}"
   JSSH_CONTROL_DIR=
@@ -329,14 +345,14 @@ _jssh_check() {
   local tool errors=0
   _jssh_secure_cache_dir
   for tool in awk cat chmod cp find id mkdir mktemp mv rm sed sort ssh stat tar; do
-    if command -v "${tool}" > /dev/null 2>&1; then
+    if command -v "${tool}" >/dev/null 2>&1; then
       jsh::log_success "${tool}"
     else
       jsh::log_error "${tool} is required"
       errors=$((errors + 1))
     fi
   done
-  if command -v shasum > /dev/null 2>&1 || command -v sha256sum > /dev/null 2>&1; then
+  if command -v shasum >/dev/null 2>&1 || command -v sha256sum >/dev/null 2>&1; then
     jsh::log_success 'SHA-256 tool'
   else
     jsh::log_error 'shasum or sha256sum is required'
@@ -363,20 +379,20 @@ _jssh_validate_ssh_options() {
   for ((index = 0; index < ${#JSSH_SSH_OPTIONS[@]}; index++)); do
     option=${JSSH_SSH_OPTIONS[index]}
     case ${option} in
-      -M | -O | -O* | -S | -S*)
-        _jssh_die "SSH control option is managed by jssh: ${option}"
-        ;;
-      -o)
-        index=$((index + 1))
-        value=${JSSH_SSH_OPTIONS[index]:-}
-        ;;
-      -o*) value=${option#-o} ;;
-      *) continue ;;
+    -M | -O | -O* | -S | -S*)
+      _jssh_die "SSH control option is managed by jssh: ${option}"
+      ;;
+    -o)
+      index=$((index + 1))
+      value=${JSSH_SSH_OPTIONS[index]:-}
+      ;;
+    -o*) value=${option#-o} ;;
+    *) continue ;;
     esac
     case ${value,,} in
-      controlmaster=* | controlpath=* | controlpersist=*)
-        _jssh_die "SSH control option is managed by jssh: ${value%%=*}"
-        ;;
+    controlmaster=* | controlpath=* | controlpersist=*)
+      _jssh_die "SSH control option is managed by jssh: ${value%%=*}"
+      ;;
     esac
   done
 }
@@ -388,7 +404,7 @@ _jssh_connect() {
   [[ $# -gt 0 ]] || _jssh_die 'missing SSH host'
   JSSH_TARGET=${!#}
   [[ ${JSSH_TARGET} != -* ]] || _jssh_die 'SSH host must be the final argument'
-  if (( $# > 1 )); then
+  if (($# > 1)); then
     JSSH_SSH_OPTIONS=("${@:1:$(($# - 1))}")
   fi
   _jssh_validate_ssh_options
@@ -413,18 +429,18 @@ _jssh_connect() {
       "${JSSH_SSH_OPTIONS[@]}" -T "${JSSH_TARGET}" sh -s
   ) || _jssh_die 'remote preflight failed'
   _jssh_validate_platform "${kernel}"
-  [[ ${JSSH_REMOTE_SHELL} == zsh ]] || _jssh_die 'remote preflight returned an invalid shell'
+  [[ ${JSSH_REMOTE_SHELL} == zsh || ${JSSH_REMOTE_SHELL} == bash ]] || _jssh_die 'remote preflight returned an invalid shell'
 
   jsh::log_info "Preparing Jsh runtime"
   payload=$(_jssh_build_payload)
   receive_script=$(_jssh_remote_receive_script)
   quoted=$(_jssh_quote "${receive_script}")
   JSSH_REMOTE_DIR=$(ssh "${control_options[@]}" "${JSSH_SSH_OPTIONS[@]}" \
-    -T "${JSSH_TARGET}" "sh -c '${quoted}'" < "${payload}") || \
+    -T "${JSSH_TARGET}" "sh -c '${quoted}'" <"${payload}") ||
     _jssh_die 'runtime transfer failed'
-  [[ ${JSSH_REMOTE_DIR} == "${JSSH_REMOTE_PREFIX}"-* ]] || \
+  [[ ${JSSH_REMOTE_DIR} == "${JSSH_REMOTE_PREFIX}"-* ]] ||
     _jssh_die 'remote returned an invalid session path'
-  [[ ${JSSH_REMOTE_DIR} != *[!A-Za-z0-9._/-]* && ${JSSH_REMOTE_DIR} != *..* ]] || \
+  [[ ${JSSH_REMOTE_DIR} != *[!A-Za-z0-9._/-]* && ${JSSH_REMOTE_DIR} != *..* ]] ||
     _jssh_die 'remote returned an unsafe session path'
 
   jsh::log_success "Jsh runtime deployed to ${JSSH_TARGET}"
@@ -443,41 +459,41 @@ _jssh_connect() {
 
 _jssh_main() {
   case ${JSSH_REMOTE_TMPDIR} in
-    /*) ;;
-    *) _jssh_die 'JSSH_REMOTE_TMPDIR must be an absolute path' ;;
+  /*) ;;
+  *) _jssh_die 'JSSH_REMOTE_TMPDIR must be an absolute path' ;;
   esac
-  [[ ${JSSH_REMOTE_TMPDIR} != *[!A-Za-z0-9._/-]* && ${JSSH_REMOTE_TMPDIR} != *..* ]] || \
+  [[ ${JSSH_REMOTE_TMPDIR} != *[!A-Za-z0-9._/-]* && ${JSSH_REMOTE_TMPDIR} != *..* ]] ||
     _jssh_die 'JSSH_REMOTE_TMPDIR contains unsafe characters'
 
   case ${1:-} in
-    __complete)
-      [[ ${2:-} != host ]] || _jssh_complete_hosts
-      ;;
-    -h | --help)
-      _jssh_usage
-      ;;
-    --version)
-      printf 'jssh %s\n' "${JSSH_VERSION}"
-      ;;
-    --check)
-      _jssh_check
-      ;;
-    --rebuild)
-      _jssh_secure_cache_dir
-      rm -f "${JSSH_CACHE_DIR}"/payload-linux-*.tar
-      jsh::log_success 'Generated jssh payloads cleared'
-      ;;
-    -r | --raw)
-      shift
-      exec ssh "$@"
-      ;;
-    '')
-      _jssh_usage >&2
-      return 2
-      ;;
-    *)
-      _jssh_connect "$@"
-      ;;
+  __complete)
+    [[ ${2:-} != host ]] || _jssh_complete_hosts
+    ;;
+  -h | --help)
+    _jssh_usage
+    ;;
+  --version)
+    printf 'jssh %s\n' "${JSSH_VERSION}"
+    ;;
+  --check)
+    _jssh_check
+    ;;
+  --rebuild)
+    _jssh_secure_cache_dir
+    rm -f "${JSSH_CACHE_DIR}"/payload-linux-*.tar
+    jsh::log_success 'Generated jssh payloads cleared'
+    ;;
+  -r | --raw)
+    shift
+    exec ssh "$@"
+    ;;
+  '')
+    _jssh_usage >&2
+    return 2
+    ;;
+  *)
+    _jssh_connect "$@"
+    ;;
   esac
 }
 

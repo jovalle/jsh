@@ -1,264 +1,25 @@
-#
-# .zshrc - Zsh Configuration
-#
-# Load Order:
-#   1. Essential Exports
-#   2. Plugin System
-#   3. Shell Options & Keybindings
-#   4. Completion System
-#   5. Helper Functions
-#   6. Shell Aliases
-#   7. Shell Functions
-#   8. Theme Customization
-#   9. Path Prioritization / Deduplication
-#   10. Local Customizations
-#
-
-typeset -i _jsh_runtime_active=0
-if [[ -n ${JSH_RUNTIME_DIR:-} ]]; then
-  _jsh_runtime_active=1
-  zmodload -F zsh/files b:mkdir 2>/dev/null || return 1
-  builtin mkdir -p -- "${JSH_RUNTIME_DIR}" "${JSH_RUNTIME_DIR}/cache"
-
-  export JSH_HISTFILE="${JSH_RUNTIME_DIR}/history"
-  typeset _jsh_runtime_xdg_cache=${XDG_CACHE_HOME-}
-  typeset -i _jsh_runtime_had_xdg_cache=$+XDG_CACHE_HOME
-  export XDG_CACHE_HOME="${JSH_RUNTIME_DIR}/cache"
-fi
-
-# ============================================================================
-# 1. ESSENTIAL EXPORTS
-# ============================================================================
-
-# Core paths and editors
-export CLICOLORS=1                               # Colorize output
-export EDITOR=vim                                # Default CLI editor
-export VISUAL=vim                                # Default full-screen editor
-export SH=${SHELL##*/}                           # Shell type reference
-export VIRTUAL_ENV_DISABLE_PROMPT=1              # Python environment appears in prompt info
-
-# Project/work directories
-export GIT_BASE=${HOME}/Projects                 # Git projects base
-export WORK_DIR=${GIT_BASE}                      # Default work directory
-export JSH=${${(%):-%N}:A:h:h:h:h}               # Jsh repository root (modules/shell/home)
-
-typeset _jsh_rc
-if [[ ${JSH_LOAD_CONFIG:-1} == 1 ]]; then
-  for _jsh_rc in "${HOME}/.jshrc" "${HOME}/.local/.jshrc" "${JSH}/local/.jshrc"; do
-    [[ ! -r ${_jsh_rc} ]] || source "${_jsh_rc}"
-  done
-fi
-unset _jsh_rc
-
-if [[ ${functions_source[command_not_found_handler]:-} == /etc/profile.d/PackageKit.sh ]]; then
-  unfunction command_not_found_handler
-fi
-
-# Silence/optimize specific tools
-export DIRENV_LOG_FORMAT=                        # Silence direnv
-export DIRENV_WARN_TIMEOUT=30s                   # Direnv timeout
-export PYTHONDONTWRITEBYTECODE=1                 # No .pyc files on import
-
-# Shell environment
-if [[ -n ${JSH_LANG:-} ]]; then
-  export LANG=${JSH_LANG}
-fi
-export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-${HOME}/.config}"         # Wwhere apps should store config files, cache files, and data files
-
-# Vendored shell dependencies
-export JSH_VENDOR="${JSH}/local/vendor"
-export FZF_BASE="${JSH}/local/vendor/fzf"
-
-# Paths - ORDER MATTERS (priority: local > jsh local > jsh > vendored fzf > go > cargo)
-export PATH=${HOME}/.local/bin:${JSH}/local/bin:${JSH}/bin:${FZF_BASE}/bin:${HOME}/go/bin:${PATH}:${HOME}/.cargo/bin
-# Locate an existing Homebrew installation before shell hooks and completions.
-for _jsh_brew_bin in /opt/homebrew/bin /usr/local/bin /home/linuxbrew/.linuxbrew/bin; do
-  [[ ! -x ${_jsh_brew_bin}/brew ]] || path+=(${_jsh_brew_bin})
-done
-unset _jsh_brew_bin
-
-
-# Terminal optimizations
-# Without -X, less uses the alternate screen, so VS Code passes PageUp/PageDown to it.
-export LESS="-FR"                           # Colors, skip paging when output fits
-# AI agent terminals cannot answer interactive pager or confirmation prompts.
-typeset -i _jsh_agent_shell=0
-if [[ -n ${COPILOT_AGENT:-}${CLAUDECODE:-}${GEMINI_CLI:-} ]]; then
-  _jsh_agent_shell=1
-  export PAGER=cat GIT_PAGER=cat BAT_PAGING=never
-  setopt RM_STAR_SILENT
-fi
-
-# ============================================================================
-# 2. PLUGIN SYSTEM
-# ============================================================================
-
-typeset -a jsh_plugins=(fzf fzf-tab zsh-autosuggestions zsh-completions zsh-syntax-highlighting)
-if [[ ${JSH_LOAD_CONFIG:-1} == 1 ]]; then
-  for plugin in ${jsh_plugins}; do
-    if [[ ! -d "${JSH_VENDOR}/${plugin}" ]]; then
-      print -u2 -- "jsh vendored plugins are missing. Run: jsh install shell"
-      break
-    fi
-  done
-fi
-unset jsh_plugins plugin
-
-# ============================================================================
-# 3. SHELL OPTIONS & KEYBINDINGS
-# ============================================================================
-
-# Vi mode with sensible keybindings
-bindkey -v
-
-# Incremental search in vi mode
-bindkey -M vicmd '^R' history-incremental-search-backward
-bindkey -M vicmd '^S' history-incremental-search-forward
-bindkey -M viins '^R' history-incremental-search-backward
-bindkey -M viins '^S' history-incremental-search-forward
-
-# Delete key fixes for vi mode
-bindkey -M vicmd '^[[3~' delete-char
-bindkey -M viins '^[[3~' delete-char
-bindkey -M viins '^[[1;5D' backward-word
-bindkey -M viins '^[[1;5C' forward-word
-
-# Shell options (all at once)
-setopt COMPLETE_IN_WORD extended_history hist_find_no_dups hist_ignore_all_dups \
-        hist_ignore_dups hist_ignore_space hist_save_no_dups INTERACTIVE_COMMENTS \
-        NO_BEEP NOBGNICE HUP INC_APPEND_HISTORY SHARE_HISTORY
-
-# History configuration
-export HISTDUP=erase                  # Erase duplicates
-export HISTFILE="${JSH_HISTFILE:-${HOME}/.zsh_history}" # Keep mutable history outside the repository
-export HISTSIZE=50000                 # Number of commands to keep in memory
-export HIST_STAMPS=iso                # Timestamp format
-export SAVEHIST=50000                 # Number of commands to save to file
-
-# Completion options
-LISTMAX=0                           # Automatically paginate completions
-export LISTMAX                      # Used by zsh completion system
-MAILCHECK=0                         # Disable mail checking
-
-# ============================================================================
-# 4. COMPLETION SYSTEM
-# ============================================================================
-
-# brew shellenv prepends site-functions to fpath, so run it before the repo entries.
-if command -v brew &>/dev/null; then
-  _jsh_path=${PATH}
-  eval "$(brew shellenv)"
-  # shellenv also prepends Homebrew to PATH, which would shadow jsh wrappers such as bin/git.
-  export PATH=${_jsh_path}:${HOMEBREW_PREFIX}/bin:${HOMEBREW_PREFIX}/sbin
-  unset _jsh_path
-fi
-
-# Add user and vendored completions to fpath.
-fpath=(~/.zsh/completions "${JSH_VENDOR}/zsh-completions/src" "${fpath[@]}")
-typeset -gUa fpath
-
-# Initialize completion system
-typeset _jsh_compdump=${ZDOTDIR:-${HOME}}/.zcompdump
-(( _jsh_runtime_active )) && _jsh_compdump=${JSH_RUNTIME_DIR}/cache/.zcompdump
-autoload -Uz compinit
-# Skip the fpath audit and rebuild when the dump is under a day old.
-if [[ -n ${_jsh_compdump}(#qN.mh-24) ]]; then
-  compinit -C -u -d "${_jsh_compdump}"
-else
-  compinit -u -d "${_jsh_compdump}"
-fi
-unset _jsh_compdump
-(( ${+functions[_jsh_after_compinit]} )) && _jsh_after_compinit
-# The cached dump may predate jsh's own completion, so register it explicitly.
-if [[ -r ${JSH}/modules/shell/completions/_jsh ]]; then
-  fpath=("${JSH}/modules/shell/completions" "${fpath[@]}")
-  autoload -Uz _jsh && compdef _jsh jsh
-fi
-
-_jsh_git() {
-  local result=1
-  if (( CURRENT == 2 )); then
-    local -a commands=(
-      'create:create a project' 'get:clone a project' 'commits:browse history'
-      'amend:move commit timestamps' 'profile:select a profile' 'save:save changes'
-      'load:load changes' 'refresh:rebase onto the default branch' 'handoff:transfer commits'
-    )
-    _describe -t commands 'jsh Git command' commands && result=0
-  fi
-  _git "$@" && result=0
-  return ${result}
-}
-autoload -Uz _git
-compdef _jsh_git git
-
-# shellcheck disable=SC1090  # Vendored repository
-[[ -r "${JSH_VENDOR}/fzf-tab/fzf-tab.plugin.zsh" && -n ${commands[fzf]:-} ]] && \
-  source "${JSH_VENDOR}/fzf-tab/fzf-tab.plugin.zsh"
-
-# Completion styling
-zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'  # Case insensitive
-# shellcheck disable=SC2296  # Zsh-specific parameter expansion syntax
-zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}" # Use LS_COLORS
-zstyle ':completion:*' menu no                          # Don't show menu by default
-
-# Fzf-tab preview settings
-zstyle ':fzf-tab:complete:cd:*' fzf-preview "ls --color \$realpath"
-
-# ---- Tool Completions ----
-
-command -v direnv &>/dev/null && eval "$(direnv hook zsh)"
-command -v docker &>/dev/null && eval "$(docker completion zsh)"
-# shellcheck disable=SC1090  # Dynamic source from fzf
-command -v fzf &>/dev/null && source <(command fzf --zsh 2>/dev/null)
-# shellcheck disable=SC1090  # Dynamic source from kubectl
-command -v kubectl &>/dev/null && source <(kubectl completion zsh)
-# shellcheck disable=SC1090  # Dynamic source from task
-command -v task &>/dev/null && source <(task --completion zsh)
-# shellcheck disable=SC1090  # Technis task arguments
-[[ -r "${GIT_BASE}/technis/scripts/completions/task.zsh" ]] && \
-  source "${GIT_BASE}/technis/scripts/completions/task.zsh"
-command -v zoxide &>/dev/null && eval "$(zoxide init zsh)"
-command -v atuin &>/dev/null && eval "$(atuin init zsh)"
-
-# ============================================================================
-# 5. HELPER FUNCTIONS
-# ============================================================================
-
-# Color palette for output formatting
-if command -v tput &>/dev/null; then
-  error() { echo -e "$(tput setaf 1)$*$(tput sgr0)"; }      # Red
-  warn() { echo -e "$(tput setaf 3)$*$(tput sgr0)"; }       # Yellow/Orange
-  success() { echo -e "$(tput setaf 2)$*$(tput sgr0)"; }    # Green
-  info() { echo -e "$(tput setaf 4)$*$(tput sgr0)"; }       # Blue
-else
-  error() { echo -e "\033[31m$*\033[0m"; }                  # Red
-  warn() { echo -e "\033[33m$*\033[0m"; }                   # Yellow
-  success() { echo -e "\033[32m$*\033[0m"; }                # Green
-  info() { echo -e "\033[34m$*\033[0m"; }                   # Blue
-fi
-
-if [[ -z "${JSH_OS:-}" ]]; then
-  case "${OSTYPE:-}" in
-    darwin*) JSH_OS=macos ;;
-    linux*) JSH_OS=linux ;;
-    cygwin* | msys* | win32*) JSH_OS=windows ;;
-    *) JSH_OS=unknown ;;
-  esac
-fi
-export JSH_OS
-
-has() { whence -p -- "$1" >/dev/null 2>&1; }
-
-# shellcheck source=../../../lib/output.sh
-source "${JSH}/lib/output.sh"
+#!/usr/bin/env bash
+# Interactive commands shared by Bash 3.2 and Zsh. Source after shell navigation.
+# shellcheck disable=SC2154 # Interactive rc supplies JSH, JSH_OS and _jsh_agent_shell.
 
 _j_ui_message() {
   local level="$1" color="" reset="" mark="" output_fd=1
   shift
   case ${level} in
-    success|ok) mark='✓'; color=$'\033[32m' ;;
-    warn|warning) mark='!'; color=$'\033[33m'; output_fd=2 ;;
-    error|fail) mark='✕'; color=$'\033[31m'; output_fd=2 ;;
+    success | ok)
+      mark='✓'
+      color=$'\033[32m'
+      ;;
+    warn | warning)
+      mark='!'
+      color=$'\033[33m'
+      output_fd=2
+      ;;
+    error | fail)
+      mark='✕'
+      color=$'\033[31m'
+      output_fd=2
+      ;;
     *) color=$'\033[36m' ;;
   esac
 
@@ -272,20 +33,6 @@ _j_ui_message() {
   printf '%b%s%s%s%b\n' "${color}" "${mark}" "${mark:+ }" "$*" "${reset}" >&"${output_fd}"
 }
 
-# shellcheck disable=SC1090  # Repository-owned Zsh module
-source "${JSH}/lib/j.zsh"
-
-git() {
-  command git "$@" || return
-  if [[ ${1:-} == create && $# -ge 2 && ${2} != -h && ${2} != --help ]]; then
-    cd -- "${GIT_BASE:-${HOME}/Projects}/${2}"
-  fi
-}
-
-# ============================================================================
-# 6. SHELL ALIASES
-# ============================================================================
-
 # ---- Directory Navigation ----
 
 alias ..='cd ..'
@@ -298,7 +45,8 @@ alias .2='cd ../../' .3='cd ../../../' .4='cd ../../../../' .5='cd ../../../../.
 
 # ---- Directory Listing ----
 
-unalias ls 2>/dev/null || true
+unalias ls l ll la lll lt lS tree 2>/dev/null || true
+unset -f ls 2>/dev/null || true
 if has eza; then
   function ls {
     local -a eza_args=(-a -l --git --icons --group-directories-first)
@@ -313,7 +61,7 @@ if has eza; then
           eza_args+=("--" "$@")
           break
           ;;
-        --*|-)
+        --* | -)
           eza_args+=("${arg}")
           ;;
         -?*)
@@ -367,7 +115,7 @@ fi
 
 # ---- File Operations ----
 
-if (( _jsh_agent_shell )); then
+if ((_jsh_agent_shell)); then
   alias cp='cp -v' mv='mv -v' ln='ln -v'
 else
   alias cp='cp -iv' mv='mv -iv' rm='rm -i' ln='ln -iv'
@@ -385,7 +133,7 @@ alias 000='chmod 000' 640='chmod 640' 644='chmod 644' 755='chmod 755' 775='chmod
 # ---- Search and Find ----
 
 unalias grep egrep fgrep ggrep 2>/dev/null || true
-unfunction grep egrep fgrep ggrep 2>/dev/null || true
+unset -f grep egrep fgrep ggrep 2>/dev/null || true
 
 _jsh_grep_backend='grep'
 _jsh_grep_has_gnu=0
@@ -408,13 +156,22 @@ _jsh_grep_run() {
     fi
     if [[ ${options_done} == 0 ]]; then
       case "${argument}" in
-        --) options_done=1; continue ;;
-        -e|-f|--regexp|--file) option_value=pattern; continue ;;
-        -A|-B|-C|-D|-d|-m|--after-context|--before-context|--binary-files|--context|--devices|--directories|--exclude|--exclude-dir|--exclude-from|--group-separator|--include|--label|--max-count)
+        --)
+          options_done=1
+          continue
+          ;;
+        -e | -f | --regexp | --file)
+          option_value=pattern
+          continue
+          ;;
+        -A | -B | -C | -D | -d | -m | --after-context | --before-context | --binary-files | --context | --devices | --directories | --exclude | --exclude-dir | --exclude-from | --group-separator | --include | --label | --max-count)
           option_value=option
           continue
           ;;
-        -e?*|-f?*|--regexp=*|--file=*) pattern_supplied=1; continue ;;
+        -e?* | -f?* | --regexp=* | --file=*)
+          pattern_supplied=1
+          continue
+          ;;
         -*) continue ;;
       esac
     fi
@@ -572,12 +329,7 @@ if has git; then
   alias gcount='git rev-list --count HEAD'
   alias gdiff='git diff --name-only master'
   alias gvimdiff='git difftool --tool=vimdiff --no-prompt'
-  # Extra subcommands from bin/git.
-  zstyle ':completion:*:*:git:*' user-commands \
-    save:'back up uncommitted changes to a secret gist' \
-    load:'apply changes saved with git save' \
-    refresh:'fetch origin and rebase onto its default branch' \
-    profile:'use a conf/git.json identity, SSH key, and SSH remotes'
+
 fi
 
 # ---- Docker ----
@@ -727,6 +479,7 @@ if has python3 || has python; then
   function activate {
     local activate_file="${PWD}/.venv/bin/activate"
     [[ -r "${activate_file}" ]] || return 0
+    # shellcheck disable=SC1090 # Activate the environment in the calling shell.
     source "${activate_file}"
   }
 fi
@@ -793,7 +546,10 @@ if has aws; then
     while IFS= read -r profile; do
       [[ -z ${profile} ]] || profiles+=("${profile}")
     done < <(aws configure list-profiles)
-    (( ${#profiles[@]} )) || { _j_ui_message warn 'No AWS profiles found'; return 1; }
+    ((${#profiles[@]})) || {
+      _j_ui_message warn 'No AWS profiles found'
+      return 1
+    }
     profile=$(jsh::choose 'AWS profile' "${profiles[@]}") || return
     export AWS_PROFILE=${profile}
   }
@@ -828,34 +584,34 @@ fi
 if has grc; then
   alias colorize='grc -es --colour=auto'
 
-  # shellcheck disable=SC1073,SC1072
-  () {
-    local grc_conf_dir=""
+  _jsh_grc_aliases() {
+    local dir file cmd grc_conf_dir=''
+    [[ -z ${ZSH_VERSION:-} ]] || setopt localoptions nonomatch
     for dir in /opt/homebrew/share/grc /usr/share/grc /usr/local/share/grc; do
-      [[ -d "$dir" ]] && { grc_conf_dir="$dir"; break; }
+      [[ ! -d ${dir} ]] || {
+        grc_conf_dir=${dir}
+        break
+      }
     done
-
-    if [[ -n "$grc_conf_dir" ]]; then
-      local -a available_configs=($grc_conf_dir/conf.*(N:t:s/conf.//))
-
-      for cmd in "${available_configs[@]}"; do
-        case "$cmd" in
-          common|dummy|esperanto|log|lolcat) continue ;;
-          configure)
-            configure() { command grc -es --colour=auto ./configure "$@"; }
-            ;;
-          make)
-            make() { command grc -es --colour=auto make "$@"; }
-            ;;
-          *)
-            if ! alias "$cmd" &>/dev/null && (( ! $+functions[$cmd] )); then
-              alias "$cmd"="colorize $cmd"
-            fi
-            ;;
-        esac
-      done
-    fi
+    [[ -n ${grc_conf_dir} ]] || return 0
+    for file in "${grc_conf_dir}"/conf.*; do
+      [[ -f ${file} ]] || continue
+      cmd=${file##*/conf.}
+      case ${cmd} in
+        common | dummy | esperanto | log | lolcat) continue ;;
+        configure) configure() { command grc -es --colour=auto ./configure "$@"; } ;;
+        make) make() { command grc -es --colour=auto make "$@"; } ;;
+        *)
+          if ! alias "${cmd}" >/dev/null 2>&1 && ! typeset -f "${cmd}" >/dev/null 2>&1; then
+            # shellcheck disable=SC2139 # Freeze the discovered command in its alias.
+            alias "${cmd}=colorize ${cmd}"
+          fi
+          ;;
+      esac
+    done
   }
+  _jsh_grc_aliases
+  unset -f _jsh_grc_aliases
 fi
 
 # ---- File Viewing and Development ----
@@ -868,18 +624,16 @@ fi
 if has nvim || has vim; then
   alias vz='vim ~/.zshrc'
 fi
-alias show_options='setopt'
 
-# ============================================================================
-# 7. SHELL FUNCTIONS
-# ============================================================================
-
-# ---- Directory Navigation ----
+unalias free top open 2>/dev/null || true
 
 up() {
   local count="${1:-1}"
   local _dir="" i
-  [[ "${count}" == <1-> ]] || { _j_ui_message error "Usage: up <positive-count>"; return 1; }
+  [[ ${count} =~ ^[1-9][0-9]*$ ]] || {
+    _j_ui_message error "Usage: up <positive-count>"
+    return 1
+  }
   for ((i = 0; i < count; i++)); do
     _dir="../${_dir}"
   done
@@ -887,14 +641,20 @@ up() {
 }
 
 take() {
-  [[ -z "${1:-}" ]] && { _j_ui_message error "Usage: take <dir>"; return 1; }
+  [[ -z "${1:-}" ]] && {
+    _j_ui_message error "Usage: take <dir>"
+    return 1
+  }
   command mkdir -p "$1" && builtin cd "$1" || return 1
 }
 
 bd() {
   local target="${1:-}"
   local _dir="${PWD}"
-  [[ -n "${target}" ]] || { _j_ui_message error "Usage: bd <parent-name>"; return 1; }
+  [[ -n "${target}" ]] || {
+    _j_ui_message error "Usage: bd <parent-name>"
+    return 1
+  }
 
   while [[ "${_dir}" != "/" ]]; do
     if [[ "$(basename "${_dir}")" == *"${target}"* ]]; then
@@ -908,10 +668,11 @@ bd() {
   return 1
 }
 
-# ---- System & Process Management ----
-
 ffpid() {
-  [[ $# -gt 0 ]] || { _j_ui_message error "Usage: ffpid <process>"; return 1; }
+  [[ $# -gt 0 ]] || {
+    _j_ui_message error "Usage: ffpid <process>"
+    return 1
+  }
   if has pgrep; then
     command pgrep -f -- "$*"
   elif has lsof; then
@@ -922,7 +683,6 @@ ffpid() {
   fi
 }
 
-unalias free top 2>/dev/null || true
 free() {
   if has free; then
     command free -h "$@"
@@ -942,13 +702,13 @@ top() {
   fi
 }
 
-unalias open 2>/dev/null || true
 open() {
   local -a targets opener
-  local target desktop=${(L)${XDG_CURRENT_DESKTOP:-${DESKTOP_SESSION:-}}}
+  local target desktop
+  desktop=$(_j_lowercase "${XDG_CURRENT_DESKTOP:-${DESKTOP_SESSION:-}}")
   local -i result=0 use_leaf=0
 
-  (( $# )) && targets=("$@") || targets=(.)
+  (($#)) && targets=("$@") || targets=(.)
   has leaf && use_leaf=1
 
   case "${JSH_OS}" in
@@ -964,7 +724,7 @@ open() {
         fi
       fi
 
-      if (( ${#opener[@]} == 0 )); then
+      if ((${#opener[@]} == 0)); then
         case "${desktop}" in
           *kde* | *plasma*)
             if has kioclient6; then
@@ -984,7 +744,7 @@ open() {
         esac
       fi
 
-      if (( ${#opener[@]} == 0 )); then
+      if ((${#opener[@]} == 0)); then
         if has xdg-open; then
           opener=(xdg-open)
         elif has gio; then
@@ -1015,13 +775,13 @@ open() {
       ;;
   esac
 
-  if (( ${#opener[@]} == 0 )); then
+  if ((${#opener[@]} == 0)); then
     _j_ui_message error "No supported opener found for ${JSH_OS}"
     return 1
   fi
 
   for target in "${targets[@]}"; do
-    if (( use_leaf )) && [[ ${target:l} == *.md || ${target:l} == *.markdown ]]; then
+    if ((use_leaf)) && [[ $(_j_lowercase "${target}") == *.md || $(_j_lowercase "${target}") == *.markdown ]]; then
       command leaf "${target}" || result=$?
     else
       command "${opener[@]}" "${target}" || result=$?
@@ -1034,11 +794,9 @@ quiet() {
   if [[ $# -eq 0 ]]; then
     return
   else
-    "$@" &> /dev/null
+    "$@" &>/dev/null
   fi
 }
-
-# ---- Directory & File Operations ----
 
 duh() {
   if [[ "${JSH_OS}" == macos ]]; then
@@ -1049,13 +807,19 @@ duh() {
 }
 
 bak() {
-  [[ $# -eq 1 ]] || { _j_ui_message error "Usage: bak <file>"; return 1; }
+  [[ $# -eq 1 ]] || {
+    _j_ui_message error "Usage: bak <file>"
+    return 1
+  }
   backup "$1"
 }
 
 backup() {
   local timestamp file destination source suffix result=0
-  [[ $# -gt 0 ]] || { _j_ui_message error "Usage: backup <file...>"; return 1; }
+  [[ $# -gt 0 ]] || {
+    _j_ui_message error "Usage: backup <file...>"
+    return 1
+  }
   timestamp="$(date +%Y%m%d_%H%M%S)"
 
   for file in "$@"; do
@@ -1066,8 +830,10 @@ backup() {
         destination="${file}.${timestamp}.${suffix}.bak"
         ((suffix++))
       done
-      source="${file:a}"
-      if command cp -a "${source}" "${destination:a}"; then
+      source=${file}
+      [[ ${source} == /* ]] || source=${PWD}/${source}
+      [[ ${destination} == /* ]] || destination=${PWD}/${destination}
+      if command cp -a "${source}" "${destination}"; then
         _j_ui_message success "Backed up: ${destination}"
       else
         _j_ui_message error "Backup failed: ${file}"
@@ -1083,13 +849,19 @@ backup() {
 
 extract() {
   local file="$1"
-  [[ -z "${file}" ]] && { _j_ui_message error "Usage: extract <file>"; return 1; }
-  [[ -f "${file}" ]] || { _j_ui_message error "File not found: ${file}"; return 1; }
+  [[ -z "${file}" ]] && {
+    _j_ui_message error "Usage: extract <file>"
+    return 1
+  }
+  [[ -f "${file}" ]] || {
+    _j_ui_message error "File not found: ${file}"
+    return 1
+  }
 
-  case "${file:l}" in
-    *.tar.bz2|*.tbz2) tar xjf "${file}" ;;
-    *.tar.gz|*.tgz) tar xzf "${file}" ;;
-    *.tar.xz|*.txz) tar xJf "${file}" ;;
+  case "$(_j_lowercase "${file}")" in
+    *.tar.bz2 | *.tbz2) tar xjf "${file}" ;;
+    *.tar.gz | *.tgz) tar xzf "${file}" ;;
+    *.tar.xz | *.txz) tar xJf "${file}" ;;
     *.tar.zst) tar --zstd -xf "${file}" ;;
     *.tar) tar xf "${file}" ;;
     *.bz2) bunzip2 "${file}" ;;
@@ -1112,13 +884,19 @@ extract() {
 compress() {
   local archive="$1"
   shift
-  [[ -z "${archive}" ]] && { _j_ui_message error "Usage: compress <archive> <files...>"; return 1; }
-  [[ $# -eq 0 ]] && { _j_ui_message error "No files specified"; return 1; }
+  [[ -z "${archive}" ]] && {
+    _j_ui_message error "Usage: compress <archive> <files...>"
+    return 1
+  }
+  [[ $# -eq 0 ]] && {
+    _j_ui_message error "No files specified"
+    return 1
+  }
 
-  case "${archive:l}" in
-    *.tar.bz2|*.tbz2) tar cjf "${archive}" "$@" ;;
-    *.tar.gz|*.tgz) tar czf "${archive}" "$@" ;;
-    *.tar.xz|*.txz) tar cJf "${archive}" "$@" ;;
+  case "$(_j_lowercase "${archive}")" in
+    *.tar.bz2 | *.tbz2) tar cjf "${archive}" "$@" ;;
+    *.tar.gz | *.tgz) tar czf "${archive}" "$@" ;;
+    *.tar.xz | *.txz) tar cJf "${archive}" "$@" ;;
     *.tar.zst) tar --zstd -cf "${archive}" "$@" ;;
     *.tar) tar cf "${archive}" "$@" ;;
     *.zip) zip -r "${archive}" "$@" ;;
@@ -1133,7 +911,10 @@ compress() {
 ff() {
   local pattern="${1:-}"
   local dir="${2:-.}"
-  [[ -n "${pattern}" ]] || { _j_ui_message error "Usage: ff <pattern> [directory]"; return 1; }
+  [[ -n "${pattern}" ]] || {
+    _j_ui_message error "Usage: ff <pattern> [directory]"
+    return 1
+  }
 
   if has fd; then
     command fd --type f --fixed-strings --ignore-case -- "${pattern}" "${dir}"
@@ -1150,7 +931,10 @@ ff() {
 ffd() {
   local pattern="${1:-}"
   local dir="${2:-.}"
-  [[ -n "${pattern}" ]] || { _j_ui_message error "Usage: ffd <pattern> [directory]"; return 1; }
+  [[ -n "${pattern}" ]] || {
+    _j_ui_message error "Usage: ffd <pattern> [directory]"
+    return 1
+  }
 
   if has fd; then
     command fd --type d --fixed-strings --ignore-case -- "${pattern}" "${dir}"
@@ -1190,10 +974,16 @@ listening() {
 
 killport() {
   local port="$1"
-  [[ -z "${port}" ]] && { _j_ui_message error "Usage: killport <port>"; return 1; }
-  [[ "${port}" == <1-65535> ]] || { _j_ui_message error "Invalid port: ${port}"; return 1; }
+  [[ -z "${port}" ]] && {
+    _j_ui_message error "Usage: killport <port>"
+    return 1
+  }
+  [[ ${port} =~ ^[0-9]{1,5}$ ]] && ((10#${port} >= 1 && 10#${port} <= 65535)) || {
+    _j_ui_message error "Invalid port: ${port}"
+    return 1
+  }
 
-  local pids
+  local pids pid
   if has lsof; then
     pids=$(command lsof -tiTCP:"${port}" -sTCP:LISTEN 2>/dev/null)
   elif has fuser; then
@@ -1205,7 +995,9 @@ killport() {
 
   if [[ -n "${pids}" ]]; then
     _j_ui_message info "Stopping PID(s) ${pids//$'\n'/, } on port ${port}"
-    kill ${=pids}
+    while IFS= read -r pid; do
+      kill "${pid}" || return
+    done < <(printf '%s\n' "${pids}" | command tr ' ' '\n')
   else
     _j_ui_message warn "No process found on port ${port}"
     return 1
@@ -1237,7 +1029,10 @@ localip() {
 }
 
 perm() {
-  [[ $# -gt 0 ]] || { _j_ui_message error "Usage: perm <path...>"; return 1; }
+  [[ $# -gt 0 ]] || {
+    _j_ui_message error "Usage: perm <path...>"
+    return 1
+  }
   if [[ "${JSH_OS}" == macos ]]; then
     command stat -f '%Lp %N' "$@"
   else
@@ -1249,7 +1044,7 @@ function proxy+ {
   local endpoint="${1:-${PROXY_ENDPOINT:-}}"
   local bypass="${2:-${NO_PROXY_LIST:-localhost,127.0.0.1,::1}}"
   case "${endpoint}" in
-    http://*|https://*) ;;
+    http://* | https://*) ;;
     *)
       _j_ui_message error "Usage: proxy+ <http-or-https-url> [no-proxy-list]"
       return 1
@@ -1269,11 +1064,9 @@ function proxy- {
   unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY all_proxy NO_PROXY no_proxy
 }
 
-# ---- Development Utilities ----
-
 git-stage-range() {
   local file="${1:-}" start="${2:-}" end="${3:-}" patch
-  [[ -n "${file}" && "${start}" == <1-> && "${end}" == <1-> && ${start} -le ${end} ]] || {
+  [[ -n "${file}" && ${start} =~ ^[1-9][0-9]*$ && ${end} =~ ^[1-9][0-9]*$ && ${start} -le ${end} ]] || {
     _j_ui_message error "Usage: git-stage-range <file> <start-line> <end-line>"
     return 1
   }
@@ -1382,156 +1175,54 @@ jsonpp() {
 genpass() {
   local length="${1:-32}"
   local password
-  [[ "${length}" == <1-> ]] || { _j_ui_message error "Usage: genpass <positive-length>"; return 1; }
+  [[ ${length} =~ ^[1-9][0-9]*$ ]] || {
+    _j_ui_message error "Usage: genpass <positive-length>"
+    return 1
+  }
 
   if has openssl; then
     password=$(command openssl rand -base64 "$((length * 2))" | command tr -dc 'a-zA-Z0-9' | command head -c "${length}")
   else
-    password=$(LC_ALL=C command tr -dc 'a-zA-Z0-9' < /dev/urandom | command head -c "${length}")
+    password=$(LC_ALL=C command tr -dc 'a-zA-Z0-9' </dev/urandom | command head -c "${length}")
   fi
-  [[ ${#password} -eq ${length} ]] || { _j_ui_message error "Could not generate ${length} characters"; return 1; }
+  [[ ${#password} -eq ${length} ]] || {
+    _j_ui_message error "Could not generate ${length} characters"
+    return 1
+  }
   printf '%s\n' "${password}"
 }
 
 urlencode() {
-  local string="$1"
-  if has python3; then
-    python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))" "$string"
-  else
-    echo "${string}" | sed 's/ /%20/g; s/!/%21/g; s/"/%22/g; s/#/%23/g; s/\$/%24/g; s/&/%26/g'
-  fi
+  local LC_ALL=C string=${1-} char code result=''
+  while [[ -n ${string} ]]; do
+    char=${string:0:1}
+    string=${string:1}
+    case ${char} in
+      [a-zA-Z0-9.~_/-]) result+=${char} ;;
+      *)
+        # Bash 3.2 printf treats bytes above 127 as signed characters.
+        printf -v code '%d' "'${char}"
+        printf -v code '%%%02X' "$((code & 255))"
+        result+=${code}
+        ;;
+    esac
+  done
+  printf '%s\n' "${result}"
 }
 
 urldecode() {
-  local string="$1"
-  if has python3; then
-    python3 -c "import urllib.parse, sys; print(urllib.parse.unquote(sys.argv[1]))" "$string"
-  else
-    echo "${string}" | sed 's/%20/ /g; s/%21/!/g; s/%22/"/g; s/%23/#/g; s/%24/$/g; s/%26/\&/g'
-  fi
-}
-
-# ---- Git Utilities ----
-
-_git_confirm() {
-  local reply
-  printf '%s [y/N] ' "$1"
-  read -r -s -k 1 reply || return 1
-  if [[ ${reply} == [yY] ]]; then
-    print y
-    return 0
-  fi
-  print n
-  _j_ui_message info "Cancelled"
-  return 1
-}
-
-_git_require_origin() {
-  git remote get-url origin >/dev/null 2>&1 && return 0
-  _j_ui_message error "No origin remote: add one with git remote add origin URL"
-  return 1
-}
-
-function git+ {
-  local branch
-  branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null) || {
-    _j_ui_message error "Detached HEAD: checkout a branch first"
-    return 1
-  }
-
-  _git_require_origin || return 1
-  _git_confirm "Push '${branch}' to origin?" || return 1
-  git push --set-upstream "$@" origin "${branch}"
-}
-
-_git_force_push() {
-  local confirm=$1
-  local branch
-  shift
-
-  branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null) || {
-    _j_ui_message error "Detached HEAD: checkout a branch first"
-    return 1
-  }
-
-  _git_require_origin || return 1
-  if [[ ${confirm} == 1 ]]; then
-    _git_confirm "Force-push '${branch}' to origin with --force-with-lease?" || return 1
-  fi
-  git push --set-upstream --force-with-lease "$@" origin "${branch}"
-}
-
-function git+++ {
-  _git_force_push 0 "$@"
-}
-
-function git++ {
-  _git_force_push 1 "$@"
-}
-
-function git- {
-  _git_confirm "Reset HEAD to undo last commit ($(git log -1 --pretty=format:'%s'))?" || return 1
-  git reset HEAD~1
-}
-
-function git-+ {
-  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    _j_ui_message error "Not a git repository"
-    return 1
-  fi
-
-  local current_branch remote upstream_ref default_ref default_branch candidate
-  current_branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null) || {
-    _j_ui_message error "Detached HEAD: checkout a branch first"
-    return 1
-  }
-
-  upstream_ref=$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null) || true
-  if [[ -n "${upstream_ref}" ]]; then
-    remote="${upstream_ref%%/*}"
-  else
-    remote=$(git config --get "branch.${current_branch}.remote" 2>/dev/null) || true
-  fi
-
-  if [[ -z "${remote}" ]]; then
-    if git remote get-url origin >/dev/null 2>&1; then
-      remote="origin"
+  local string=${1-} result='' byte
+  while [[ -n ${string} ]]; do
+    if [[ ${string} == %[0-9a-fA-F][0-9a-fA-F]* ]]; then
+      printf -v byte '%b' "\\x${string:1:2}"
+      result+=${byte}
+      string=${string:3}
     else
-      remote=$(git remote | head -n 1)
+      result+=${string:0:1}
+      string=${string:1}
     fi
-  fi
-
-  if [[ -z "${remote}" ]]; then
-    _j_ui_message error "No git remote configured"
-    return 1
-  fi
-
-  default_ref=$(git symbolic-ref --quiet --short "refs/remotes/${remote}/HEAD" 2>/dev/null) || true
-  default_branch="${default_ref#"${remote}"/}"
-
-  if [[ -z "${default_branch}" || "${default_branch}" == "${default_ref}" ]]; then
-    default_branch=$(git remote show "${remote}" 2>/dev/null | sed -n 's/^[[:space:]]*HEAD branch: //p' | head -n 1)
-  fi
-
-  if [[ -z "${default_branch}" ]]; then
-    for candidate in main master trunk develop; do
-      if git show-ref --verify --quiet "refs/remotes/${remote}/${candidate}"; then
-        default_branch="${candidate}"
-        break
-      fi
-    done
-  fi
-
-  if [[ -z "${default_branch}" ]]; then
-    _j_ui_message error "Could not determine default branch for remote '${remote}'"
-    return 1
-  fi
-
-  _git_confirm "Fetch '${remote}' and rebase '${current_branch}' onto '${remote}/${default_branch}'?" || return 1
-
-  git fetch "${remote}" --prune || return 1
-  _j_ui_message info "Rebasing ${current_branch} onto ${remote}/${default_branch}"
-  git rebase --autostash "$@" "${remote}/${default_branch}"
+  done
+  printf '%s\n' "${result}"
 }
 
 git_() {
@@ -1544,7 +1235,10 @@ git_() {
 
 gclone() {
   local repo="$1"
-  [[ -z "${repo}" ]] && { _j_ui_message error "Usage: gclone <repo-url>"; return 1; }
+  [[ -z "${repo}" ]] && {
+    _j_ui_message error "Usage: gclone <repo-url>"
+    return 1
+  }
 
   local dir
   dir="$(basename "${repo}" .git)"
@@ -1562,7 +1256,7 @@ http2ssh() {
     https://github.com/*) ssh_url="git@github.com:${url#https://github.com/}" ;;
     https://gitlab.com/*) ssh_url="git@gitlab.com:${url#https://gitlab.com/}" ;;
     https://bitbucket.org/*) ssh_url="git@bitbucket.org:${url#https://bitbucket.org/}" ;;
-    git@*|ssh://*)
+    git@* | ssh://*)
       _j_ui_message info "Remote '${remote}' already uses SSH"
       return 0
       ;;
@@ -1576,46 +1270,13 @@ http2ssh() {
   _j_ui_message success "Updated '${remote}' to ${ssh_url}"
 }
 
-# ---- IPMI & Hardware Management ----
-
-ipmi() {
-  [[ -z "${IPMI_HOST:-}" || -z "${IPMI_USER:-}" || -z "${IPMI_CRED_FILE:-}" ]] && \
-    { error "IPMI env vars not set"; return 1; }
-  has ipmitool || { error "ipmitool is required"; return 1; }
-  [[ "${1:-}" == fan ]] || {
-    command ipmitool -I lanplus -H "${IPMI_HOST}" -U "${IPMI_USER}" -f "${IPMI_CRED_FILE}" "$@"
-    return
-  }
-  if [[ $# -ne 2 || "$2" != <-> ]]; then
-    error "Usage: ipmi fan <speed_0-255>"
-    return 1
-  fi
-
-  local speed=$((10#$2)) hex_speed
-  if (( speed > 255 )); then
-    error "Usage: ipmi fan <speed_0-255>"
-    return 1
-  fi
-  hex_speed=$(printf '%02x\n' "${speed}") || return 1
-  command ipmitool -I lanplus -H "${IPMI_HOST}" -U "${IPMI_USER}" -f "${IPMI_CRED_FILE}" raw 0x30 0x30 0x01 0x00 || return 1
-  if ! command ipmitool -I lanplus -H "${IPMI_HOST}" -U "${IPMI_USER}" -f "${IPMI_CRED_FILE}" raw 0x30 0x30 0x02 0xff "0x${hex_speed}"; then
-    if command ipmitool -I lanplus -H "${IPMI_HOST}" -U "${IPMI_USER}" -f "${IPMI_CRED_FILE}" raw 0x30 0x30 0x01 0x01 >/dev/null 2>&1; then
-      error "Failed to set fan speed; restored automatic control"
-    else
-      error "Failed to set fan speed and restore automatic control"
-    fi
-    return 1
-  fi
-}
-
-# ---- Remote Development ----
-
 rcode() {
-  [[ $# -ne 2 ]] && { echo "Usage: rcode <ssh_host> <remote_path>"; return 1; }
+  [[ $# -ne 2 ]] && {
+    echo "Usage: rcode <ssh_host> <remote_path>"
+    return 1
+  }
   code --remote "ssh-remote+${1}" "${2}"
 }
-
-# ---- Miscellaneous ----
 
 weather() {
   local location="${1:-}"
@@ -1624,14 +1285,20 @@ weather() {
 
 cheat() {
   local topic="$1"
-  [[ -z "${topic}" ]] && { _j_ui_message error "Usage: cheat <topic>"; return 1; }
+  [[ -z "${topic}" ]] && {
+    _j_ui_message error "Usage: cheat <topic>"
+    return 1
+  }
   command curl -fsS "https://cheat.sh/${topic}"
 }
 
 timer() {
   local seconds="${1:-60}"
   local msg="${2:-Timer done!}"
-  [[ "${seconds}" == <1-> ]] || { _j_ui_message error "Usage: timer <positive-seconds> [message]"; return 1; }
+  [[ ${seconds} =~ ^[1-9][0-9]*$ ]] || {
+    _j_ui_message error "Usage: timer <positive-seconds> [message]"
+    return 1
+  }
 
   echo "Timer: ${seconds} seconds"
   while [[ "${seconds}" -gt 0 ]]; do
@@ -1649,8 +1316,8 @@ timer() {
 }
 
 calc() {
-  local expr="$*"
-  if [[ ! "$expr" =~ ^[0-9+\-*/\(\)\.\ %^]+$ ]]; then
+  local expr="$*" numeric='^[-0-9+*/(). %^]+$'
+  if [[ ! ${expr} =~ ${numeric} ]]; then
     _j_ui_message error "calc: invalid characters in expression"
     return 1
   fi
@@ -1667,12 +1334,10 @@ note() {
   if [[ $# -eq 0 ]]; then
     [[ -f "${notes_file}" ]] && command cat "${notes_file}"
   else
-    echo "$(date '+%Y-%m-%d %H:%M') $*" >> "${notes_file}"
+    echo "$(date '+%Y-%m-%d %H:%M') $*" >>"${notes_file}"
     echo "Note added."
   fi
 }
-
-# ---- Interactive Selectors ----
 
 fcd() {
   local root=${1:-.} directory selected
@@ -1680,7 +1345,10 @@ fcd() {
   while IFS= read -r directory; do
     choices+=("${directory}")
   done < <(find "${root}" -type d 2>/dev/null)
-  (( ${#choices[@]} )) || { _j_ui_message warn 'No directories found'; return 1; }
+  ((${#choices[@]})) || {
+    _j_ui_message warn 'No directories found'
+    return 1
+  }
   selected=$(jsh::choose 'Directory' "${choices[@]}") || return
   cd "${selected}" || return
 }
@@ -1697,7 +1365,10 @@ fe() {
       files+=("${file}")
     done
   fi
-  (( ${#files[@]} )) || { _j_ui_message warn 'No files found'; return 1; }
+  ((${#files[@]})) || {
+    _j_ui_message warn 'No files found'
+    return 1
+  }
   selected=$(jsh::choose 'File' "${files[@]}") || return
   "${EDITOR:-vim}" "${selected}" </dev/tty
 }
@@ -1710,9 +1381,12 @@ fh() {
     [[ -z ${command} ]] && continue
     [[ -n ${pattern} && ${command} != *${pattern}* ]] && continue
     commands+=("${command}")
-    (( ${#commands[@]} < 30 )) || break
+    ((${#commands[@]} < 30)) || break
   done < <(history | tail -100)
-  (( ${#commands[@]} )) || { _j_ui_message warn 'No matching commands'; return 1; }
+  ((${#commands[@]})) || {
+    _j_ui_message warn 'No matching commands'
+    return 1
+  }
   selected=$(jsh::choose 'Recent command' "${commands[@]}") || return
   _j_ui_message info "Executing: ${selected}"
   eval "${selected}"
@@ -1726,16 +1400,19 @@ fkill() {
     shift
   fi
   pattern=$*
-  pattern_lower=${(L)pattern}
+  pattern_lower=$(_j_lowercase "${pattern}")
   while IFS= read -r line; do
-    [[ -n ${pattern} && ${(L)line} != *${pattern_lower}* ]] && continue
+    [[ -n ${pattern} && $(_j_lowercase "${line}") != *${pattern_lower}* ]] && continue
     processes+=("${line}")
-    (( ${#processes[@]} < 30 )) || break
+    ((${#processes[@]} < 30)) || break
   done < <(command ps ax -o pid=,user=,command=)
-  (( ${#processes[@]} )) || { _j_ui_message warn 'No matching processes'; return 1; }
+  ((${#processes[@]})) || {
+    _j_ui_message warn 'No matching processes'
+    return 1
+  }
   selected=$(jsh::choose 'PID USER COMMAND' "${processes[@]}") || return
-  pid=${${(z)selected}[1]}
-  [[ ${pid} == <1-> ]] || return 1
+  read -r pid _ <<<"${selected}"
+  [[ ${pid} =~ ^[1-9][0-9]*$ ]] || return 1
   _j_ui_message info "Sending SIG${signal} to PID ${pid}..."
   kill -s "${signal}" "${pid}"
 }
@@ -1747,7 +1424,10 @@ fco() {
     branch=$(printf '%s\n' "${branch}" | sed 's/^[ *]*//; s|^remotes/origin/||')
     [[ -z ${branch} || ${branch} == HEAD* ]] || branches+=("${branch}")
   done < <(git branch -a 2>/dev/null)
-  (( ${#branches[@]} )) || { _j_ui_message warn 'No branches found (not a git repo?)'; return 1; }
+  ((${#branches[@]})) || {
+    _j_ui_message warn 'No branches found (not a git repo?)'
+    return 1
+  }
   selected=$(jsh::choose 'Git branch' "${branches[@]}") || return
   git checkout "${selected}"
 }
@@ -1758,103 +1438,11 @@ fgl() {
   while IFS= read -r selected; do
     commits+=("${selected}")
   done < <(git log --oneline -30 2>/dev/null)
-  (( ${#commits[@]} )) || { _j_ui_message warn 'No commits found (not a git repo?)'; return 1; }
+  ((${#commits[@]})) || {
+    _j_ui_message warn 'No commits found (not a git repo?)'
+    return 1
+  }
   selected=$(jsh::choose 'Recent commit' "${commits[@]}") || return
-  printf '%s\n' "${${(z)selected}[1]}"
+  selected=${selected%% *}
+  printf '%s\n' "${selected}"
 }
-
-# ============================================================================
-# 8. THEME CUSTOMIZATION
-# ============================================================================
-
-# shellcheck disable=SC1090  # Repository-owned native prompt
-source "${JSH}/lib/prompt.zsh"
-
-# ============================================================================
-# 9. PATH PRIORITIZATION / DEDUPLICATION
-# ============================================================================
-
-# Function to remove duplicate PATH entries while preserving order
-dedup_path() {
-  # shellcheck disable=SC2296  # Zsh-specific parameter expansion syntax
-  local path_array=("${(s/:/)PATH}")
-  local -A seen
-  local clean_path=""
-
-  for dir in "${path_array[@]}"; do
-    if [[ -n "${dir}" ]] && [[ -z "${seen[${dir}]}" ]]; then
-      seen[${dir}]=1
-      if [[ -z "${clean_path}" ]]; then
-        clean_path="${dir}"
-      else
-        clean_path="${clean_path}:${dir}"
-      fi
-    fi
-  done
-
-  export PATH="${clean_path}"
-}
-
-# Deduplicate PATH entries
-dedup_path
-
-# ============================================================================
-# 10. SHELL LIFECYCLE
-# ============================================================================
-
-jsh() {
-  case ${1:-} in
-    -r|reload)
-      shift
-      if (( $# )); then
-        print -u2 -- 'Usage: jsh -r | jsh reload'
-        return 2
-      fi
-      (( $+functions[_jsh_prompt_git_async_stop] )) && _jsh_prompt_git_async_stop
-      setopt LOCAL_OPTIONS GLOBAL_EXPORT
-      local JSH_RELOADING=1
-      source "${JSH}/modules/shell/home/.zshrc"
-      return
-      ;;
-  esac
-  command "${JSH}/bin/jsh" "$@"
-}
-
-# These plugins must load after widgets and local customizations are defined.
-typeset -gA ZSH_HIGHLIGHT_STYLES
-ZSH_HIGHLIGHT_STYLES[command]='fg=green'
-ZSH_HIGHLIGHT_STYLES[hashed-command]='fg=green'
-
-# Re-sourcing on reload makes the two plugins wrap each other's widgets into a loop.
-# shellcheck disable=SC1090  # Vendored repositories
-(( $+functions[_zsh_autosuggest_start] )) || \
-  [[ ! -r "${JSH_VENDOR}/zsh-autosuggestions/zsh-autosuggestions.zsh" ]] || \
-  source "${JSH_VENDOR}/zsh-autosuggestions/zsh-autosuggestions.zsh"
-(( $+functions[_zsh_highlight] )) || \
-  [[ ! -r "${JSH_VENDOR}/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" ]] || \
-  source "${JSH_VENDOR}/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
-
-# Agent shells and reloads skip start-up work.
-if [[ -o interactive && ${JSH_RELOADING:-0} != 1 && -r ${JSH}/lib/startup.zsh ]] &&
-  (( ! _jsh_agent_shell )); then
-  # shellcheck source=../../../lib/startup.zsh
-  source "${JSH}/lib/startup.zsh"
-  _jsh_load_keys
-  _jsh_run_init
-fi
-
-if (( _jsh_runtime_active )); then
-  if (( _jsh_runtime_had_xdg_cache )); then
-    export XDG_CACHE_HOME=${_jsh_runtime_xdg_cache}
-  else
-    unset XDG_CACHE_HOME
-  fi
-fi
-unset _jsh_runtime_active _jsh_runtime_had_xdg_cache _jsh_runtime_xdg_cache
-
-# jsh runtime path: begin
-case ":${PATH}:" in
-  *:"${HOME}/.local/bin":*) ;;
-  *) export PATH="${HOME}/.local/bin:${PATH}" ;;
-esac
-# jsh runtime path: end

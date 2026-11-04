@@ -1,3 +1,472 @@
+#
+# .zshrc - Zsh Configuration
+#
+# Load Order:
+#   1. Essential Exports
+#   2. Plugin System
+#   3. Shell Options & Keybindings
+#   4. Completion System
+#   5. Helper Functions
+#   6. Shell Aliases
+#   7. Shell Functions
+#   8. Theme Customization
+#   9. Path Prioritization / Deduplication
+#   10. Local Customizations
+#
+
+typeset -i _jsh_runtime_active=0
+if [[ -n ${JSH_RUNTIME_DIR:-} ]]; then
+  _jsh_runtime_active=1
+  export JSH_RELOAD_PID=$$
+  zmodload -F zsh/files b:mkdir 2>/dev/null || return 1
+  builtin mkdir -p -- "${JSH_RUNTIME_DIR}" "${JSH_RUNTIME_DIR}/cache"
+
+  export JSH_HISTFILE="${JSH_RUNTIME_DIR}/history"
+  typeset _jsh_runtime_xdg_cache=${XDG_CACHE_HOME-}
+  typeset -i _jsh_runtime_had_xdg_cache=$+XDG_CACHE_HOME
+  export XDG_CACHE_HOME="${JSH_RUNTIME_DIR}/cache"
+fi
+
+# ============================================================================
+# 1. ESSENTIAL EXPORTS
+# ============================================================================
+
+# Core paths and editors
+export CLICOLORS=1                               # Colorize output
+export EDITOR=vim                                # Default CLI editor
+export VISUAL=vim                                # Default full-screen editor
+export SH=${SHELL##*/}                           # Shell type reference
+export VIRTUAL_ENV_DISABLE_PROMPT=1              # Python environment appears in prompt info
+
+# Project/work directories
+export GIT_BASE=${HOME}/Projects                 # Git projects base
+export WORK_DIR=${GIT_BASE}                      # Default work directory
+export JSH=${${(%):-%N}:A:h:h}                   # Repository root through symlinks
+
+typeset _jsh_rc
+if [[ ${JSH_LOAD_CONFIG:-1} == 1 ]]; then
+  for _jsh_rc in "${HOME}/.jshrc" "${HOME}/.local/.jshrc" "${JSH}/local/.jshrc"; do
+    [[ ! -r ${_jsh_rc} ]] || source "${_jsh_rc}"
+  done
+fi
+unset _jsh_rc
+
+if [[ ${functions_source[command_not_found_handler]:-} == /etc/profile.d/PackageKit.sh ]]; then
+  unfunction command_not_found_handler
+fi
+
+# Silence/optimize specific tools
+export DIRENV_LOG_FORMAT=                        # Silence direnv
+export DIRENV_WARN_TIMEOUT=30s                   # Direnv timeout
+export PYTHONDONTWRITEBYTECODE=1                 # No .pyc files on import
+
+# Shell environment
+if [[ -n ${JSH_LANG:-} ]]; then
+  export LANG=${JSH_LANG}
+fi
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-${HOME}/.config}"         # Wwhere apps should store config files, cache files, and data files
+
+# Vendored shell dependencies
+export JSH_VENDOR=${JSH_VENDOR:-${XDG_DATA_HOME:-${HOME}/.local/share}/jsh/vendor}
+if [[ ! -d ${JSH_VENDOR} && -d ${JSH}/local/vendor ]]; then
+  export JSH_VENDOR=${JSH}/local/vendor
+fi
+export FZF_BASE=${JSH_VENDOR}/fzf
+
+# Paths - ORDER MATTERS (priority: local > jsh local > jsh > vendored fzf > go > cargo)
+export PATH=${HOME}/.local/bin:${JSH}/local/bin:${JSH}/bin:${FZF_BASE}/bin:${HOME}/go/bin:${PATH}:${HOME}/.cargo/bin
+# Locate an existing Homebrew installation before shell hooks and completions.
+for _jsh_brew_bin in /opt/homebrew/bin /usr/local/bin /home/linuxbrew/.linuxbrew/bin; do
+  [[ ! -x ${_jsh_brew_bin}/brew ]] || path+=(${_jsh_brew_bin})
+done
+unset _jsh_brew_bin
+
+
+# Terminal optimizations
+# Without -X, less uses the alternate screen, so VS Code passes PageUp/PageDown to it.
+export LESS="-FR"                           # Colors, skip paging when output fits
+# AI agent terminals cannot answer interactive pager or confirmation prompts.
+typeset -i _jsh_agent_shell=0
+if [[ -n ${COPILOT_AGENT:-}${CLAUDECODE:-}${GEMINI_CLI:-} ]]; then
+  _jsh_agent_shell=1
+  export PAGER=cat GIT_PAGER=cat BAT_PAGING=never
+  setopt RM_STAR_SILENT
+fi
+
+# ============================================================================
+# 2. PLUGIN SYSTEM
+# ============================================================================
+
+typeset -a jsh_plugins=(fzf fzf-tab zsh-autosuggestions zsh-completions zsh-syntax-highlighting)
+if [[ ${JSH_LOAD_CONFIG:-1} == 1 ]]; then
+  for plugin in ${jsh_plugins}; do
+    if [[ ! -d "${JSH_VENDOR}/${plugin}" ]]; then
+      print -u2 -- "jsh shell plugins are missing. Run: ./scripts/shell.sh"
+      break
+    fi
+  done
+fi
+unset jsh_plugins plugin
+
+# ============================================================================
+# 3. SHELL OPTIONS & KEYBINDINGS
+# ============================================================================
+
+# Vi mode with sensible keybindings
+bindkey -v
+
+# Incremental search in vi mode
+bindkey -M vicmd '^R' history-incremental-search-backward
+bindkey -M vicmd '^S' history-incremental-search-forward
+bindkey -M viins '^R' history-incremental-search-backward
+bindkey -M viins '^S' history-incremental-search-forward
+
+# Delete key fixes for vi mode
+bindkey -M vicmd '^[[3~' delete-char
+bindkey -M viins '^[[3~' delete-char
+bindkey -M viins '^[[1;5D' backward-word
+bindkey -M viins '^[[1;5C' forward-word
+
+# Shell options (all at once)
+setopt COMPLETE_IN_WORD extended_history hist_find_no_dups hist_ignore_all_dups \
+        hist_ignore_dups hist_ignore_space hist_save_no_dups INTERACTIVE_COMMENTS \
+        NO_BEEP NOBGNICE HUP INC_APPEND_HISTORY SHARE_HISTORY
+
+# History configuration
+export HISTDUP=erase                  # Erase duplicates
+export HISTFILE="${JSH_HISTFILE:-${HOME}/.zsh_history}" # Keep mutable history outside the repository
+export HISTSIZE=50000                 # Number of commands to keep in memory
+export HIST_STAMPS=iso                # Timestamp format
+export SAVEHIST=50000                 # Number of commands to save to file
+
+# Completion options
+LISTMAX=0                           # Automatically paginate completions
+export LISTMAX                      # Used by zsh completion system
+MAILCHECK=0                         # Disable mail checking
+
+# ============================================================================
+# 4. COMPLETION SYSTEM
+# ============================================================================
+
+# brew shellenv prepends site-functions to fpath, so run it before the repo entries.
+if command -v brew &>/dev/null; then
+  _jsh_path=${PATH}
+  eval "$(brew shellenv)"
+  # shellenv also prepends Homebrew to PATH, which would shadow jsh wrappers such as bin/git.
+  export PATH=${_jsh_path}:${HOMEBREW_PREFIX}/bin:${HOMEBREW_PREFIX}/sbin
+  unset _jsh_path
+fi
+
+# Add user and vendored completions to fpath.
+fpath=(~/.zsh/completions "${JSH_VENDOR}/zsh-completions/src" "${fpath[@]}")
+typeset -gUa fpath
+
+# Initialize completion system
+typeset _jsh_cache=${XDG_CACHE_HOME:-${HOME}/.cache}/jsh
+command mkdir -p -- "${_jsh_cache}"
+typeset _jsh_compdump=${_jsh_cache}/.zcompdump
+unset _jsh_cache
+(( _jsh_runtime_active )) && _jsh_compdump=${JSH_RUNTIME_DIR}/cache/.zcompdump
+autoload -Uz compinit
+# Skip the fpath audit and rebuild when the dump is under a day old.
+if [[ -n ${_jsh_compdump}(#qN.mh-24) ]]; then
+  compinit -C -u -d "${_jsh_compdump}"
+else
+  compinit -u -d "${_jsh_compdump}"
+fi
+unset _jsh_compdump
+(( ${+functions[_jsh_after_compinit]} )) && _jsh_after_compinit
+_jsh() {
+  _arguments \
+    '(-h --help)'{-h,--help}'[show runtime help]' \
+    '-r[reload this shell configuration]' \
+    '-c[run a shell command]:command:' \
+    '-i[open an interactive shell]' \
+    '-l[open a login shell]'
+}
+compdef _jsh jsh
+
+_jsh_git() {
+  local result=1
+  if (( CURRENT == 2 )); then
+    local -a commands=(
+      'create:create a project' 'get:clone a project' 'commits:browse history'
+      'amend:move commit timestamps' 'profile:select a profile' 'save:save changes'
+      'load:load changes' 'refresh:rebase onto the default branch' 'handoff:transfer commits'
+    )
+    _describe -t commands 'jsh Git command' commands && result=0
+  fi
+  _git "$@" && result=0
+  return ${result}
+}
+autoload -Uz _git
+compdef _jsh_git git
+
+# shellcheck disable=SC1090  # Vendored repository
+[[ -r "${JSH_VENDOR}/fzf-tab/fzf-tab.plugin.zsh" && -n ${commands[fzf]:-} ]] && \
+  source "${JSH_VENDOR}/fzf-tab/fzf-tab.plugin.zsh"
+
+# Completion styling
+zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'  # Case insensitive
+# shellcheck disable=SC2296  # Zsh-specific parameter expansion syntax
+zstyle ':completion:*' list-colors "${(s.:.)LS_COLORS}" # Use LS_COLORS
+zstyle ':completion:*' menu no                          # Don't show menu by default
+
+# Fzf-tab preview settings
+zstyle ':fzf-tab:complete:cd:*' fzf-preview "ls --color \$realpath"
+
+# ---- Tool Completions ----
+
+command -v direnv &>/dev/null && eval "$(direnv hook zsh)"
+command -v docker &>/dev/null && eval "$(docker completion zsh)"
+# shellcheck disable=SC1090  # Dynamic source from fzf
+command -v fzf &>/dev/null && source <(command fzf --zsh 2>/dev/null)
+# shellcheck disable=SC1090  # Dynamic source from kubectl
+command -v kubectl &>/dev/null && source <(kubectl completion zsh)
+# shellcheck disable=SC1090  # Dynamic source from task
+command -v task &>/dev/null && source <(task --completion zsh)
+# shellcheck disable=SC1090  # Technis task arguments
+[[ -r "${GIT_BASE}/technis/scripts/completions/task.zsh" ]] && \
+  source "${GIT_BASE}/technis/scripts/completions/task.zsh"
+command -v zoxide &>/dev/null && eval "$(zoxide init zsh)"
+command -v atuin &>/dev/null && eval "$(atuin init zsh)"
+
+# ============================================================================
+# 5. HELPER FUNCTIONS
+# ============================================================================
+
+# Color palette for output formatting
+if command -v tput &>/dev/null; then
+  error() { echo -e "$(tput setaf 1)$*$(tput sgr0)"; }      # Red
+  warn() { echo -e "$(tput setaf 3)$*$(tput sgr0)"; }       # Yellow/Orange
+  success() { echo -e "$(tput setaf 2)$*$(tput sgr0)"; }    # Green
+  info() { echo -e "$(tput setaf 4)$*$(tput sgr0)"; }       # Blue
+else
+  error() { echo -e "\033[31m$*\033[0m"; }                  # Red
+  warn() { echo -e "\033[33m$*\033[0m"; }                   # Yellow
+  success() { echo -e "\033[32m$*\033[0m"; }                # Green
+  info() { echo -e "\033[34m$*\033[0m"; }                   # Blue
+fi
+
+if [[ -z "${JSH_OS:-}" ]]; then
+  case "${OSTYPE:-}" in
+    darwin*) JSH_OS=macos ;;
+    linux*) JSH_OS=linux ;;
+    cygwin* | msys* | win32*) JSH_OS=windows ;;
+    *) JSH_OS=unknown ;;
+  esac
+fi
+export JSH_OS
+
+has() { whence -p -- "$1" >/dev/null 2>&1; }
+
+# shellcheck source=lib/shell/output.sh
+source "${JSH}/lib/shell/output.sh"
+
+
+# shellcheck source=lib/shell/navigation.sh
+source "${JSH}/lib/shell/navigation.sh"
+
+_j_lowercase() { print -rn -- "${(L)1}"; }
+
+_j_track_directory() {
+  [[ -z ${J_NO_HOOK:-} ]] || return 0
+  local track_path=$1
+  setopt localoptions no_bg_nice
+  (_j_add "${track_path}") >/dev/null 2>&1 &!
+}
+
+_j_chpwd() {
+  [[ -z ${OLDPWD:-} ]] || _J_PREV_DIR=${OLDPWD}
+  _j_track_directory "${PWD}"
+}
+
+autoload -Uz add-zsh-hook
+add-zsh-hook chpwd _j_chpwd
+
+git() {
+  command git "$@" || return
+  if [[ ${1:-} == create && $# -ge 2 && ${2} != -h && ${2} != --help ]]; then
+    cd -- "${GIT_BASE:-${HOME}/Projects}/${2}"
+  fi
+}
+
+
+# ============================================================================
+# 6. SHELL ALIASES
+# ============================================================================
+
+# shellcheck source=lib/shell/commands.sh
+source "${JSH}/lib/shell/commands.sh"
+alias show_options='setopt'
+  # Extra subcommands from bin/git.
+  zstyle ':completion:*:*:git:*' user-commands \
+    save:'back up uncommitted changes to a secret gist' \
+    load:'apply changes saved with git save' \
+    refresh:'fetch origin and rebase onto its default branch' \
+    profile:'use a ~/.config/jsh/git.json identity, SSH key, and SSH remotes'
+
+# ============================================================================
+# 7. ZSH-SPECIFIC FUNCTIONS
+# ============================================================================
+
+_git_confirm() {
+  local reply
+  printf '%s [y/N] ' "$1"
+  read -r -s -k 1 reply || return 1
+  if [[ ${reply} == [yY] ]]; then
+    print y
+    return 0
+  fi
+  print n
+  _j_ui_message info "Cancelled"
+  return 1
+}
+
+_git_require_origin() {
+  git remote get-url origin >/dev/null 2>&1 && return 0
+  _j_ui_message error "No origin remote: add one with git remote add origin URL"
+  return 1
+}
+
+function git+ {
+  local branch
+  branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null) || {
+    _j_ui_message error "Detached HEAD: checkout a branch first"
+    return 1
+  }
+
+  _git_require_origin || return 1
+  _git_confirm "Push '${branch}' to origin?" || return 1
+  git push --set-upstream "$@" origin "${branch}"
+}
+
+_git_force_push() {
+  local confirm=$1
+  local branch
+  shift
+
+  branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null) || {
+    _j_ui_message error "Detached HEAD: checkout a branch first"
+    return 1
+  }
+
+  _git_require_origin || return 1
+  if [[ ${confirm} == 1 ]]; then
+    _git_confirm "Force-push '${branch}' to origin with --force-with-lease?" || return 1
+  fi
+  git push --set-upstream --force-with-lease "$@" origin "${branch}"
+}
+
+function git+++ {
+  _git_force_push 0 "$@"
+}
+
+function git++ {
+  _git_force_push 1 "$@"
+}
+
+function git- {
+  _git_confirm "Reset HEAD to undo last commit ($(git log -1 --pretty=format:'%s'))?" || return 1
+  git reset HEAD~1
+}
+
+function git-+ {
+  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    _j_ui_message error "Not a git repository"
+    return 1
+  fi
+
+  local current_branch remote upstream_ref default_ref default_branch candidate
+  current_branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null) || {
+    _j_ui_message error "Detached HEAD: checkout a branch first"
+    return 1
+  }
+
+  upstream_ref=$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null) || true
+  if [[ -n "${upstream_ref}" ]]; then
+    remote="${upstream_ref%%/*}"
+  else
+    remote=$(git config --get "branch.${current_branch}.remote" 2>/dev/null) || true
+  fi
+
+  if [[ -z "${remote}" ]]; then
+    if git remote get-url origin >/dev/null 2>&1; then
+      remote="origin"
+    else
+      remote=$(git remote | head -n 1)
+    fi
+  fi
+
+  if [[ -z "${remote}" ]]; then
+    _j_ui_message error "No git remote configured"
+    return 1
+  fi
+
+  default_ref=$(git symbolic-ref --quiet --short "refs/remotes/${remote}/HEAD" 2>/dev/null) || true
+  default_branch="${default_ref#"${remote}"/}"
+
+  if [[ -z "${default_branch}" || "${default_branch}" == "${default_ref}" ]]; then
+    default_branch=$(git remote show "${remote}" 2>/dev/null | sed -n 's/^[[:space:]]*HEAD branch: //p' | head -n 1)
+  fi
+
+  if [[ -z "${default_branch}" ]]; then
+    for candidate in main master trunk develop; do
+      if git show-ref --verify --quiet "refs/remotes/${remote}/${candidate}"; then
+        default_branch="${candidate}"
+        break
+      fi
+    done
+  fi
+
+  if [[ -z "${default_branch}" ]]; then
+    _j_ui_message error "Could not determine default branch for remote '${remote}'"
+    return 1
+  fi
+
+  _git_confirm "Fetch '${remote}' and rebase '${current_branch}' onto '${remote}/${default_branch}'?" || return 1
+
+  git fetch "${remote}" --prune || return 1
+  _j_ui_message info "Rebasing ${current_branch} onto ${remote}/${default_branch}"
+  git rebase --autostash "$@" "${remote}/${default_branch}"
+}
+
+# ---- IPMI & Hardware Management ----
+
+ipmi() {
+  [[ -z "${IPMI_HOST:-}" || -z "${IPMI_USER:-}" || -z "${IPMI_CRED_FILE:-}" ]] && \
+    { error "IPMI env vars not set"; return 1; }
+  has ipmitool || { error "ipmitool is required"; return 1; }
+  [[ "${1:-}" == fan ]] || {
+    command ipmitool -I lanplus -H "${IPMI_HOST}" -U "${IPMI_USER}" -f "${IPMI_CRED_FILE}" "$@"
+    return
+  }
+  if [[ $# -ne 2 || "$2" != <-> ]]; then
+    error "Usage: ipmi fan <speed_0-255>"
+    return 1
+  fi
+
+  local speed=$((10#$2)) hex_speed
+  if (( speed > 255 )); then
+    error "Usage: ipmi fan <speed_0-255>"
+    return 1
+  fi
+  hex_speed=$(printf '%02x\n' "${speed}") || return 1
+  command ipmitool -I lanplus -H "${IPMI_HOST}" -U "${IPMI_USER}" -f "${IPMI_CRED_FILE}" raw 0x30 0x30 0x01 0x00 || return 1
+  if ! command ipmitool -I lanplus -H "${IPMI_HOST}" -U "${IPMI_USER}" -f "${IPMI_CRED_FILE}" raw 0x30 0x30 0x02 0xff "0x${hex_speed}"; then
+    if command ipmitool -I lanplus -H "${IPMI_HOST}" -U "${IPMI_USER}" -f "${IPMI_CRED_FILE}" raw 0x30 0x30 0x01 0x01 >/dev/null 2>&1; then
+      error "Failed to set fan speed; restored automatic control"
+    else
+      error "Failed to set fan speed and restore automatic control"
+    fi
+    return 1
+  fi
+}
+
+# ============================================================================
+# 8. THEME CUSTOMIZATION
+# ============================================================================
+
 unsetopt PROMPT_SUBST
 zmodload zsh/datetime 2>/dev/null || true
 autoload -Uz add-zsh-hook
@@ -600,6 +1069,7 @@ _jsh_prompt_preexec() {
 
 _jsh_prompt_precmd() {
 	local exit_code=$? now
+	jsh::reload_pending
 	_JSH_PROMPT_EXIT=${exit_code}
 	if [[ -n ${_JSH_PROMPT_STARTED} ]]; then
 		_jsh_prompt_now; now=${REPLY}
@@ -719,3 +1189,135 @@ add-zsh-hook zshexit _jsh_prompt_git_async_stop
 zle -N _jsh_prompt_git_async_callback
 _jsh_prompt_node_update
 _jsh_prompt_render
+
+
+# ============================================================================
+# 9. PATH PRIORITIZATION / DEDUPLICATION
+# ============================================================================
+
+# Function to remove duplicate PATH entries while preserving order
+dedup_path() {
+  # shellcheck disable=SC2296  # Zsh-specific parameter expansion syntax
+  local path_array=("${(s/:/)PATH}")
+  local -A seen
+  local clean_path=""
+
+  for dir in "${path_array[@]}"; do
+    if [[ -n "${dir}" ]] && [[ -z "${seen[${dir}]}" ]]; then
+      seen[${dir}]=1
+      if [[ -z "${clean_path}" ]]; then
+        clean_path="${dir}"
+      else
+        clean_path="${clean_path}:${dir}"
+      fi
+    fi
+  done
+
+  export PATH="${clean_path}"
+}
+
+# Deduplicate PATH entries
+dedup_path
+
+# ============================================================================
+# 10. SHELL LIFECYCLE
+# ============================================================================
+
+jsh() {
+  case ${1:-} in
+    -r|reload)
+      shift
+      if (( $# )); then
+        print -u2 -- 'Usage: jsh -r | jsh reload'
+        return 2
+      fi
+      (( $+functions[_jsh_prompt_git_async_stop] )) && _jsh_prompt_git_async_stop
+      setopt LOCAL_OPTIONS GLOBAL_EXPORT
+      local JSH_RELOADING=1
+      source "${JSH}/dotfiles/.zshrc"
+      return
+      ;;
+  esac
+  command "${JSH}/bin/jsh" "$@"
+}
+
+# These plugins must load after widgets and local customizations are defined.
+typeset -gA ZSH_HIGHLIGHT_STYLES
+ZSH_HIGHLIGHT_STYLES[command]='fg=green'
+ZSH_HIGHLIGHT_STYLES[hashed-command]='fg=green'
+
+# Re-sourcing on reload makes the two plugins wrap each other's widgets into a loop.
+# shellcheck disable=SC1090  # Vendored repositories
+(( $+functions[_zsh_autosuggest_start] )) || \
+  [[ ! -r "${JSH_VENDOR}/zsh-autosuggestions/zsh-autosuggestions.zsh" ]] || \
+  source "${JSH_VENDOR}/zsh-autosuggestions/zsh-autosuggestions.zsh"
+(( $+functions[_zsh_highlight] )) || \
+  [[ ! -r "${JSH_VENDOR}/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" ]] || \
+  source "${JSH_VENDOR}/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
+
+# Interactive shell start: load Git profile SSH keys and run local/init.d scripts.
+
+# Loads each Git profile ssh_key into the agent unless it is already loaded.
+_jsh_load_keys() {
+  local config=${JSH_GIT_PROFILES:-${XDG_CONFIG_HOME:-${HOME}/.config}/jsh/git.json} key public fingerprint loaded
+  local -a keys ssh_add=(ssh-add) added failed
+  [[ -r ${config} ]] || return 0
+  (( $+commands[jq] )) || return 0
+  keys=("${(@f)$(command jq -r '.profiles[]? | .ssh_key // empty' "${config}" 2>/dev/null)}")
+  keys=(${(u)keys:#})
+  (( ${#keys} )) || return 0
+  loaded=$(command ssh-add -l 2>/dev/null)
+  (( $? != 2 )) || return 0
+  [[ ${OSTYPE} != darwin* || ! -x /usr/bin/ssh-add ]] ||
+    ssh_add=(/usr/bin/ssh-add --apple-use-keychain)
+  for key in "${keys[@]}"; do
+    key=${key/#\~\//${HOME}/}
+    [[ ${key} == */* ]] || key=${HOME}/.ssh/${key}
+    if [[ ! -r ${key} ]]; then
+      failed+=("${key:t} (missing)")
+      continue
+    fi
+    public=${key}.pub
+    [[ -r ${public} ]] || public=${key}
+    fingerprint=${${(z)$(command ssh-keygen -lf "${public}" 2>/dev/null)}[2]}
+    [[ -n ${fingerprint} && ${loaded} == *" ${fingerprint} "* ]] && continue
+    if command "${ssh_add[@]}" -q "${key}"; then
+      added+=("${key:t}")
+    else
+      failed+=("${key:t}")
+    fi
+  done
+  (( ! ${#added} )) || jsh::log_success "ssh: added ${(j:, :)added}"
+  (( ! ${#failed} )) || jsh::log_warn "ssh: could not load ${(j:, :)failed}"
+}
+
+# Runs each executable in JSH_INIT in name order, reporting only failures.
+_jsh_run_init() {
+  local script
+  for script in "${JSH_INIT:-${JSH}/local/init.d}"/*(N.x); do
+    "${script}" || jsh::log_error "init: ${script:t} failed"
+  done
+}
+
+# Agent shells and reloads skip start-up work.
+if [[ -o interactive && ${JSH_RELOADING:-0} != 1 && ${JSH_LOAD_CONFIG:-1} == 1 ]] &&
+  (( ! _jsh_agent_shell )); then
+  _jsh_load_keys
+  _jsh_run_init
+fi
+
+if (( _jsh_runtime_active )); then
+  if (( _jsh_runtime_had_xdg_cache )); then
+    export XDG_CACHE_HOME=${_jsh_runtime_xdg_cache}
+  else
+    unset XDG_CACHE_HOME
+  fi
+fi
+unset _jsh_runtime_active _jsh_runtime_had_xdg_cache _jsh_runtime_xdg_cache
+
+# jsh runtime path: begin
+case ":${PATH}:" in
+  *:"${HOME}/.local/bin":*) ;;
+  *) export PATH="${HOME}/.local/bin:${PATH}" ;;
+esac
+# jsh runtime path: end
