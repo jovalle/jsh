@@ -155,7 +155,7 @@ def show_xfce_status() -> None:
     if icon_path.is_file():
         image = f"<icon>{icon}-symbolic</icon><iconclick>{SCRIPT} --xfce-toggle</iconclick>"
     else:
-        image = f"<img>{SCRIPT.parents[1] / 'assets/icons' / (icon + '.svg')}</img>"
+        image = f"<img>{SCRIPT.parents[1] / 'dotfiles/.local/share/icons/hicolor/scalable/status' / (icon + '-symbolic.svg')}</img>"
         image += f"<click>{SCRIPT} --xfce-toggle</click>"
     print(f"{image}<tool>{tip}</tool>")
 

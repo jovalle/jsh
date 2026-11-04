@@ -8,7 +8,7 @@
 #   git get REPOSITORY   Clone a GitHub or GitLab repository into the projects directory
 #   git commits          Browse formatted commit history
 #   git amend -t TIME COMMIT  Move a commit and its successors in time
-#   git profile [NAME]    Use a conf/git.json profile: identity, SSH key, SSH GitHub remotes
+#   git profile [NAME]    Use a ~/.config/jsh/git.json profile: identity, SSH key, SSH GitHub remotes
 #   git commit -t TIME    Commit with a chosen date (see `git commit -t --help`)
 #   git status            On a terminal, adds identity and branch notes and condenses file lists
 #   git status --raw      Plain git status, untouched
@@ -62,10 +62,23 @@ status)
 *) exec "${git_bin}" "$@" ;;
 esac
 
-JSH_ROOT=$(CDPATH='' cd -P "${BASH_SOURCE[0]%/*}/.." && pwd -P)
-# shellcheck source=../lib/core.sh
-. "${JSH_ROOT}/lib/core.sh"
+case ${BASH_SOURCE[0]} in
+  /*) launcher=${BASH_SOURCE[0]} ;;
+  *) launcher=${PWD}/${BASH_SOURCE[0]} ;;
+esac
+while [[ -L ${launcher} ]]; do
+  parent=$(CDPATH='' cd -P "${launcher%/*}" && pwd)
+  target=$(readlink "${launcher}")
+  case ${target} in
+    /*) launcher=${target} ;;
+    *) launcher=${parent}/${target} ;;
+  esac
+done
+JSH_ROOT=$(CDPATH='' cd -P "${launcher%/*}/.." && pwd -P)
+# shellcheck source=../scripts/lib/common.sh
+. "${JSH_ROOT}/scripts/lib/common.sh"
 jsh::color_init
+PROFILES=${JSH_GIT_PROFILES:-${XDG_CONFIG_HOME:-${HOME}/.config}/jsh/git.json}
 
 die() {
 	jsh::log_error "$*"
@@ -279,7 +292,7 @@ amend() {
 	commit=$(run_git rev-parse --verify --quiet --end-of-options "${ref}^{commit}") || die 'unknown commit'
 	base=$(run_git show -s --format=%ct "${commit}") || return 1
 	epoch=$(resolve_timestamp "${spec}" "${base}") || die "invalid timestamp: ${spec}"
-	python3 "${JSH_ROOT}/lib/jsh/amend.py" "${git_bin}" "${commit}" "${epoch}" "${single}"
+	python3 "${JSH_ROOT}/lib/git/amend.py" "${git_bin}" "${commit}" "${epoch}" "${single}"
 }
 
 commit_help() {
@@ -709,7 +722,7 @@ create() {
 		names+=("${line%%$'\x1f'*}")
 		[[ ${line%%$'\x1f'*} != "${wanted}" ]] || found=1
 	done <<<"${profiles}"
-	((${#names[@]})) || die 'no profiles in conf/git.json'
+	((${#names[@]})) || die "no profiles in ${PROFILES}"
 	if [[ -z ${wanted} ]]; then
 		[[ -t 0 && -t 1 ]] || die 'specify a profile when not using a terminal'
 		wanted=$(jsh::choose profile "${names[@]}") || return 1
@@ -803,9 +816,8 @@ commits() {
 # Prints NAME, display name, email, GitHub user, and SSH key per profile, split by \x1f
 # (tabs would let `read` collapse empty fields).
 read_profiles() {
-	local file=${JSH_GIT_PROFILES:-${JSH_ROOT}/conf/git.json}
-	[[ -r ${file} ]] || die "no profiles: create ${file} from conf/git.example.json"
-	python3 - "${file}" <<'EOF'
+	[[ -r ${PROFILES} ]] || die "no profiles: create ${PROFILES} (format in the jsh README)"
+	python3 - "${PROFILES}" <<'EOF'
 import json, sys
 
 for name, profile in json.load(open(sys.argv[1], encoding="utf-8")).get("profiles", {}).items():
@@ -839,7 +851,7 @@ profile() {
 	local -a lines names
 	case ${1:-} in
 	-h | --help)
-		printf 'usage: git profile [NAME | --list]\n\nSet user.name, user.email, and core.sshCommand from a conf/git.json\n'
+		printf 'usage: git profile [NAME | --list]\n\nSet user.name, user.email, and core.sshCommand from a %s\n' "${PROFILES}"
 		printf 'profile, and switch GitHub HTTPS origin and upstream remotes to SSH.\n'
 		return
 		;;
@@ -849,7 +861,7 @@ profile() {
 	while IFS= read -r line; do
 		[[ -n ${line} ]] && lines+=("${line}") && names+=("${line%%$'\x1f'*}")
 	done < <(read_profiles)
-	((${#lines[@]})) || die 'no profiles in conf/git.json'
+	((${#lines[@]})) || die "no profiles in ${PROFILES}"
 	if [[ -z ${wanted} || ${wanted} == --list ]]; then
 		current=$(run_git config user.email 2>/dev/null || true)
 		if [[ ${wanted} == --list || ! -t 0 || ! -t 1 ]]; then
@@ -913,7 +925,7 @@ status_identity() {
 		scope=guessed
 	fi
 	[[ ${scope} == local ]] || note=" (${scope})"
-	if [[ -r ${JSH_GIT_PROFILES:-${JSH_ROOT}/conf/git.json} ]]; then
+	if [[ -r ${PROFILES} ]]; then
 		while IFS=$'\x1f' read -r name display pemail user key; do
 			[[ ${pemail} == "${author_email}" ]] || continue
 			profile=${name}
@@ -968,7 +980,7 @@ condense_status() {
 	local color=false
 	[[ -n ${NO_COLOR:-} ]] || color=$(run_git config --get-colorbool color.status true)
 	run_git -c advice.statusHints=false -c status.relativePaths=false -c color.status=never status |
-		python3 "${JSH_ROOT}/lib/jsh/status.py" "${color}"
+		python3 "${JSH_ROOT}/lib/git/status.py" "${color}"
 	exit 0
 }
 
@@ -994,7 +1006,7 @@ status)
 	if ! run_git rev-parse --git-dir >/dev/null 2>&1; then
 		color=false
 		[[ -n ${NO_COLOR:-} ]] || color=$(run_git config --get-colorbool color.status true)
-		JSH_GIT_BIN=${git_bin} exec python3 "${JSH_ROOT}/lib/jsh/repos.py" "${color}" "$@"
+		JSH_GIT_BIN=${git_bin} exec python3 "${JSH_ROOT}/lib/git/repos.py" "${color}" "$@"
 	fi
 	author_email=''
 	status_identity

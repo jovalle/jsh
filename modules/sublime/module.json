@@ -1,5 +1,0 @@
-{
-  "description": "Sublime Text with managed preferences",
-  "install": [{ "brew": { "casks": ["sublime-text"] } }, { "flatpak": ["com.sublimetext.three"] }],
-  "configure": [{ "script": "configure.py" }]
-}

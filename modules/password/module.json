@@ -1,4 +1,0 @@
-{
-  "description": "1Password desktop app for browser and system autofill",
-  "install": [{ "brew": { "casks": ["1password"] } }, { "script": "install.py", "when": { "platform": "linux" } }]
-}

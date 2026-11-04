@@ -7,21 +7,29 @@
 set -euo pipefail
 
 SELF=nukem
-case $0 in
-  /*) launcher=$0 ;;
-  *) launcher=${PWD}/$0 ;;
+case ${BASH_SOURCE[0]} in
+  /*) launcher=${BASH_SOURCE[0]} ;;
+  *) launcher=${PWD}/${BASH_SOURCE[0]} ;;
 esac
+while [[ -L ${launcher} ]]; do
+  parent=$(CDPATH='' cd -P "${launcher%/*}" && pwd)
+  target=$(readlink "${launcher}")
+  case ${target} in
+    /*) launcher=${target} ;;
+    *) launcher=${parent}/${target} ;;
+  esac
+done
 if [[ -z ${JSH_ROOT:-} ]]; then
   if [[ -n ${JSH_DIR:-} ]]; then
     JSH_ROOT=${JSH_DIR}
-  elif [[ -f ${launcher%/*}/../lib/core.sh ]]; then
+  elif [[ -f ${launcher%/*}/../scripts/lib/common.sh ]]; then
     JSH_ROOT=$(CDPATH='' cd -P "${launcher%/*}/.." && pwd -P)
   else
     JSH_ROOT=${HOME}/.jsh
   fi
 fi
-# shellcheck source=../lib/core.sh
-. "${JSH_ROOT}/lib/core.sh"
+# shellcheck source=../scripts/lib/common.sh
+. "${JSH_ROOT}/scripts/lib/common.sh"
 
 # Timeout for kubectl operations (seconds)
 readonly KUBECTL_TIMEOUT="${NUKEM_TIMEOUT:-30}"
