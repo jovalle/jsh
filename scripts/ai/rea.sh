@@ -90,7 +90,7 @@ sync_graphify() {
 }
 
 sync_rea() {
-  local existed=0 planned=1
+  local existed=0 planned=1 plan
   jsh::activity 'Checking REA skill registration'
   local -a args=(--skill-client shared)
   [[ -d ${SKILLS}/reverse-engineer-anything ]] && existed=1
@@ -98,8 +98,12 @@ sync_rea() {
   command -v codex >/dev/null 2>&1 && args+=(--client codex)
   command -v agy >/dev/null 2>&1 && args+=(--client antigravity)
   if command -v rea >/dev/null 2>&1; then
-    planned=$(rea setup --dry-run "${args[@]}" --format json </dev/null |
-      jq '.plannedActions | length')
+    plan=$(rea setup --dry-run "${args[@]}" --format json </dev/null 2>/dev/null || :)
+    if [[ $(jq -r '.status' <<<"${plan}") == needs_human ]]; then
+      jsh::notice "REA setup: $(jq -r '.remediation' <<<"${plan}")"
+      return 1
+    fi
+    planned=$(jq '.plannedActions | length' <<<"${plan}")
   fi
   if [[ ${planned} == 0 ]]; then
     jsh::current
