@@ -11,8 +11,10 @@ _j_abspath() (
 
 # Jump between projects and stacks by frecency; `projects` summarizes their repos.
 
-J_DATA=${J_DATA:-${XDG_STATE_HOME:-${HOME}/.local/state}/jsh/j.db}
-[[ ! -f ${JSH}/local/j.db || -f ${J_DATA} ]] || J_DATA=${JSH}/local/j.db
+if [[ -z ${J_DATA:-} ]]; then
+  J_DATA=${XDG_STATE_HOME:-${HOME}/.local/state}/jsh/j.db
+  [[ ! -f ${JSH}/local/j.db || -f ${J_DATA} ]] || J_DATA=${JSH}/local/j.db
+fi
 J_EXCLUDE=${J_EXCLUDE:-${HOME}}
 J_PATHS=${J_PATHS-${GIT_BASE:-${HOME}/Projects}}
 J_STACKS=${J_STACKS:-${HOME}/Stacks}

@@ -39,7 +39,7 @@ if [[ ${1:-} == help && $# -gt 1 ]]; then
 fi
 
 case ${1:-} in
-save | load | refresh | create | get | commits | amend | profile | handoff | --help | -h | help) ;;
+save | load | refresh | create | get | commits | amend | profile | handoff | __complete | --help | -h | help) ;;
 commit)
 	case " $* " in
 	*' -t'* | *' --timestamp'*) ;;
@@ -1045,6 +1045,13 @@ commits) commits "$@" ;;
 amend) amend "$@" ;;
 profile) profile "$@" ;;
 handoff) handoff "$@" ;;
+__complete)
+	# Prints profile names for shell completion; never writes the sample file or fails.
+	if [[ ${1:-} == profile && -r ${PROFILES} ]]; then
+		read_profiles 2>/dev/null | cut -d $'\x1f' -f1 || true
+	fi
+	exit 0
+	;;
 commit) commit_at "$@" ;;
 status)
 	if ! run_git rev-parse --git-dir >/dev/null 2>&1; then

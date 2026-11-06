@@ -147,7 +147,7 @@ choose_namespace_interactive() {
 set_namespace() {
   local ctx prev
   ctx="$(current_context)" || exit_err "error getting current context"
-  prev="$(current_namespace)" || exit_error "error getting current namespace"
+  prev="$(current_namespace)" || exit_err "error getting current namespace"
 
   if grep -q ^"${1}"\$ <(get_namespaces); then
     switch_namespace "${ctx}" "${1}"
@@ -233,8 +233,6 @@ main() {
       echo "error: unrecognized flag \"${1}\"" >&2
       usage
       exit 1
-    elif [[ "${1}" =~ (.+)=(.+) ]]; then
-      alias_context "${BASH_REMATCH[2]}" "${BASH_REMATCH[1]}"
     else
       set_namespace "${1}"
     fi

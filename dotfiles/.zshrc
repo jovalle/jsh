@@ -182,12 +182,48 @@ _jsh() {
     '-r[reload this shell configuration]' \
     '-c[run a shell command]:command:' \
     '-i[open an interactive shell]' \
-    '-l[open a login shell]'
+    '-l[open a login shell]' \
+    '1::command:((init\:"run local/init scripts" reload\:"reload this shell configuration"))'
 }
 compdef _jsh jsh
 
+_jsh_profiles() {
+  local -a names expl
+  names=(${(f)"$("${JSH}/bin/git" __complete profile 2>/dev/null)"})
+  _wanted profiles expl profile compadd -a names
+}
+
+# Complete arguments of jsh's own git subcommands.
+_jsh_git_extra() {
+  local -a expl
+  case ${words[2]} in
+    profile)
+      (( CURRENT == 3 )) || return 1
+      _jsh_profiles
+      _wanted options expl option compadd -- --list -h --help
+      ;;
+    create)
+      (( CURRENT == 4 )) && _jsh_profiles
+      ;;
+    load) _wanted options expl option compadd -- -f --force -h --help ;;
+    handoff) _wanted options expl option compadd -- -n --dry-run --clean -h --help ;;
+    amend)
+      if [[ ${PREFIX} != -* ]] && (( ${+functions[__git_recent_commits]} )); then
+        __git_recent_commits
+      else
+        _wanted options expl option compadd -- -x -t -h --help
+      fi
+      ;;
+    *) _wanted options expl option compadd -- -h --help ;;
+  esac
+}
+
 _jsh_git() {
   local result=1
+  if (( CURRENT >= 3 )) && [[ ${words[2]} == (profile|create|load|handoff|amend|save|refresh|get|commits) ]]; then
+    _jsh_git_extra
+    return
+  fi
   if (( CURRENT == 2 )); then
     local -a commands=(
       'create:create a project' 'get:clone a project' 'commits:browse history'
@@ -201,6 +237,154 @@ _jsh_git() {
 }
 autoload -Uz _git
 compdef _jsh_git git
+
+_jsh_kube_contexts() {
+  command kubectl config get-contexts -o name --request-timeout=2s 2>/dev/null
+  return 0
+}
+
+_jsh_kube_namespaces() {
+  command kubectl --request-timeout=2s get namespaces \
+    -o 'jsonpath={range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null
+  return 0
+}
+
+_jsh_kubectx() {
+  local -a contexts expl opts=(- -a --add -c --current -d --delete -u --unset -h --help)
+  contexts=(${(f)"$(_jsh_kube_contexts)"})
+  if (( CURRENT == 2 )); then
+    _wanted contexts expl context compadd -a contexts
+    # A literal '-' word would be taken as _all_labels' slot for its own options.
+    _wanted options expl option compadd -a opts
+  elif [[ ${words[2]} == (-d|--delete) ]]; then
+    _wanted contexts expl context compadd -a contexts
+  elif [[ ${words[2]} == (-a|--add) ]] && (( CURRENT == 3 )); then
+    _files
+  fi
+}
+compdef _jsh_kubectx kubectx
+
+_jsh_kubens() {
+  local -a namespaces expl opts=(- -c --current -h --help)
+  (( CURRENT == 2 )) || return 1
+  namespaces=(${(f)"$(_jsh_kube_namespaces)"})
+  _wanted namespaces expl namespace compadd -a namespaces
+  _wanted options expl option compadd -a opts
+}
+compdef _jsh_kubens kubens
+
+_jsh_nukem() {
+  local -a names expl
+  local -A opt_args
+  local context state
+  _arguments -s \
+    '(-l --list)'{-l,--list}'[list namespaces stuck in Terminating]' \
+    '(-f --force)'{-f,--force}'[skip confirmation]' \
+    '(-n --dry-run)'{-n,--dry-run}'[preview finalizer removal]' \
+    '(-c --context)'{-c,--context}'[use a kubectl context]:context:->context' \
+    '(-v --verbose)'{-v,--verbose}'[show debug output]' \
+    '(- *)'{-h,--help}'[show help]' \
+    '(- *)--version[show version]' \
+    '1:namespace:->namespace' && return 0
+  case ${state} in
+    context)
+      names=(${(f)"$(_jsh_kube_contexts)"})
+      _wanted contexts expl context compadd -a names
+      ;;
+    namespace)
+      context=${opt_args[-c]:-${opt_args[--context]:-}}
+      # _arguments stores opt_args with \: and \\ escaped.
+      context=${${context//\\:/:}//\\\\/\\}
+      names=(${(f)"$(NUKEM_TIMEOUT=2 "${JSH}/bin/nukem" __complete namespace ${context:+${context}} 2>/dev/null)"})
+      _wanted namespaces expl namespace compadd -a names
+      ;;
+  esac
+}
+compdef _jsh_nukem nukem
+
+# Turn "NAME<TAB>DESCRIPTION" hook lines into _describe's NAME:DESCRIPTION.
+_jsh_hook_pairs() {
+  local line name desc
+  reply=()
+  for line in ${(f)"$("${JSH}/bin/$1" __complete "$2" 2>/dev/null)"}; do
+    name=${line%%$'\t'*}
+    desc=''
+    [[ ${line} != *$'\t'* ]] || desc=${line#*$'\t'}
+    name=${${name//\\/\\\\}//:/\\:}
+    reply+=("${name}:${desc}")
+  done
+}
+
+_jsh_jssh() {
+  local -a flags reply
+  if (( CURRENT == 2 )) && [[ ${PREFIX} == -* ]]; then
+    flags=(
+      '--check:check local requirements' '--rebuild:clear generated payloads'
+      '-r:run plain ssh' '--raw:run plain ssh' '-h:show help' '--help:show help'
+      '--version:show version'
+    )
+    _describe -t options 'option' flags
+    return
+  fi
+  _jsh_hook_pairs jssh host
+  _describe -t hosts 'ssh host' reply
+}
+compdef _jsh_jssh jssh
+
+_jsh_jump() {
+  local -a names flags expl
+  local project
+  if [[ ${PREFIX} == -* ]]; then
+    flags=(
+      '-c:open the match in VS Code' '-v:show search details'
+      '-a:add the current directory' '--add:add the current directory'
+      '--remove:remove the current directory' '--db:show tracked directories and scores'
+      '--clean:remove missing directories' '--help:show help'
+    )
+    _describe -t options 'option' flags
+    return
+  fi
+  for project in ${(f)"$(_j_get_projects 2>/dev/null)"}; do names+=("${project:t}"); done
+  _wanted projects expl project compadd -a names
+}
+compdef _jsh_jump j p
+
+_jsh_proxy_presets() {
+  local -a reply
+  _jsh_hook_pairs proxy preset
+  _describe -t presets 'preset' reply
+}
+
+_jsh_proxy() {
+  local i
+  for (( i = 2; i < CURRENT; i++ )); do
+    case ${words[i]} in
+      -p|--preset|-u|--url|-s|--socks|-n|--no-proxy) (( i++ )) ;;
+      --)
+        words=("${(@)words[i + 1,-1]}")
+        (( CURRENT -= i ))
+        _normal
+        return
+        ;;
+      -*) ;;
+      *) break ;;
+    esac
+  done
+  _arguments -S -A '-*' \
+    '(-p --preset)'{-p,--preset}'[use a built-in proxy preset]:preset:_jsh_proxy_presets' \
+    '(-u --url)'{-u,--url}'[set the HTTP proxy URL]:url: ' \
+    '(-s --socks)'{-s,--socks}'[set the SOCKS proxy URL]:url: ' \
+    '(-n --no-proxy)'{-n,--no-proxy}'[set hosts that bypass the proxy]:hosts: ' \
+    '--shell[start a shell with the proxy]' \
+    '--env[print the proxy exports]' \
+    '--test[test the proxy]' \
+    '--list[list presets]' \
+    '(-v --verbose)'{-v,--verbose}'[show debug output]' \
+    '(- *)'{-h,--help}'[show help]' \
+    '(- *)--version[show version]' \
+    '*::command:_normal'
+}
+compdef _jsh_proxy proxy
 
 # shellcheck disable=SC1090  # Vendored repository
 [[ -r "${JSH_VENDOR}/fzf-tab/fzf-tab.plugin.zsh" && -n ${commands[fzf]:-} ]] && \
@@ -223,11 +407,12 @@ command -v docker &>/dev/null && eval "$(docker completion zsh)"
 command -v fzf &>/dev/null && source <(command fzf --zsh 2>/dev/null)
 # shellcheck disable=SC1090  # Dynamic source from kubectl
 command -v kubectl &>/dev/null && source <(kubectl completion zsh)
+(( $+_comps[kubectl] )) && compdef kubecolor=kubectl
 # shellcheck disable=SC1090  # Dynamic source from task
 command -v task &>/dev/null && source <(task --completion zsh)
-# shellcheck disable=SC1090  # Technis task arguments
-[[ -r "${GIT_BASE}/technis/scripts/completions/task.zsh" ]] && \
-  source "${GIT_BASE}/technis/scripts/completions/task.zsh"
+# shellcheck disable=SC1090  # Technis vault and just recipe arguments
+[[ -r "${GIT_BASE}/technis/tools/completion.zsh" ]] && \
+  source "${GIT_BASE}/technis/tools/completion.zsh"
 command -v zoxide &>/dev/null && eval "$(zoxide init zsh)"
 command -v atuin &>/dev/null && eval "$(atuin init zsh)"
 

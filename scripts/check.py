@@ -46,6 +46,7 @@ class ShellChecks(unittest.TestCase):
             JSH_PROMPT_ASYNC="0",
             JSH_PROMPT_MODE="ascii",
             J_NO_HOOK="1",
+            J_DATA=str(self.home / "j.db"),
             GIT_CONFIG_NOSYSTEM="1",
         )
         # Avoid Homebrew discovery leaking installed tools into these isolated shells.
@@ -128,6 +129,45 @@ class ShellChecks(unittest.TestCase):
                 pass
             os.waitpid(pid, 0)
         return output.decode(errors="replace")
+
+    def list_choices(self, shell, line, **env):
+        """Type LINE then ^D into an interactive zsh and return what the listing printed."""
+        environment = self.env | env | {"ZDOTDIR": str(ROOT / "dotfiles")}
+        pid, terminal = pty.fork()
+        if pid == 0:
+            os.chdir(self.home)
+            os.execve(shell, [shell, "-d", "-i"], environment)
+
+        def settle(limit=25.0, quiet=1.0):
+            # Keys sent before zle starts are handled by the tty's cooked mode, so wait for quiet.
+            chunks = bytearray()
+            end = time.monotonic() + limit
+            last = time.monotonic()
+            while time.monotonic() < end and time.monotonic() - last < quiet:
+                if select.select([terminal], [], [], 0.1)[0]:
+                    try:
+                        chunk = os.read(terminal, 65536)
+                    except OSError:
+                        break
+                    if not chunk:
+                        break
+                    chunks.extend(chunk)
+                    last = time.monotonic()
+            return chunks.decode(errors="replace")
+
+        try:
+            settle()
+            os.write(terminal, b"PATH=$HOME/tools:$PATH\n")
+            settle()
+            os.write(terminal, line.encode() + b"\x04")
+            return settle()
+        finally:
+            os.close(terminal)
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            os.waitpid(pid, 0)
 
     def test_commands_and_reload_keep_listing_arguments(self):
         self.tool("eza", 'printf "<%s>\\n" "$@"')
@@ -841,8 +881,286 @@ esac''')
                     COMP_WORDS=(j al)
                     _jsh_jump_complete
                     [[ " ${COMPREPLY[*]} " == *' alpha '* ]] || exit 2
+                    _git() { touch "$HOME/native"; COMPREPLY=(native); }
+                    COMP_WORDS=(git profile w); COMP_CWORD=2; _jsh_git_complete
+                    [[ ${COMPREPLY[*]} == 'work ' ]] || exit 3
+                    COMP_WORDS=(git profile --l); COMP_CWORD=2; _jsh_git_complete
+                    [[ ${COMPREPLY[*]} == '--list ' ]] || exit 4
+                    COMP_WORDS=(git load --f); COMP_CWORD=2; _jsh_git_complete
+                    [[ ${COMPREPLY[*]} == '--force ' ]] || exit 5
+                    COMP_WORDS=(git create app w); COMP_CWORD=3; _jsh_git_complete
+                    [[ ${COMPREPLY[*]} == 'work ' ]] || exit 6
+                    COMP_WORDS=(git create w); COMP_CWORD=2; _jsh_git_complete
+                    (( ${#COMPREPLY[@]} == 0 )) || exit 7
+                    COMP_WORDS=(git handoff --d); COMP_CWORD=2; _jsh_git_complete
+                    [[ ${COMPREPLY[*]} == '--dry-run ' ]] || exit 8
+                    COMP_WORDS=(git amend -); COMP_CWORD=2; _jsh_git_complete
+                    [[ $(printf '%s|' "${COMPREPLY[@]}") == '-x |-t |-h |--help |' ]] || exit 9
+                    COMP_WORDS=(git save --h); COMP_CWORD=2; _jsh_git_complete
+                    [[ ${COMPREPLY[*]} == '--help ' ]] || exit 10
+                    [[ ! -e $HOME/native ]] || exit 11
+                    COMP_WORDS=(git status s); COMP_CWORD=2; _jsh_git_complete
+                    [[ ${COMPREPLY[*]} == native && -e $HOME/native ]] || exit 12
+                """,
+                    JSH_GIT_PROFILES=str(profiles),
+                )
+
+    def test_zsh_completes_project_jumps(self):
+        for shell in SHELLS:
+            if "zsh" not in Path(shell).name:
+                continue
+            with self.subTest(shell=shell):
+                self.run_shell(
+                    shell,
+                    """
+                    [[ $_comps[j] == _jsh_jump ]] || exit 1
+                    [[ $_comps[p] == _jsh_jump ]] || exit 2
                 """,
                 )
+
+    def test_zsh_lists_kube_contexts_and_git_profiles(self):
+        self.tool("kubectl", "printf '%s\\n' dev prod")
+        profiles = self.home / "profiles.json"
+        profiles.write_text('{"profiles": {"work": {"name": "Work", "email": "work@example.org"}}}')
+        for shell in SHELLS:
+            if "zsh" not in Path(shell).name:
+                continue
+            with self.subTest(shell=shell):
+                output = self.list_choices(shell, "kubectx ")
+                self.assertIn("prod", output)
+                for bogus in ("-J", "-default-"):
+                    self.assertNotIn(bogus, output)
+                output = self.list_choices(shell, "git profile ", JSH_GIT_PROFILES=str(profiles))
+                self.assertIn("work", output)
+
+    def test_kubecolor_passes_completion_requests_through(self):
+        self.tool("kubectl", 'printf "%s\\n" "$@"; printf ":4\\n"')
+        result = subprocess.run(
+            [str(ROOT / "bin/kubecolor"), "__complete", "get", ""],
+            env=self.env | {"KUBECOLOR_FORCE_COLORS": "always"},
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual((result.returncode, result.stderr), (0, ""))
+        self.assertEqual(result.stdout, "__complete\nget\n\n:4\n")
+
+    def test_kubecolor_reuses_kubectl_completion(self):
+        self.tool(
+            "kubectl",
+            """case "$*" in
+  "completion bash") echo '__start_kubectl() { :; }; complete -o default -F __start_kubectl kubectl' ;;
+  "completion zsh") echo '_kubectl() { :; }; compdef _kubectl kubectl' ;;
+esac""",
+        )
+        for plugin in ("fzf", "fzf-tab", "zsh-autosuggestions", "zsh-completions", "zsh-syntax-highlighting"):
+            (self.home / "vendor" / plugin).mkdir()
+        self.each_shell(
+            """
+            if [[ -n ${ZSH_VERSION:-} ]]; then
+                [[ $_comps[kubecolor] == _kubectl ]] || exit 1
+            else
+                [[ $(complete -p kubecolor) == *'-F __start_kubectl'* ]] || exit 2
+            fi
+        """,
+            JSH_LOAD_CONFIG="1",
+        )
+
+    def test_bash_completes_through_aliases(self):
+        self.tool(
+            "kubectl",
+            """case "$*" in
+  "completion bash") echo '__start_kubectl() { COMPREPLY=("${COMP_WORDS[*]}|${COMP_CWORD}|${COMP_LINE}|${COMP_POINT}|$3"); }; complete -o default -F __start_kubectl kubectl' ;;
+  *get-contexts*) printf '%s\\n' dev prod ;;
+esac""",
+        )
+        for shell in SHELLS:
+            if "zsh" in Path(shell).name:
+                continue
+            with self.subTest(shell=shell):
+                self.run_shell(
+                    shell,
+                    """
+                    PATH=$HOME/tools:$PATH
+                    [[ $(complete -p kg) == *_jsh_alias_complete* ]] || exit 1
+                    [[ $(complete -p kx) == *_jsh_alias_complete* ]] || exit 2
+                    [[ $(complete -p kubectl) == *__start_kubectl* ]] || exit 3
+                    COMP_WORDS=(kg po); COMP_CWORD=1; COMP_LINE='kg po'; COMP_POINT=5
+                    _jsh_alias_complete kg po kg
+                    [[ ${COMPREPLY[0]} == 'kubectl get po|2|kubectl get po|14|get' ]] || exit 4
+                    [[ ${COMP_WORDS[*]} == 'kg po' && $COMP_CWORD == 1 ]] || exit 5
+                    COMP_WORDS=(kx p); COMP_CWORD=1; COMP_LINE='kx p'; COMP_POINT=4
+                    _jsh_alias_complete kx p kx
+                    [[ ${COMPREPLY[*]} == prod ]] || exit 6
+                    alias zzfixture=zzmissing
+                    source "$JSH/lib/shell/completion.sh"
+                    ! complete -p zzfixture 2>/dev/null || exit 7
+                    [[ $(complete -p | grep -c ' kg$') == 1 ]] || exit 8
+                    [[ $(complete -p kn) == *_jsh_alias_complete* && $(complete -p kn) != *'-o default'* ]] || exit 9
+                    [[ $(complete -p kx) == *'-o default'* ]] || exit 10
+                """,
+                    JSH_LOAD_CONFIG="1",
+                )
+
+    def test_kube_switchers_complete_contexts_and_namespaces(self):
+        # The rc puts Homebrew's real kubectl ahead of the stub, so the shell code restores PATH.
+        self.tool(
+            "kubectl",
+            """case "$*" in
+  *get-contexts*) printf '%s\\n' dev prod arn:aws:eks:us-east-1:1:cluster/x '$(touch $HOME/pwned)' ;;
+  *namespaces*) printf '%s\\n' default kube-system ;;
+esac""",
+        )
+        self.each_shell(
+            """
+            PATH=$HOME/tools:$PATH
+            if [[ -n ${ZSH_VERSION:-} ]]; then
+                [[ $_comps[kubectx] == _jsh_kubectx ]] || exit 1
+                [[ $_comps[kubens] == _jsh_kubens ]] || exit 2
+                [[ $(_jsh_kube_contexts) == *prod* ]] || exit 3
+                [[ $(_jsh_kube_namespaces) == *kube-system* ]] || exit 4
+            else
+                [[ $(complete -p kubectx) == *'-o default'* ]] || exit 1
+                COMP_WORDS=(kubectx p); COMP_CWORD=1; _jsh_kubectx_complete
+                [[ ${COMPREPLY[*]} == prod ]] || exit 2
+                COMP_WORDS=(kubectx -d d); COMP_CWORD=2; _jsh_kubectx_complete
+                [[ ${COMPREPLY[*]} == dev ]] || exit 3
+                COMP_WORDS=(kubectx dev ''); COMP_CWORD=2; _jsh_kubectx_complete
+                (( ${#COMPREPLY[@]} == 0 )) || exit 4
+                COMP_WORDS=(kubectx --add ''); COMP_CWORD=2; _jsh_kubectx_complete
+                (( ${#COMPREPLY[@]} == 0 )) || exit 5
+                COMP_WORDS=(kubens kube); COMP_CWORD=1; _jsh_kubens_complete
+                [[ ${COMPREPLY[*]} == kube-system ]] || exit 6
+                COMP_WORDS=(kubens a ''); COMP_CWORD=2; _jsh_kubens_complete
+                (( ${#COMPREPLY[@]} == 0 )) || exit 7
+                COMP_WORDS=(kubectx arn : aws); COMP_CWORD=3; COMP_LINE='kubectx arn:aws'; COMP_POINT=15
+                _jsh_kubectx_complete
+                [[ ${#COMPREPLY[@]} == 1 && ${COMPREPLY[0]} == aws:eks:us-east-1:1:cluster/x ]] || exit 8
+                COMP_WORDS=(kubectx -d arn : aws); COMP_CWORD=4; COMP_LINE='kubectx -d arn:aws'; COMP_POINT=18
+                _jsh_kubectx_complete
+                [[ ${#COMPREPLY[@]} == 1 && ${COMPREPLY[0]} == aws:eks:us-east-1:1:cluster/x ]] || exit 11
+                COMP_WORDS=(kubectx arn :); COMP_CWORD=2; COMP_LINE='kubectx arn:'; COMP_POINT=12
+                _jsh_kubectx_complete
+                [[ ${#COMPREPLY[@]} == 1 && ${COMPREPLY[0]} == aws:eks:us-east-1:1:cluster/x ]] || exit 12
+                COMP_WORDS=(kubectx '$(t'); COMP_CWORD=1; _jsh_kubectx_complete
+                [[ ${#COMPREPLY[@]} == 1 && ${COMPREPLY[0]} == '$(touch' ]] || exit 13
+                [[ ! -e $HOME/pwned ]] || exit 14
+                command cp -f "$HOME/tools/kubectl" "$HOME/kubectl.good"
+                printf '#!/bin/sh\\necho oops >&2\\nexit 1\\n' > "$HOME/tools/kubectl"
+                COMP_WORDS=(kubectx ''); COMP_CWORD=1; _jsh_kubectx_complete
+                [[ ${COMPREPLY[*]} == '- -a --add -c --current -d --delete -u --unset -h --help' ]] || exit 9
+                COMP_WORDS=(kubens ''); COMP_CWORD=1; _jsh_kubens_complete
+                [[ ${COMPREPLY[*]} == '- -c --current -h --help' ]] || exit 10
+                command mv -f "$HOME/kubectl.good" "$HOME/tools/kubectl"
+            fi
+        """
+        )
+
+    def test_kubens_reports_unknown_namespace_for_equals_argument(self):
+        self.tool(
+            "kubectl",
+            """case "$*" in
+  *current-context*) printf '%s\\n' dev ;;
+  *"get namespaces"*) printf '%s\\n' default ;;
+esac""",
+        )
+        result = subprocess.run(
+            [str(ROOT / "bin/kubens"), "a=b"],
+            env=self.env | {"KUBECTX_IGNORE_FZF": "1"},
+            cwd=self.home,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn('no namespace exists with name "a=b"', result.stderr)
+        self.assertNotIn("command not found", result.stderr)
+
+    def test_nukem_completes_only_terminating_namespaces(self):
+        stub = """echo "$*" >> "$HOME/calls"
+case "$*" in
+  *get-contexts*) printf '%s\\n' dev prod ;;
+  *Terminating*) echo stuck ;;
+esac"""
+        self.tool("kubectl", stub)
+        hook = subprocess.run(
+            [str(ROOT / "bin/nukem"), "__complete", "namespace", "prod"],
+            env=self.env | {"NUKEM_TIMEOUT": "2"},
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual((hook.returncode, hook.stdout, hook.stderr), (0, "stuck\n", ""))
+        self.assertIn("--context prod", (self.home / "calls").read_text())
+        self.tool("kubectl", "echo oops >&2; exit 1")
+        hook = subprocess.run(
+            [str(ROOT / "bin/nukem"), "__complete", "namespace"],
+            env=self.env | {"NUKEM_TIMEOUT": "2"},
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual((hook.returncode, hook.stdout, hook.stderr), (0, "", ""))
+        self.tool("kubectl", stub)
+        (self.home / "calls").unlink()
+        self.each_shell(
+            """
+            PATH=$HOME/tools:$PATH
+            if [[ -n ${ZSH_VERSION:-} ]]; then
+                [[ $_comps[nukem] == _jsh_nukem ]] || exit 1
+            else
+                COMP_WORDS=(nukem -c d); COMP_CWORD=2; _jsh_nukem_complete
+                [[ ${COMPREPLY[*]} == dev ]] || exit 1
+                COMP_WORDS=(nukem -c prod s); COMP_CWORD=3; _jsh_nukem_complete
+                [[ ${COMPREPLY[*]} == stuck ]] || exit 2
+                grep -q -- '--context prod' "$HOME/calls" || exit 3
+                COMP_WORDS=(nukem stuck s); COMP_CWORD=2; _jsh_nukem_complete
+                (( ${#COMPREPLY[@]} == 0 )) || exit 4
+                COMP_WORDS=(nukem --d); COMP_CWORD=1; _jsh_nukem_complete
+                [[ ${COMPREPLY[*]} == --dry-run ]] || exit 5
+            fi
+        """
+        )
+
+    def test_bash_completes_jssh_hosts_and_proxy_presets(self):
+        (self.home / ".ssh").mkdir()
+        (self.home / ".ssh/config").write_text("Host alpha beta *.wild\n")
+        self.tool("cuprobe", "true")
+        self.each_shell(
+            """
+            if [[ -n ${ZSH_VERSION:-} ]]; then
+                [[ $_comps[jssh] == _jsh_jssh ]] || exit 1
+                [[ $_comps[proxy] == _jsh_proxy ]] || exit 2
+            else
+                _command_offset() { COMPREPLY=(offset-$1); }
+                COMP_WORDS=(jssh a); COMP_CWORD=1; _jsh_jssh_complete
+                [[ ${COMPREPLY[*]} == alpha ]] || exit 1
+                COMP_WORDS=(jssh --c); COMP_CWORD=1; _jsh_jssh_complete
+                [[ ${COMPREPLY[*]} == --check ]] || exit 2
+                COMP_WORDS=(proxy -p t); COMP_CWORD=2; _jsh_proxy_complete
+                [[ ${COMPREPLY[*]} == tor ]] || exit 3
+                COMP_WORDS=(proxy -p tor curl ''); COMP_CWORD=4; _jsh_proxy_complete
+                [[ ${COMPREPLY[*]} == offset-3 ]] || exit 4
+                COMP_WORDS=(proxy cu); COMP_CWORD=1; _jsh_proxy_complete
+                [[ ${COMPREPLY[*]} == offset-1 ]] || exit 5
+                COMP_WORDS=(proxy -p tor cu); COMP_CWORD=3; _jsh_proxy_complete
+                [[ ${COMPREPLY[*]} == offset-3 ]] || exit 6
+                COMP_WORDS=(proxy -u ''); COMP_CWORD=2; _jsh_proxy_complete
+                (( ${#COMPREPLY[@]} == 0 )) || exit 7
+                COMP_WORDS=(proxy -- cu); COMP_CWORD=2; _jsh_proxy_complete
+                [[ ${COMPREPLY[*]} == offset-2 ]] || exit 8
+                unset -f _command_offset
+                COMP_WORDS=(proxy cupr); COMP_CWORD=1; _jsh_proxy_complete
+                [[ ${COMPREPLY[*]} == cuprobe ]] || exit 9
+                COMP_WORDS=(proxy -p tor cupr); COMP_CWORD=3; _jsh_proxy_complete
+                [[ ${COMPREPLY[*]} == cuprobe ]] || exit 10
+                COMP_WORDS=(proxy -- cupr); COMP_CWORD=2; _jsh_proxy_complete
+                [[ ${COMPREPLY[*]} == cuprobe ]] || exit 11
+                COMP_WORDS=(proxy ''); COMP_CWORD=1; _jsh_proxy_complete
+                [[ " ${COMPREPLY[*]} " == *" --preset "* && " ${COMPREPLY[*]} " == *" cuprobe "* ]] || exit 12
+            fi
+        """
+        )
 
     def test_bash_initializes_installed_hooks_once(self):
         for name in ("direnv", "atuin", "zoxide"):

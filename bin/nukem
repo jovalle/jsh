@@ -89,12 +89,17 @@ kubectl_cmd() {
   "${cmd[@]}" "$@"
 }
 
+# Print the names of namespaces stuck in Terminating state
+terminating_namespaces() {
+  kubectl_cmd get namespaces -o jsonpath='{range .items[?(@.status.phase=="Terminating")]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true
+}
+
 # List namespaces stuck in Terminating state
 list_terminating() {
   jsh::log_note "Checking for namespaces in Terminating state..."
 
   local namespaces
-  namespaces=$(kubectl_cmd get namespaces -o jsonpath='{range .items[?(@.status.phase=="Terminating")]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)
+  namespaces=$(terminating_namespaces)
 
   if [[ -z "${namespaces}" ]]; then
     jsh::log_success "No namespaces stuck in Terminating state"
@@ -288,4 +293,11 @@ main() {
 # Handle interrupts gracefully
 trap 'printf "\n"; die "Interrupted"' INT TERM
 
+if [[ ${1:-} == __complete ]]; then
+  if [[ ${2:-} == namespace ]]; then
+    KUBECTL_CONTEXT=${3:-}
+    terminating_namespaces
+  fi
+  exit 0
+fi
 main "$@"

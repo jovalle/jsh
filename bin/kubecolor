@@ -63,14 +63,14 @@ kubecolor_detect_mode() {
 
     [[ -n ${KUBECOLOR_COMMAND} ]] && continue
     case ${argument} in
-      get | describe | logs | diff | explain | top | version | apply | create | delete | patch | replace | rollout | scale | wait | auth | cluster-info | api-resources | api-versions | exec | attach | cp | port-forward | proxy | completion)
+      get | describe | logs | diff | explain | top | version | apply | create | delete | patch | replace | rollout | scale | wait | auth | cluster-info | api-resources | api-versions | exec | attach | cp | port-forward | proxy | completion | __complete | __completeNoDesc)
         KUBECOLOR_COMMAND=${argument}
         ;;
     esac
   done
 
   case ${KUBECOLOR_COMMAND} in
-    exec | attach | cp | port-forward | proxy | completion)
+    exec | attach | cp | port-forward | proxy | completion | __complete | __completeNoDesc)
       KUBECOLOR_BYPASS=1
       return
       ;;
