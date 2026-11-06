@@ -77,11 +77,3 @@ also upgrades installed software. Run them only when asked.
   hooks; touching credentials, SSH, or Git identity handling.
 - Never: commit secrets or personal data; read or print credentials; edit generated or
   vendored paths; run commands that wait on a password prompt.
-
-## 1Password
-
-- For authorized tasks using the 1Password CLI, reuse one persistent terminal session for
-  all `op` calls; authorization follows the terminal. Batch the needed secret references
-  into one `op run --env-file=PATH -- COMMAND`, where the file holds only `op://`
-  references and resolved secrets go straight to the consuming process, never to agent
-  output. Close the session when done; do not cache secrets or add keepalive calls.
