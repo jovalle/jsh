@@ -7,6 +7,19 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 . "${SCRIPT_DIR}/lib/common.sh" "$@"
 export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 HOMEBREW_NO_INSTALL_UPGRADE=1
 export HOMEBREW_NO_ENV_HINTS=1 SUDO_ASKPASS=/usr/bin/false GIT_TERMINAL_PROMPT=0
+[[ ${JSH_KEEP_APPS:-0} != 1 ]] || export HOMEBREW_NO_UPGRADE_QUIT_CASKS=1
+
+# An upgraded cask app that is still open keeps running the previous version.
+jsh::brew_running() {
+  local name=$1 app
+  while IFS= read -r app; do
+    [[ -n ${app} ]] || continue
+    if ps -axo command= | grep -F -- "/${app}/Contents/MacOS/" >/dev/null; then
+      jsh::notice "restart ${app%.app} to use the updated version"
+    fi
+  done < <(brew info --json=v2 --cask "${name}" 2>/dev/null |
+    jq -r '.casks[].artifacts[] | .app? // empty | (map(objects | .target) + map(strings))[0] | split("/") | last')
+}
 
 jsh::refresh() {
   local manager=$1 directory=${JSH_PACKAGE_STATE:-${JSH_TMP}}/refresh
@@ -81,6 +94,7 @@ jsh::brew_update() {
   for name in "${outdated[@]}"; do
     if jsh::task "Homebrew upgrade: ${name}" brew upgrade --no-ask "${flag}" "${name}"; then
       jsh::emit changed "${name}" package
+      [[ ${kind} != casks || ${JSH_KEEP_APPS:-0} != 1 ]] || jsh::brew_running "${name}"
     else
       status=1
     fi

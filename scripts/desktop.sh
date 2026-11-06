@@ -253,6 +253,10 @@ configure_panel() {
   after=$(xfconf-query -c xfce4-panel -lv 2>/dev/null || true)
   [[ ${before} != "${after}" || ${panel_files_changed} != 0 ]] || return 0
   pgrep -x xfce4-panel >/dev/null 2>&1 || return 0
+  if [[ ${JSH_KEEP_APPS:-0} == 1 ]]; then
+    jsh::notice 'restart the XFCE panel to apply its settings: ~/.jsh/scripts/desktop.sh'
+    return 0
+  fi
   # Plugins save their in-memory settings on exit, so reapply once the panel has stopped.
   if DISPLAY=${DISPLAY:-:0} timeout 5 xfce4-panel --quit >/dev/null 2>&1; then
     trap 'DISPLAY=${DISPLAY:-:0} nohup xfce4-panel >/dev/null 2>&1 & jsh::cleanup' EXIT

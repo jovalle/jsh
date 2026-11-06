@@ -15,9 +15,17 @@ export JSH_ROOT JSH_RUNTIME_DIR
 case ${1:-} in
 -h | --help)
 	printf '%s\n' 'Usage: jsh [shell-options]' \
+		'       jsh update [GROUP ...]' \
 		'Open Zsh, or Bash when Zsh is unavailable.' \
+		'Update runs install.sh --update without closing open apps, then lists apps to restart.' \
 		'Install and configure with install.sh and scripts/*.sh.'
 	exit 0
+	;;
+update)
+	shift
+	JSH_KEEP_APPS=1
+	export JSH_KEEP_APPS
+	exec bash "${JSH_ROOT}/install.sh" --update "$@"
 	;;
 '' | -*) ;;
 *)

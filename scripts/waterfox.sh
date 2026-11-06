@@ -136,9 +136,14 @@ toolbar() {
     "${selected}/prefs.js" >"${APP_TMP}/prefs.js"
   ! cmp -s "${APP_TMP}/prefs.js" "${selected}/prefs.js"
 }
+# Waterfox only reads user.js, but rewrites prefs.js on exit.
+APP_LIVE=1
 write_preferences() {
   jsh::file "${APP_TMP}/user.js" "${selected}/user.js"
-  if toolbar; then jsh::file "${APP_TMP}/prefs.js" "${selected}/prefs.js"; fi
+  toolbar || return 0
+  if [[ ${APP_OPEN:-0} == 1 ]]; then
+    jsh::notice 'quit Waterfox, then run jsh update to pin its toolbar extensions'
+  else jsh::file "${APP_TMP}/prefs.js" "${selected}/prefs.js"; fi
 }
 if cmp -s "${APP_TMP}/user.js" "${selected}/user.js" && ! toolbar; then
   jsh::current

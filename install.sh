@@ -70,7 +70,7 @@ jsh::handoff() {
   elif [[ -t 1 && -t 2 ]]; then
     jsh::log_detail 'Opening the jsh runtime...'
     env -u JSH_PROGRESS_FILE -u JSH_REPORT -u JSH_PACKAGE_STATE -u JSH_STEP -u JSH_DRY_RUN \
-      -u JSH_UPDATE "${JSH_ROOT}/bin/jsh" </dev/tty
+      -u JSH_UPDATE -u JSH_KEEP_APPS "${JSH_ROOT}/bin/jsh" </dev/tty
   else
     printf 'Run "$HOME/.local/bin/jsh" to open the runtime\n'
   fi

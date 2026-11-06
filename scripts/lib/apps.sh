@@ -126,6 +126,16 @@ app::with_closed() (
     "${callback}" "$@"
     return
   fi
+  # APP_LIVE=1 marks callbacks whose writes survive while the app stays open.
+  if [[ ${JSH_KEEP_APPS:-0} == 1 ]]; then
+    if [[ ${APP_LIVE:-0} == 1 ]]; then
+      APP_OPEN=1 "${callback}" "$@" || return
+      jsh::notice "restart ${label} to apply its changes"
+    else
+      jsh::notice "quit ${label}, then run jsh update to apply its settings"
+    fi
+    return
+  fi
   if [[ ${JSH_DRY_RUN:-0} == 1 ]]; then
     jsh::notice "${label} must close and reopen for pending changes"
     "${callback}" "$@"

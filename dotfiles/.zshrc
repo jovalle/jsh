@@ -191,7 +191,7 @@ _jsh() {
     '-c[run a shell command]:command:' \
     '-i[open an interactive shell]' \
     '-l[open a login shell]' \
-    '1::command:((init\:"run local/init scripts" reload\:"reload this shell configuration"))'
+    '1::command:((init\:"run local/init scripts" reload\:"reload this shell configuration" update\:"update without closing open apps"))'
 }
 compdef _jsh jsh
 

@@ -45,6 +45,7 @@ installed packages Homebrew marks deprecated or disabled when nothing depends on
 | `nukem`                         | Clears finalizers from a namespace stuck terminating                              |
 | `jsh`                           | Opens this checkout's shell without installing anything                           |
 | `jsh init [-n] [-y]`            | Sources `local/init/*.zsh` in this shell; `-n` previews, `-y` never prompts       |
+| `jsh update [GROUP ...]`        | Runs `install.sh --update` without closing open apps, then lists apps to restart  |
 | `jssh HOST`                     | Opens SSH with the jsh runtime shipped to a temporary directory on the host       |
 | `proxy`                         | Runs a command with HTTP/HTTPS proxy variables set                                |
 | `cafe`                          | Keeps the screen awake until stopped                                              |

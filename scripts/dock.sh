@@ -205,7 +205,9 @@ configure_xfce_dock() {
   [[ ${panel_before} != "${panel_after}" || ${dock_file_changed} != 0 ]] || return 0
   dock_changed=1
   [[ ${panel_before} == "${panel_after}" ]] || dock_details+=("panel: dock plugin configuration updated")
-  if pgrep -x xfce4-panel >/dev/null 2>&1; then
+  if [[ ${JSH_KEEP_APPS:-0} == 1 ]] && pgrep -x xfce4-panel >/dev/null 2>&1; then
+    jsh::notice 'restart the XFCE panel to apply dock pins: xfce4-panel -r'
+  elif pgrep -x xfce4-panel >/dev/null 2>&1; then
     jsh::activity 'Restarting XFCE panel'
     timeout 5 xfce4-panel -r >/dev/null 2>&1 || true
     sleep 1

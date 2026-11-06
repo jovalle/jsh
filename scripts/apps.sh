@@ -75,6 +75,7 @@ while IFS= read -r entry; do
 done <"${APP_TMP}/entries"
 chmod 755 "${APP_TMP}/component/Contents/MacOS/${name}"
 APP_LAUNCH=(open -a foobar2000)
+APP_LIVE=1
 install_component() {
   local path backup
   backup=${XDG_STATE_HOME:-${HOME}/.local/state}/jsh/backups/$(date +%Y%m%d-%H%M%S)-$$/foobar2000

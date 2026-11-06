@@ -6,7 +6,7 @@ _jsh_complete() {
   COMPREPLY=()
   [[ ${COMP_CWORD} == 1 ]] || return 0
   while IFS= read -r suggestion; do COMPREPLY+=("${suggestion}"); done < <(
-    compgen -W '--help -r reload -c -i' -- "${COMP_WORDS[COMP_CWORD]}"
+    compgen -W '--help -r reload update -c -i' -- "${COMP_WORDS[COMP_CWORD]}"
   )
 }
 complete -F _jsh_complete jsh

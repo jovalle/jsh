@@ -49,6 +49,10 @@ while IFS=$'\t' read -r domain key type value; do
 done <"${SCRIPT_DIR}/macos/preferences.tsv"
 for app in Dock Finder SystemUIServer; do
   [[ " ${restart[*]-} " == *" ${app} "* ]] || continue
+  if [[ ${JSH_KEEP_APPS:-0} == 1 ]]; then
+    jsh::notice "restart ${app} to apply its settings: killall ${app}"
+    continue
+  fi
   jsh::activity "Restarting ${app}"
   jsh::run killall "${app}" 2>/dev/null || true
 done
