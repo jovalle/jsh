@@ -84,3 +84,14 @@ for name in _j _jsh _jsh_fallback _just _make; do
       ;;
   esac
 done
+
+# Atuin 18.24+ creates ~/.atuin/config.toml, which shadows the managed XDG config.
+jsh::activity 'Checking Atuin config'
+atuin_config=${HOME}/.atuin/config.toml
+if [[ -f ${atuin_config} && -L ${XDG_CONFIG_HOME:-${HOME}/.config}/atuin/config.toml ]]; then
+  if [[ ${JSH_DRY_RUN:-0} != 1 ]]; then
+    jsh::backup "${atuin_config}"
+    rm -- "${atuin_config}"
+  fi
+  jsh::removed "${atuin_config}"
+fi
