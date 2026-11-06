@@ -15,9 +15,14 @@ present=0
 for directory in "${roots[@]}"; do [[ ! -d ${directory} ]] || present=1; done
 if command -v waterfox >/dev/null 2>&1 || [[ -d /Applications/Waterfox.app || -d /var/lib/flatpak/app/net.waterfox.waterfox ]]; then present=1; fi
 [[ ${present} == 1 ]] || exit 0
+app::desired waterfox policies.json >"${APP_TMP}/desired.json"
 if [[ $(uname -s) == Darwin ]]; then
-  app::desired waterfox policies.json | jq '.EnterprisePoliciesEnabled = true' >"${APP_TMP}/policy.json"
+  jq '.EnterprisePoliciesEnabled = true' "${APP_TMP}/desired.json" >"${APP_TMP}/policy.json"
   app::policy "${APP_TMP}/policy.json" /Library/Preferences/net.waterfox.waterfox.plist 1
+elif binary=$(command -v waterfox) && binary=$(readlink -f "${binary}") && [[ -f ${binary%/*}/application.ini ]]; then
+  # Only a native install reads distribution/policies.json; the Flatpak's is read-only.
+  jq '{policies: .}' "${APP_TMP}/desired.json" >"${APP_TMP}/policy.json"
+  app::policy "${APP_TMP}/policy.json" "${binary%/*}/distribution/policies.json"
 fi
 : >"${APP_TMP}/profiles"
 : >"${APP_TMP}/defaults"
@@ -97,21 +102,45 @@ fi
 [[ -f ${APP_TMP}/current.js ]] || : >"${APP_TMP}/current.js"
 awk '
   FNR == NR {
-    if ($0 ~ /^user_pref\(["\047]/) { key=$0; sub(/^user_pref\(["\047]/, "", key); sub(/["\047].*$/, "", key); keys[key]=1 }
+    if ($0 ~ /^user_pref\(["\047]/) { key=$0; sub(/^user_pref\(["\047]/, "", key); sub(/["\047].*$/, "", key); if (key == "browser.uiCustomization.state") next; keys[key]=1 }
     managed=managed $0 "\n"; next
   }
   $0 == "// BEGIN jsh preferences" { block=1; next }
   $0 == "// END jsh preferences" { block=0; next }
   block { next }
-  /^user_pref\(["\047]/ { key=$0; sub(/^user_pref\(["\047]/, "", key); sub(/["\047].*$/, "", key); if (key in keys) next }
+  /^user_pref\(["\047]/ { key=$0; sub(/^user_pref\(["\047]/, "", key); sub(/["\047].*$/, "", key); if (key in keys || key == "browser.uiCustomization.state") next }
   { kept=kept $0 "\n" }
   END {
     sub(/[[:space:]]+$/, "", kept); sub(/[[:space:]]+$/, "", managed)
     if (kept != "") printf "%s\n\n", kept
     printf "// BEGIN jsh preferences\n%s\n// END jsh preferences\n", managed
   }' "${APP_TMP}/managed.js" "${APP_TMP}/current.js" >"${APP_TMP}/user.js"
-write_preferences() { jsh::file "${APP_TMP}/user.js" "${selected}/user.js"; }
-if cmp -s "${APP_TMP}/user.js" "${selected}/user.js"; then
+jq -c '[.ExtensionSettings // {} | to_entries[] | select(.value.default_area == "navbar")
+  | (.key | ascii_downcase | gsub("[^a-z0-9_-]"; "_")) + "-browser-action"]' "${APP_TMP}/desired.json" >"${APP_TMP}/pinned.json"
+# default_area only places unseen widgets, so pin navbar entries in policies.json order.
+toolbar() {
+  local layout
+  layout=$(grep -m1 '^user_pref("browser.uiCustomization.state", ' "${selected}/prefs.js" 2>/dev/null) || return 1
+  layout=$(jq -Rr --slurpfile pinned "${APP_TMP}/pinned.json" '
+    def listed($list): . as $widget | $list | index($widget) != null;
+    $pinned[0] as $pinned
+    | capture("^user_pref\\(\"browser\\.uiCustomization\\.state\", (?<value>.*)\\);$").value | fromjson | fromjson
+    | (.placements["nav-bar"] // []) as $nav
+    | [$nav[] | select(listed($pinned) | not)] as $rest
+    | (($nav | map(listed($pinned)) | index(true))
+      // ($rest | index("unified-extensions-button") | values + 1) // ($rest | length)) as $at
+    | .placements |= map_values(map(select(listed($pinned) | not)))
+    | .placements["nav-bar"] = $rest[:$at] + $pinned + $rest[$at:]
+    | "user_pref(\"browser.uiCustomization.state\", \(tojson | tojson));"' <<<"${layout}") || return 1
+  layout=${layout} awk 'index($0, "user_pref(\"browser.uiCustomization.state\", ") == 1 { $0 = ENVIRON["layout"] } { print }' \
+    "${selected}/prefs.js" >"${APP_TMP}/prefs.js"
+  ! cmp -s "${APP_TMP}/prefs.js" "${selected}/prefs.js"
+}
+write_preferences() {
+  jsh::file "${APP_TMP}/user.js" "${selected}/user.js"
+  if toolbar; then jsh::file "${APP_TMP}/prefs.js" "${selected}/prefs.js"; fi
+}
+if cmp -s "${APP_TMP}/user.js" "${selected}/user.js" && ! toolbar; then
   jsh::current
 else
   if [[ $(uname -s) == Darwin ]]; then
