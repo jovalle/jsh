@@ -881,26 +881,26 @@ esac''')
                     COMP_WORDS=(j al)
                     _jsh_jump_complete
                     [[ " ${COMPREPLY[*]} " == *' alpha '* ]] || exit 2
-                    _git() { touch "$HOME/native"; COMPREPLY=(native); }
+                    _git() { touch "$HOME/native-$BASH_VERSION"; COMPREPLY=(native); }
                     COMP_WORDS=(git profile w); COMP_CWORD=2; _jsh_git_complete
-                    [[ ${COMPREPLY[*]} == 'work ' ]] || exit 3
+                    [[ "${COMPREPLY[*]}" == 'work ' ]] || exit 3
                     COMP_WORDS=(git profile --l); COMP_CWORD=2; _jsh_git_complete
-                    [[ ${COMPREPLY[*]} == '--list ' ]] || exit 4
+                    [[ "${COMPREPLY[*]}" == '--list ' ]] || exit 4
                     COMP_WORDS=(git load --f); COMP_CWORD=2; _jsh_git_complete
-                    [[ ${COMPREPLY[*]} == '--force ' ]] || exit 5
+                    [[ "${COMPREPLY[*]}" == '--force ' ]] || exit 5
                     COMP_WORDS=(git create app w); COMP_CWORD=3; _jsh_git_complete
-                    [[ ${COMPREPLY[*]} == 'work ' ]] || exit 6
+                    [[ "${COMPREPLY[*]}" == 'work ' ]] || exit 6
                     COMP_WORDS=(git create w); COMP_CWORD=2; _jsh_git_complete
                     (( ${#COMPREPLY[@]} == 0 )) || exit 7
                     COMP_WORDS=(git handoff --d); COMP_CWORD=2; _jsh_git_complete
-                    [[ ${COMPREPLY[*]} == '--dry-run ' ]] || exit 8
+                    [[ "${COMPREPLY[*]}" == '--dry-run ' ]] || exit 8
                     COMP_WORDS=(git amend -); COMP_CWORD=2; _jsh_git_complete
                     [[ $(printf '%s|' "${COMPREPLY[@]}") == '-x |-t |-h |--help |' ]] || exit 9
                     COMP_WORDS=(git save --h); COMP_CWORD=2; _jsh_git_complete
-                    [[ ${COMPREPLY[*]} == '--help ' ]] || exit 10
-                    [[ ! -e $HOME/native ]] || exit 11
+                    [[ "${COMPREPLY[*]}" == '--help ' ]] || exit 10
+                    [[ ! -e $HOME/native-$BASH_VERSION ]] || exit 11
                     COMP_WORDS=(git status s); COMP_CWORD=2; _jsh_git_complete
-                    [[ ${COMPREPLY[*]} == native && -e $HOME/native ]] || exit 12
+                    [[ ${COMPREPLY[*]} == native && -e $HOME/native-$BASH_VERSION ]] || exit 12
                 """,
                     JSH_GIT_PROFILES=str(profiles),
                 )
