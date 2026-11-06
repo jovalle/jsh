@@ -30,12 +30,10 @@ installed packages Homebrew marks deprecated or disabled when nothing depends on
 | ------------------------------- | --------------------------------------------------------------------------------- |
 | `git status`                    | Adds identity and branch notes and condenses file lists; `--raw` for plain output |
 | `git status -R [DIR]`           | Outside a repository, summarizes every repository below `DIR` (or `~/Projects`)   |
-| `git commit -t TIME`            | Commits with a chosen date                                                        |
-| `git amend -t TIME COMMIT`      | Moves a commit and its successors in time                                         |
 | `git save`, `git load`          | Backs up and restores uncommitted changes through a secret gist                   |
 | `git refresh`                   | Fetches origin and rebases onto the default branch                                |
 | `git create`, `git get`         | Creates or clones a project under `$GIT_BASE`                                     |
-| `git profile [NAME]`            | Switches identity, SSH key, and remotes from `~/.config/jsh/git.json`             |
+| `git profile [NAME]`            | Switches identity, SSH key, and remotes from `local/git.json`                     |
 | `git commits`                   | Browses formatted commit history                                                  |
 | `git handoff`                   | Carries unpushed commits to another workstation through Syncthing                 |
 | `j [QUERY]`                     | Jumps to the best frecency match; `j` alone picks a project, `j -c` opens VS Code |

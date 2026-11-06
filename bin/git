@@ -8,7 +8,7 @@
 #   git get REPOSITORY   Clone a GitHub or GitLab repository into the projects directory
 #   git commits          Browse formatted commit history
 #   git amend -t TIME COMMIT  Move a commit and its successors in time
-#   git profile [NAME]    Use a ~/.config/jsh/git.json profile: identity, SSH key, SSH GitHub remotes
+#   git profile [NAME]    Use a local/git.json profile: identity, SSH key, SSH GitHub remotes
 #   git commit -t TIME    Commit with a chosen date (see `git commit -t --help`)
 #   git status            On a terminal, adds identity and branch notes and condenses file lists
 #   git status --raw      Plain git status, untouched
@@ -78,7 +78,9 @@ JSH_ROOT=$(CDPATH='' cd -P "${launcher%/*}/.." && pwd -P)
 # shellcheck source=../scripts/lib/common.sh
 . "${JSH_ROOT}/scripts/lib/common.sh"
 jsh::color_init
-PROFILES=${JSH_GIT_PROFILES:-${XDG_CONFIG_HOME:-${HOME}/.config}/jsh/git.json}
+PROFILES=${JSH_GIT_PROFILES:-${JSH_ROOT}/local/git.json}
+legacy_profiles=${XDG_CONFIG_HOME:-${HOME}/.config}/jsh/git.json
+[[ -n ${JSH_GIT_PROFILES:-} || -e ${PROFILES} || ! -r ${legacy_profiles} ]] || PROFILES=${legacy_profiles}
 
 die() {
 	jsh::log_error "$*"
@@ -716,13 +718,20 @@ create() {
 		jsh::confirm 'Change into it?'
 		return
 	fi
-	profiles=$(read_profiles) || return 1
-	while IFS= read -r line; do
-		[[ -n ${line} ]] || continue
-		names+=("${line%%$'\x1f'*}")
-		[[ ${line%%$'\x1f'*} != "${wanted}" ]] || found=1
-	done <<<"${profiles}"
-	((${#names[@]})) || die "no profiles in ${PROFILES}"
+	if [[ -n ${wanted} || -r ${PROFILES} ]]; then
+		profiles=$(read_profiles) || return 1
+		while IFS= read -r line; do
+			[[ -n ${line} ]] || continue
+			names+=("${line%%$'\x1f'*}")
+			[[ ${line%%$'\x1f'*} != "${wanted}" ]] || found=1
+		done <<<"${profiles}"
+	fi
+	if ((${#names[@]} == 0)); then
+		mkdir -- "${target}" || die "cannot create directory: ${target}"
+		run_git -C "${target}" init --quiet
+		jsh::log_success "created ${target}"
+		return
+	fi
 	if [[ -z ${wanted} ]]; then
 		[[ -t 0 && -t 1 ]] || die 'specify a profile when not using a terminal'
 		wanted=$(jsh::choose profile "${names[@]}") || return 1
@@ -743,7 +752,8 @@ get() {
 		return
 	fi
 	(($# == 1)) || die 'usage: git get OWNER/REPO | URL'
-	local input=$1 path url host target found=''
+	local input=$1 path url host target found='' profiles line name display email user key ssh_command
+	local -a clone_options=()
 	case ${input} in
 	https://github.com/* | https://gitlab.com/*) url=${input}; path=${input#https://*/} ;;
 	git@github.com:* | git@gitlab.com:*) url=${input}; path=${input#*:} ;;
@@ -756,18 +766,35 @@ get() {
 	[[ -n ${target} && ${target} != . && ${target} != .. ]] || die 'invalid repository name'
 	target=${GIT_BASE:-${HOME}/Projects}/${target}
 	[[ ! -e ${target} && ! -L ${target} ]] || die "project already exists: ${target}"
+	ssh_command="${GIT_SSH_COMMAND:-ssh} -o BatchMode=yes"
+	if [[ -r ${PROFILES} ]]; then
+		profiles=$(read_profiles) || return 1
+		while IFS= read -r line; do
+			IFS=$'\x1f' read -r name display email user key <<<"${line}"
+			if [[ -n ${user} && ${user} == "${path%%/*}" && -n ${key} ]]; then
+				ssh_command="ssh -F /dev/null -i $(printf '%q' "$(key_path "${key}")") -o IdentitiesOnly=yes"
+				clone_options=(-c "core.sshCommand=${ssh_command}")
+				ssh_command+=" -o BatchMode=yes"
+				if [[ ${url} == https://* ]]; then
+					url="git@${url#https://}"
+					url=${url/\//:}
+				fi
+				break
+			fi
+		done <<<"${profiles}"
+	fi
 	if [[ -z ${url} ]]; then
 		for host in github.com gitlab.com; do
-			url=https://${host}/${path%.git}.git
-			if GIT_TERMINAL_PROMPT=0 run_git ls-remote "${url}" >/dev/null 2>&1; then
+			if ((${#clone_options[@]})); then url=git@${host}:${path%.git}.git; else url=https://${host}/${path%.git}.git; fi
+			if GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="${ssh_command}" run_git ls-remote "${url}" >/dev/null 2>&1; then
 				found=1
 				break
 			fi
 		done
 		[[ -n ${found} ]] || die 'repository not found or inaccessible on GitHub and GitLab'
 	fi
-	GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh} -o BatchMode=yes" \
-		run_git clone "${url}" "${target}"
+	GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND="${ssh_command}" \
+		run_git clone ${clone_options[@]+"${clone_options[@]}"} "${url}" "${target}"
 }
 
 # ---- commits ----
@@ -816,11 +843,28 @@ commits() {
 # Prints NAME, display name, email, GitHub user, and SSH key per profile, split by \x1f
 # (tabs would let `read` collapse empty fields).
 read_profiles() {
-	[[ -r ${PROFILES} ]] || die "no profiles: create ${PROFILES} (format in the jsh README)"
+	if [[ ! -e ${PROFILES} ]]; then
+		mkdir -p -- "${PROFILES%/*}" && cat >"${PROFILES}" <<'EOF' || die "cannot write ${PROFILES}"
+{
+  "profiles": {
+    "personal": {
+      "name": "Your Name",
+      "email": "you@example.com",
+      "user": "github-username",
+      "ssh_key": "id_ed25519"
+    }
+  }
+}
+EOF
+		die "no profiles yet: fill in the sample at ${PROFILES}"
+	fi
+	[[ -r ${PROFILES} ]] || die "cannot read ${PROFILES}"
 	python3 - "${PROFILES}" <<'EOF'
 import json, sys
 
 for name, profile in json.load(open(sys.argv[1], encoding="utf-8")).get("profiles", {}).items():
+    if profile.get("email") == "you@example.com":
+        continue
     fields = [name] + [profile.get(key, "") for key in ("name", "email", "user", "ssh_key")]
     print("\x1f".join(fields))
 EOF
@@ -848,7 +892,7 @@ ssh_url() {
 
 profile() {
 	local wanted='' line chosen='' name display email user key current remote url push owner
-	local -a lines names
+	local -a lines=() names=()
 	case ${1:-} in
 	-h | --help)
 		printf 'usage: git profile [NAME | --list]\n\nSet user.name, user.email, and core.sshCommand from a %s\n' "${PROFILES}"
@@ -861,7 +905,7 @@ profile() {
 	while IFS= read -r line; do
 		[[ -n ${line} ]] && lines+=("${line}") && names+=("${line%%$'\x1f'*}")
 	done < <(read_profiles)
-	((${#lines[@]})) || die "no profiles in ${PROFILES}"
+	((${#lines[@]})) || die "no profiles yet: fill in ${PROFILES}"
 	if [[ -z ${wanted} || ${wanted} == --list ]]; then
 		current=$(run_git config user.email 2>/dev/null || true)
 		if [[ ${wanted} == --list || ! -t 0 || ! -t 1 ]]; then

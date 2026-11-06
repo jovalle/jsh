@@ -713,8 +713,64 @@ esac''')
         self.assertEqual(len(calls), 6)
         self.assertTrue(all("--quiet" in call for call in calls), calls)
 
+    def test_git_get_uses_matching_profile_key(self):
+        profiles = self.home / "profiles.json"
+        profiles.write_text('{"profiles": {"work": {"user": "skulltrail", "ssh_key": "key with space"}}}')
+        self.tool("git", '''printf '%s|%s\\n' "$GIT_SSH_COMMAND" "$*" >> "$HOME/git-calls"
+case "$*" in
+  *git@github.com:skulltrail/skulltrail.git*) exit 0 ;;
+  *) exit 1 ;;
+esac''')
+        result = subprocess.run(
+            [str(ROOT / "bin/git"), "get", "skulltrail/skulltrail"],
+            env=self.env | {"JSH_GIT_PROFILES": str(profiles)}, cwd=self.home,
+            capture_output=True, text=True, timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = (self.home / "git-calls").read_text().splitlines()
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(all("ssh -F /dev/null -i " in call and "key\\ with\\ space" in call and "IdentitiesOnly=yes" in call for call in calls), calls)
+        self.assertIn("clone -c core.sshCommand=", calls[1])
+        self.assertTrue(all("git@github.com:skulltrail/skulltrail.git" in call for call in calls))
+
+    def test_git_get_without_matching_profile_uses_https(self):
+        self.tool("git", '''printf '%s\\n' "$*" >> "$HOME/git-calls"''')
+        result = subprocess.run(
+            ["/bin/bash", str(ROOT / "bin/git"), "get", "other/project"],
+            env=self.env | {"JSH_GIT_PROFILES": str(self.home / "missing.json")}, cwd=self.home,
+            capture_output=True, text=True, timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = (self.home / "git-calls").read_text().splitlines()
+        self.assertTrue(all("https://github.com/other/project.git" in call for call in calls), calls)
+        self.assertNotIn("core.sshCommand", calls[-1])
+
+    def test_git_profile_completion_reads_profiles_without_creating_them(self):
+        profiles = self.home / "profiles.json"
+        profiles.write_text(
+            '{"profiles": {"work": {"name": "Work", "email": "work@example.org"},'
+            ' "personal": {"name": "Me", "email": "you@example.com"}}}'
+        )
+        env = self.env | {"JSH_GIT_PROFILES": str(profiles)}
+        result = subprocess.run(
+            [str(ROOT / "bin/git"), "__complete", "profile"],
+            env=env, capture_output=True, text=True, timeout=10,
+        )
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "work\n", ""))
+        missing = self.home / "missing/profiles.json"
+        for kind, path in (("profile", missing), ("other", profiles)):
+            result = subprocess.run(
+                [str(ROOT / "bin/git"), "__complete", kind],
+                env=self.env | {"JSH_GIT_PROFILES": str(path)},
+                capture_output=True, text=True, timeout=10,
+            )
+            self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
+        self.assertFalse(missing.parent.exists())
+
     def test_bash_completions_extend_native_git_and_complete_project_names(self):
         (self.home / "Projects/alpha").mkdir(parents=True)
+        profiles = self.home / "profiles.json"
+        profiles.write_text('{"profiles": {"work": {"name": "Work", "email": "work@example.org"}}}')
         for shell in SHELLS:
             if "zsh" in Path(shell).name:
                 continue

@@ -304,7 +304,7 @@ alias show_options='setopt'
     save:'back up uncommitted changes to a secret gist' \
     load:'apply changes saved with git save' \
     refresh:'fetch origin and rebase onto its default branch' \
-    profile:'use a ~/.config/jsh/git.json identity, SSH key, and SSH remotes'
+    profile:'use a local/git.json identity, SSH key, and SSH remotes'
 
 # ============================================================================
 # 7. ZSH-SPECIFIC FUNCTIONS
@@ -1259,8 +1259,10 @@ ZSH_HIGHLIGHT_STYLES[hashed-command]='fg=green'
 
 # Loads each Git profile ssh_key into the agent unless it is already loaded.
 _jsh_load_keys() {
-  local config=${JSH_GIT_PROFILES:-${XDG_CONFIG_HOME:-${HOME}/.config}/jsh/git.json} key public fingerprint loaded
+  local config=${JSH_GIT_PROFILES:-${JSH}/local/git.json} key public fingerprint loaded
   local -a keys ssh_add=(ssh-add) added failed
+  [[ -n ${JSH_GIT_PROFILES:-} || -r ${config} ]] ||
+    config=${XDG_CONFIG_HOME:-${HOME}/.config}/jsh/git.json
   [[ -r ${config} ]] || return 0
   (( $+commands[jq] )) || return 0
   keys=("${(@f)$(command jq -r '.profiles[]? | .ssh_key // empty' "${config}" 2>/dev/null)}")
