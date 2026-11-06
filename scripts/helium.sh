@@ -33,12 +33,41 @@ if [[ ${#profiles[@]} != 1 ]]; then
   exit 0
 fi
 preferences=${profiles[0]}
+# Linux Chromium needs experimental web-platform features for Kingpin's Web Bluetooth.
+# Keep the user's other browser flags when adding this setting.
+helium::state() {
+  local current=${APP_TMP}/helium-current-state.json
+  if [[ -f "${profile_root}/Local State" ]]; then app::jsonc "${profile_root}/Local State" >"${current}"
+  else printf '{}\n' >"${current}"; fi
+  app::jsonc "${SCRIPT_DIR}/helium/state.json" >"${APP_TMP}/helium-base-state.json"
+  jq -n --slurpfile state "${APP_TMP}/helium-base-state.json" --slurpfile current "${current}" '
+    ($current[0].browser.enabled_labs_experiments // []) as $flags |
+    if ($flags | type) != "array" or any($flags[]; type != "string") then
+      error("Helium experimental flags must be a string array")
+    else $state[0] * {browser: {enabled_labs_experiments:
+      (($flags | map(select(. != "enable-experimental-web-platform-features" and
+        (startswith("enable-experimental-web-platform-features@") | not)))) +
+        ["enable-experimental-web-platform-features"])}} end' >"${APP_TMP}/helium-state.json"
+}
+helium::state
 jsh::activity 'Checking Helium profile preferences'
+helium::preferences() {
+  local current=${APP_TMP}/helium-current-preferences.json
+  app::jsonc "${preferences}" >"${current}"
+  jq -n --slurpfile base "${SCRIPT_DIR}/helium/preferences.json" --slurpfile policy "${APP_TMP}/policy.json" --slurpfile current "${current}" '
+    [$policy[0].ExtensionSettings // {} | to_entries[] | select(.value.toolbar_pin == "force_pinned") | .key] as $pinned |
+    ($current[0].extensions.pinned_extensions // []) as $existing |
+    if ($existing | type) != "array" or any($existing[]; type != "string") then
+      error("Helium pinned extensions must be a string array")
+    else $base[0] * {extensions: {pinned_extensions:
+      ($pinned + [$existing[] | select(. as $id | $pinned | index($id) | not)])}} end' >"${APP_TMP}/helium-preferences.json"
+}
+helium::preferences
 secure=${preferences%/*}/Secure\ Preferences
 pending=0
-app::pending "${SCRIPT_DIR}/helium/preferences.json" "${preferences}"
+app::pending "${APP_TMP}/helium-preferences.json" "${preferences}"
 [[ ${APP_PENDING} == 0 ]] || pending=1
-app::pending "${SCRIPT_DIR}/helium/state.json" "${profile_root}/Local State"
+app::pending "${APP_TMP}/helium-state.json" "${profile_root}/Local State"
 [[ ${APP_PENDING} == 0 ]] || pending=1
 : >"${APP_TMP}/unpacked"
 unpacked=$(app::local helium unpacked.json)
@@ -128,8 +157,10 @@ load_unpacked() {
 }
 configure_helium() {
   jsh::activity 'Applying Helium profile preferences'
-  app::json "${SCRIPT_DIR}/helium/preferences.json" "${preferences}"
-  app::json "${SCRIPT_DIR}/helium/state.json" "${profile_root}/Local State"
+  helium::preferences
+  app::json "${APP_TMP}/helium-preferences.json" "${preferences}"
+  helium::state
+  app::json "${APP_TMP}/helium-state.json" "${profile_root}/Local State"
   if [[ ${unpacked_pending} == 1 ]]; then load_unpacked; fi
 }
 app::with_closed Helium 'helium|Helium|helium-bin' configure_helium
