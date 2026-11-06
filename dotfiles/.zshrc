@@ -177,6 +177,14 @@ fi
 unset _jsh_compdump
 (( ${+functions[_jsh_after_compinit]} )) && _jsh_after_compinit
 _jsh() {
+  if [[ ${words[2]} == init ]]; then
+    shift words
+    (( CURRENT-- ))
+    _arguments \
+      '(-n --dry-run)'{-n,--dry-run}'[preview without changing anything]' \
+      '(-y --yes)'{-y,--yes}'[never prompt]'
+    return
+  fi
   _arguments \
     '(-h --help)'{-h,--help}'[show runtime help]' \
     '-r[reload this shell configuration]' \
@@ -1422,6 +1430,11 @@ jsh() {
       source "${JSH}/dotfiles/.zshrc"
       return
       ;;
+    init)
+      shift
+      _jsh_init "$@"
+      return
+      ;;
   esac
   command "${JSH}/bin/jsh" "$@"
 }
@@ -1484,6 +1497,52 @@ _jsh_run_init() {
   for script in "${JSH_INIT:-${JSH}/local/init.d}"/*(N.x); do
     "${script}" || jsh::log_error "init: ${script:t} failed"
   done
+}
+
+# Sources each local/init/*.zsh in name order so they can change this shell (e.g. SSH_AUTH_SOCK).
+_jsh_init() {
+  local script dir=${JSH}/local/init
+  # Init scripts read J_INIT_DRY and J_INIT_YES.
+  local -i J_INIT_DRY=0 J_INIT_YES=0 _jinit_status failed=0 tilde=0
+  while (( $# )); do
+    case $1 in
+      -n|--dry-run) J_INIT_DRY=1 ;;
+      -y|--yes) J_INIT_YES=1 ;;
+      -h|--help)
+        print -r -- 'Usage: jsh init [-n|--dry-run] [-y|--yes]'
+        print -r -- 'Run local/init/*.zsh in this shell; -n previews, -y never prompts.'
+        return 0
+        ;;
+      *)
+        print -u2 -r -- "jsh init: unknown option: $1"
+        return 2
+        ;;
+    esac
+    shift
+  done
+  local -a scripts=("${dir}"/*.zsh(N.))
+  if (( ! ${#scripts} )); then
+    _j_ui_message info "No init scripts in ${(D)dir}"
+    return 0
+  fi
+  # Init scripts written for the old j init expect this helper.
+  (( $+functions[_j_stack_tilde] )) || { tilde=1; _j_stack_tilde() { print -rn -- "${(D)1}" } }
+  for script in "${scripts[@]}"; do
+    # Never source a script under -n unless it honors J_INIT_DRY.
+    if (( J_INIT_DRY )) && [[ $(<"${script}") != *J_INIT_DRY* ]]; then
+      _j_ui_message info "init: would run ${script:t:r}"
+      continue
+    fi
+    _jinit_status=0
+    source "${script}" || _jinit_status=$?
+    (( _jinit_status == 0 )) && continue
+    (( ++failed ))
+    _j_ui_message error "init: ${script:t:r} failed"
+  done
+  (( ! tilde )) || unfunction _j_stack_tilde
+  # Old j init scripts may leave this global behind.
+  unset _jinit_key
+  (( ! failed ))
 }
 
 # Agent shells and reloads skip start-up work.
