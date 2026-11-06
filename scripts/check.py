@@ -4,6 +4,7 @@
 import os
 from pathlib import Path
 import pty
+import re
 import select
 import shlex
 import shutil
@@ -394,7 +395,9 @@ class ShellChecks(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertRegex(result.stdout, r"=   :-=-:.*Update.*-:")
-        self.assertIn("› OS: macOS\n\n› Module: core", result.stdout)
+        self.assertIn("› core", result.stdout)
+        self.assertNotIn("› OS:", result.stdout)
+        self.assertNotIn("› Module:", result.stdout)
         self.assertNotIn("Scope:", result.stdout)
         self.assertLess(result.stdout.index("Update"), result.stdout.index("BREW_UPDATE"))
 
@@ -419,9 +422,10 @@ class ShellChecks(unittest.TestCase):
             output.extend(chunk)
         os.close(master)
         self.assertEqual(process.wait(timeout=10), 0, output)
-        display = output.decode(errors="replace")
+        display = re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", output.decode(errors="replace"))
         for component in ("core", "shell", "links", "tools"):
-            self.assertIn(f"› Module: {component}", display)
+            self.assertIn(f"› {component}", display)
+            self.assertIn(f"\x1b[36m›\x1b[0m \x1b[36m{component}\x1b[0m".encode(), output)
         self.assertIn("Starting package checks", display)
         self.assertIn("Everything is current", display)
 
@@ -434,8 +438,20 @@ class ShellChecks(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertRegex(result.stdout, r"=   :-=-:.*Preview.*-:")
-        self.assertIn("› OS: Debian\n› Desktop: XFCE\n\n› Module: core", result.stdout)
+        self.assertIn("› core", result.stdout)
+        self.assertNotIn("› OS:", result.stdout)
+        self.assertNotIn("› Desktop:", result.stdout)
         self.assertNotIn("Scope:", result.stdout)
+
+    def test_monitored_update_colors_package_heading(self):
+        checkout = self.installer_scope_fixture()
+        result = subprocess.run(
+            ["bash", str(checkout / "install.sh"), "--update", "core"],
+            env=self.env | {"JSH_PROGRESS_FILE": str(self.home / "progress")},
+            cwd=self.home, capture_output=True, text=True, timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("\x1b[36m›\x1b[0m \x1b[36mpackages\x1b[0m", result.stdout)
 
     def test_installer_rejects_removed_scope_option_before_changes(self):
         checkout = self.installer_scope_fixture()
@@ -458,6 +474,46 @@ class ShellChecks(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("Ready", result.stdout)
         self.assertNotIn("Opening the jsh runtime", result.stdout)
+
+    def test_installer_numbers_bootstrap_and_selected_groups(self):
+        checkout = self.installer_scope_fixture()
+        progress = self.home / "progress"
+        for group in ("git", "tools"):
+            (checkout / f"scripts/{group}.sh").write_text(
+                'cat "$JSH_PROGRESS_FILE" >> "$HOME/steps"\n')
+        result = subprocess.run(
+            ["bash", str(checkout / "install.sh"), "core", "git", "tools"],
+            env=self.env | {"JSH_PROGRESS_FILE": str(progress)},
+            cwd=self.home, capture_output=True, text=True, timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.home / "steps").read_text(),
+                         "[4/5] git  Starting git\n[5/5] tools  Starting tools\n")
+
+    def test_installer_ignores_inherited_progress_path_on_a_terminal(self):
+        checkout = self.installer_scope_fixture()
+        (checkout / "scripts/packages.sh").write_text("sleep 0.5\n")
+        (self.home / ".jsh").symlink_to(checkout)
+        master, slave = pty.openpty()
+        process = subprocess.Popen(
+            ["bash", str(checkout / "install.sh"), "tools"],
+            env=self.env | {"JSH_PROGRESS_FILE": str(self.home / "stale")},
+            cwd=self.home, stdin=subprocess.DEVNULL, stdout=slave, stderr=slave,
+        )
+        os.close(slave)
+        output = bytearray()
+        while True:
+            try:
+                chunk = os.read(master, 65536)
+            except OSError:
+                break
+            if not chunk:
+                break
+            output.extend(chunk)
+        os.close(master)
+        self.assertEqual(process.wait(timeout=10), 0, output)
+        self.assertIn("⠋", output.decode(errors="replace"))
+        self.assertFalse((self.home / "stale").exists())
 
     def test_installer_reloads_the_existing_runtime_without_nesting(self):
         checkout = self.installer_scope_fixture()
@@ -1072,6 +1128,32 @@ printf '\\nSTATUS:%s\\n' "$?"
             file.write("\n# cache invalidation fixture\n")
         self.assertNotEqual(first, payload())
 
+
+    def test_installer_runs_global_brew_updates_in_package_step(self):
+        checkout = self.installer_scope_fixture()
+        shutil.copy2(ROOT / "scripts/packages.sh", checkout / "scripts/packages.sh")
+        jq = shutil.which("jq")
+        if not jq:
+            self.skipTest("jq is required for Homebrew metadata")
+        (self.tools / "jq").symlink_to(jq)
+        self.tool("brew", '''case "$1" in
+  update) exit 0 ;;
+  info) printf '%s\\n' '{"formulae":[{"full_name":"retired-formula","deprecated":true}],"casks":[{"token":"retired-cask","deprecated":true}]}' ;;
+  outdated) case "$2" in --formula) echo unrelated-formula ;; --cask) echo chatgpt ;; esac ;;
+  upgrade) printf '%s: %s\\n' "$JSH_STEP" "$*" >> "$HOME/actions" ;;
+esac''')
+        result = subprocess.run(
+            ["bash", str(checkout / "install.sh"), "--update", "ghostty"],
+            env=self.env | {"JSH_PLATFORM": "darwin"}, cwd=self.home,
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue((self.home / "actions").exists(), result.stdout + result.stderr)
+        actions = (self.home / "actions").read_text().splitlines()
+        self.assertEqual(len(actions), 2, actions)
+        self.assertTrue(all(" packages " in line for line in actions), actions)
+        self.assertTrue(any("unrelated-formula" in line for line in actions), actions)
+        self.assertTrue(any("chatgpt" in line for line in actions), actions)
 
     def test_brew_update_includes_unlisted_packages_and_removes_deprecated(self):
         if os.uname().sysname == "Darwin":

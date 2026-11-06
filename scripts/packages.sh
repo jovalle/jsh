@@ -100,6 +100,7 @@ jsh::brew() {
     [[ ${JSH_PLATFORM} == darwin ]] || return 0
     flag=--cask
   }
+  [[ ${JSH_UPDATE:-0} != 1 || ${JSH_BREW_DEFER:-0} != 1 || ${kind} == taps ]] || return 0
   if ! command -v brew >/dev/null 2>&1; then
     [[ ${JSH_PLATFORM} != darwin ]] || {
       jsh::log_error 'Install Homebrew first: https://brew.sh'
@@ -150,9 +151,16 @@ jsh::brew() {
 }
 
 jsh::native() {
-  local manager=$1 name listing='' status=0
+  local manager=$1 name listing='' status=0 root=1
   local -a missing=()
   shift
+  if [[ ${JSH_DRY_RUN} != 1 ]] && ! jsh::admin; then
+    if [[ ${JSH_UPDATE:-0} == 1 ]]; then
+      jsh::notice "${manager} updates need sudo; run sudo -v first, then rerun"
+      return 0
+    fi
+    root=0
+  fi
   if [[ ${JSH_UPDATE:-0} == 1 ]]; then
     if [[ ${manager} == apt ]]; then
       jsh::refresh apt 'Checking apt updates' jsh::root env DEBIAN_FRONTEND=noninteractive apt-get update || return
@@ -180,6 +188,10 @@ jsh::native() {
     fi
   done
   ((${#missing[@]})) || return 0
+  if ((root == 0)); then
+    jsh::notice "Install with sudo: ${manager} install ${missing[*]}"
+    return 1
+  fi
   if [[ ${manager} == apt ]]; then
     local option=--no-upgrade
     [[ ${JSH_UPDATE:-0} != 1 ]] || option=--only-upgrade
@@ -303,6 +315,12 @@ jsh::appimage() {
 # Package choices are ordinary shell, grouped by purpose and platform.
 install_group() {
   case $1 in
+    maintenance)
+      if command -v brew >/dev/null 2>&1 || [[ ${JSH_PLATFORM} == darwin ]]; then
+        jsh::brew formulae || return
+        jsh::brew casks || return
+      fi
+      ;;
     ai)
       jsh::brew formulae opencode || return
       jsh::brew casks antigravity-cli chatgpt codex copilot-cli || return

@@ -22,6 +22,8 @@ jsh::paint() {
 }
 
 jsh::log_info() { printf '%s %s\n' "$(jsh::paint 1 36 '›')" "$*"; }
+# Usage: jsh::log_field LABEL VALUE. Prints "› LABEL: VALUE" with the value in cyan.
+jsh::log_field() { printf '%s %s: %s\n' "$(jsh::paint 1 36 '›')" "$1" "$(jsh::paint 1 36 "$2")"; }
 jsh::log_note() { printf '%s\n' "$(jsh::paint 1 2 "$*")"; }
 jsh::log_detail() { printf '%s\n' "$(jsh::paint 1 2 "$*")"; }
 jsh::log_item() { printf '  %s %s\n' "$(jsh::paint 1 32 +)" "$*"; }
@@ -147,9 +149,12 @@ BANNER
     banner=${banner%" =   :-=-:                          -:"}
     banner+=$(printf ' =   :-=-:        %-18s-:' "$1")
   fi
-  printf '%s\n' "$(jsh::paint 1 36 "${banner}")"
-  [[ -z ${2:-} ]] || jsh::log_info "OS: $2"
-  [[ -z ${3:-} ]] || jsh::log_info "Desktop: $3"
+  local line
+  # Paint each line so the color survives line-by-line relaying.
+  while IFS= read -r line; do printf '%s\n' "$(jsh::paint 1 36 "${line}")"; done <<<"${banner}"
+  [[ -z ${2:-}${3:-} ]] || printf '\n'
+  [[ -z ${2:-} ]] || jsh::log_field OS "$2"
+  [[ -z ${3:-} ]] || jsh::log_field Desktop "$3"
 }
 
 jsh::color_init

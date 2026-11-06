@@ -39,6 +39,8 @@ if [[ ${_JSH_AUTOMATION} == 1 ]]; then
     esac
   done
   unset _jsh_arg
+  # Monitored children write to a log, so a terminal on stdout means an inherited, stale path.
+  [[ ! -t 1 ]] || unset JSH_PROGRESS_FILE
 fi
 export JSH_DRY_RUN=${JSH_DRY_RUN:-0}
 if [[ -z ${JSH_PLATFORM:-} ]]; then
@@ -88,7 +90,8 @@ jsh::emit() {
     removed) printf '%s %-*s %s\n' "$(jsh::paint 1 31 -)" "${width}" "${prefix}" "${value}" ;;
     notice)
       if [[ -n ${JSH_REPORT:-} && ${JSH_DRY_RUN} != 1 ]]; then
-        printf '%s\n' "${value}" >>"${JSH_REPORT}/notices"
+        grep -Fxq -- "${value}" "${JSH_REPORT}/notices" 2>/dev/null ||
+          printf '%s\n' "${value}" >>"${JSH_REPORT}/notices"
       else jsh::log_warn "${value}"; fi ;;
     detail)
       if [[ -z ${JSH_REPORT:-} || ${value} != *'up to date' ]]; then printf '  %s\n' "${value}"; fi ;;
@@ -207,7 +210,7 @@ jsh::progress_draw() {
 
 # Stream child reports above one persistent progress display while setup scripts run.
 jsh::monitor() {
-  local log=${JSH_TMP:?}/monitor.log pid status=0 frame=0 start=${SECONDS} line label detail partial='' finished=0
+  local log=${JSH_TMP:?}/monitor.log pid status=0 frame=0 start=${SECONDS} line key label detail partial='' finished=0
   local JSH_PROGRESS_LINES=0
   : >"${log}"
   "$@" </dev/null >"${log}" 2>&1 &
@@ -232,7 +235,11 @@ jsh::monitor() {
         '! '*) printf '%s\n' "$(jsh::paint 2 33 "${line}")" >&2 ;;
         '✗ '*) printf '%s\n' "$(jsh::paint 2 31 "${line}")" >&2 ;;
         '✓ '*) printf '%s\n' "$(jsh::paint 2 32 "${line}")" >&2 ;;
-        '› '*) printf '%s\n' "$(jsh::paint 2 36 "${line}")" >&2 ;;
+        '› '*': '*)
+          key=${line%%: *}
+          printf '%s %s: %s\n' "$(jsh::paint 2 36 '›')" "${key:2}" "$(jsh::paint 2 36 "${line#*: }")" >&2
+          ;;
+        '› '*) printf '%s %s\n' "$(jsh::paint 2 36 '›')" "${line:2}" >&2 ;;
         'Ready'* | 'Preview complete'*) printf '%s\n' "$(jsh::paint 2 32 "${line}")" >&2 ;;
         'Finished with errors'*) printf '%s\n' "$(jsh::paint 2 31 "${line}")" >&2 ;;
         'Action needed') printf '%s\n' "$(jsh::paint 2 33 "${line}")" >&2 ;;

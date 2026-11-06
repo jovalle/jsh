@@ -69,7 +69,8 @@ jsh::handoff() {
     jsh::log_detail 'Run "jsh reload" to refresh the current runtime'
   elif [[ -t 1 && -t 2 ]]; then
     jsh::log_detail 'Opening the jsh runtime...'
-    "${JSH_ROOT}/bin/jsh" </dev/tty
+    env -u JSH_PROGRESS_FILE -u JSH_REPORT -u JSH_PACKAGE_STATE -u JSH_STEP -u JSH_DRY_RUN \
+      -u JSH_UPDATE "${JSH_ROOT}/bin/jsh" </dev/tty
   else
     printf 'Run "$HOME/.local/bin/jsh" to open the runtime\n'
   fi
@@ -136,30 +137,39 @@ if ((${#groups[@]} == 0)); then
     jsh::notice 'Workstation setup needs sudo; run sudo -v first, then rerun ./install.sh'
   fi
   if ((workstation)); then
-    groups=(linux macos core dev git ghostty containers kube fonts password tools services
-      apps desktop dock display keybindings audio wallpaper vscode sublime helium waterfox
-      ai skills)
+    if [[ ${JSH_PLATFORM} == darwin ]]; then groups=(macos); else groups=(linux); fi
+    groups+=(dev git ghostty containers kube fonts password tools services apps desktop dock
+      display keybindings audio wallpaper vscode sublime helium waterfox ai skills)
   fi
 fi
 
-case ${JSH_PLATFORM} in
-  darwin) platform=macOS ;;
-  debian) platform=Debian ;;
-  rhel) platform=RHEL ;;
-  *) platform=${JSH_PLATFORM} ;;
-esac
-case ${JSH_DESKTOP} in
-  xfce) desktop=XFCE ;;
-  gnome) desktop=GNOME ;;
-  "${JSH_PLATFORM}") desktop='' ;;
-  *) desktop=${JSH_DESKTOP} ;;
-esac
+# Bootstrap core, shell, and links always run first, so they count as steps 1-3.
+selected=()
+for group in ${groups[@]+"${groups[@]}"}; do
+  case ${group} in core | shell) ;; *) selected+=("${group}") ;; esac
+done
+total=$((${#selected[@]} + 3))
+if [[ ${JSH_UPDATE:-0} == 1 ]]; then
+  total=$((total + 1))
+  export JSH_BREW_DEFER=1
+fi
+
 action=Install
 [[ ${JSH_UPDATE:-0} != 1 ]] || action=Update
 [[ ${JSH_DRY_RUN} != 1 ]] || action=Preview
-jsh_banner "${action}" "${platform}" "${desktop}"
+# A monitored child writes to a log, but the monitor relays to the terminal.
+if [[ -n ${JSH_PROGRESS_FILE:-} && -z ${NO_COLOR:-} && ${TERM:-} != dumb ]]; then
+  _jsh_color_1=1 jsh_banner "${action}"
+else
+  jsh_banner "${action}"
+fi
 printf '\n'
-jsh::log_info 'Module: core'
+jsh::module() {
+  local _jsh_color_1=${_jsh_color_1}
+  if [[ -n ${JSH_PROGRESS_FILE:-} && -z ${NO_COLOR:-} && ${TERM:-} != dumb ]]; then _jsh_color_1=1; fi
+  jsh::log_info "$(jsh::paint 1 36 "$1")"
+}
+jsh::module core
 
 
 # Make the checkout available at the standard path, unless it already lives there.
@@ -168,7 +178,7 @@ if [[ ! ${HOME}/.jsh -ef ${JSH_ROOT} ]]; then
 fi
 
 # Base prerequisites come first so every script has jq, curl, and a supported shell.
-export JSH_STEP='[bootstrap] core '
+export JSH_STEP="[1/${total}] core "
 if jsh::packages core; then :; else
   status=$?
   jsh::log_error "core bootstrap failed (${status})"
@@ -176,8 +186,8 @@ if jsh::packages core; then :; else
   jsh::install_summary
   exit "${status}"
 fi
-jsh::log_info 'Module: shell'
-export JSH_STEP='[bootstrap] shell '
+jsh::module shell
+export JSH_STEP="[2/${total}] shell "
 if bash "${JSH_ROOT}/scripts/shell.sh"; then :; else
   status=$?
   jsh::log_error "shell bootstrap failed (${status})"
@@ -185,11 +195,11 @@ if bash "${JSH_ROOT}/scripts/shell.sh"; then :; else
   jsh::install_summary
   exit "${status}"
 fi
-unset JSH_STEP
 
 # Link files individually so unmanaged sibling settings remain intact.
-jsh::log_info 'Module: links'
-[[ -z ${JSH_PROGRESS_FILE:-} ]] || printf '%s\n' '[bootstrap] links  Linking configuration' >"${JSH_PROGRESS_FILE}"
+jsh::module links
+export JSH_STEP="[3/${total}] links "
+jsh::activity 'Linking configuration'
 while IFS= read -r -d '' source; do
   relative=${source#"${JSH_ROOT}/dotfiles/"}
   case ${relative} in
@@ -209,14 +219,21 @@ done
 
 
 status=0
-step=0
-for group in ${groups[@]+"${groups[@]}"}; do
+step=3
+if [[ ${JSH_UPDATE:-0} == 1 ]]; then
   step=$((step + 1))
-  export JSH_STEP="[${step}/${#groups[@]}] ${group} "
-  case ${group} in
-    core | shell) continue ;;
-  esac
-  jsh::log_info "Module: ${group}"
+  export JSH_STEP="[${step}/${total}] packages "
+  jsh::module packages
+  if JSH_BREW_DEFER=0 jsh::packages maintenance; then :; else
+    jsh::log_error 'packages failed'
+    failures=$((failures + 1))
+    status=1
+  fi
+fi
+for group in ${selected[@]+"${selected[@]}"}; do
+  step=$((step + 1))
+  export JSH_STEP="[${step}/${total}] ${group} "
+  jsh::module "${group}"
   jsh::activity "Starting ${group}"
   group_status=0
   if [[ -f ${JSH_ROOT}/scripts/${group}.sh ]]; then
@@ -230,7 +247,7 @@ for group in ${groups[@]+"${groups[@]}"}; do
     status=1
   fi
 done
-unset JSH_STEP
+unset JSH_STEP JSH_BREW_DEFER
 jsh::install_summary
 if [[ ${status} == 0 && ${JSH_DRY_RUN} != 1 && -z ${JSH_PROGRESS_FILE:-} ]]; then jsh::handoff; fi
 exit "${status}"
