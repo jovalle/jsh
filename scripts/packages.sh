@@ -369,7 +369,7 @@ install_group() {
         jsh::native dnf fontconfig xfce4-appfinder arc-theme papirus-icon-theme pavucontrol xfce4-clipman-plugin xfce4-cpugraph-plugin xfce4-docklike-plugin xfce4-fsguard-plugin xfce4-genmon-plugin xfce4-netload-plugin xfce4-pulseaudio-plugin xfce4-screensaver xfce4-systemload-plugin xfce4-taskmanager xfce4-terminal || return
       fi
       if [[ (${JSH_DESKTOP} == gnome || ${JSH_DESKTOP} == xfce) && (${JSH_PLATFORM} == debian) && (${JSH_DESKTOP} == xfce) && (${JSH_HOST} == colossus) && ${JSH_PLATFORM} == debian ]]; then
-        jsh::native apt build-essential pkg-config patch intltool libgtk-3-dev libpulse-dev libxfce4panel-2.0-dev libxfce4ui-2-dev libxfconf-0-dev libkeybinder-3.0-dev libnotify-dev libwnck-3-dev libexo-2-dev libxfce4windowing-0-dev || return
+        jsh::native apt build-essential pkg-config patch gettext meson libgtk-3-dev libpulse-dev libxfce4panel-2.0-dev libxfce4ui-2-dev libxfconf-0-dev libkeybinder-3.0-dev libnotify-dev libwnck-3-dev libexo-2-dev libxfce4windowing-0-dev || return
       fi
       ;;
     dev)

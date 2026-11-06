@@ -1,6 +1,6 @@
 --- a/panel-plugin/pulseaudio-button.c
 +++ b/panel-plugin/pulseaudio-button.c
-@@ -118,6 +118,12 @@
+@@ -119,6 +119,12 @@
    gulong                recording_changed_id;
    gulong                deactivate_id;
    gulong                configuration_changed_id;
@@ -13,7 +13,7 @@
  };
 
  struct _PulseaudioButtonClass
-@@ -146,14 +152,123 @@
+@@ -147,14 +153,123 @@
 
 
 
@@ -143,7 +143,7 @@
  }
 
 
-@@ -188,6 +303,8 @@
+@@ -190,6 +305,8 @@
    gtk_widget_add_events (GTK_WIDGET (button), GDK_SCROLL_MASK);
 
    button->icon_size = 16;
@@ -152,7 +152,7 @@
 
    button->image = gtk_image_new ();
    button->recording_indicator = gtk_image_new ();
-@@ -219,6 +336,8 @@
+@@ -223,6 +340,8 @@
        button->menu = NULL;
      }
 
@@ -161,10 +161,10 @@
    g_object_unref (button->recording_indicator_style_css_provider);
 
    (*G_OBJECT_CLASS (pulseaudio_button_parent_class)->finalize) (object);
-@@ -280,7 +399,13 @@
+@@ -292,7 +411,13 @@
    if (event->button == 2) /* middle button */
      {
-       if (pulseaudio_button_mic_icon_under_pointer (button, event->x))
+       if (pulseaudio_button_mic_icon_under_pointer (button, event->x, event->y))
 -        pulseaudio_volume_toggle_muted_mic (button->volume);
 +        {
 +          const gchar *name = pulseaudio_volume_get_default_input (button->volume);
@@ -176,7 +176,7 @@
        else
          pulseaudio_volume_toggle_muted (button->volume);
        return TRUE;
-@@ -431,12 +556,10 @@
+@@ -443,12 +568,10 @@
      icon_name = icons[V_MUTED];
    else if (volume <= 0.0)
      icon_name = icons[V_MUTED];
@@ -192,7 +192,7 @@
 
    if (!connected)
      recording_icon_name = recording_icons[V_MUTED];
-@@ -464,8 +587,7 @@
+@@ -476,8 +599,7 @@
    if (force_update || recording_icon_name != button->recording_icon_name)
      {
        button->recording_icon_name = recording_icon_name;
@@ -202,7 +202,7 @@
      }
 
    if (force_update || button->recording != recording)
-@@ -596,6 +718,9 @@
+@@ -634,6 +756,9 @@
 
    button->recording_indicator_persistent = pulseaudio_config_get_rec_indicator_persistent (button->config);
    pulseaudio_button_update (button, TRUE);
@@ -214,9 +214,9 @@
  }
 --- a/panel-plugin/pulseaudio-button.h
 +++ b/panel-plugin/pulseaudio-button.h
-@@ -52,6 +52,10 @@
-
+@@ -56,6 +56,10 @@
  PulseaudioMenu         *pulseaudio_button_get_menu    (PulseaudioButton *button);
+
 
 +gint                    pulseaudio_button_get_jsh_mic_state (PulseaudioButton *button);
 +void                    pulseaudio_button_set_jsh_mic_state (PulseaudioButton *button,
@@ -235,7 +235,7 @@
  #include "pulseaudio-mpris.h"
  #include "devicemenuitem.h"
  #include "mprismenuitem.h"
-@@ -220,13 +221,37 @@
+@@ -244,13 +245,37 @@
 
 
 
@@ -253,41 +253,41 @@
 +    return;
 +  gtk_widget_set_sensitive (menu->input_scale, state >= 0);
 +  if (state >= 0 &&
-+      scale_menu_item_get_muted (SCALE_MENU_ITEM (menu->input_scale)) != (state == 1))
++      xfpa_scale_menu_item_get_muted (XFPA_SCALE_MENU_ITEM (menu->input_scale)) != (state == 1))
 +    {
-+      scale_menu_item_set_muted (SCALE_MENU_ITEM (menu->input_scale), state == 1);
++      xfpa_scale_menu_item_set_muted (XFPA_SCALE_MENU_ITEM (menu->input_scale), state == 1);
 +    }
 +}
 +
  static void
  pulseaudio_menu_mute_input_item_toggled (PulseaudioMenu   *menu,
-                                          ScaleMenuItem    *menu_item)
+                                          XfpaScaleMenuItem    *menu_item)
  {
    g_return_if_fail (IS_PULSEAUDIO_MENU (menu));
 
--  pulseaudio_volume_set_muted_mic (menu->volume, scale_menu_item_get_muted (menu_item));
+-  pulseaudio_volume_set_muted_mic (menu->volume, xfpa_scale_menu_item_get_muted (menu_item));
 +  if (jsh_wave_input (menu))
 +    pulseaudio_button_set_jsh_mic_state (PULSEAUDIO_BUTTON (menu->button),
-+                                         scale_menu_item_get_muted (menu_item));
++                                         xfpa_scale_menu_item_get_muted (menu_item));
 +  else
-+    pulseaudio_volume_set_muted_mic (menu->volume, scale_menu_item_get_muted (menu_item));
++    pulseaudio_volume_set_muted_mic (menu->volume, xfpa_scale_menu_item_get_muted (menu_item));
  }
 
 
-@@ -330,8 +355,15 @@
+@@ -354,8 +379,15 @@
        g_signal_handlers_block_by_func (G_OBJECT (menu->input_scale),
                                         pulseaudio_menu_mute_input_item_toggled,
                                         menu);
--      scale_menu_item_set_muted (SCALE_MENU_ITEM (menu->input_scale),
--                                 pulseaudio_volume_get_muted_mic (volume));
+-      xfpa_scale_menu_item_set_muted (XFPA_SCALE_MENU_ITEM (menu->input_scale),
+-                                      pulseaudio_volume_get_muted_mic (volume));
 +      if (jsh_wave_input (menu))
 +        pulseaudio_menu_set_jsh_mic_state (menu,
 +          pulseaudio_button_get_jsh_mic_state (PULSEAUDIO_BUTTON (menu->button)));
 +      else
 +        {
 +          gtk_widget_set_sensitive (menu->input_scale, TRUE);
-+          scale_menu_item_set_muted (SCALE_MENU_ITEM (menu->input_scale),
-+                                     pulseaudio_volume_get_muted_mic (volume));
++          xfpa_scale_menu_item_set_muted (XFPA_SCALE_MENU_ITEM (menu->input_scale),
++                                          pulseaudio_volume_get_muted_mic (volume));
 +        }
        g_signal_handlers_unblock_by_func (G_OBJECT (menu->input_scale),
                                           pulseaudio_menu_mute_input_item_toggled,
@@ -305,7 +305,7 @@
  #endif /* !__PULSEAUDIO_MENU_H__ */
 --- a/panel-plugin/pulseaudio-volume.c
 +++ b/panel-plugin/pulseaudio-volume.c
-@@ -75,6 +75,7 @@
+@@ -78,6 +78,7 @@
 
    gdouble               volume;
    gboolean              muted;
@@ -313,7 +313,7 @@
    gboolean              recording;
    gboolean              recording_last_state;
 
-@@ -238,6 +239,38 @@
+@@ -249,6 +250,38 @@
 
 
 
@@ -352,7 +352,7 @@
  /* sink event callbacks */
  static void
  pulseaudio_volume_sink_info_cb (pa_context         *context,
-@@ -247,6 +280,7 @@
+@@ -258,6 +291,7 @@
  {
    gboolean  muted;
    gdouble   vol = 0.0;
@@ -360,7 +360,7 @@
 
    PulseaudioVolume *volume = PULSEAUDIO_VOLUME (userdata);
 
-@@ -260,13 +294,24 @@
+@@ -271,13 +305,24 @@
        return;
      }
 
@@ -386,7 +386,7 @@
    muted = !!(i->mute);
    for (guint j = 0; j < i->volume.channels; j++)
      vol = MAX (vol, pulseaudio_volume_v2d (volume, i->volume.values[j]));
-@@ -682,6 +727,15 @@
+@@ -707,6 +752,15 @@
  }
 
 
@@ -404,7 +404,7 @@
  pulseaudio_volume_get_connected (PulseaudioVolume *volume)
 --- a/panel-plugin/pulseaudio-volume.h
 +++ b/panel-plugin/pulseaudio-volume.h
-@@ -40,6 +40,7 @@
+@@ -48,6 +48,7 @@
  PulseaudioVolume       *pulseaudio_volume_new                     (PulseaudioPlugin *plugin,
                                                                     PulseaudioConfig *config);
 
@@ -414,7 +414,7 @@
  gdouble                 pulseaudio_volume_get_volume              (PulseaudioVolume *volume);
 --- a/panel-plugin/scalemenuitem.c
 +++ b/panel-plugin/scalemenuitem.c
-@@ -94,6 +94,30 @@
+@@ -96,6 +96,30 @@
 
 
 
@@ -444,24 +444,24 @@
 +
  /* Public API */
  GtkWidget*
- scale_menu_item_new_with_range (gdouble min,
-@@ -131,6 +155,7 @@
+ xfpa_scale_menu_item_new_with_range (gdouble min,
+@@ -126,6 +150,7 @@
 
    /* Configure the mute toggle */
-   priv->mute_toggle = gtk_switch_new ();
-+  jsh_style_audio_switch (priv->mute_toggle);
+   scale_item->mute_toggle = gtk_switch_new ();
++  jsh_style_audio_switch (scale_item->mute_toggle);
 
    /* Pack the scale widget */
-   priv->hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
-@@ -213,6 +238,11 @@
+   scale_item->hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
+@@ -193,6 +218,11 @@
 
-   gtk_switch_set_active (GTK_SWITCH (priv->mute_toggle), !muted);
-   gtk_switch_set_state (GTK_SWITCH (priv->mute_toggle), !muted);
-+  gtk_widget_set_tooltip_text (priv->mute_toggle,
+   gtk_switch_set_active (GTK_SWITCH (item->mute_toggle), !muted);
+   gtk_switch_set_state (GTK_SWITCH (item->mute_toggle), !muted);
++  gtk_widget_set_tooltip_text (item->mute_toggle,
 +                               muted ? "Muted — click to turn sound on"
 +                                     : "Sound on — click to mute");
-+  atk_object_set_name (gtk_widget_get_accessible (priv->mute_toggle),
++  atk_object_set_name (gtk_widget_get_accessible (item->mute_toggle),
 +                       muted ? "Muted" : "Sound on");
 
-   scale_menu_item_update_icon (item);
+   xfpa_scale_menu_item_update_icon (item);
  }

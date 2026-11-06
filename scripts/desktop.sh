@@ -46,6 +46,26 @@ write_if_changed() {
   changes=$((changes + 1))
 }
 
+# Plugins rewrite their rc files on exit, so compare only the keys jsh manages.
+write_rc() {
+  local target=$1 mode=$2 line key current=1
+  local -a wanted=()
+  local -A keys=()
+  while IFS= read -r line; do
+    wanted+=("${line}")
+    keys[${line%%=*}]=1
+    grep -Fqx -- "${line}" "${target}" 2>/dev/null || current=0
+  done
+  ((current)) && return 0
+  write_if_changed "${target}" "${mode}" < <(
+    printf '%s\n' "${wanted[@]}"
+    [[ ! -f ${target} ]] || while IFS= read -r line; do
+      key=${line%%=*}
+      [[ -z ${key} || -n ${keys[${key}]:-} ]] || printf '%s\n' "${line}"
+    done <"${target}"
+  )
+}
+
 managed_plugin() {
   local type=$1 role=${2:-$1} id managed plugin_type plugin_role max_id
   while IFS= read -r id; do
@@ -72,13 +92,12 @@ managed_plugin() {
   changes=$((changes + 1))
 }
 
-configure_panel() {
+apply_panel() {
   jsh::activity 'Checking XFCE panel layout'
   local panel_id cpu_id load_id net_id fs_id audio_id cafe_id mic_id='' id plugin_id plugin_type
-  local panel_before panel_after systray_id='' clock_id='' actions_id='' panel_stopped=0
+  local systray_id='' clock_id='' actions_id=''
   local audio_type=pulseaudio
   local -a plugin_ids=() existing_ids=() base_ids=() arguments=()
-  panel_before=$(xfconf-query -c xfce4-panel -lv 2>/dev/null || true)
   panel_id=$(xfconf-query -c xfce4-panel -p /panels 2>/dev/null | grep -E '^[0-9]+$' | head -n 1)
   [[ ${panel_id} =~ ^[0-9]+$ ]] || {
     jsh::log_note '  › skipped panel: unavailable'
@@ -146,7 +165,7 @@ configure_panel() {
   for id in network uptime; do xfconf_set xfce4-panel "/plugins/plugin-${load_id}/${id}/enabled" bool false; done
   xfconf_set xfce4-panel "/plugins/plugin-${load_id}/command" string xfce4-taskmanager
   xfconf_set xfce4-panel "/plugins/plugin-${fs_id}/mountpoint" string /
-  write_if_changed "${HOME}/.config/xfce4/panel/fsguard-${fs_id}.rc" 0644 <<'EOF'
+  write_rc "${HOME}/.config/xfce4/panel/fsguard-${fs_id}.rc" 0644 <<'EOF'
 yellow=8
 red=2
 lab_size_visible=false
@@ -157,9 +176,9 @@ label_visible=true
 mnt=/
 EOF
   write_if_changed "${HOME}/.config/xfce4/panel/net-led.sh" 0755 <"${SCRIPT_DIR}/desktop/panel/net.sh"
-  write_if_changed "${HOME}/.config/xfce4/panel/genmon-${net_id}.rc" 0644 <<EOF
+  write_rc "${HOME}/.config/xfce4/panel/genmon-${net_id}.rc" 0644 <<EOF
 Command=${HOME}/.config/xfce4/panel/net-led.sh
-UseLabel=false
+UseLabel=0
 Text=
 UpdatePeriod=100
 EOF
@@ -167,25 +186,17 @@ EOF
     rm -f "${HOME}/.config/xfce4/panel/cafe-status.sh" "${HOME}/.config/xfce4/panel/cafe-toggle.sh"
     panel_files_changed=1
   fi
-  write_if_changed "${HOME}/.config/xfce4/panel/genmon-${cafe_id}.rc" 0644 <<EOF
+  write_rc "${HOME}/.config/xfce4/panel/genmon-${cafe_id}.rc" 0644 <<EOF
 Command=${JSH_ROOT}/bin/cafe --xfce-status
-UseLabel=false
+UseLabel=0
 Text=
 UpdatePeriod=500
 Action=${JSH_ROOT}/bin/cafe --xfce-toggle
 EOF
   if [[ -n ${mic_id} ]]; then
-    # Genmon saves its in-memory settings on exit; stop it before changing its interval.
-    if ! grep -Fqx 'UpdatePeriod=250' "${HOME}/.config/xfce4/panel/genmon-${mic_id}.rc" 2>/dev/null &&
-      pgrep -x xfce4-panel >/dev/null 2>&1; then
-      if DISPLAY=${DISPLAY:-:0} timeout 5 xfce4-panel --quit >/dev/null 2>&1; then
-        panel_stopped=1
-        trap 'DISPLAY=${DISPLAY:-:0} nohup xfce4-panel >/dev/null 2>&1 & jsh::cleanup' EXIT
-      fi
-    fi
-    write_if_changed "${HOME}/.config/xfce4/panel/genmon-${mic_id}.rc" 0644 <<EOF
+    write_rc "${HOME}/.config/xfce4/panel/genmon-${mic_id}.rc" 0644 <<EOF
 Command=${JSH_ROOT}/bin/microphone --panel
-UseLabel=false
+UseLabel=0
 Text=
 UpdatePeriod=250
 EOF
@@ -232,12 +243,31 @@ EOF
   xfconf_set xfce4-panel "/plugins/plugin-${clock_id}/mode" int 2
   xfconf_set xfce4-panel "/plugins/plugin-${clock_id}/digital-layout" int 3
   xfconf_set xfce4-panel "/plugins/plugin-${clock_id}/digital-time-format" string '%Y-%m-%d %H:%M:%S'
-  panel_after=$(xfconf-query -c xfce4-panel -lv 2>/dev/null || true)
-  [[ ${panel_before} != "${panel_after}" || ${panel_files_changed} != 0 ]] || return 0
-  if ((panel_stopped)); then
+}
+
+configure_panel() {
+  local before after saved_changes
+  local -a saved_details=()
+  before=$(xfconf-query -c xfce4-panel -lv 2>/dev/null || true)
+  apply_panel
+  after=$(xfconf-query -c xfce4-panel -lv 2>/dev/null || true)
+  [[ ${before} != "${after}" || ${panel_files_changed} != 0 ]] || return 0
+  pgrep -x xfce4-panel >/dev/null 2>&1 || return 0
+  # Plugins save their in-memory settings on exit, so reapply once the panel has stopped.
+  if DISPLAY=${DISPLAY:-:0} timeout 5 xfce4-panel --quit >/dev/null 2>&1; then
+    trap 'DISPLAY=${DISPLAY:-:0} nohup xfce4-panel >/dev/null 2>&1 & jsh::cleanup' EXIT
+    for _ in {1..50}; do
+      pgrep -x xfce4-panel >/dev/null 2>&1 || break
+      sleep 0.1
+    done
+    saved_changes=${changes}
+    saved_details=("${details[@]}")
+    apply_panel
+    changes=${saved_changes}
+    details=("${saved_details[@]}")
     DISPLAY=${DISPLAY:-:0} nohup xfce4-panel >/dev/null 2>&1 &
     trap 'jsh::cleanup' EXIT
-  elif pgrep -x xfce4-panel >/dev/null 2>&1; then
+  else
     DISPLAY=${DISPLAY:-:0} timeout 5 xfce4-panel -r >/dev/null 2>&1 || true
     sleep 1
     pgrep -x xfce4-panel >/dev/null 2>&1 || DISPLAY=${DISPLAY:-:0} nohup xfce4-panel >/dev/null 2>&1 &
