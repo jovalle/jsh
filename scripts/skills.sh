@@ -39,6 +39,20 @@ while IFS=$'\t' read -r source name; do
   fi
   jsh::link "${vendor}/${source}" "${HOME}/.agents/skills/${name}"
 done <"${SCRIPT_DIR}/skills/links.tsv"
+# Machine-local skills live outside the repository: SOURCE (relative to $HOME) TAB NAME.
+for list in "${XDG_CONFIG_HOME:-${HOME}/.config}/jsh/skills.tsv" "${JSH_ROOT}/local/skills.tsv"; do
+  [[ -f ${list} ]] || continue
+  while IFS=$'\t' read -r source name; do
+    jsh::activity "Checking local skill ${name}"
+    if [[ ! -d ${HOME}/${source} ]]; then
+      jsh::detail "local skill ${name}: ${HOME}/${source} is missing"
+      continue
+    fi
+    jsh::link "${HOME}/${source}" "${HOME}/.agents/skills/${name}"
+  done <"${list}"
+  break
+done
+# scripts/ai/rea.sh installs graphify and reverse-engineer-anything as real directories.
 for name in github-actions-hardening show-me-your-work; do
   jsh::activity "Checking bundled skill ${name}"
   jsh::link "${JSH_ROOT}/dotfiles/.agents/skills/${name}" "${HOME}/.agents/skills/${name}"
