@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install pinned GNOME extensions and configure the enabled set.
+# Install and update GNOME extensions from extensions.gnome.org and configure the enabled set.
 
 set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
@@ -16,28 +16,50 @@ present() { [[ -d ${base}/$1 || -d /usr/share/gnome-shell/extensions/$1 ]]; }
 version=$(gnome-shell --version)
 version=${version##* }
 version=${version%%.*}
+temporary=$(jsh::temp)
 while IFS= read -r uuid; do
   jsh::activity "Checking GNOME extension ${uuid}"
-  if present "${uuid}"; then
+  [[ ${uuid} =~ ^[A-Za-z0-9._@-]+$ ]] || {
+    jsh::notice "invalid extension UUID: ${uuid}"
+    exit 1
+  }
+  installed=''
+  if [[ -d ${base}/${uuid} ]]; then
+    [[ ${JSH_UPDATE:-0} == 1 ]] || {
+      jsh::current
+      continue
+    }
+    [[ ! -f ${base}/${uuid}/metadata.json ]] || installed=$(jq -r '.version // empty' "${base}/${uuid}/metadata.json")
+  elif present "${uuid}" || [[ ${JSH_UPDATE:-0} == 1 ]]; then
+    # System extensions belong to the distribution; updates only touch installed ones.
     jsh::current
     continue
   fi
-  build=$(jq -c --arg uuid "${uuid}" --arg version "${version}" \
-    '.install[$uuid][] | select(.shells | index($version))' "${spec}" | head -n 1)
-  if [[ -z ${build} ]]; then
-    jsh::notice "${uuid}: no pinned build for GNOME Shell ${version}"
+  if [[ ${JSH_DRY_RUN:-0} == 1 ]]; then
+    if [[ -d ${base}/${uuid} ]]; then jsh::notice "would check for a ${uuid} update"; else jsh::added "${uuid}"; fi
     continue
   fi
-  if [[ ${JSH_DRY_RUN:-0} != 1 ]]; then
-    temporary=$(jsh::temp)
-    archive=${temporary}/extension.zip
-    jsh::download "$(jq -r .url <<<"${build}")" "${archive}"
-    printf '%s  %s\n' "$(jq -r .sha256 <<<"${build}")" "${archive}" | sha256sum -c - >/dev/null
-    jsh::run gnome-extensions install --force "${archive}"
+  jsh::download "https://extensions.gnome.org/extension-info/?uuid=${uuid}&shell_version=${version}" "${temporary}/info.json"
+  build=$(jq -c --arg version "${version}" '.shell_version_map[$version] // empty' "${temporary}/info.json")
+  if [[ -z ${build} ]]; then
+    jsh::notice "${uuid}: no release for GNOME Shell ${version}"
+    continue
   fi
-  jsh::added "${uuid}"
-  jsh::notice 'Log out and back in so GNOME Shell loads new extensions'
-done < <(jq -r '.install | keys[]' "${spec}")
+  release=$(jq -er '.version | tostring' <<<"${build}")
+  tag=$(jq -er '.pk | tostring' <<<"${build}")
+  [[ ${tag} =~ ^[0-9]+$ ]] || {
+    jsh::notice "${uuid}: invalid release tag"
+    exit 1
+  }
+  if [[ ${installed} == "${release}" ]]; then
+    jsh::current
+    continue
+  fi
+  jsh::download "https://extensions.gnome.org/download-extension/${uuid}.shell-extension.zip?version_tag=${tag}" "${temporary}/extension.zip"
+  jsh::run gnome-extensions install --force "${temporary}/extension.zip"
+  if [[ -n ${installed} ]]; then jsh::changed "${uuid} ${installed} → ${release}"; else jsh::added "${uuid}"; fi
+  jsh::notice 'Log out and back in so GNOME Shell loads extension changes'
+done < <(jq -r '.install[]' "${spec}")
 jsh::activity 'Checking enabled GNOME extensions'
 enabled=$(jsh::gnome_list org.gnome.shell enabled-extensions)
 wanted=$(jq -c 'map(select(. != "ding@rastersoft.com" and . != "desktop-icons@csoriano"))' <<<"${enabled}")
