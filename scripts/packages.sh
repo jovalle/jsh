@@ -164,6 +164,30 @@ jsh::brew() {
   for name in "${missing[@]}"; do jsh::emit added "${name}" package; done
 }
 
+# App Store apps such as Xcode; mas drops root for the download and needs a signed-in Apple Account.
+jsh::mas() {
+  local listing id name status=0
+  [[ ${JSH_UPDATE:-0} == 1 && ${JSH_PLATFORM} == darwin ]] || return 0
+  command -v mas >/dev/null 2>&1 || return 0
+  jsh::need jq || return
+  jsh::activity 'Checking App Store updates'
+  listing=$(mas outdated --json | jq -r '[.adamID, .name] | @tsv') || return
+  [[ -n ${listing} ]] || return 0
+  if [[ ${JSH_DRY_RUN} != 1 ]] && ! jsh::admin; then
+    jsh::notice 'App Store updates need sudo; run sudo -v first, then rerun'
+    return 0
+  fi
+  while IFS=$'\t' read -r id name; do
+    [[ ${id} =~ ^[0-9]+$ ]] || continue
+    if jsh::task "App Store update: ${name}" jsh::root mas update "${id}"; then
+      jsh::emit changed "${name}" package
+    else
+      status=1
+    fi
+  done <<<"${listing}"
+  return "${status}"
+}
+
 jsh::native() {
   local manager=$1 name listing='' status=0 root=1
   local -a missing=()
@@ -333,6 +357,7 @@ install_group() {
       if command -v brew >/dev/null 2>&1 || [[ ${JSH_PLATFORM} == darwin ]]; then
         jsh::brew formulae || return
         jsh::brew casks || return
+        jsh::mas || return
       fi
       ;;
     ai)
@@ -452,7 +477,7 @@ install_group() {
     tools)
       if [[ (${JSH_PLATFORM} == darwin) ]]; then
         jsh::brew taps gromgit/fuse || return
-        jsh::brew formulae bash-completion duti gromgit/fuse/ntfs-3g-mac imagemagick || return
+        jsh::brew formulae bash-completion duti gromgit/fuse/ntfs-3g-mac imagemagick mas || return
       fi
       jsh::brew taps xguot/difi || return
       jsh::brew formulae bash gum jq unzip zip zsh age ansible atuin bat btop bun coreutils curl diffutils direnv eza fd ffmpeg fnm fzf gawk gettext gh git git-lfs gnu-sed gnupg go go-task grc grep hugo just kew lazygit leaf-markdown-viewer libtiff libxcrypt make mpv ncdu neovim netcat nmap node parallel pnpm poetry readline ripgrep rsync rtk sops speedtest-go sshpass stow summarize syncthing tmux tree uv watch xguot/difi/difi xorriso xz zoxide || return

@@ -21,6 +21,8 @@ This clones into `~/.jsh` (or `JSH_HOME`), installs Git, Zsh, and the shell plug
 
 Homebrew updates include installed dependencies and other outdated packages, and remove
 installed packages Homebrew marks deprecated or disabled when nothing depends on them.
+On macOS, updates include outdated App Store apps such as Xcode through `mas`, which
+needs an Apple Account signed in to the App Store and cached sudo credentials (`sudo -v`).
 
 ## Enhancements
 
