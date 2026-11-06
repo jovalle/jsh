@@ -1453,6 +1453,27 @@ ZSH_HIGHLIGHT_STYLES[hashed-command]='fg=green'
   [[ ! -r "${JSH_VENDOR}/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" ]] || \
   source "${JSH_VENDOR}/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
 
+# Use the Git profile account for GitHub CLI commands in this repository.
+gh() {
+  local config=${JSH_GIT_PROFILES:-${JSH}/local/git.json} email users user token
+  if { [[ ${1:-} == auth && ${2:-} != status ]]; } || ! command git rev-parse --git-dir >/dev/null 2>&1; then
+    command gh "$@"
+    return
+  fi
+  [[ -n ${JSH_GIT_PROFILES:-} || -e ${config} ]] || config=${XDG_CONFIG_HOME:-${HOME}/.config}/jsh/git.json
+  [[ -r ${config} ]] || { command gh "$@"; return; }
+  email=$(command git config --get user.email) || { command gh "$@"; return; }
+  users=$(command jq -er --arg email "${email}" '[.profiles[] | select(.email == $email) | .user | select(type == "string" and length > 0)] | unique | if length > 1 then error("multiple GitHub users match Git profile") else .[0] // "" end' "${config}") || return 1
+  user=${users}
+  [[ -n ${user} ]] || { command gh "$@"; return; }
+  token=$(command env -u GH_TOKEN -u GITHUB_TOKEN gh auth token --hostname github.com --user "${user}") || {
+    print -u2 -- "gh: cannot get credentials for Git profile account ${user}; run gh auth login"
+    return 1
+  }
+  [[ -n ${token} ]] || { print -u2 -- "gh: empty credentials for Git profile account ${user}"; return 1; }
+  GH_TOKEN=${token} command gh "$@"
+}
+
 # Interactive shell start: load Git profile SSH keys and run local/init.d scripts.
 
 # Loads each Git profile ssh_key into the agent unless it is already loaded.

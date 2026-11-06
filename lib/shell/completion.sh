@@ -31,7 +31,7 @@ _jsh_git_extra() {
     load) _jsh_reply '-f --force -h --help' "${current}" ;;
     handoff) _jsh_reply '-n --dry-run --clean -h --help' "${current}" ;;
     amend) _jsh_reply '-x -t -h --help' "${current}" ;;
-    save | refresh | get | commits) _jsh_reply '-h --help' "${current}" ;;
+    save | refresh | get | commits | profiles) _jsh_reply '-h --help' "${current}" ;;
     *) return 1 ;;
   esac
   # Native git completions end in a space and the git spec has nospace.
@@ -54,7 +54,7 @@ _jsh_git_complete() {
   [[ -z ${native} ]] || "${native}" "$@"
   [[ ${COMP_CWORD} == 1 ]] || return 0
   while IFS= read -r suggestion; do COMPREPLY+=("${suggestion}"); done < <(
-    compgen -W 'create get commits amend profile save load refresh handoff' -- "${current}"
+    compgen -W 'create get commits amend profile profiles save load refresh handoff' -- "${current}"
   )
   if [[ -z ${native} ]]; then
     while IFS= read -r suggestion; do COMPREPLY+=("${suggestion}"); done < <(

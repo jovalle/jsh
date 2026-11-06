@@ -841,6 +841,40 @@ esac''')
         self.assertTrue(all("https://github.com/other/project.git" in call for call in calls), calls)
         self.assertNotIn("core.sshCommand", calls[-1])
 
+    def test_git_profiles_lists_and_marks_matching_identity(self):
+        profiles = self.home / "profiles.json"
+        profiles.write_text('{"profiles":{"anon":{"name":"Anon","email":"anon@example.org","user":"skulltrail"},"work":{"name":"Work","email":"work@example.org","user":"work"}}}')
+        subprocess.run(["git", "init", "-q", str(self.home / "repo")], env=self.env, check=True)
+        repo = self.home / "repo"
+        subprocess.run(["git", "config", "user.email", "anon@example.org"], env=self.env, cwd=repo, check=True)
+        def listing():
+            return subprocess.run([str(ROOT / "bin/git"), "profiles"], env=self.env | {"JSH_GIT_PROFILES": str(profiles)}, cwd=repo, capture_output=True, text=True)
+        result = listing()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertRegex(result.stdout, r"(?m)^\*\s+anon\s+")
+        self.assertRegex(result.stdout, r"(?m)^\s+work\s+")
+        subprocess.run(["git", "config", "user.email", "unmatched@example.org"], env=self.env, cwd=repo, check=True)
+        self.assertNotIn("*", listing().stdout)
+
+    def test_gh_status_uses_selected_profile(self):
+        zsh, jq = shutil.which("zsh"), shutil.which("jq")
+        if not zsh or not jq:
+            self.skipTest("zsh and jq required")
+        profiles = self.home / "profiles.json"
+        profiles.write_text('{"profiles":{"anon":{"email":"anon@example.org","user":"skulltrail"}}}')
+        self.tool("git", 'case "$1" in rev-parse) exit 0;; config) echo anon@example.org;; esac')
+        self.tool("gh", 'if [ "$1" = auth ] && [ "$2" = token ]; then printf token-%s "$6"; else printf "%s:%s\\n" "${GH_TOKEN-unset}" "$*"; fi')
+        self.tool("jq", f'exec "{jq}" "$@"')
+        rc = (ROOT / "dotfiles/.zshrc").read_text()
+        function = rc[rc.index("gh() {\n"):rc.index("\n# Interactive shell start:")]
+        script = self.home / "function.zsh"
+        script.write_text(function)
+        def call(args):
+            return subprocess.run([zsh, "-f", "-c", f'source "$1"; shift; gh "$@"', "test", str(script), *args], env=self.env | {"JSH_GIT_PROFILES": str(profiles)}, capture_output=True, text=True)
+        self.assertEqual(call(["auth", "status"]).stdout, "token-skulltrail:auth status\n")
+        self.assertEqual(call(["auth", "login"]).stdout, "unset:auth login\n")
+        self.assertEqual(call(["workflow", "list"]).stdout, "token-skulltrail:workflow list\n")
+
     def test_git_profile_completion_reads_profiles_without_creating_them(self):
         profiles = self.home / "profiles.json"
         profiles.write_text(

@@ -34,6 +34,7 @@ installed packages Homebrew marks deprecated or disabled when nothing depends on
 | `git refresh`                   | Fetches origin and rebases onto the default branch                                |
 | `git create`, `git get`         | Creates or clones a project under `$GIT_BASE`                                     |
 | `git profile [NAME]`            | Switches identity, SSH key, and remotes from `local/git.json`                     |
+| `git profiles`                  | Lists Git profiles and marks the current identity                                 |
 | `git commits`                   | Browses formatted commit history                                                  |
 | `git handoff`                   | Carries unpushed commits to another workstation through Syncthing                 |
 | `j [QUERY]`                     | Jumps to the best frecency match; `j` alone picks a project, `j -c` opens VS Code |

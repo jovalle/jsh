@@ -9,6 +9,7 @@
 #   git commits          Browse formatted commit history
 #   git amend -t TIME COMMIT  Move a commit and its successors in time
 #   git profile [NAME]    Use a local/git.json profile: identity, SSH key, SSH GitHub remotes
+#   git profiles          List profiles and mark the current identity
 #   git commit -t TIME    Commit with a chosen date (see `git commit -t --help`)
 #   git status            On a terminal, adds identity and branch notes and condenses file lists
 #   git status --raw      Plain git status, untouched
@@ -33,13 +34,13 @@ fi
 
 if [[ ${1:-} == help && $# -gt 1 ]]; then
 	case $2 in
-	create | get | commits | amend | save | load | refresh | profile | handoff) set -- "$2" --help ;;
+	create | get | commits | amend | save | load | refresh | profile | profiles | handoff) set -- "$2" --help ;;
 	*) exec "${git_bin}" "$@" ;;
 	esac
 fi
 
 case ${1:-} in
-save | load | refresh | create | get | commits | amend | profile | handoff | __complete | --help | -h | help) ;;
+save | load | refresh | create | get | commits | amend | profile | profiles | handoff | __complete | --help | -h | help) ;;
 commit)
 	case " $* " in
 	*' -t'* | *' --timestamp'*) ;;
@@ -1044,6 +1045,14 @@ get) get "$@" ;;
 commits) commits "$@" ;;
 amend) amend "$@" ;;
 profile) profile "$@" ;;
+profiles)
+  if [[ ${1:-} == --help || ${1:-} == -h ]]; then
+    printf 'usage: git profiles\n\nList Git profiles and mark the current identity.\n'
+  else
+    (($# == 0)) || die 'usage: git profiles'
+    profile --list
+  fi
+  ;;
 handoff) handoff "$@" ;;
 __complete)
 	# Prints profile names for shell completion; never writes the sample file or fails.
