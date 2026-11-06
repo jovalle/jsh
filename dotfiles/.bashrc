@@ -120,10 +120,8 @@ if [[ ${_JSH_BASH_TOOLS_LOADED:-0} != 1 ]]; then
     # Tool-generated hooks are evaluated only from installed executables.
     has direnv && eval "$(command direnv hook bash)"
     has docker && eval "$(command docker completion bash)"
-    # shellcheck disable=SC1090 # Completion code from installed tools.
-    has kubectl && . <(command kubectl completion bash)
-    # shellcheck disable=SC1090
-    has task && . <(command task --completion bash)
+    has kubectl && eval "$(command kubectl completion bash)"
+    has task && eval "$(command task --completion bash)"
     has zoxide && eval "$(command zoxide init bash)"
     has atuin && eval "$(command atuin init bash)"
   fi

@@ -953,6 +953,7 @@ esac''')
   "completion zsh") echo '_kubectl() { :; }; compdef _kubectl kubectl' ;;
 esac""",
         )
+        self.tool("task", "[ \"$*\" != '--completion bash' ] || echo '_task_fixture() { :; }; complete -F _task_fixture task'")
         for plugin in ("fzf", "fzf-tab", "zsh-autosuggestions", "zsh-completions", "zsh-syntax-highlighting"):
             (self.home / "vendor" / plugin).mkdir()
         self.each_shell(
@@ -961,6 +962,7 @@ esac""",
                 [[ $_comps[kubecolor] == _kubectl ]] || exit 1
             else
                 [[ $(complete -p kubecolor) == *'-F __start_kubectl'* ]] || exit 2
+                [[ $(complete -p task) == *'-F _task_fixture'* ]] || exit 3
             fi
         """,
             JSH_LOAD_CONFIG="1",
