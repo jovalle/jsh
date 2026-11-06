@@ -152,8 +152,8 @@ MAILCHECK=0                         # Disable mail checking
 if command -v brew &>/dev/null; then
   _jsh_path=${PATH}
   eval "$(brew shellenv)"
-  # shellenv also prepends Homebrew to PATH, which would shadow jsh wrappers such as bin/git.
-  export PATH=${_jsh_path}:${HOMEBREW_PREFIX}/bin:${HOMEBREW_PREFIX}/sbin
+  # Keep jsh wrappers such as bin/git ahead of Homebrew, and Homebrew ahead of system tools.
+  export PATH=${HOME}/.local/bin:${JSH}/local/bin:${JSH}/bin:${FZF_BASE}/bin:${HOME}/go/bin:${HOMEBREW_PREFIX}/bin:${HOMEBREW_PREFIX}/sbin:${_jsh_path}
   unset _jsh_path
 fi
 

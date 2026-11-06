@@ -85,8 +85,15 @@ if [[ ${_JSH_BASH_TOOLS_LOADED:-0} != 1 ]]; then
     if has brew; then
       _jsh_path=${PATH}
       eval "$(command brew shellenv)"
-      export PATH=${_jsh_path}:${HOMEBREW_PREFIX:-/opt/homebrew}/bin:${HOMEBREW_PREFIX:-/opt/homebrew}/sbin
-      unset _jsh_path
+      # Keep jsh wrappers such as bin/git ahead of Homebrew, and Homebrew ahead of system tools.
+      _jsh_path=${HOME}/.local/bin:${JSH}/local/bin:${JSH}/bin:${FZF_BASE}/bin:${HOME}/go/bin:${HOME}/.cargo/bin:${HOMEBREW_PREFIX:-/opt/homebrew}/bin:${HOMEBREW_PREFIX:-/opt/homebrew}/sbin:${_jsh_path}
+      IFS=: read -ra _jsh_dirs <<<"${_jsh_path}"
+      _jsh_path=
+      for _jsh_dir in "${_jsh_dirs[@]}"; do
+        case :${_jsh_path}: in *:"${_jsh_dir}":*) ;; *) _jsh_path=${_jsh_path:+${_jsh_path}:}${_jsh_dir} ;; esac
+      done
+      export PATH=${_jsh_path}
+      unset _jsh_path _jsh_dirs _jsh_dir
     fi
     # Version 1 completion supports Bash 3.2; version 2 requires a newer shell.
     if ((BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 2))); then
