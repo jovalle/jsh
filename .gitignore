@@ -71,6 +71,7 @@ Temporary\ Items
 __pycache__
 archive/
 bh_unicode_properties.cache
+docs/
 dotfiles/.config/.wrangler/
 dotfiles/.config/Code/
 dotfiles/.config/colima/
