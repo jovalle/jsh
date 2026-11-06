@@ -54,9 +54,11 @@ def shade(head, chunk, tail, name, dim):
     if len(chunk) == 1:
         return leaf("/".join(head + (chunk[0],) + tail), name, dim)
     names, extension = brace(chunk)
-    prefix = "".join(part + "/" for part in head) + "{"
-    suffix = "}" + extension + "".join("/" + part for part in tail)
-    return dim(prefix) + dim(",").join(map(name, names)) + dim(suffix)
+    prefix = dim("".join(part + "/" for part in head) + "{")
+    braced = dim(",").join(map(name, names))
+    if not any(tail):
+        return prefix + braced + dim("}") + name(extension) + dim("/" * len(tail))
+    return prefix + braced + dim("}" + extension + "/") + leaf("/".join(tail), name, dim)
 
 
 def group(paths):
