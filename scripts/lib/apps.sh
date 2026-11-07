@@ -72,6 +72,7 @@ app::json() {
 
 app::policy() {
   local desired=$1 target=$2 keep=${3:-0} current updated domain backup
+  APP_POLICY_CHANGED=0
   jsh::activity "Checking policy ${target}"
   current=${APP_TMP}/policy-current.json
   updated=${APP_TMP}/policy-updated.json
@@ -88,6 +89,7 @@ app::policy() {
     return
   fi
   if [[ ${JSH_DRY_RUN:-0} == 1 ]]; then
+    APP_POLICY_CHANGED=1
     jsh::changed "${target}"
     return
   fi
@@ -115,6 +117,8 @@ app::policy() {
     jsh::root install -d -m 755 "${target%/*}"
     jsh::root install -m 644 "${updated}" "${target}"
   fi
+  # shellcheck disable=SC2034 # Consumed by the caller.
+  APP_POLICY_CHANGED=1
   jsh::changed "${target}"
 }
 

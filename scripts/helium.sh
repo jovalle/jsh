@@ -26,6 +26,18 @@ if [[ $(uname -s) == Darwin ]]; then
   mv "${APP_TMP}/policy-mac.json" "${APP_TMP}/policy.json"
 fi
 app::policy "${APP_TMP}/policy.json" "${policy}"
+if [[ ${APP_POLICY_CHANGED} == 1 ]] && pgrep -u "$(id -u)" -x 'helium|Helium|helium-bin' >/dev/null; then
+  jsh::notice 'restart Helium to apply the changed policy'
+fi
+if [[ $(uname -s) == Darwin ]]; then
+  manifest=/Applications/Helium.app/Contents/Resources/net.imput.helium.manifest/Contents/Resources/net.imput.helium.manifest
+  if [[ ! -r ${manifest} ]] || ! plutil -convert json -o - "${manifest}" >"${APP_TMP}/manifest.json"; then
+    jsh::notice 'cannot verify the temporary Helium search policy; check helium://policy'
+  elif ! jq -e '.. | objects | select(.pfm_name? == "ExtensionForceInstallWithSearchOrNewTabOverridesEnabled")' \
+    "${APP_TMP}/manifest.json" >/dev/null; then
+    jsh::notice 'Helium does not list the temporary search policy; check helium://policy and choose Startpage manually if needed'
+  fi
+fi
 jsh::activity 'Finding Helium profiles'
 shopt -s nullglob
 profiles=("${profile_root}"/*/Preferences)
@@ -95,6 +107,14 @@ read_secure() {
   else printf '{}\n' >"${APP_TMP}/secure.json"; fi
 }
 unpacked_pending=0
+if [[ $(uname -s) == Darwin ]]; then
+  read_secure
+  if ! jq -e '.extensions.settings.fgmjlmbojbkmdpofahffgcpkhkngfpef |
+    type == "object" and ((.disable_reasons // []) | type == "array" and length == 0)' \
+    "${APP_TMP}/secure.json" >/dev/null; then
+    jsh::notice 'Startpage extension is missing or disabled; restart Helium, enable extension downloads, and check helium://extensions'
+  fi
+fi
 jsh::activity 'Checking Helium unpacked extensions'
 if [[ -s ${APP_TMP}/unpacked ]]; then
   read_secure

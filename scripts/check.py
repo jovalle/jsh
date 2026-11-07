@@ -2,6 +2,7 @@
 """Exercise interactive shell contracts without reading the user's configuration."""
 
 import os
+import json
 from pathlib import Path
 import pty
 import re
@@ -58,6 +59,62 @@ class ShellChecks(unittest.TestCase):
         path = self.tools / name
         path.write_text("#!/bin/sh\n" + body + "\n")
         path.chmod(0o755)
+
+    def test_helium_policy_reports_restart_and_missing_extension(self):
+        jq = shutil.which("jq")
+        if not jq:
+            self.skipTest("jq required")
+        self.tool("jq", f'exec "{jq}" "$@"')
+        self.tool("uname", "echo Darwin")
+        self.tool("pgrep", "exit 0")
+        self.tool("sudo", 'if [ "$1" = -n ]; then shift; fi; if [ "$1" = -- ]; then shift; fi; "$@"')
+        self.tool("killall", "exit 0")
+        self.tool("plutil", 'cat "$5"')
+        runtime = self.home / "fixture"
+        (runtime / "scripts/lib").mkdir(parents=True)
+        (runtime / "lib/shell").mkdir(parents=True)
+        for name in ("apps.sh", "common.sh"):
+            shutil.copy(ROOT / "scripts/lib" / name, runtime / "scripts/lib" / name)
+        shutil.copy(ROOT / "lib/shell/output.sh", runtime / "lib/shell/output.sh")
+        shutil.copytree(ROOT / "scripts/helium", runtime / "scripts/helium")
+        (runtime / "scripts/packages.sh").write_text('#!/bin/bash\nexit 0\n')
+        source = (ROOT / "scripts/helium.sh").read_text()
+        source = source.replace('policy=/Library/Managed\\ Preferences/$(id -un)/net.imput.helium.plist', 'policy=${HOME}/policy.json')
+        source = source.replace('/Applications/Helium.app/Contents/Resources/net.imput.helium.manifest/Contents/Resources/net.imput.helium.manifest', '${HOME}/manifest.json')
+        script = runtime / "scripts/helium.sh"
+        script.write_text(source)
+        profile = self.home / "Library/Application Support/net.imput.helium/Default"
+        profile.mkdir(parents=True)
+        prefs = json.loads((runtime / "scripts/helium/preferences.json").read_text())
+        policy = json.loads((runtime / "scripts/helium/policy.json").read_text())
+        prefs.setdefault("extensions", {})["pinned_extensions"] = sorted(policy["ExtensionSettings"])
+        (profile / "Preferences").write_text(json.dumps(prefs))
+        (profile.parent / "Local State").write_text(json.dumps({**json.loads((runtime / "scripts/helium/state.json").read_text()), "browser": {"enabled_labs_experiments": ["enable-experimental-web-platform-features"]}}))
+        (self.home / "manifest.json").write_text('{"pfm_name":"ExtensionForceInstallWithSearchOrNewTabOverridesEnabled"}')
+        (profile / "Secure Preferences").write_text('{"extensions":{"settings":{"fgmjlmbojbkmdpofahffgcpkhkngfpef":{"location":7}}}}')
+        env = self.env | {"JSH_ROOT": str(runtime), "JSH_KEEP_APPS": "1", "XDG_STATE_HOME": str(self.home / "state"), "XDG_CONFIG_HOME": str(self.home / "config"), "TMPDIR": str(self.home)}
+        def run():
+            result = subprocess.run(["bash", str(script)], env=env, cwd=self.home, capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            return result.stdout + result.stderr
+        self.assertIn("restart Helium", run())
+        saved_policy = (self.home / "policy.json").read_bytes()
+        self.assertNotIn("restart Helium", run())
+        self.assertEqual((self.home / "policy.json").read_bytes(), saved_policy)
+        (profile / "Secure Preferences").write_text('{}')
+        self.assertIn("Startpage extension", run())
+        (profile / "Secure Preferences").write_text('{"extensions":{"settings":{"fgmjlmbojbkmdpofahffgcpkhkngfpef":{"disable_reasons":[1]}}}}')
+        self.assertIn("Startpage extension", run())
+        (self.home / "manifest.json").write_text('{}')
+        self.assertIn("temporary", run())
+        (self.home / "policy.json").write_text('{}')
+        self.tool("sudo", "exit 1")
+        output = run()
+        self.assertIn("needs sudo", output)
+        self.assertNotIn("restart Helium to apply the changed policy", output)
+        env["JSH_DRY_RUN"] = "1"
+        self.assertIn("restart Helium", run())
+        self.assertEqual((self.home / "policy.json").read_text(), '{}')
 
     def run_shell(self, shell, code, **env):
         runtime = Path(env.get("JSH_ROOT", ROOT))
