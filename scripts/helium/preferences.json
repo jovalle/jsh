@@ -1,5 +1,10 @@
 {
   "helium": {
+    "browser": {
+      "layout": 1,
+      "show_progress_bar": true,
+      "rounded_frame": false
+    },
     "completed_onboarding": true,
     "global_privacy_control": true,
     "services": {
@@ -37,6 +42,9 @@
   },
   "search": {
     "suggest_enabled": false
+  },
+  "default_search_provider": {
+    "guid": "485bf7d3-0215-45af-87dc-538868000113"
   },
   "background_mode": {
     "enabled": false
