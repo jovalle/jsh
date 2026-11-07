@@ -74,11 +74,12 @@ helium::preferences() {
   app::jsonc "${preferences}" >"${current}"
   jq -n --slurpfile base "${SCRIPT_DIR}/helium/preferences.json" --slurpfile policy "${APP_TMP}/policy.json" --slurpfile current "${current}" '
     [$policy[0].ExtensionSettings // {} | to_entries[] | select(.value.toolbar_pin == "force_pinned") | .key] as $pinned |
+    [($policy[0].ExtensionInstallForcelist // [])[] | split(";")[0]] as $managed |
     ($current[0].extensions.pinned_extensions // []) as $existing |
     if ($existing | type) != "array" or any($existing[]; type != "string") then
       error("Helium pinned extensions must be a string array")
     else $base[0] * {extensions: {pinned_extensions:
-      ($pinned + [$existing[] | select(. as $id | $pinned | index($id) | not)])}} end' >"${APP_TMP}/helium-preferences.json"
+      ($pinned + [$existing[] | select(. as $id | ($pinned + $managed) | index($id) | not)])}} end' >"${APP_TMP}/helium-preferences.json"
 }
 helium::preferences
 secure=${preferences%/*}/Secure\ Preferences

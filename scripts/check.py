@@ -115,6 +115,16 @@ class ShellChecks(unittest.TestCase):
         env["JSH_DRY_RUN"] = "1"
         self.assertIn("restart Helium", run())
         self.assertEqual((self.home / "policy.json").read_text(), '{}')
+        env.pop("JSH_DRY_RUN")
+        self.tool("sudo", 'if [ "$1" = -n ]; then shift; fi; if [ "$1" = -- ]; then shift; fi; "$@"')
+        self.tool("pgrep", "exit 1")
+        policy["ExtensionInstallForcelist"] = ["first", "second", "removed"]
+        policy["ExtensionSettings"] = {"second": {"toolbar_pin": "force_pinned"}, "first": {"toolbar_pin": "force_pinned"}}
+        (runtime / "scripts/helium/policy.json").write_text(json.dumps(policy))
+        prefs["extensions"]["pinned_extensions"] = ["first", "removed", "personal", "second"]
+        (profile / "Preferences").write_text(json.dumps(prefs))
+        run()
+        self.assertEqual(json.loads((profile / "Preferences").read_text())["extensions"]["pinned_extensions"], ["second", "first", "personal"])
 
     def run_shell(self, shell, code, **env):
         runtime = Path(env.get("JSH_ROOT", ROOT))
