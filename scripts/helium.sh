@@ -19,6 +19,12 @@ else
 fi
 if ! command -v helium >/dev/null 2>&1 && [[ ! -d ${profile_root} && ! -d /Applications/Helium.app ]]; then exit 0; fi
 app::desired helium policy.json >"${APP_TMP}/policy.json"
+if [[ $(uname -s) == Darwin ]]; then
+  jq '.ExtensionForceInstallWithSearchOrNewTabOverridesEnabled = true |
+    .ExtensionInstallForcelist += ["fgmjlmbojbkmdpofahffgcpkhkngfpef"]' \
+    "${APP_TMP}/policy.json" >"${APP_TMP}/policy-mac.json"
+  mv "${APP_TMP}/policy-mac.json" "${APP_TMP}/policy.json"
+fi
 app::policy "${APP_TMP}/policy.json" "${policy}"
 jsh::activity 'Finding Helium profiles'
 shopt -s nullglob
