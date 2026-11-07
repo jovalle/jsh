@@ -773,7 +773,7 @@ get() {
 		while IFS= read -r line; do
 			IFS=$'\x1f' read -r name display email user key <<<"${line}"
 			if [[ -n ${user} && ${user} == "${path%%/*}" && -n ${key} ]]; then
-				ssh_command="ssh -F /dev/null -i $(printf '%q' "$(key_path "${key}")") -o IdentitiesOnly=yes"
+				ssh_command="ssh -F /dev/null -i $(key_arg "$(key_path "${key}")") -o IdentitiesOnly=yes"
 				clone_options=(-c "core.sshCommand=${ssh_command}")
 				ssh_command+=" -o BatchMode=yes"
 				if [[ ${url} == https://* ]]; then
@@ -878,6 +878,16 @@ key_path() {
 	printf '%s\n' "${key}"
 }
 
+# Prints a key path quoted for sh, keeping ~/ so a Syncthing-shared .git/config works on every host.
+key_arg() {
+	if [[ $1 == "${HOME}"/* ]]; then
+		# shellcheck disable=SC2088 # the shell running core.sshCommand expands it
+		printf '~/%q\n' "${1#"${HOME}"/}"
+	else
+		printf '%q\n' "$1"
+	fi
+}
+
 # Prints a GitHub HTTPS URL as SSH; any other URL is printed unchanged.
 ssh_url() {
 	local path
@@ -930,7 +940,7 @@ profile() {
 	if [[ -n ${key} ]]; then
 		key=$(key_path "${key}")
 		[[ -r ${key} ]] || jsh::log_warn "SSH key not found: ${key}"
-		run_git config core.sshCommand "ssh -i $(printf '%q' "${key}") -o IdentitiesOnly=yes"
+		run_git config core.sshCommand "ssh -i $(key_arg "${key}") -o IdentitiesOnly=yes"
 	fi
 	for remote in origin upstream; do
 		url=$(run_git remote get-url "${remote}" 2>/dev/null) || continue
@@ -976,7 +986,7 @@ status_identity() {
 			profile=${name}
 			[[ -n ${key} ]] || break
 			fix=''
-			[[ $(run_git config core.sshCommand 2>/dev/null) == "ssh -i $(printf '%q' "$(key_path "${key}")") -o IdentitiesOnly=yes" ]] ||
+			[[ $(run_git config core.sshCommand 2>/dev/null) == "ssh -i $(key_arg "$(key_path "${key}")") -o IdentitiesOnly=yes" ]] ||
 				fix='SSH key not set'
 			url=$(run_git remote get-url origin 2>/dev/null) || url=''
 			[[ $(ssh_url "${url}") == "${url}" ]] || fix+="${fix:+, }origin uses HTTPS"
