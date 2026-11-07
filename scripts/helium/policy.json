@@ -1,4 +1,5 @@
 {
+  "DefaultWebBluetoothGuardSetting": 3,
   "DefaultSearchProviderEnabled": true,
   "DefaultSearchProviderName": "Startpage",
   "DefaultSearchProviderSearchURL": "https://www.startpage.com/sp/search?query={searchTerms}",
