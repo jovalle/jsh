@@ -290,7 +290,7 @@ jsh::sha256() {
   fi
 }
 jsh::appimage() {
-  local name=$1 release=$2 arm=$3 arch item digest url scratch destination state current
+  local name=$1 release=$2 arm=$3 amd=${4:-x86_64} arch item digest url scratch destination state current
   jsh::activity "Checking ${name} AppImage"
   destination=${HOME}/.local/bin/${name}
   state=${XDG_STATE_HOME:-${HOME}/.local/state}/jsh/appimage/${name}.json
@@ -318,7 +318,7 @@ jsh::appimage() {
   fi
   jsh::need jq || return
   arch=$(uname -m)
-  case ${arch} in arm64 | aarch64) arch=${arm} ;; x86_64) ;; *)
+  case ${arch} in arm64 | aarch64) arch=${arm} ;; x86_64) arch=${amd} ;; *)
     jsh::log_error "unsupported architecture: ${arch}"
     return 1
     ;;
@@ -500,6 +500,18 @@ install_group() {
       jsh::brew casks waterfox || return
       if [[ ${JSH_PLATFORM} != darwin ]]; then
         jsh::flatpak net.waterfox.waterfox || return
+      fi
+      ;;
+    wox)
+      jsh::brew casks wox || return
+      if [[ ${JSH_PLATFORM} == debian ]]; then
+        jsh::native apt sqlite3 || return
+      fi
+      if [[ ${JSH_PLATFORM} == rhel ]]; then
+        jsh::native dnf sqlite || return
+      fi
+      if [[ ${JSH_PLATFORM} != darwin ]]; then
+        jsh::appimage wox https://api.github.com/repos/Wox-launcher/Wox/releases/latest arm64 amd64 || return
       fi
       ;;
     *)

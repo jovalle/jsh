@@ -64,6 +64,8 @@ needs an Apple Account signed in to the App Store and cached sudo credentials (`
 
 Browser policies, preferences, and extensions are managed alongside VS Code, Sublime Text,
 and Ghostty settings. Open each browser once before configuring it.
+[Wox](https://github.com/Wox-launcher/Wox) starts at login and takes Command+Space from
+Spotlight on macOS and Super+Space from the desktop on Linux; open it once before configuring it.
 Helium enables experimental web-platform features on Linux and macOS so [Kingpin](https://github.com/jovalle/kingpin) can use Web Bluetooth where needed. This also enables other experimental web features; existing browser flags are preserved.
 
 ## Layout

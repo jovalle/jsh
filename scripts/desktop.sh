@@ -313,7 +313,6 @@ configure_xfce() {
   xfconf_set xfce4-terminal /font-name string 'JetBrainsMono Nerd Font, JetBrainsMono Nerd Font Mono, FiraCode Nerd Font, Hack Nerd Font, MesloLGS Nerd Font, JetBrains Mono, DejaVu Sans Mono, Symbols Nerd Font, monospace 11'
   xfconf_set xfce4-terminal /font-use-system bool false
   xfconf_set xsettings /Gtk/MonospaceFontName string 'JetBrainsMono Nerd Font 11'
-  xfconf_set xfce4-keyboard-shortcuts '/commands/custom/<Super>space' string xfce4-appfinder
   xfconf_set xfce4-keyboard-shortcuts '/commands/custom/<Super><Shift>s' string 'xfce4-screenshooter -rc'
   xfconf_set xfce4-keyboard-shortcuts '/xfwm4/custom/<Super>Left' string tile_left_key
   xfconf_set xfce4-keyboard-shortcuts '/xfwm4/custom/<Super>Right' string tile_right_key

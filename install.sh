@@ -15,14 +15,14 @@ for argument in "$@"; do
         'scripts/NAME.sh runs directly.' \
         'Groups: ai apps audio containers desktop dev display dock fonts ghostty git' \
         '        helium keybindings kube linux macos password services shell skills' \
-        '        sublime tools vscode wallpaper waterfox' \
+        '        sublime tools vscode wallpaper waterfox wox' \
         '' 'Use --update to update software; Homebrew updates all installed packages and' \
         'removes deprecated or disabled packages. Configuration remains idempotent.'
       exit 0
       ;;
     --dry-run) export JSH_DRY_RUN=1 ;;
     --update) export JSH_UPDATE=1 ;;
-    ai | apps | audio | containers | core | desktop | dev | display | dock | fonts | ghostty | git | helium | keybindings | kube | linux | macos | password | services | shell | skills | sublime | tools | vscode | wallpaper | waterfox) groups+=("${argument}") ;;
+    ai | apps | audio | containers | core | desktop | dev | display | dock | fonts | ghostty | git | helium | keybindings | kube | linux | macos | password | services | shell | skills | sublime | tools | vscode | wallpaper | waterfox | wox) groups+=("${argument}") ;;
     *)
       printf 'jsh: unknown option or group: %s\n' "${argument}" >&2
       exit 2
@@ -139,7 +139,7 @@ if ((${#groups[@]} == 0)); then
   if ((workstation)); then
     if [[ ${JSH_PLATFORM} == darwin ]]; then groups=(macos); else groups=(linux); fi
     groups+=(dev git ghostty containers kube fonts password tools services apps desktop dock
-      display keybindings audio wallpaper vscode sublime helium waterfox ai skills)
+      display keybindings wox audio wallpaper vscode sublime helium waterfox ai skills)
   fi
 fi
 
