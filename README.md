@@ -79,3 +79,13 @@ bin/         # everyday commands
 ```
 
 `make check` runs syntax checks, ShellCheck, and the shell smoke checks in temporary homes.
+
+Install the commit checks with `pre-commit install` after installing `pre-commit` and Go.
+Gitleaks scans staged changes, including `archive/`. If it reports a credential, remove it
+from the staged changes and rotate it if it was exposed. `make hooks` runs the checks manually;
+Gitleaks still scans only staged changes.
+
+The Secrets CI check scans incoming Git history, including merged commits, using the
+Gitleaks version pinned in `.pre-commit-config.yaml`. Local hooks can be bypassed;
+configure GitHub push protection and require the CI check on the default branch.
+Renovate proposes dependency updates and automerges passing non-major updates.
