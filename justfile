@@ -45,7 +45,7 @@ format:
 syntax:
     for file in {{ shell_files }} {{ bash_rc }}; do bash -n "$file"; done
     for file in {{ zsh_files }}; do zsh -n "$file"; done
-    cache=$(mktemp -d); trap 'rm -rf -- "$cache"' EXIT; PYTHONPYCACHEPREFIX="$cache" python3 -m py_compile lib/output.py lib/git/*.py bin/cafe bin/microphone scripts/check.py
+    cache=$(mktemp -d); trap 'rm -rf -- "$cache"' EXIT; PYTHONPYCACHEPREFIX="$cache" python3 -m py_compile lib/output.py lib/git/*.py ansible/plugins/*/*.py bin/cafe bin/microphone scripts/check.py
 
 [private]
 lint:

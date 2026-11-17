@@ -9,8 +9,8 @@ jsh::usage() {
   printf '%s\n' 'Usage: ./install.sh [--dry-run] [--update] [--list] [GROUP ...]' \
     '' 'With no groups, the scope follows the machine: every group on a workstation' \
     'with admin rights (sudo/root on Linux, the admin group on macOS), otherwise only' \
-    'the base shell and dotfiles. Named groups run only those;' \
-    'scripts/NAME.sh runs directly.' \
+    'the base shell and dotfiles. Named groups run only those. A group runs its' \
+    'ansible/roles/NAME role when it has one, otherwise scripts/NAME.sh, which also runs directly.' \
     '' 'Use --update to update software; Homebrew updates all installed packages and' \
     'removes deprecated or disabled packages. Configuration remains idempotent.'
 }
@@ -222,6 +222,17 @@ if [[ ${JSH_UPDATE:-0} == 1 ]]; then
   fi
 fi
 for group in ${selected[@]+"${selected[@]}"}; do
+  # A group with a role runs through Ansible, whose output prints its header and platform skip.
+  if [[ -d ${JSH_ROOT}/ansible/roles/${group} ]]; then
+    group_status=0
+    jsh::playbook "${group}" || group_status=$?
+    jsh::event stepclose
+    if ((group_status != 0)); then
+      jsh::fail "${group} failed (${group_status})"
+      status=1
+    fi
+    continue
+  fi
   group_platform=
   group_purpose=
   while IFS="	" read -r name platform purpose; do

@@ -325,6 +325,33 @@ jsh::packages() {
   return "${status}"
 }
 
+# Ported groups run as roles of ansible/site.yml, which tags each role with its group name.
+jsh::playbook() {
+  local home=${JSH_ANSIBLE_HOME:-${JSH_ROOT}/local/ansible} group tags update=false keep=false
+  local preview=()
+  if [[ ! -x ${home}/venv/bin/ansible-playbook ]]; then
+    if [[ ${JSH_DRY_RUN} == 1 ]]; then
+      for group in "$@"; do
+        jsh::group "${group}" "$(jsh::groups table | awk -F'\t' -v name="${group}" '$1 == name { print $2 }')"
+        jsh::skipped "${group} preview: Ansible is not installed yet"
+      done
+      return 0
+    fi
+    jsh::group ansible "Install the pinned Ansible"
+    bash "${JSH_ROOT}/scripts/ansible.sh" || return
+  fi
+  tags=$(
+    IFS=,
+    printf '%s' "$*"
+  )
+  [[ ${JSH_UPDATE:-0} != 1 ]] || update=true
+  [[ ${JSH_KEEP_APPS:-0} != 1 ]] || keep=true
+  [[ ${JSH_DRY_RUN} != 1 ]] || preview=(--check)
+  ANSIBLE_CONFIG="${JSH_ROOT}/ansible/ansible.cfg" ANSIBLE_STDOUT_CALLBACK=jsh ANSIBLE_NOCOLOR=1 \
+    "${home}/venv/bin/ansible-playbook" "${JSH_ROOT}/ansible/site.yml" --tags "${tags}" \
+    ${preview[@]+"${preview[@]}"} --diff -e "{\"jsh_update\": ${update}, \"jsh_keep_apps\": ${keep}}"
+}
+
 jsh::python() {
   local python
   python=$(command -v python3 2>/dev/null) || return 1

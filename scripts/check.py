@@ -4338,6 +4338,168 @@ esac''')
                         "linux": "jsh_platform != 'darwin'"}[platforms[name]]
             self.assertEqual(task.get("when"), expected, name)
 
+    def run_play(self, tasks, *arguments, roles=None, **environment):
+        """Run a playbook with the jsh callback and return (result, events)."""
+        play = self.home / "play"
+        for name, body in (roles or {}).items():
+            (play / "roles" / name / "tasks").mkdir(parents=True, exist_ok=True)
+            (play / "roles" / name / "tasks/main.yml").write_text(body)
+        play.mkdir(exist_ok=True)
+        (play / "site.yml").write_text(
+            "- hosts: localhost\n  gather_facts: false\n  tasks:\n" + tasks)
+        result = self.playbook(
+            play / "site.yml", *arguments,
+            ANSIBLE_STDOUT_CALLBACK="jsh", ANSIBLE_ROLES_PATH=str(play / "roles"),
+            JSH_OUTPUT="renderer", JSH_PLATFORM="darwin", **environment)
+        # str.splitlines() also splits at the \x1e marker itself.
+        events = [line[1:].split("\t") for line in result.stdout.split("\n")
+                  if line.startswith("\x1e")]
+        return result, [event for event in events if event[0] != "progress"]
+
+    def purpose(self, group):
+        for line in (ROOT / "scripts/groups.tsv").read_text().splitlines():
+            if line.startswith(group + "\t"):
+                return line.split("\t")[2]
+        self.fail(group)
+
+    def test_callback_reports_ok_added_changed_removed_and_loop_labels(self):
+        for name in ("a", "b"):
+            (self.home / name).write_text("same\n")
+        target = self.home / "new"
+        role = f"""- name: new file exists
+  ansible.builtin.copy: {{content: "x\\n", dest: "{target}"}}
+- name: new file is current
+  ansible.builtin.copy: {{content: "x\\n", dest: "{target}"}}
+- name: new file has y
+  ansible.builtin.lineinfile: {{path: "{target}", line: "y"}}
+- name: new file is gone
+  ansible.builtin.file: {{path: "{target}", state: absent}}
+- name: copies are current
+  ansible.builtin.copy: {{content: "same\\n", dest: "{self.home}/{{{{ item }}}}"}}
+  loop: [a, b]
+"""
+        result, events = self.run_play(
+            "    - name: macos\n      ansible.builtin.include_role: {name: macos}\n",
+            "--diff", roles={"macos": role})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(events, [
+            ["group", "macos", self.purpose("macos")],
+            ["step", "check", "macos"],
+            ["item", "added", "new file exists"],
+            ["item", "ok", "new file is current"],
+            ["item", "changed", "new file has y"],
+            ["item", "removed", "new file is gone"],
+            ["item", "ok", "a"],
+            ["item", "ok", "b"],
+            ["stepclose"],
+        ])
+
+    def test_callback_check_mode_reports_drift_and_diff_lines(self):
+        target = self.home / "file"
+        target.write_text("a\n")
+        role = f"""- name: file has b
+  ansible.builtin.lineinfile: {{path: "{target}", line: "b"}}
+"""
+        result, events = self.run_play(
+            "    - name: macos\n      ansible.builtin.include_role: {name: macos}\n",
+            "--check", "--diff", roles={"macos": role})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(["item", "changed", "file has b"], events)
+        outputs = [event[2] for event in events if event[:2] == ["item", "output"]]
+        self.assertTrue(any(line.startswith(("+", "-")) for line in outputs), events)
+        self.assertEqual(target.read_text(), "a\n")
+
+    def test_callback_turns_sudo_password_failure_into_notice(self):
+        self.tool("sudo", "echo 'sudo: a password is required' >&2\nexit 1")
+        role = "- name: root file exists\n  ansible.builtin.command: 'true'\n  become: true\n"
+        started = time.monotonic()
+        result, events = self.run_play(
+            "    - name: macos\n      ansible.builtin.include_role: {name: macos}\n",
+            roles={"macos": role})
+        self.assertLess(time.monotonic() - started, 30)
+        self.assertNotEqual(result.returncode, 0)
+        kinds = [event[1] for event in events if event[0] == "item"]
+        self.assertIn("fail", kinds, events)
+        self.assertIn(["item", "notice", "run sudo -v first, then rerun"], events)
+
+    def test_callback_passes_helper_events_through(self):
+        role = r"""- name: helper ran
+  ansible.builtin.command: printf '\036item\tadded\tx installed\t\n'
+  register: helper
+  changed_when: helper.stdout is reported_change
+"""
+        result, events = self.run_play(
+            "    - name: macos\n      ansible.builtin.include_role: {name: macos}\n",
+            roles={"macos": role})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        items = [event for event in events if event[0] == "item"]
+        self.assertEqual(items, [["item", "added", "x installed", ""]])
+
+    def test_callback_skipped_include_prints_platform_skip(self):
+        result, events = self.run_play(
+            "    - name: services\n      ansible.builtin.include_role: {name: services}\n"
+            "      when: jsh_platform != 'darwin'\n")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(["item", "skip", "Skipping services on macOS: Linux only"], events)
+
+    def test_callback_notice_task_adds_notice(self):
+        role = "- name: notice\n  ansible.builtin.debug: {msg: quit X}\n"
+        result, events = self.run_play(
+            "    - name: macos\n      ansible.builtin.include_role: {name: macos}\n",
+            roles={"macos": role})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(["item", "notice", "quit X"], events)
+
+    def installer_fixture(self):
+        checkout = self.home / "checkout"
+        for name in ("scripts/lib", "lib/shell", "bin", "dotfiles", "ansible/roles/fonts/tasks"):
+            (checkout / name).mkdir(parents=True)
+        for name in ("scripts/lib/common.sh", "lib/shell/output.sh", "lib/output.py",
+                     "lib/verbs.tsv", "scripts/groups.tsv", "install.sh"):
+            shutil.copy2(ROOT / name, checkout / name)
+        (checkout / "scripts/packages.sh").write_text("exit 0\n")
+        (checkout / "scripts/shell.sh").write_text("exit 0\n")
+        (checkout / "scripts/fonts.sh").write_text("touch \"$HOME/fonts-script-ran\"\n")
+        (checkout / "ansible/roles/fonts/tasks/main.yml").write_text("[]\n")
+        return checkout
+
+    def mock_playbook(self):
+        bin_dir = self.home / "ansible/venv/bin"
+        bin_dir.mkdir(parents=True)
+        path = bin_dir / "ansible-playbook"
+        path.write_text("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$HOME/playbook.log\"\n")
+        path.chmod(0o755)
+
+    def install(self, checkout, *arguments):
+        return subprocess.run(
+            ["bash", str(checkout / "install.sh"), *arguments],
+            env=self.env | {"JSH_PLATFORM": "darwin",
+                            "JSH_ANSIBLE_HOME": str(self.home / "ansible")},
+            cwd=self.home, capture_output=True, text=True, timeout=60,
+        )
+
+    def test_installer_runs_ansible_for_ported_groups(self):
+        checkout = self.installer_fixture()
+        self.mock_playbook()
+        result = self.install(checkout, "--dry-run", "fonts")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        log = (self.home / "playbook.log").read_text()
+        self.assertIn("--tags fonts --check --diff", log)
+        self.assertFalse((self.home / "fonts-script-ran").exists())
+        (self.home / "playbook.log").unlink()
+        result = self.install(checkout, "--update", "fonts")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        log = (self.home / "playbook.log").read_text()
+        self.assertIn('"jsh_update": true', log)
+        self.assertNotIn("--check", log)
+
+    def test_installer_dry_run_without_ansible_skips_groups(self):
+        checkout = self.installer_fixture()
+        result = self.install(checkout, "--dry-run", "fonts")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Skipping fonts preview: Ansible is not installed yet", result.stdout)
+        self.assertFalse((self.home / "ansible").exists())
+
 
 if __name__ == "__main__":
     unittest.main()
