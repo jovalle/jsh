@@ -16,6 +16,11 @@
       ansible.builtin.set_fact:
         vscode_planned: "{{ ansible_check_mode and vscode_current == '' }}"
 
+    - name: info
+      ansible.builtin.debug:
+        msg: VS Code update is unchecked in preview
+      when: ansible_check_mode and jsh_update | bool and vscode_current != ""
+
     - name: VS Code private download folder exists
       ansible.builtin.tempfile:
         state: directory

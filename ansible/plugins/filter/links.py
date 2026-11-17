@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 
-def links(entries: list, source_root: str, destination_root: str) -> list:
+def links(entries: list | str, source_root: str, destination_root: str) -> list:
     """Each entry is NAME, [SOURCE, NAME], or {source, name}; SOURCE defaults to NAME.
 
-    The result links source_root/SOURCE to destination_root/NAME.
+    A string is parsed as tab-separated SOURCE and NAME lines. The result links
+    source_root/SOURCE to destination_root/NAME.
     """
+    if isinstance(entries, str):
+        entries = [line.split("\t") for line in entries.splitlines() if line]
     items = []
     for entry in entries or []:
         if isinstance(entry, dict):

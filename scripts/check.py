@@ -4474,6 +4474,32 @@ esac''')
         self.assertIn(["item", "changed", "Helium restarted"], events)
         self.assertTrue((self.home / "launched").exists())
 
+    def test_helium_linux_does_not_check_the_macos_startpage_extension(self):
+        profile_root = self.home / "Helium"
+        profile = profile_root / "Default"
+        profile.mkdir(parents=True)
+        (profile / "Preferences").write_text(
+            json.dumps({"extensions": {"pinned_extensions": []}}))
+        (profile_root / "Local State").write_text("{}\n")
+        (profile / "Secure Preferences").write_text(
+            json.dumps({"extensions": {"settings": {}}}))
+        self.tool("helium", "exit 0")
+        self.tool("pgrep", "exit 1")
+        variables = {
+            "helium_packages": {},
+            "helium_profile_root": str(profile_root),
+            "helium_policy_path": str(self.home / "policy.json"),
+            "helium_policy_become": False,
+        }
+
+        result, events = self.browser_play(
+            "helium", variables, JSH_PLATFORM="linux")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn(
+            ["item", "notice", "Startpage extension is missing or disabled; restart Helium, "
+             "enable extension downloads, and check helium://extensions"], events)
+
     def test_helium_profile_matches_bash_merge_inputs(self):
         defaults = (ROOT / "ansible/roles/helium/defaults/main.yml").read_text()
         self.assertIn("/Library/Managed Preferences/", defaults)
@@ -4686,6 +4712,100 @@ exec /usr/bin/stat "$@"
         self.assertEqual(result, {"darwin": {"casks": ["c"], "mas": ["1"]},
                                   "debian": {"apt": ["p"]}, "rhel": {"dnf": ["d"]}})
 
+    def test_uv_update_preview_reports_outdated_managed_tools(self):
+        for command in ("current-tool", "outdated-tool", "external-tool"):
+            self.tool(command, "exit 0")
+        self.tool(
+            "uv",
+            "if [ \"$*\" = \"tool list --outdated\" ]; then\n"
+            "  echo \"pkg-outdated v1.0.0\"\n"
+            "elif [ \"$*\" = \"tool list\" ]; then\n"
+            "  printf \"%s\\n\" \"pkg-current v1.0.0\" \"pkg-outdated v1.0.0\"\n"
+            "elif [ \"$1 $2\" = \"tool upgrade\" ]; then\n"
+            "  touch \"$HOME/uv-upgraded\"\n"
+            "fi")
+        variables = json.dumps({
+            "jsh_platform": "debian",
+            "jsh_update": True,
+            "packages_spec": {"debian": {"uv": [
+                {"command": "current-tool", "package": "pkg-current"},
+                {"command": "outdated-tool", "package": "pkg-outdated"},
+                {"command": "external-tool", "package": "pkg-external"}]}},
+            "packages_extra": {},
+        })
+        roles = {"macos": "- name: Packages\n  ansible.builtin.include_role: {name: packages}\n"}
+        include = "    - name: macos\n      ansible.builtin.include_role: {name: macos}\n"
+        role_paths = str(self.home / "play/roles") + ":" + str(ROOT / "ansible/roles")
+
+        result, events = self.run_play(
+            include, "--check", "-e", variables, roles=roles,
+            **{"ANSIBLE_ROLES_PATH": role_paths})
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(["item", "ok", "current-tool"], events)
+        self.assertIn(["item", "changed", "outdated-tool"], events)
+        self.assertIn(["item", "ok", "external-tool"], events)
+        self.assertFalse((self.home / "uv-upgraded").exists())
+
+    def test_flatpak_update_preview_reports_only_outdated_and_missing_apps(self):
+        self.tool(
+            "flatpak",
+            "case \" $* \" in\n"
+            "  *\" --version \"*) echo \"Flatpak 1.16.0\" ;;\n"
+            "  *\" remote-ls \"*) echo \"com.example.Outdated\" ;;\n"
+            "  *\" list \"*) printf \"%s\\n\" com.example.Current com.example.Outdated ;;\n"
+            "  *\" remotes \"*) echo \"flathub\" ;;\n"
+            "  *\" update \"*) touch \"$HOME/flatpak-updated\" ;;\n"
+            "esac")
+        variables = json.dumps({
+            "jsh_platform": "debian",
+            "jsh_update": True,
+            "packages_spec": {"debian": {"flatpak": [
+                "com.example.Current", "com.example.Outdated", "com.example.Missing"]}},
+            "packages_extra": {},
+        })
+        roles = {"macos": "- name: Packages\n  ansible.builtin.include_role: {name: packages}\n"}
+        include = "    - name: macos\n      ansible.builtin.include_role: {name: macos}\n"
+        role_paths = str(self.home / "play/roles") + ":" + str(ROOT / "ansible/roles")
+
+        result, events = self.run_play(
+            include, "--check", "-e", variables, roles=roles,
+            **{"ANSIBLE_ROLES_PATH": role_paths})
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(["item", "ok", "com.example.Current"], events)
+        self.assertIn(["item", "changed", "com.example.Outdated"], events)
+        self.assertIn(["item", "changed", "com.example.Missing"], events)
+        self.assertFalse((self.home / "flatpak-updated").exists())
+
+    def test_appimage_preview_matches_bash_without_downloading_or_drift(self):
+        package = {
+            "name": "missing-appimage",
+            "release": "https://example.invalid/releases/latest",
+            "arm": "arm64",
+            "amd": "amd64",
+        }
+        variables = json.dumps({
+            "jsh_platform": "debian",
+            "jsh_update": False,
+            "packages_spec": {"debian": {"appimage": [package]}},
+            "packages_extra": {},
+        })
+        roles = {"macos": "- name: Packages\n  ansible.builtin.include_role: {name: packages}\n"}
+        include = "    - name: macos\n      ansible.builtin.include_role: {name: macos}\n"
+        role_paths = str(self.home / "play/roles") + ":" + str(ROOT / "ansible/roles")
+
+        result, events = self.run_play(
+            include, "--check", "-e", variables, roles=roles,
+            **{"ANSIBLE_ROLES_PATH": role_paths})
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(
+            ["item", "info", "would download verified missing-appimage AppImage"], events)
+        self.assertFalse((self.home / ".local").exists())
+        self.assertFalse(any(event[1] in ("added", "changed", "removed")
+                             for event in events if event[0] == "item"), events)
+
     def test_package_roles_match_bash_lists(self):
         tools = ("bash gum jq unzip zip zsh age ansible atuin bat btop bun coreutils curl "
                  "diffutils direnv eza fd ffmpeg fnm fzf gawk gettext gh git git-lfs gnu-sed gnupg "
@@ -4857,6 +4977,30 @@ exec /usr/bin/stat "$@"
         result, events = self.run_play(include, "-e", directory, **roles)
         self.assertNotEqual(result.returncode, 0)
         self.assertTrue((self.home / "dir").is_dir())
+
+    def test_skills_role_reads_the_first_local_skill_list(self):
+        source = self.home / "custom skill"
+        source.mkdir()
+        local = self.home / "skills.tsv"
+        local.write_text("custom skill\tlocal-skill\n")
+        variables = json.dumps({
+            "jsh_root": str(ROOT),
+            "skills_home": str(self.home),
+            "skills_vendor": str(self.home / "vendor"),
+            "skills_repos": [],
+            "skills_links": [],
+            "skills_bundled": [],
+            "skills_local_lists": [str(local)],
+        })
+        include = "    - name: skills\n      ansible.builtin.include_role: {name: skills}\n"
+        result, events = self.run_play(
+            include, "-e", variables,
+            **{"ANSIBLE_ROLES_PATH": str(ROOT / "ansible/roles")})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        target = self.home / ".agents/skills/local-skill"
+        self.assertEqual(target.readlink(), source)
+        self.assertIn(["item", "changed", str(target)], events)
+
     def test_links_filter_builds_link_items(self):
         script = (
             "import importlib.util, json\n"
@@ -5168,10 +5312,11 @@ esac''')
 
     def test_flatpak_update_argv_uses_literal_strings(self):
         tasks = self.yaml_file(ROOT / "ansible/roles/packages/tasks/flatpak.yml")
-        update = tasks[2]["block"][2]
+        update = next(task for task in tasks[2]["block"]
+                      if task.get("name") == "Flatpak apps are updated")
         self.assertEqual(
             update["ansible.builtin.command"]["argv"],
-            "{{ ['flatpak', 'update', '--user', '--noninteractive', '-y'] + packages_selected.flatpak }}",
+            ["flatpak", "update", "--noninteractive", "-y", "{{ item }}"],
         )
 
     def test_vscode_linux_download_uses_private_tempdir_and_skips_in_check_mode(self):
@@ -5189,6 +5334,12 @@ esac''')
         self.assertTrue(all("not ansible_check_mode" in str(task["when"]) for task in installs))
         planned = next(task for task in block if task.get("name") == "VS Code install is planned")
         self.assertIn("ansible_check_mode", str(planned["ansible.builtin.set_fact"]["vscode_planned"]))
+        preview = next(
+            task for task in block
+            if task.get("ansible.builtin.debug", {}).get("msg") ==
+            "VS Code update is unchecked in preview")
+        self.assertIn("jsh_update", str(preview["when"]))
+        self.assertIn("ansible_check_mode", str(preview["when"]))
 
     @unittest.skipUnless(os.uname().sysname == "Darwin", "reads macOS LaunchServices")
     def test_apps_role_preserves_launchservices_integer_types(self):

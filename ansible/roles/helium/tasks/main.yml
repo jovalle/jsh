@@ -327,10 +327,11 @@
               {{ (((helium_secure.extensions | default({})).settings | default({}))
                   .fgmjlmbojbkmdpofahffgcpkhkngfpef | default({})) }}
           when: >-
-            helium_startpage is not mapping
-            or helium_startpage | length == 0
-            or helium_startpage.disable_reasons | default([]) is not sequence
-            or helium_startpage.disable_reasons | default([]) | length != 0
+            jsh_platform == "darwin" and
+            (helium_startpage is not mapping
+             or helium_startpage | length == 0
+             or helium_startpage.disable_reasons | default([]) is not sequence
+             or helium_startpage.disable_reasons | default([]) | length != 0)
 
         - name: ok
           ansible.builtin.debug:
@@ -340,7 +341,8 @@
               {{ (((helium_secure.extensions | default({})).settings | default({}))
                   .fgmjlmbojbkmdpofahffgcpkhkngfpef | default({})) }}
           when: >-
-            helium_startpage is mapping
+            jsh_platform == "darwin"
+            and helium_startpage is mapping
             and helium_startpage | length > 0
             and helium_startpage.disable_reasons | default([]) is sequence
             and helium_startpage.disable_reasons | default([]) | length == 0

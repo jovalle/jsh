@@ -21,6 +21,7 @@
         flatpakrepo_url: https://flathub.org/repo/flathub.flatpakrepo
         method: user
         state: present
+      when: not jsh_update | bool
 
     - name: Flatpak apps are installed
       community.general.flatpak:
@@ -29,10 +30,52 @@
         method: user
         state: present
       loop: "{{ packages_selected.flatpak }}"
+      when: not jsh_update | bool
 
-    - name: Flatpak apps are up to date
+    - name: Installed Flatpak apps are listed
       ansible.builtin.command:
-        argv: "{{ ['flatpak', 'update', '--user', '--noninteractive', '-y'] + packages_selected.flatpak }}"
-      register: packages_flatpak_update
-      changed_when: "'Nothing to do' not in packages_flatpak_update.stdout"
+        argv: [flatpak, list, --app, --columns=application]
+      register: packages_flatpak_installed
+      changed_when: false
+      check_mode: false
       when: jsh_update | bool
+
+    - name: Flatpak updates are listed
+      ansible.builtin.command:
+        argv: [flatpak, remote-ls, --updates, --columns=application]
+      register: packages_flatpak_updates
+      changed_when: false
+      check_mode: false
+      when: jsh_update | bool
+
+    - name: ok
+      ansible.builtin.debug:
+        msg: "{{ item }}"
+      loop: "{{ packages_selected.flatpak }}"
+      when: >-
+        jsh_update | bool
+        and item in packages_flatpak_installed.stdout_lines
+        and item not in packages_flatpak_updates.stdout_lines
+
+    - name: Flatpak update drift is reported
+      ansible.builtin.command: "true"
+      loop: "{{ packages_selected.flatpak }}"
+      loop_control:
+        label: "{{ item }}"
+      changed_when: true
+      check_mode: false
+      when: >-
+        jsh_update | bool and
+        (item not in packages_flatpak_installed.stdout_lines
+         or (ansible_check_mode and item in packages_flatpak_updates.stdout_lines))
+
+    - name: Flatpak apps are updated
+      ansible.builtin.command:
+        argv: [flatpak, update, --noninteractive, -y, "{{ item }}"]
+      loop: "{{ packages_selected.flatpak }}"
+      loop_control:
+        label: "{{ item }}"
+      changed_when: true
+      when: >-
+        jsh_update | bool and not ansible_check_mode
+        and item in packages_flatpak_updates.stdout_lines
