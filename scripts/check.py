@@ -5096,6 +5096,111 @@ exec /usr/bin/stat "$@"
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
 
+    def sudo_fixture(self):
+        """Copy sudo tasks with system paths and privilege escalation isolated to HOME."""
+        role = self.home / "play/roles/sudo_fixture/tasks"
+        role.mkdir(parents=True)
+        target = self.home / "sudoers"
+        tasks = (ROOT / "ansible/roles/linux/tasks/sudo.yml").read_text()
+        tasks = tasks.replace('"/etc/sudoers.d/{{ linux_user }}"', f'"{target}"')
+        tasks = tasks.replace("  become: true\n", "  become: false\n")
+        tasks = tasks.replace("        owner: root\n        group: root\n", "")
+        (role / "main.yml").write_text(tasks)
+        self.tool("visudo", "exit 0")
+        return target
+
+    def run_sudo_fixture(self):
+        return self.run_play(
+            "    - name: linux\n      ansible.builtin.include_role: {name: sudo_fixture}\n",
+            "-e", json.dumps({"linux_user": "jay", "linux_state": str(self.home / "state"),
+                              "ansible_date_time": {"epoch": "1700000000"}}),
+        )[0]
+
+    def test_audio_headless_preview_stops_after_the_session_notice(self):
+        result, events = self.run_play(
+            "    - name: audio\n      ansible.builtin.include_role: {name: audio}\n",
+            "--check", "-e", json.dumps({"jsh_desktop": "", "jsh_host": "test",
+                                          "jsh_audio_policy": ""}),
+            ANSIBLE_ROLES_PATH=str(ROOT / "ansible/roles"), JSH_PLATFORM="debian",
+            JSH_DESKTOP="",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(["item", "info", "audio policy: no GNOME or XFCE session"], events)
+        self.assertNotIn("has no attribute 'rc'", result.stdout + result.stderr)
+
+    def test_xfce_screensaver_starts_detached_with_a_display(self):
+        tasks = self.yaml_file(ROOT / "ansible/roles/desktop/tasks/xfce.yml")
+        start = next(task for task in tasks
+                     if task.get("name") == "XFCE screensaver process is running")
+        command = start.get("ansible.builtin.shell", "")
+        self.assertIn("nohup", command)
+        self.assertIn("setsid", command)
+        self.assertIn("xfce4-screensaver", command)
+        self.assertIn("&", command)
+        self.assertEqual(start["environment"]["DISPLAY"],
+                         "{{ lookup('ansible.builtin.env', 'DISPLAY') or ':0' }}")
+        self.assertFalse(start["failed_when"])
+        self.assertIn("not ansible_check_mode", start["when"])
+
+    def test_handlers_run_when_a_later_group_fails(self):
+        roles = self.home / "handler-roles"
+        marker = self.home / "handler-ran"
+        macos = roles / "macos"
+        (macos / "tasks").mkdir(parents=True)
+        (macos / "handlers").mkdir()
+        (macos / "tasks/main.yml").write_text(
+            "- name: handler is notified\n"
+            "  ansible.builtin.command:\n"
+            "    argv: [/usr/bin/true]\n"
+            "  changed_when: true\n"
+            "  notify: test handler\n")
+        (macos / "handlers/main.yml").write_text(
+            "- name: test handler\n"
+            f"  ansible.builtin.copy: {{content: ran, dest: '{marker}'}}\n")
+        dev = roles / "dev/tasks"
+        dev.mkdir(parents=True)
+        (dev / "main.yml").write_text(
+            "- name: later group fails\n"
+            "  ansible.builtin.fail: {msg: expected failure}\n")
+        site = self.home / "handler-site.yml"
+        shutil.copy2(ROOT / "ansible/site.yml", site)
+        result = self.playbook(
+            site, "--tags", "macos,dev", "-e",
+            '{"jsh_platform":"darwin","jsh_host":"test"}',
+            ANSIBLE_ROLES_PATH=str(roles), JSH_PLATFORM="darwin",
+        )
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(marker.is_file(), result.stdout + result.stderr)
+        self.assertEqual(marker.read_text(), "ran")
+        config = (ROOT / "ansible/ansible.cfg").read_text()
+        self.assertIn("force_handlers = True", config)
+        for role in ("apps", "audio", "desktop", "fonts", "linux", "services"):
+            tasks = self.yaml_file(ROOT / f"ansible/roles/{role}/tasks/main.yml")
+            self.assertEqual(tasks[-1].get("ansible.builtin.meta"), "flush_handlers", role)
+
+    def test_sudoers_exact_rule_is_current_among_other_lines(self):
+        target = self.sudo_fixture()
+        original = "Defaults:jay !requiretty\njay ALL=(ALL) NOPASSWD:ALL\n"
+        target.write_text(original)
+        result = self.run_sudo_fixture()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(target.read_text(), original)
+        self.assertFalse((self.home / "state/jsh/backups").exists())
+
+    def test_sudoers_replacements_create_unique_nonoverwriting_backups(self):
+        target = self.sudo_fixture()
+        target.write_text("first original\n")
+        first = self.run_sudo_fixture()
+        self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+        target.chmod(0o600)
+        target.write_text("second original\n")
+        second = self.run_sudo_fixture()
+        self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
+        backups = sorted((self.home / "state/jsh/backups").glob("*/sudoers"))
+        self.assertEqual(sorted(backup.read_text() for backup in backups),
+                         ["first original\n", "second original\n"])
+        self.assertEqual(len({backup.parent for backup in backups}), 2)
+
     def test_linux_dry_run_skips_failed_timezone_query(self):
         self.tool("timedatectl", "exit 1")
         tasks = ("    - name: linux\n"
@@ -5166,18 +5271,39 @@ exec /usr/bin/stat "$@"
 
     def test_linux_without_cached_sudo_keeps_the_action_notice(self):
         self.tool("sudo", "exit 1")
-        tasks = ("    - name: linux\n"
-                 "      ansible.builtin.include_role: {name: linux}\n")
+        role = self.home / "play/roles/linux/tasks"
+        role.mkdir(parents=True)
+        marker = self.home / "unsafe-role-task"
+        (role / "main.yml").write_text(
+            f"- name: unsafe role task\n"
+            f"  ansible.builtin.file: {{path: '{marker}', state: touch}}\n"
+            "- name: preflight\n"
+            "  ansible.builtin.include_tasks: preflight.yml\n")
+        shutil.copy2(ROOT / "ansible/roles/linux/tasks/preflight.yml", role / "preflight.yml")
+        tasks = ("    - name: linux preflight\n"
+                 "      ansible.builtin.include_role:\n"
+                 "        name: linux\n"
+                 "        tasks_from: preflight\n")
         result, events = self.run_play(
-            tasks, "-e", json.dumps({"linux_user": "jay"}),
-            **{"ANSIBLE_ROLES_PATH": str(ROOT / "ansible/roles"),
-               "JSH_PLATFORM": "linux"})
+            tasks, "-e", json.dumps({"linux_user": "jay"}), JSH_PLATFORM="linux")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(marker.exists(), events)
         self.assertIn(
             ["item", "notice",
              "Linux system configuration needs sudo; run sudo -v first, then rerun"],
             events,
         )
+
+    def test_services_headless_preview_ignores_skipped_legacy_stats(self):
+        self.tool("systemctl", '[ "$1" = --version ] && exit 0\nexit 1')
+        result, events = self.run_play(
+            "    - name: services\n      ansible.builtin.include_role: {name: services}\n",
+            "--check", ANSIBLE_ROLES_PATH=str(ROOT / "ansible/roles"),
+            JSH_PLATFORM="debian",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("has no attribute 'stat'", result.stdout + result.stderr)
+        self.assertNotIn("fail", [event[1] for event in events if event[0] == "item"])
 
     def test_services_restarts_only_when_retiring_legacy_agent_files(self):
         tasks = self.yaml_file(ROOT / "ansible/roles/services/tasks/ssh.yml")

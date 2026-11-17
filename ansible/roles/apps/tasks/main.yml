@@ -22,3 +22,6 @@
   changed_when: apps_decoder.stdout is reported_change
   check_mode: false
   when: jsh_platform == 'darwin' and apps_decoder_enabled | bool
+
+- name: Pending handlers run
+  ansible.builtin.meta: flush_handlers

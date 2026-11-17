@@ -4,6 +4,10 @@
     msg: "audio policy: no GNOME or XFCE session"
   when: jsh_desktop not in ["gnome", "xfce"]
 
+- name: Audio configuration stops without a desktop session
+  ansible.builtin.meta: end_role
+  when: jsh_desktop not in ["gnome", "xfce"]
+
 - name: PulseAudio tools are found
   ansible.builtin.command:
     argv: [sh, -c, "command -v pactl"]
@@ -85,3 +89,6 @@
       bash '{{ jsh_root }}/ansible/roles/audio/files/cycle.sh' cycle
     keybindings_shortcut_slug: jsh-audio-output
   when: audio_pactl.rc == 0
+
+- name: Pending handlers run
+  ansible.builtin.meta: flush_handlers

@@ -27,3 +27,6 @@
 
 - name: Linux timezone is configured
   ansible.builtin.include_tasks: timezone.yml
+
+- name: Pending handlers run
+  ansible.builtin.meta: flush_handlers

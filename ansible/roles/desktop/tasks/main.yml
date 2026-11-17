@@ -58,3 +58,6 @@
   ansible.builtin.debug:
     msg: Desktop avatar source is unavailable
   when: desktop_avatar_file.stat is defined and not desktop_avatar_file.stat.isreg | default(false)
+
+- name: Pending handlers run
+  ansible.builtin.meta: flush_handlers

@@ -71,3 +71,6 @@
             state: absent
           changed_when: false
           check_mode: false
+
+- name: Pending handlers run
+  ansible.builtin.meta: flush_handlers

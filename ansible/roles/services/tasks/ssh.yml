@@ -67,7 +67,10 @@
   loop: "{{ services_legacy_stat.results | default([]) }}"
   loop_control:
     label: "{{ item.item.dest }}"
-  when: not item.stat.exists and not item.stat.islnk | default(false)
+  when:
+    - not item.skipped | default(false)
+    - not item.stat.exists
+    - not item.stat.islnk | default(false)
 
 - name: Dangling managed SSH agent links are refused
   ansible.builtin.fail:
@@ -75,7 +78,10 @@
   loop: "{{ services_legacy_stat.results | default([]) }}"
   loop_control:
     label: "{{ item.item.dest }}"
-  when: item.stat.islnk | default(false) and not item.stat.exists
+  when:
+    - not item.skipped | default(false)
+    - item.stat.islnk | default(false)
+    - not item.stat.exists
 
 - name: Legacy SSH agent files are read
   ansible.builtin.slurp:
@@ -84,7 +90,9 @@
   loop_control:
     label: "{{ item.item.dest }}"
   register: services_legacy_read
-  when: item.stat.exists
+  when:
+    - not item.skipped | default(false)
+    - item.stat.exists
 
 - name: Modified managed SSH agent files are refused
   ansible.builtin.fail:

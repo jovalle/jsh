@@ -42,29 +42,38 @@
   when:
     - not ansible_check_mode
     - linux_user != "root"
-    - linux_sudoers_current == linux_sudoers_line + "\n"
+    - linux_sudoers_line in linux_sudoers_current.splitlines()
 
 - name: Passwordless sudo access is installed
   when:
     - not ansible_check_mode
     - linux_user != "root"
-    - linux_sudoers_current != linux_sudoers_line + "\n"
+    - linux_sudoers_line not in linux_sudoers_current.splitlines()
   block:
     - name: info
       ansible.builtin.debug:
         msg: "grants {{ linux_user }} passwordless sudo access"
 
-    - name: Sudoers backup folder exists
+    - name: Sudoers backup root exists
       ansible.builtin.file:
-        path: "{{ linux_state }}/jsh/backups/{{ ansible_date_time.epoch }}-ansible"
+        path: "{{ linux_state }}/jsh/backups"
         state: directory
         mode: "0700"
+      when: linux_sudoers_stat.stat.exists
+
+    - name: Sudoers backup folder exists
+      ansible.builtin.tempfile:
+        path: "{{ linux_state }}/jsh/backups"
+        state: directory
+        prefix: "{{ now(utc=true, fmt='%Y%m%d-%H%M%S') }}-"
+        suffix: -ansible
+      register: linux_sudoers_backup
       when: linux_sudoers_stat.stat.exists
 
     - name: Existing sudoers file is backed up
       ansible.builtin.copy:
         content: "{{ linux_sudoers_current }}"
-        dest: "{{ linux_state }}/jsh/backups/{{ ansible_date_time.epoch }}-ansible/sudoers"
+        dest: "{{ linux_sudoers_backup.path }}/sudoers"
         mode: "0600"
       when: linux_sudoers_stat.stat.exists
 

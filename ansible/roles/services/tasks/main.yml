@@ -72,3 +72,6 @@
     services_podman_written.changed
     or services_agent_written.results | default([]) | selectattr("changed") | list | length > 0
     or services_legacy_removed.results | default([]) | selectattr("changed") | list | length > 0
+
+- name: Pending handlers run
+  ansible.builtin.meta: flush_handlers
