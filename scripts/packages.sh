@@ -45,7 +45,7 @@ install_group() {
       ;;
     core)
       if [[ ${JSH_PLATFORM} == darwin ]]; then
-        jsh::brew formulae bash curl git python zsh jq || return
+        jsh::brew formulae bash curl git python zsh jq uv || return
       fi
       if [[ ${JSH_PLATFORM} == debian ]]; then
         jsh::native apt bash ca-certificates curl git python3 zsh procps jq || return

@@ -4146,5 +4146,113 @@ with output.session():
         self.assertEqual(used - module.verbs().keys(), set())
 
 
+class AnsibleChecks(unittest.TestCase):
+    """Check the Ansible bootstrap, plugins, and playbook in a temporary HOME."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="jsh-ansible-")
+        self.addCleanup(self.temp.cleanup)
+        self.home = Path(self.temp.name).resolve()
+        self.tools = self.home / "tools"
+        self.tools.mkdir()
+        self.env = dict(
+            HOME=str(self.home),
+            PATH=f"{self.tools}:/usr/bin:/bin:/usr/sbin:/sbin",
+            LANG="en_US.UTF-8",
+            TMPDIR=str(self.home),
+            GIT_CONFIG_NOSYSTEM="1",
+        )
+
+    def tool(self, name, body):
+        path = self.tools / name
+        path.write_text("#!/bin/sh\n" + body + "\n")
+        path.chmod(0o755)
+
+    def checkout(self):
+        """Copy the parts of the checkout setup scripts read, so tests can change them."""
+        root = self.home / "jsh"
+        for part in ("scripts/lib", "scripts/groups.tsv", "lib", "ansible", "scripts/ansible.sh"):
+            source = ROOT / part
+            if source.is_dir():
+                shutil.copytree(source, root / part, ignore=shutil.ignore_patterns("__pycache__"))
+            else:
+                (root / part).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, root / part)
+        return root
+
+    def mock_uv(self):
+        self.tool("uv", r'''printf '%s\n' "$*" >> "$HOME/uv.log"
+case $1 in
+  venv)
+    for argument; do directory=$argument; done
+    mkdir -p "$directory/bin"
+    printf '#!/bin/sh\nexit 0\n' > "$directory/bin/python"
+    chmod +x "$directory/bin/python" ;;
+  pip)
+    if [ "${MOCK_PIP_FAIL:-0}" = 1 ]; then echo 'pip failed' >&2; exit 1; fi
+    python=
+    previous=
+    for argument; do
+      [ "$previous" = --python ] && python=$argument
+      previous=$argument
+    done
+    bin=${python%/*}
+    printf '#!/bin/sh\nexit 0\n' > "$bin/ansible-playbook"
+    printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "$HOME/galaxy.log"\n' > "$bin/ansible-galaxy"
+    chmod +x "$bin/ansible-playbook" "$bin/ansible-galaxy" ;;
+esac''')
+
+    def bootstrap(self, root, *arguments, **environment):
+        return subprocess.run(
+            ["bash", str(root / "scripts/ansible.sh"), *arguments],
+            env=self.env | {
+                "JSH_ANSIBLE_HOME": str(self.home / "ansible"),
+                "JSH_UV": str(self.tools / "uv"),
+            } | environment,
+            cwd=self.home, capture_output=True, text=True, timeout=60,
+        )
+
+    def test_ansible_bootstrap_installs_then_reports_current(self):
+        self.mock_uv()
+        root = self.checkout()
+        first = self.bootstrap(root)
+        self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+        self.assertIn("+ Ansible installed", first.stdout)
+        self.assertTrue((self.home / "ansible/stamp").is_file())
+        self.assertIn("collection install", (self.home / "galaxy.log").read_text())
+        (self.home / "uv.log").unlink()
+        second = self.bootstrap(root)
+        self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
+        self.assertIn("✓ Ansible is current", second.stdout)
+        self.assertFalse((self.home / "uv.log").exists())
+
+    def test_ansible_bootstrap_reinstalls_when_requirements_change(self):
+        self.mock_uv()
+        root = self.checkout()
+        self.assertEqual(self.bootstrap(root).returncode, 0)
+        requirements = root / "ansible/requirements.txt"
+        requirements.write_text(requirements.read_text() + "# changed\n")
+        result = self.bootstrap(root)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("~ Ansible updated", result.stdout)
+
+    def test_ansible_bootstrap_failure_writes_no_stamp(self):
+        self.mock_uv()
+        root = self.checkout()
+        result = self.bootstrap(root, MOCK_PIP_FAIL="1")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertFalse((self.home / "ansible/stamp").exists())
+        self.assertIn("✕", result.stdout + result.stderr)
+
+    def test_ansible_bootstrap_dry_run_changes_nothing(self):
+        self.mock_uv()
+        root = self.checkout()
+        result = self.bootstrap(root, "--dry-run")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("would add", result.stdout)
+        self.assertFalse((self.home / "ansible").exists())
+        self.assertFalse((self.home / "uv.log").exists())
+
+
 if __name__ == "__main__":
     unittest.main()
