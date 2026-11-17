@@ -62,19 +62,6 @@ class ShellChecks(unittest.TestCase):
         path.write_text("#!/bin/sh\n" + body + "\n")
         path.chmod(0o755)
 
-    def test_linux_dry_run_skips_failed_timezone_query(self):
-        self.tool("uname", "echo Linux")
-        self.tool("sysctl", "echo 0")
-        self.tool("systemctl", "exit 1")
-        self.tool("timedatectl", "exit 1")
-        result = subprocess.run(
-            ["bash", str(ROOT / "scripts/linux.sh"), "--dry-run"],
-            env=self.env | {"JSH_PLATFORM": "linux"}, cwd=self.home,
-            capture_output=True, text=True, timeout=20,
-        )
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("Skipping timezone: timedatectl failed", result.stdout)
-
     def test_no_current_output_helper_remains(self):
         files = sorted((ROOT / "scripts").rglob("*.sh"))
         offenders = [str(file.relative_to(ROOT)) for file in files
@@ -561,7 +548,6 @@ class ShellChecks(unittest.TestCase):
         checkout = self.installer_scope_fixture()
         (checkout / "scripts/groups.tsv").write_text(
             "macos\tdarwin\tMac settings\nlinux\tlinux\tLinux settings\ndev\tall\tDeveloper tools\n")
-        (checkout / "scripts/linux.sh").write_text("touch \"$HOME/linux-ran\"\n")
         self.tool("id", "if [ \"$1\" = -Gn ]; then echo \"staff admin\"; else exec /usr/bin/id \"$@\"; fi")
         result = subprocess.run(
             ["bash", str(checkout / "install.sh")],
@@ -572,7 +558,6 @@ class ShellChecks(unittest.TestCase):
         self.assertIn("Detected macOS", result.stdout)
         self.assertIn("› linux  Linux settings", result.stdout)
         self.assertIn("Skipping Linux configuration on macOS", result.stdout)
-        self.assertFalse((self.home / "linux-ran").exists(), result.stdout)
 
     def test_named_groups_print_no_skips_for_unnamed_groups(self):
         checkout = self.installer_scope_fixture()
@@ -2214,7 +2199,7 @@ esac""",
                                  (0, expected, ""))
 
     def test_setup_scripts_reject_unknown_options(self):
-        for name in ("ansible.sh", "linux.sh", "shell.sh"):
+        for name in ("ansible.sh", "shell.sh"):
             with self.subTest(script=name):
                 result = subprocess.run(["bash", str(ROOT / "scripts" / name), "--dry-run", "--bogus"],
                                         env=self.env, cwd=self.home, capture_output=True,
@@ -2223,11 +2208,11 @@ esac""",
                 self.assertIn("unknown option: --bogus", result.stderr)
 
     def test_setup_script_help_names_the_script(self):
-        result = subprocess.run(["bash", str(ROOT / "scripts/linux.sh"), "--help"],
+        result = subprocess.run(["bash", str(ROOT / "scripts/shell.sh"), "--help"],
                                 env=self.env, capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.splitlines()[0],
-                         "Apply Linux file-watching limits, memory and power policy, and the timezone.")
+                         "Install shell plugins and their matching fzf binary.")
 
     def test_standalone_script_opens_one_session_with_its_group_header(self):
         child = self.home / "child.sh"
@@ -4058,6 +4043,17 @@ esac''')
         items = [event for event in events if event[0] == "item"]
         self.assertEqual(items, [["item", "added", "x installed", ""]])
 
+    def test_callback_handler_start_uses_ansibles_handler_signature(self):
+        import ast
+
+        tree = ast.parse((ROOT / "ansible/plugins/callback/jsh.py").read_text())
+        callback = next(node for node in tree.body
+                        if isinstance(node, ast.ClassDef) and node.name == "CallbackModule")
+        handler = next(node for node in callback.body
+                       if isinstance(node, ast.FunctionDef)
+                       and node.name == "v2_playbook_on_handler_task_start")
+        self.assertEqual([argument.arg for argument in handler.args.args], ["self", "task"])
+
     def test_callback_skipped_include_prints_platform_skip(self):
         result, events = self.run_play(
             "    - name: services\n      ansible.builtin.include_role: {name: services}\n"
@@ -4881,22 +4877,24 @@ exec /usr/bin/stat "$@"
 
     def test_installer_runs_one_playbook_then_bash_groups(self):
         checkout = self.installer_fixture()
-        for name in ("macos", "tools"):
+        for name in ("macos", "tools", "services"):
             (checkout / "ansible/roles" / name / "tasks").mkdir(parents=True)
             (checkout / "ansible/roles" / name / "tasks/main.yml").write_text("[]\n")
-        (checkout / "scripts/services.sh").write_text(
-            "printf 'services\\n' >> \"$HOME/playbook.log\"\n")
+        (checkout / "scripts/desktop.sh").write_text(
+            "echo desktop >> \"$HOME/playbook.log\"\n")
         self.mock_playbook()
         result = subprocess.run(
-            ["bash", str(checkout / "install.sh"), "--dry-run", "macos", "fonts", "tools", "services"],
-            env=self.env | {"JSH_PLATFORM": "debian", "JSH_ANSIBLE_HOME": str(self.home / "ansible")},
+            ["bash", str(checkout / "install.sh"), "--dry-run", "macos", "fonts",
+             "tools", "services", "desktop"],
+            env=self.env | {"JSH_PLATFORM": "debian",
+                            "JSH_ANSIBLE_HOME": str(self.home / "ansible")},
             cwd=self.home, capture_output=True, text=True, timeout=60,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         calls = (self.home / "playbook.log").read_text().splitlines()
         self.assertEqual(len(calls), 2, calls)
-        self.assertIn("--tags macos,fonts,tools --check --diff", calls[0])
-        self.assertEqual(calls[1], "services")
+        self.assertIn("--tags macos,fonts,tools,services --check --diff", calls[0])
+        self.assertEqual(calls[1], "desktop")
 
 
     def yaml_file(self, path):
@@ -4907,6 +4905,68 @@ exec /usr/bin/stat "$@"
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
+
+    def test_linux_dry_run_skips_failed_timezone_query(self):
+        self.tool("timedatectl", "exit 1")
+        tasks = ("    - name: linux\n"
+                 "      ansible.builtin.include_role:\n"
+                 "        name: linux\n"
+                 "        tasks_from: timezone\n")
+        result, events = self.run_play(
+            tasks, "--check",
+            **{"ANSIBLE_ROLES_PATH": str(ROOT / "ansible/roles"),
+               "JSH_PLATFORM": "linux"})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(["item", "info", "timezone: timedatectl failed"], events)
+
+    def test_linux_sysctl_keeps_minimums_but_sets_memory_exactly(self):
+        tasks = self.yaml_file(ROOT / "ansible/roles/linux/tasks/sysctl.yml")
+        minimum = next(task for task in tasks if task.get("name") == "Minimum kernel settings apply")
+        exact = next(task for task in tasks if task.get("name") == "Exact kernel settings apply")
+        probe = next(task for task in tasks if task.get("name") == "Kernel settings are read")
+        self.assertFalse(probe["changed_when"])
+        self.assertFalse(probe["check_mode"])
+        self.assertEqual(minimum["loop_control"]["label"],
+                         "{{ item.item.key }} is at least {{ item.item.value }}")
+        self.assertIn("max", minimum["ansible.posix.sysctl"]["value"])
+        self.assertEqual(exact["ansible.posix.sysctl"]["value"], "{{ item.value }}")
+
+    def test_linux_files_notify_only_the_required_reloads_and_restart(self):
+        defaults = self.yaml_file(ROOT / "ansible/roles/linux/defaults/main.yml")
+        files = {item["dest"]: item["notify"] for item in defaults["linux_system_files"]}
+        self.assertEqual(files["/etc/default/earlyoom"],
+                         ["Systemd configuration reloads", "earlyoom.service restarts"])
+        self.assertEqual(files["/etc/systemd/coredump.conf.d/99-jsh-storage.conf"],
+                         ["Systemd configuration reloads"])
+        self.assertEqual(files["/etc/systemd/logind.conf.d/99-jsh-sleep.conf"],
+                         ["systemd-logind reloads"])
+        self.assertEqual(files["/etc/udev/rules.d/90-jsh-usb-wakeup.rules"],
+                         ["USB udev rules reload"])
+
+    def test_linux_without_cached_sudo_keeps_the_action_notice(self):
+        self.tool("sudo", "exit 1")
+        tasks = ("    - name: linux\n"
+                 "      ansible.builtin.include_role: {name: linux}\n")
+        result, events = self.run_play(
+            tasks, "-e", json.dumps({"linux_user": "jay"}),
+            **{"ANSIBLE_ROLES_PATH": str(ROOT / "ansible/roles"),
+               "JSH_PLATFORM": "linux"})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(
+            ["item", "notice",
+             "Linux system configuration needs sudo; run sudo -v first, then rerun"],
+            events,
+        )
+
+    def test_services_restarts_only_when_retiring_legacy_agent_files(self):
+        tasks = self.yaml_file(ROOT / "ansible/roles/services/tasks/ssh.yml")
+        installed = next(task for task in tasks
+                         if task.get("name") == "Legacy SSH agent files are installed")
+        removed = next(task for task in tasks
+                       if task.get("name") == "Legacy SSH agent files are absent")
+        self.assertEqual(installed["notify"], "User systemd configuration reloads")
+        self.assertEqual(removed["notify"],
+                         ["User systemd configuration reloads", "SSH agent restarts"])
 
     def test_uv_update_only_upgrades_uv_managed_tools(self):
         self.tool("just", "exit 0")

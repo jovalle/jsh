@@ -1,0 +1,12 @@
+---
+galaxy_info:
+  author: jsh
+  description: Apply Linux file-watching limits, memory and power policy, and the timezone
+  license: MIT
+  min_ansible_version: "2.22"
+  platforms:
+    - name: Debian
+      versions: [all]
+    - name: EL
+      versions: [all]
+dependencies: []

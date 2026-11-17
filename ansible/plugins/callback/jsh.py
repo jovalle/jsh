@@ -197,7 +197,8 @@ class CallbackModule(CallbackBase):
         elif self._group is not None and task.name:
             self._emit("progress", task.name)
 
-    v2_playbook_on_handler_task_start = v2_playbook_on_task_start
+    def v2_playbook_on_handler_task_start(self, task):
+        self.v2_playbook_on_task_start(task, False)
 
     def _skip_text(self, group: str) -> str:
         platform = self._groups[group][0]

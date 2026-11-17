@@ -1,0 +1,35 @@
+---
+linux_user: "{{ ansible_user_id }}"
+linux_home: >-
+  {{ lookup("ansible.builtin.env", "HOME") }}
+linux_state: >-
+  {{ lookup("ansible.builtin.env", "XDG_STATE_HOME") or (linux_home + "/.local/state") }}
+linux_timezone: >-
+  {{ lookup("ansible.builtin.env", "JSH_TIMEZONE") or "America/New_York" }}
+linux_become: "{{ not ansible_check_mode }}"
+linux_sysctl_minimum_file: /etc/sysctl.d/90-jsh.conf
+linux_sysctl_exact_file: /etc/sysctl.d/99-jsh-memory.conf
+linux_sysctl_minimum:
+  - {key: fs.inotify.max_user_watches, value: 524288}
+  - {key: fs.inotify.max_user_instances, value: 1024}
+linux_sysctl_exact:
+  - {key: vm.swappiness, value: 180}
+  - {key: vm.watermark_boost_factor, value: 0}
+  - {key: vm.watermark_scale_factor, value: 125}
+  - {key: vm.page-cluster, value: 0}
+linux_system_files:
+  - src: earlyoom
+    dest: /etc/default/earlyoom
+    notify: [Systemd configuration reloads, earlyoom.service restarts]
+  - src: coredump.conf
+    dest: /etc/systemd/coredump.conf.d/99-jsh-storage.conf
+    notify: [Systemd configuration reloads]
+  - src: zram.conf
+    dest: /etc/systemd/zram-generator.conf
+    notify: [Systemd configuration reloads]
+  - src: logind.conf
+    dest: /etc/systemd/logind.conf.d/99-jsh-sleep.conf
+    notify: [systemd-logind reloads]
+  - src: usb.rules
+    dest: /etc/udev/rules.d/90-jsh-usb-wakeup.rules
+    notify: [USB udev rules reload]

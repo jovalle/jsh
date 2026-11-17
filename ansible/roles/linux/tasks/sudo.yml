@@ -1,0 +1,79 @@
+---
+- name: "/etc/sudoers.d/{{ linux_user }} installed"
+  ansible.builtin.command:
+    argv: [/usr/bin/true]
+  changed_when: true
+  check_mode: false
+  when: ansible_check_mode and linux_user != "root"
+
+- name: ok
+  ansible.builtin.debug:
+    msg: "{{ linux_user }} has passwordless sudo"
+  when: linux_user == "root"
+
+- name: Current sudoers file is checked
+  ansible.builtin.stat:
+    path: "/etc/sudoers.d/{{ linux_user }}"
+  register: linux_sudoers_stat
+  become: true
+  when: not ansible_check_mode and linux_user != "root"
+
+- name: Current sudoers file is read
+  ansible.builtin.slurp:
+    src: "/etc/sudoers.d/{{ linux_user }}"
+  register: linux_sudoers_read
+  become: true
+  when:
+    - not ansible_check_mode
+    - linux_user != "root"
+    - linux_sudoers_stat.stat.exists
+
+- name: Current sudoers content is selected
+  ansible.builtin.set_fact:
+    linux_sudoers_current: >-
+      {{ (linux_sudoers_read.content | b64decode)
+         if linux_sudoers_stat.stat.exists else "" }}
+    linux_sudoers_line: "{{ linux_user }} ALL=(ALL) NOPASSWD:ALL"
+  when: not ansible_check_mode and linux_user != "root"
+
+- name: ok
+  ansible.builtin.debug:
+    msg: "{{ linux_user }} has passwordless sudo"
+  when:
+    - not ansible_check_mode
+    - linux_user != "root"
+    - linux_sudoers_current == linux_sudoers_line + "\n"
+
+- name: Passwordless sudo access is installed
+  when:
+    - not ansible_check_mode
+    - linux_user != "root"
+    - linux_sudoers_current != linux_sudoers_line + "\n"
+  block:
+    - name: info
+      ansible.builtin.debug:
+        msg: "grants {{ linux_user }} passwordless sudo access"
+
+    - name: Sudoers backup folder exists
+      ansible.builtin.file:
+        path: "{{ linux_state }}/jsh/backups/{{ ansible_date_time.epoch }}-ansible"
+        state: directory
+        mode: "0700"
+      when: linux_sudoers_stat.stat.exists
+
+    - name: Existing sudoers file is backed up
+      ansible.builtin.copy:
+        content: "{{ linux_sudoers_current }}"
+        dest: "{{ linux_state }}/jsh/backups/{{ ansible_date_time.epoch }}-ansible/sudoers"
+        mode: "0600"
+      when: linux_sudoers_stat.stat.exists
+
+    - name: "/etc/sudoers.d/{{ linux_user }} installed"
+      ansible.builtin.copy:
+        content: "{{ linux_sudoers_line }}\n"
+        dest: "/etc/sudoers.d/{{ linux_user }}"
+        owner: root
+        group: root
+        mode: "0440"
+        validate: visudo -cf %s
+      become: true

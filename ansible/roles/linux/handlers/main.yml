@@ -1,0 +1,44 @@
+---
+- name: Systemd configuration reloads
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  become: true
+  changed_when: false
+  check_mode: false
+  when: not ansible_check_mode and linux_systemd.rc | default(1) == 0
+
+- name: earlyoom.service restarts
+  ansible.builtin.systemd_service:
+    name: earlyoom.service
+    state: restarted
+  become: "{{ linux_become }}"
+  when: linux_earlyoom.rc | default(1) == 0
+
+- name: systemd-logind reloads
+  ansible.builtin.command:
+    argv: [systemctl, kill, -s, HUP, systemd-logind.service]
+  become: true
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: not ansible_check_mode and linux_systemd.rc | default(1) == 0
+
+- name: USB udev rules reload
+  ansible.builtin.command:
+    argv: [udevadm, control, --reload]
+  become: true
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  listen: USB udev rules reload
+  when: not ansible_check_mode
+
+- name: USB devices retrigger
+  ansible.builtin.command:
+    argv: [udevadm, trigger, --subsystem-match=usb]
+  become: true
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  listen: USB udev rules reload
+  when: not ansible_check_mode

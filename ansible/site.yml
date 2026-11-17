@@ -39,6 +39,22 @@
           ansible.builtin.set_fact:
             jsh_failed_groups: "{{ jsh_failed_groups + ['macos'] }}"
 
+    - name: linux group
+      tags: [linux]
+      block:
+        - name: linux
+          ansible.builtin.include_role:
+            name: linux
+            apply:
+              tags: [linux]
+          tags: [linux]
+          when: jsh_platform != 'darwin'
+      rescue:
+        - name: linux failure is recorded
+          ansible.builtin.set_fact:
+            jsh_failed_groups: >-
+              {{ jsh_failed_groups + ["linux"] }}
+
     - name: dev group
       tags: [dev]
       block:
@@ -136,6 +152,22 @@
         - name: tools failure is recorded
           ansible.builtin.set_fact:
             jsh_failed_groups: "{{ jsh_failed_groups + ['tools'] }}"
+
+    - name: services group
+      tags: [services]
+      block:
+        - name: services
+          ansible.builtin.include_role:
+            name: services
+            apply:
+              tags: [services]
+          tags: [services]
+          when: jsh_platform != 'darwin'
+      rescue:
+        - name: services failure is recorded
+          ansible.builtin.set_fact:
+            jsh_failed_groups: >-
+              {{ jsh_failed_groups + ["services"] }}
 
     - name: apps group
       tags: [apps]

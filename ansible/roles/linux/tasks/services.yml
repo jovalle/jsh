@@ -1,0 +1,51 @@
+---
+- name: Systemd is available
+  ansible.builtin.command:
+    argv: [systemctl, --version]
+  register: linux_systemd
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: earlyoom.service is available
+  ansible.builtin.command:
+    argv: [systemctl, cat, earlyoom.service]
+  register: linux_earlyoom
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: linux_systemd.rc == 0
+
+- name: systemd-zram-setup@zram0.service is available
+  ansible.builtin.command:
+    argv: [systemctl, cat, systemd-zram-setup@zram0.service]
+  register: linux_zram
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: linux_systemd.rc == 0
+
+- name: earlyoom.service is active
+  ansible.builtin.systemd_service:
+    name: earlyoom.service
+    enabled: true
+    state: started
+  become: "{{ linux_become }}"
+  when: linux_earlyoom.rc | default(1) == 0
+
+- name: info
+  ansible.builtin.debug:
+    msg: "Skipping earlyoom.service: unit is unavailable"
+  when: linux_earlyoom.rc | default(1) != 0
+
+- name: systemd-zram-setup@zram0.service is active
+  ansible.builtin.systemd_service:
+    name: systemd-zram-setup@zram0.service
+    state: started
+  become: "{{ linux_become }}"
+  when: linux_zram.rc | default(1) == 0
+
+- name: info
+  ansible.builtin.debug:
+    msg: "Skipping systemd-zram-setup@zram0.service: unit is unavailable"
+  when: linux_zram.rc | default(1) != 0

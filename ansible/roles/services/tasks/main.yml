@@ -1,0 +1,74 @@
+---
+- name: Systemctl is available
+  ansible.builtin.command:
+    argv: [systemctl, --version]
+  register: services_systemctl
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: info
+  ansible.builtin.debug:
+    msg: "Skipping services: systemctl is unavailable"
+  when: services_systemctl.rc != 0
+
+- name: Services stop without systemctl
+  ansible.builtin.meta: end_role
+  when: services_systemctl.rc != 0
+
+- name: User service folders are checked
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ services_user_systemd }}"
+    - "{{ services_environment }}"
+  loop_control:
+    label: "{{ item }}"
+  register: services_folders
+
+- name: User service folders exist
+  ansible.builtin.file:
+    path: "{{ item.item }}"
+    state: directory
+    mode: u+rwx
+  loop: "{{ services_folders.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: not item.stat.exists
+
+- name: Native SSH agent socket is checked
+  ansible.builtin.command:
+    argv: [systemctl, --user, cat, ssh-agent.socket]
+  register: services_native_ssh
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: SSH agent files are configured
+  ansible.builtin.include_tasks: ssh.yml
+
+- name: Podman environment is current
+  ansible.builtin.copy:
+    src: podman.conf
+    dest: "{{ services_environment }}/podman.conf"
+    mode: "0644"
+  register: services_podman_written
+  notify: User systemd configuration reloads
+
+- name: User service file handlers run
+  ansible.builtin.meta: flush_handlers
+
+- name: User service activation is configured
+  ansible.builtin.include_tasks: activation.yml
+  loop: "{{ [services_ssh_agent_unit] + services_agent_units }}"
+  loop_control:
+    loop_var: services_unit
+    label: "{{ services_unit }}"
+
+- name: notice
+  ansible.builtin.debug:
+    msg: log out and back in to load the new environment files
+  when: >-
+    services_podman_written.changed
+    or services_agent_written.results | default([]) | selectattr("changed") | list | length > 0
+    or services_legacy_removed.results | default([]) | selectattr("changed") | list | length > 0
