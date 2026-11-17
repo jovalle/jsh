@@ -4253,6 +4253,91 @@ esac''')
         self.assertFalse((self.home / "ansible").exists())
         self.assertFalse((self.home / "uv.log").exists())
 
+    def venv(self, name):
+        path = ROOT / "local/ansible/venv/bin" / name
+        if not path.exists():
+            self.fail(f"{path} is missing; run ./scripts/ansible.sh")
+        return path
+
+    def ansible_env(self, **environment):
+        return self.env | {
+            "ANSIBLE_CONFIG": str(ROOT / "ansible/ansible.cfg"),
+            "ANSIBLE_CACHE_PLUGIN_CONNECTION": str(self.home / "facts"),
+            "ANSIBLE_NOCOLOR": "1",
+            "JSH_ROOT": str(ROOT),
+        } | environment
+
+    def playbook(self, playbook, *arguments, **environment):
+        return subprocess.run(
+            [str(self.venv("ansible-playbook")), str(playbook), *arguments],
+            env=self.ansible_env(**environment), cwd=self.home, stdin=subprocess.DEVNULL,
+            capture_output=True, text=True, timeout=180,
+        )
+
+    def test_playbook_uses_the_venv_python(self):
+        # Only an explicit inventory host can lose the controller's Python to discovery.
+        inventory = subprocess.run(
+            [str(self.venv("ansible-inventory")), "--list"],
+            env=self.ansible_env(), cwd=self.home, stdin=subprocess.DEVNULL,
+            capture_output=True, text=True, timeout=120,
+        )
+        self.assertEqual(inventory.returncode, 0, inventory.stdout + inventory.stderr)
+        self.assertIn("localhost", json.loads(inventory.stdout)["ungrouped"]["hosts"])
+        result = subprocess.run(
+            [str(self.venv("ansible")), "localhost", "-m", "ansible.builtin.setup",
+             "-a", "filter=ansible_python"],
+            env=self.ansible_env(), cwd=self.home, stdin=subprocess.DEVNULL,
+            capture_output=True, text=True, timeout=120,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        facts = json.loads(result.stdout.split("=>", 1)[1])
+        executable = facts["ansible_facts"]["ansible_python"]["executable"]
+        self.assertTrue(executable.startswith(str(ROOT / "local/ansible/venv/")), executable)
+
+    def test_playbook_detects_platform_desktop_and_host(self):
+        site = ROOT / "ansible/site.yml"
+        named = self.playbook(site, "--check", "-e", "jsh_debug_facts=true",
+                              JSH_PLATFORM="rhel", JSH_DESKTOP="xfce", JSH_HOST="colossus")
+        self.assertEqual(named.returncode, 0, named.stdout + named.stderr)
+        self.assertIn("rhel xfce colossus", named.stdout)
+        detected = self.playbook(site, "--check", "-e", "jsh_debug_facts=true")
+        self.assertEqual(detected.returncode, 0, detected.stdout + detected.stderr)
+        host = subprocess.run(["hostname", "-s"], capture_output=True, text=True).stdout.strip()
+        platform = "darwin" if os.uname().sysname == "Darwin" else ""
+        if platform:
+            self.assertIn(f"darwin darwin {host}", detected.stdout)
+
+    def test_site_includes_match_groups_index(self):
+        groups = []
+        for line in (ROOT / "scripts/groups.tsv").read_text().splitlines():
+            if line and not line.startswith("#"):
+                name, platform, _ = line.split("\t")
+                groups.append((name, platform))
+        script = (
+            "import json, sys, yaml\n"
+            "play = yaml.safe_load(open(sys.argv[1]))[0]\n"
+            "print(json.dumps([t for t in play.get('tasks') or [] "
+            "if 'ansible.builtin.include_role' in t]))\n"
+        )
+        result = subprocess.run(
+            [str(self.venv("python")), "-c", script, str(ROOT / "ansible/site.yml")],
+            capture_output=True, text=True, timeout=60,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        includes = json.loads(result.stdout)
+        order = [name for name, _ in groups]
+        platforms = dict(groups)
+        names = [task["ansible.builtin.include_role"]["name"] for task in includes]
+        self.assertEqual(names, sorted(names, key=order.index))
+        for task in includes:
+            name = task["ansible.builtin.include_role"]["name"]
+            self.assertIn(name, platforms)
+            self.assertEqual(task.get("tags"), [name])
+            self.assertEqual(task["ansible.builtin.include_role"].get("apply"), {"tags": [name]})
+            expected = {"all": None, "darwin": "jsh_platform == 'darwin'",
+                        "linux": "jsh_platform != 'darwin'"}[platforms[name]]
+            self.assertEqual(task.get("when"), expected, name)
+
 
 if __name__ == "__main__":
     unittest.main()

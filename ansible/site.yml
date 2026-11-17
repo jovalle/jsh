@@ -1,0 +1,21 @@
+---
+# One play configures this workstation. Each setup group in scripts/groups.tsv is a role,
+# included in the same order with its name as the tag.
+- name: Workstation
+  hosts: localhost
+  gather_facts: true
+  gather_subset: [min]
+  pre_tasks:
+    - name: Host variables apply
+      ansible.builtin.group_by:
+        key: "{{ jsh_host }}"
+      changed_when: false
+      tags: [always]
+
+    - name: Detected platform
+      ansible.builtin.debug:
+        msg: "{{ jsh_platform }} {{ jsh_desktop }} {{ jsh_host }}"
+      when: jsh_debug_facts | default(false) | bool
+      tags: [always]
+
+  tasks: []

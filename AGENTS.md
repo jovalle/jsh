@@ -17,6 +17,7 @@ prompts stay in VS Code Settings Sync, not here.
 | ---------------- | ----------------------------------------------------------------------------- |
 | All checks       | `just check`                                                                  |
 | One check        | `just check syntax`, `just check lint`, `just check shell`                    |
+| Ansible checks   | `just check ansible` (installs Ansible into `local/ansible/`)                 |
 | One shell file   | `bash -n FILE` or `zsh -n FILE`, then `shellcheck -x --severity=warning FILE` |
 | Preview setup    | `just status [GROUP ...]` or `./scripts/NAME.sh --dry-run`                    |
 | List groups      | `just list groups`                                                            |
@@ -43,6 +44,12 @@ them only when asked.
   `dotfiles/.gitconfig` sets as `core.hooksPath` (one `dispatch.sh` linked under each hook name;
   it runs a repository's tracked `.githooks/` after `git config jsh.hooks true`, then
   `.git/hooks`).
+- `ansible/`: host configuration, moving here group by group. `site.yml` includes one role
+  per group in `groups.tsv` order, tagged with the group name; `install.sh` runs a group's
+  role when `ansible/roles/GROUP` exists, otherwise `scripts/GROUP.sh`. `scripts/ansible.sh`
+  installs the pinned versions from `ansible/requirements.*` into `local/ansible/`. To run it
+  directly, set `ANSIBLE_CONFIG=ansible/ansible.cfg` and run
+  `local/ansible/venv/bin/ansible-playbook ansible/site.yml --tags GROUP --check --diff`.
 - `bin/`: everyday commands and the isolated `jsh` runtime.
 - `dotfiles/`: home-relative configuration.
 - `justfile`: one-line shortcuts and checks.
@@ -63,8 +70,8 @@ them only when asked.
   bottom line, and groups close with ✓/✕/–.
 - `bin/` commands load `lib/shell/output.sh`, never `scripts/lib/`.
 - Privileged work uses `jsh::root` (`sudo -n`). Never prompt for input or a password.
-- Runtime is Bash; Python (standard library only) is limited to `bin/`, `lib/git/`, and
-  `lib/output.py`. Shell is 2-space indented; see `.editorconfig`.
+- Runtime is Bash; Python (standard library only) is limited to `bin/`, `lib/git/`,
+  `lib/output.py`, and `ansible/plugins/` (which may also use Ansible's own APIs). Shell is 2-space indented; see `.editorconfig`.
 - Names: commands read like speech, files and directories are one lowercase word when that
   stays clear.
 

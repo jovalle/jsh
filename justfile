@@ -31,10 +31,10 @@ setup *groups:
 list what='groups':
     {{ if what == "groups" { "./install.sh --list" } else { error("just list: only groups") } }}
 
-# Run syntax, lint, and shell checks, or one of them, or the pre-commit hooks
+# Run syntax, lint, shell, and Ansible checks, or one of them, or the pre-commit hooks
 [group('develop')]
 check what='all':
-    {{ just_executable() }} {{ if what == "all" { "syntax lint shell" } else if what =~ '^(syntax|lint|shell|hooks)$' { what } else { error("just check: syntax, lint, shell, or hooks") } }}
+    {{ just_executable() }} {{ if what == "all" { "syntax lint shell ansible" } else if what =~ '^(syntax|lint|shell|ansible|hooks)$' { what } else { error("just check: syntax, lint, shell, ansible, or hooks") } }}
 
 # Format shell files with shfmt
 [group('develop')]
@@ -54,6 +54,12 @@ lint:
 [private]
 shell:
     python3 scripts/check.py
+
+[private]
+ansible:
+    ./scripts/ansible.sh
+    cd ansible && ANSIBLE_CONFIG=ansible.cfg ../local/ansible/venv/bin/ansible-playbook --syntax-check site.yml
+    cd ansible && ANSIBLE_CONFIG=ansible.cfg PATH="$PWD/../local/ansible/venv/bin:$PATH" ansible-lint
 
 [private]
 hooks:

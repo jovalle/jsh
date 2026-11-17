@@ -1,0 +1,8 @@
+---
+# The repository's YAML rules plus the octal rules ansible-lint requires.
+extends: ../.yamllint
+
+rules:
+  octal-values:
+    forbid-implicit-octal: true
+    forbid-explicit-octal: true
