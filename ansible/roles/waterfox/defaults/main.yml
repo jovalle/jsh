@@ -1,0 +1,21 @@
+---
+waterfox_packages:
+  darwin:
+    casks: [waterfox]
+  linux:
+    flatpak: [net.waterfox.waterfox]
+
+waterfox_home: "{{ lookup('ansible.builtin.env', 'HOME') }}"
+waterfox_config: "{{ lookup('ansible.builtin.env', 'XDG_CONFIG_HOME') or waterfox_home ~ '/.config' }}"
+waterfox_state: "{{ lookup('ansible.builtin.env', 'XDG_STATE_HOME') or waterfox_home ~ '/.local/state' }}"
+waterfox_roots: >-
+  {{ [waterfox_home ~ '/Library/Application Support/Waterfox'] if jsh_platform == 'darwin'
+     else [waterfox_home ~ '/.waterfox', waterfox_home ~ '/.var/app/net.waterfox.waterfox/.waterfox'] }}
+waterfox_policy_path: /Library/Preferences/net.waterfox.waterfox.plist
+waterfox_policy_become: true
+waterfox_policy_overlays:
+  - "{{ waterfox_config }}/jsh/waterfox/policies.json"
+  - "{{ jsh_root }}/local/waterfox/policies.json"
+waterfox_user_overlays:
+  - "{{ waterfox_config }}/jsh/waterfox/user.js"
+  - "{{ jsh_root }}/local/waterfox/user.js"

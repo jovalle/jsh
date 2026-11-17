@@ -1,0 +1,19 @@
+---
+galaxy_info:
+  author: jsh
+  description: Apply Waterfox policy and preferences to its default profile
+  license: MIT
+  min_ansible_version: "2.22"
+  platforms:
+    - name: MacOSX
+      versions: [all]
+    - name: Debian
+      versions: [all]
+    - name: EL
+      versions: [all]
+dependencies:
+  - role: packages
+    when: not app_apply | default(false) | bool
+    vars:
+      packages_spec: "{{ waterfox_packages }}"
+      packages_extra: "{{ waterfox_packages_extra | default({}) }}"

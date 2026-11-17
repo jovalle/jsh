@@ -1,0 +1,14 @@
+---
+- name: "{{ helium_preferences }}"
+  settings:
+    path: "{{ helium_preferences }}"
+    source: "{{ jsh_root }}/ansible/roles/helium/files/preferences.json"
+    values: "{{ helium_preferences_values }}"
+    overlays: "{{ helium_preferences_overlays }}"
+
+- name: "{{ helium_profile_root }}/Local State"
+  settings:
+    path: "{{ helium_profile_root }}/Local State"
+    source: "{{ jsh_root }}/ansible/roles/helium/files/state.json"
+    values: "{{ helium_state_values }}"
+    overlays: "{{ helium_state_overlays }}"

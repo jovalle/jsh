@@ -1,0 +1,32 @@
+---
+helium_packages:
+  darwin:
+    casks: [helium-browser]
+  linux:
+    appimage:
+      - name: helium
+        release: https://api.github.com/repos/imputnet/helium-linux/releases/latest
+        arm: arm64
+        amd: x86_64
+
+helium_home: "{{ lookup('ansible.builtin.env', 'HOME') }}"
+helium_config: "{{ lookup('ansible.builtin.env', 'XDG_CONFIG_HOME') or helium_home ~ '/.config' }}"
+helium_profile_root: >-
+  {{ helium_home ~ '/Library/Application Support/net.imput.helium'
+     if jsh_platform == 'darwin' else helium_config ~ '/helium' }}
+helium_policy_path: >-
+  {{ '/Library/Preferences/net.imput.helium.plist' if jsh_platform == 'darwin'
+     else '/etc/chromium/policies/managed/jsh-helium.json' }}
+helium_policy_become: true
+helium_manifest_path: >-
+  {{ '/Applications/Helium.app/Contents/Resources/net.imput.helium.manifest/Contents/Resources/'
+     ~ 'net.imput.helium.manifest' }}
+helium_overlays:
+  - "{{ helium_config }}/jsh/helium/policy.json"
+  - "{{ jsh_root }}/local/helium/policy.json"
+helium_preferences_overlays:
+  - "{{ helium_config }}/jsh/helium/preferences.json"
+  - "{{ jsh_root }}/local/helium/preferences.json"
+helium_state_overlays:
+  - "{{ helium_config }}/jsh/helium/state.json"
+  - "{{ jsh_root }}/local/helium/state.json"

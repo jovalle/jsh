@@ -1,0 +1,288 @@
+---
+- name: Helium command is found
+  ansible.builtin.command:
+    argv: [sh, -c, 'command -v helium']
+  register: helium_command
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: Helium profile root is checked
+  ansible.builtin.stat:
+    path: "{{ helium_profile_root }}"
+  register: helium_root
+
+- name: Helium application is checked
+  ansible.builtin.stat:
+    path: /Applications/Helium.app
+  register: helium_application
+  when: jsh_platform == 'darwin'
+
+- name: info
+  ansible.builtin.debug:
+    msg: "Skipping Helium configuration: Helium is not installed"
+  when: >-
+    helium_command.rc != 0 and not helium_root.stat.isdir | default(false)
+    and not helium_application.stat.isdir | default(false)
+
+- name: Helium configuration is managed
+  when: >-
+    helium_command.rc == 0 or helium_root.stat.isdir | default(false)
+    or helium_application.stat.isdir | default(false)
+  block:
+    - name: "{{ helium_policy_path }}"
+      settings:
+        path: "{{ helium_policy_path }}"
+        source: "{{ jsh_root }}/ansible/roles/helium/files/policy.json"
+        values: >-
+          {{ {'ExtensionForceInstallWithSearchOrNewTabOverridesEnabled': true,
+              'ExtensionInstallForcelist':
+                (lookup('ansible.builtin.file', jsh_root ~ '/ansible/roles/helium/files/policy.json')
+                 | from_json).ExtensionInstallForcelist
+                + ['fgmjlmbojbkmdpofahffgcpkhkngfpef']}
+             if jsh_platform == 'darwin' else {} }}
+        overlays: "{{ helium_overlays }}"
+        format: "{{ 'plist' if jsh_platform == 'darwin' else 'json' }}"
+        merge: replace
+        backup: true
+      become: "{{ helium_policy_become | bool }}"
+      register: helium_policy
+
+    - name: Helium policy change is recorded
+      ansible.builtin.set_fact:
+        helium_policy_changed: "{{ helium_policy is changed }}"
+
+    - name: Helium policy process is checked
+      ansible.builtin.command:
+        argv:
+          - pgrep
+          - -u
+          - "{{ lookup('ansible.builtin.pipe', 'id -u') }}"
+          - -x
+          - "{{ 'Helium' if jsh_platform == 'darwin' else 'helium' }}"
+      register: helium_policy_process
+      changed_when: false
+      check_mode: false
+      failed_when: helium_policy_process.rc not in [0, 1]
+      when: helium_policy_changed | bool
+
+    - name: notice
+      ansible.builtin.debug:
+        msg: restart Helium to apply the changed policy
+      when: helium_policy_changed | bool and helium_policy_process.rc == 0
+
+    - name: Helium search policy manifest is read
+      ansible.builtin.command:
+        argv: [plutil, -convert, json, -o, -, "{{ helium_manifest_path }}"]
+      register: helium_manifest
+      changed_when: false
+      check_mode: false
+      failed_when: false
+      when: jsh_platform == 'darwin'
+
+    - name: notice
+      ansible.builtin.debug:
+        msg: "cannot verify the temporary Helium search policy; check helium://policy"
+      when: jsh_platform == 'darwin' and helium_manifest.rc != 0
+
+    - name: notice
+      ansible.builtin.debug:
+        msg: >-
+          Helium does not list the temporary search policy; check helium://policy and choose
+          Startpage manually if needed
+      when: >-
+        jsh_platform == 'darwin' and helium_manifest.rc == 0
+        and 'ExtensionForceInstallWithSearchOrNewTabOverridesEnabled' not in helium_manifest.stdout
+
+    - name: Default Helium profile is checked
+      ansible.builtin.stat:
+        path: "{{ helium_profile_root }}/Default/Preferences"
+      register: helium_default_profile
+
+    - name: Helium profiles are found
+      ansible.builtin.find:
+        paths: "{{ helium_profile_root }}"
+        patterns: Preferences
+        file_type: file
+        recurse: true
+      register: helium_found_profiles
+      when: helium_root.stat.isdir | default(false)
+
+    - name: Helium profile candidates are selected
+      ansible.builtin.set_fact:
+        helium_profiles: >-
+          {{ [helium_profile_root ~ '/Default/Preferences']
+             if helium_default_profile.stat.isreg | default(false)
+             else (helium_found_profiles.files | default([]) | map(attribute='path') | list) }}
+
+    - name: notice
+      ansible.builtin.debug:
+        msg: open Helium once to create a profile, then rerun
+      when: helium_profiles | length == 0
+
+    - name: notice
+      ansible.builtin.debug:
+        msg: several profiles and no Default profile; choose one by hand
+      when: helium_profiles | length > 1
+
+    - name: Helium profile is selected
+      ansible.builtin.set_fact:
+        helium_preferences: "{{ helium_profiles[0] }}"
+        helium_profile: "{{ helium_profiles[0] | dirname }}"
+      when: helium_profiles | length == 1
+
+    - name: ok
+      ansible.builtin.debug:
+        msg: "Helium profile is {{ helium_profile }}"
+      when: helium_profiles | length == 1
+
+    - name: Helium profile preferences are managed
+      when: helium_profiles | length == 1
+      block:
+        - name: Helium preferences are read
+          ansible.builtin.slurp:
+            src: "{{ helium_preferences }}"
+          register: helium_current_preferences
+
+        - name: Helium pinned extensions are read
+          ansible.builtin.set_fact:
+            helium_existing_pinned: >-
+              {{ (((helium_current_preferences.content | b64decode | from_json).extensions
+                   | default({})).pinned_extensions | default([])) }}
+            helium_pinned: >-
+              {{ ['blockjmkbacgjkknlgpkjjiijinjdanf',
+                  'jplgfhpmjnbigmhklmmbgecoobifkmpa',
+                  'nngceckbapebfimnlniiiahkandclblb'] }}
+            helium_managed: >-
+              {{ ['nngceckbapebfimnlniiiahkandclblb',
+                  'hehggadaopoacecdllhhajmbjkdcmajg',
+                  'jplgfhpmjnbigmhklmmbgecoobifkmpa',
+                  'pkehgijcmpdhfbdbbnkijodmdjhbjlgp']
+                 + (['fgmjlmbojbkmdpofahffgcpkhkngfpef']
+                    if jsh_platform == 'darwin' else []) }}
+
+        - name: Helium pinned extensions are valid
+          ansible.builtin.assert:
+            that:
+              - helium_existing_pinned is sequence
+              - helium_existing_pinned is not string
+              - helium_existing_pinned | select('string') | list | length == helium_existing_pinned | length
+            fail_msg: Helium pinned extensions must be a string array
+
+        - name: Helium unmanaged pinned extensions are kept
+          ansible.builtin.set_fact:
+            helium_pinned: "{{ helium_pinned + [item] }}"
+          loop: "{{ helium_existing_pinned }}"
+          when: item not in helium_pinned + helium_managed
+
+        - name: Helium local state is read
+          ansible.builtin.slurp:
+            src: "{{ helium_profile_root }}/Local State"
+          register: helium_current_state
+          failed_when: false
+
+        - name: Helium experimental flags are selected
+          ansible.builtin.set_fact:
+            helium_experiments: >-
+              {{ (((helium_current_state.content | default('e30=') | b64decode | from_json).browser
+                   | default({})).enabled_labs_experiments | default([])) }}
+
+        - name: Helium experimental flags are valid
+          ansible.builtin.assert:
+            that:
+              - helium_experiments is sequence
+              - helium_experiments is not string
+              - helium_experiments | select('string') | list | length == helium_experiments | length
+            fail_msg: Helium experimental flags must be a string array
+          when: jsh_platform != 'darwin'
+
+        - name: Helium profile settings values are selected
+          ansible.builtin.set_fact:
+            helium_preferences_values:
+              default_search_provider_data: >-
+                {{ lookup('ansible.builtin.file',
+                          jsh_root ~ '/ansible/roles/helium/files/search.json') | from_json }}
+              extensions:
+                pinned_extensions: "{{ helium_pinned }}"
+            helium_state_values: >-
+              {{ {'browser': {'enabled_labs_experiments':
+                    (helium_experiments
+                     | reject('match', '^enable-experimental-web-platform-features(@.*)?$') | list)
+                    + ['enable-experimental-web-platform-features']}}
+                 if jsh_platform != 'darwin' else {} }}
+
+        - name: "{{ helium_preferences }} is pending"
+          settings:
+            path: "{{ helium_preferences }}"
+            source: "{{ jsh_root }}/ansible/roles/helium/files/preferences.json"
+            values: "{{ helium_preferences_values }}"
+            overlays: "{{ helium_preferences_overlays }}"
+          check_mode: true
+          register: helium_preferences_pending
+
+        - name: "{{ helium_profile_root }}/Local State is pending"
+          settings:
+            path: "{{ helium_profile_root }}/Local State"
+            source: "{{ jsh_root }}/ansible/roles/helium/files/state.json"
+            values: "{{ helium_state_values }}"
+            overlays: "{{ helium_state_overlays }}"
+          check_mode: true
+          register: helium_state_pending
+
+        - name: Helium secure preferences are read
+          ansible.builtin.slurp:
+            src: "{{ helium_profile }}/Secure Preferences"
+          register: helium_secure_file
+          failed_when: false
+
+        - name: Helium secure preferences are decoded
+          ansible.builtin.set_fact:
+            helium_secure: >-
+              {{ helium_secure_file.content | b64decode | from_json
+                 if helium_secure_file.content is defined else {} }}
+
+        - name: notice
+          ansible.builtin.debug:
+            msg: >-
+              Startpage extension is missing or disabled; restart Helium, enable extension
+              downloads, and check helium://extensions
+          vars:
+            helium_startpage: >-
+              {{ (((helium_secure.extensions | default({})).settings | default({}))
+                  .fgmjlmbojbkmdpofahffgcpkhkngfpef | default({})) }}
+          when: >-
+            helium_startpage is not mapping
+            or helium_startpage | length == 0
+            or helium_startpage.disable_reasons | default([]) is not sequence
+            or helium_startpage.disable_reasons | default([]) | length != 0
+
+        - name: ok
+          ansible.builtin.debug:
+            msg: Startpage extension is installed and enabled
+          vars:
+            helium_startpage: >-
+              {{ (((helium_secure.extensions | default({})).settings | default({}))
+                  .fgmjlmbojbkmdpofahffgcpkhkngfpef | default({})) }}
+          when: >-
+            helium_startpage is mapping
+            and helium_startpage | length > 0
+            and helium_startpage.disable_reasons | default([]) is sequence
+            and helium_startpage.disable_reasons | default([]) | length == 0
+
+        - name: ok
+          ansible.builtin.debug:
+            msg: Helium unpacked extensions are current
+
+        - name: Helium restarts for its profile settings
+          ansible.builtin.include_role:
+            name: app
+          vars:
+            app_label: Helium
+            app_process: "{{ 'Helium' if jsh_platform == 'darwin' else 'helium' }}"
+            app_launch: "{{ ['open', '-a', 'Helium'] if jsh_platform == 'darwin' else ['helium'] }}"
+            app_role: helium
+            app_tasks: apply.yml
+            app_apply: true
+            app_pending: >-
+              {{ helium_preferences_pending is changed or helium_state_pending is changed }}
+            app_live: false

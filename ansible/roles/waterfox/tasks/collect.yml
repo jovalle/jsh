@@ -1,0 +1,54 @@
+---
+- name: Waterfox directory profiles are initialized
+  ansible.builtin.set_fact:
+    waterfox_directory_profiles: []
+    waterfox_install_defaults: []
+
+- name: Waterfox profile registrations are collected
+  vars:
+    waterfox_fields: "{{ item.split('	') }}"
+    waterfox_registered_path: >-
+      {{ waterfox_registration.item.item ~ '/' ~ waterfox_fields[2]
+         if waterfox_fields[3] == '1' and not waterfox_fields[2].startswith('/')
+         else waterfox_fields[2] }}
+    waterfox_canonical_path: "{{ waterfox_registered_path | realpath }}"
+  ansible.builtin.set_fact:
+    waterfox_directory_profiles: >-
+      {{ waterfox_directory_profiles
+         + ([{'root': waterfox_registration.item.item, 'name': waterfox_fields[1],
+              'path': waterfox_canonical_path, 'default': waterfox_fields[4] | default('0', true)}]
+            if waterfox_fields[0] == 'profile' else []) }}
+    waterfox_install_defaults: >-
+      {{ waterfox_install_defaults
+         + ([waterfox_canonical_path] if waterfox_fields[0] == 'install' else []) }}
+  loop: "{{ waterfox_registration.stdout_lines }}"
+  when: waterfox_registered_path is directory
+
+- name: Waterfox profile defaults are selected
+  ansible.builtin.set_fact:
+    waterfox_profile_defaults: >-
+      {{ waterfox_directory_profiles | selectattr('default', 'equalto', '1')
+         | map(attribute='path') | list }}
+    waterfox_install_defaults: "{{ waterfox_install_defaults | unique | list }}"
+
+- name: A lone Waterfox profile is the default
+  ansible.builtin.set_fact:
+    waterfox_profile_defaults: "{{ [waterfox_directory_profiles[0].path] }}"
+  when: waterfox_profile_defaults | length == 0 and waterfox_directory_profiles | length == 1
+
+- name: Waterfox installation defaults are selected
+  ansible.builtin.set_fact:
+    waterfox_directory_defaults: >-
+      {{ waterfox_profile_defaults
+         if waterfox_install_defaults | length > 1
+            and waterfox_profile_defaults | length == 1
+            and waterfox_profile_defaults[0] in waterfox_install_defaults
+         else waterfox_install_defaults
+         if waterfox_install_defaults | length > 0
+         else waterfox_profile_defaults }}
+
+- name: Waterfox profiles and defaults are collected
+  ansible.builtin.set_fact:
+    waterfox_profiles: "{{ waterfox_profiles + waterfox_directory_profiles }}"
+    waterfox_defaults: >-
+      {{ waterfox_directory_defaults if waterfox_defaults | length == 0 else waterfox_defaults }}

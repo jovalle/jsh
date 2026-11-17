@@ -57,18 +57,6 @@ install_group() {
         jsh::brew formulae displayplacer || return
       fi
       ;;
-    helium)
-      jsh::brew casks helium-browser || return
-      if [[ ${JSH_PLATFORM} != darwin ]]; then
-        jsh::appimage helium https://api.github.com/repos/imputnet/helium-linux/releases/latest arm64 || return
-      fi
-      ;;
-    waterfox)
-      jsh::brew casks waterfox || return
-      if [[ ${JSH_PLATFORM} != darwin ]]; then
-        jsh::flatpak net.waterfox.waterfox || return
-      fi
-      ;;
     wox)
       jsh::brew casks wox || return
       if [[ ${JSH_PLATFORM} == debian ]]; then

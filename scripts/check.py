@@ -81,106 +81,6 @@ class ShellChecks(unittest.TestCase):
                      if "jsh::current" in file.read_text()]
         self.assertEqual(offenders, [])
 
-    def test_helium_policy_reports_restart_and_missing_extension(self):
-        jq = shutil.which("jq")
-        if not jq:
-            self.skipTest("jq required")
-        self.tool("jq", f'exec "{jq}" "$@"')
-        self.tool("uname", "echo Darwin")
-        self.tool("pgrep", "exit 0")
-        self.tool("sudo", 'if [ "$1" = -n ]; then shift; fi; if [ "$1" = -- ]; then shift; fi; "$@"')
-        self.tool("killall", "exit 0")
-        self.tool("plutil", 'cat "$5"')
-        runtime = self.home / "fixture"
-        (runtime / "scripts/lib").mkdir(parents=True)
-        (runtime / "lib/shell").mkdir(parents=True)
-        for name in ("apps.sh", "common.sh"):
-            shutil.copy(ROOT / "scripts/lib" / name, runtime / "scripts/lib" / name)
-        shutil.copy(ROOT / "lib/shell/output.sh", runtime / "lib/shell/output.sh")
-        for name in ("output.py", "verbs.tsv"):
-            shutil.copy(ROOT / "lib" / name, runtime / "lib" / name)
-        shutil.copytree(ROOT / "scripts/helium", runtime / "scripts/helium")
-        (runtime / "scripts/packages.sh").write_text('#!/bin/bash\nexit 0\n')
-        source = (ROOT / "scripts/helium.sh").read_text()
-        source = source.replace('policy=/Library/Managed\\ Preferences/$(id -un)/net.imput.helium.plist', 'policy=${HOME}/policy.json')
-        source = source.replace('/Applications/Helium.app/Contents/Resources/net.imput.helium.manifest/Contents/Resources/net.imput.helium.manifest', '${HOME}/manifest.json')
-        script = runtime / "scripts/helium.sh"
-        script.write_text(source)
-        profile = self.home / "Library/Application Support/net.imput.helium/Default"
-        profile.mkdir(parents=True)
-        prefs = json.loads((runtime / "scripts/helium/preferences.json").read_text())
-        policy = json.loads((runtime / "scripts/helium/policy.json").read_text())
-        prefs.setdefault("extensions", {})["pinned_extensions"] = sorted(policy["ExtensionSettings"])
-        (profile / "Preferences").write_text(json.dumps(prefs))
-        (profile.parent / "Local State").write_text(json.dumps({**json.loads((runtime / "scripts/helium/state.json").read_text()), "browser": {"enabled_labs_experiments": ["enable-experimental-web-platform-features"]}}))
-        (self.home / "manifest.json").write_text('{"pfm_name":"ExtensionForceInstallWithSearchOrNewTabOverridesEnabled"}')
-        (profile / "Secure Preferences").write_text('{"extensions":{"settings":{"fgmjlmbojbkmdpofahffgcpkhkngfpef":{"location":7}}}}')
-        env = self.env | {"JSH_ROOT": str(runtime), "JSH_KEEP_APPS": "1", "XDG_STATE_HOME": str(self.home / "state"), "XDG_CONFIG_HOME": str(self.home / "config"), "TMPDIR": str(self.home)}
-        def run():
-            result = subprocess.run(["bash", str(script)], env=env, cwd=self.home, capture_output=True, text=True, timeout=30)
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            return result.stdout + result.stderr
-        changed = run()
-        self.assertIn("Checking Helium policy...", changed)
-        self.assertIn("~ ~/policy.json written", changed)
-        self.assertIn("! restart Helium to apply the changed policy", changed)
-        self.assertIn(f"✓ Helium profile is {profile}", changed)
-        self.assertLess(
-            changed.index("✓ Helium profile preferences are current"),
-            changed.index("Checking Helium extensions..."),
-        )
-        saved_policy = (self.home / "policy.json").read_bytes()
-        current = run()
-        self.assertIn("✓ ~/policy.json is current", current)
-        self.assertNotIn("restart Helium", current)
-        self.assertEqual((self.home / "policy.json").read_bytes(), saved_policy)
-        (profile / "Secure Preferences").write_text('{}')
-        self.assertIn(
-            "! Startpage extension is missing or disabled; restart Helium, enable extension "
-            "downloads, and check helium://extensions",
-            run(),
-        )
-        (profile / "Secure Preferences").write_text('{"extensions":{"settings":{"fgmjlmbojbkmdpofahffgcpkhkngfpef":{"disable_reasons":[1]}}}}')
-        self.assertIn(
-            "! Startpage extension is missing or disabled; restart Helium, enable extension "
-            "downloads, and check helium://extensions",
-            run(),
-        )
-        (self.home / "manifest.json").write_text('{}')
-        self.assertIn(
-            "! Helium does not list the temporary search policy; check helium://policy and "
-            "choose Startpage manually if needed",
-            run(),
-        )
-        (self.home / "policy.json").write_text('{}')
-        self.tool("sudo", "exit 1")
-        output = run()
-        self.assertIn(
-            "! ~/policy.json needs sudo; run sudo -v first, then rerun", output,
-        )
-        self.assertNotIn("restart Helium to apply the changed policy", output)
-        env["JSH_DRY_RUN"] = "1"
-        preview = run()
-        self.assertIn("! ~/policy.json differs  would change", preview)
-        self.assertIn("! restart Helium to apply the changed policy", preview)
-        self.assertEqual((self.home / "policy.json").read_text(), '{}')
-        env.pop("JSH_DRY_RUN")
-        self.tool("sudo", 'if [ "$1" = -n ]; then shift; fi; if [ "$1" = -- ]; then shift; fi; "$@"')
-        self.tool("pgrep", "exit 1")
-        policy["ExtensionInstallForcelist"] = ["first", "second", "removed"]
-        policy["ExtensionSettings"] = {"second": {"toolbar_pin": "force_pinned"}, "first": {"toolbar_pin": "force_pinned"}}
-        (runtime / "scripts/helium/policy.json").write_text(json.dumps(policy))
-        prefs["extensions"]["pinned_extensions"] = ["first", "removed", "personal", "second"]
-        (profile / "Preferences").write_text(json.dumps(prefs))
-        updated = run()
-        self.assertEqual(updated.count("Checking Helium profile preferences..."), 1)
-        self.assertEqual(updated.count("Checking Helium extensions..."), 1)
-        self.assertLess(
-            updated.index("Checking Helium profile preferences..."),
-            updated.index("Preferences written"),
-        )
-        self.assertEqual(json.loads((profile / "Preferences").read_text())["extensions"]["pinned_extensions"], ["second", "first", "personal"])
-
     def run_shell(self, shell, code, **env):
         runtime = Path(env.get("JSH_ROOT", ROOT))
         if "zsh" in Path(shell).name:
@@ -4407,6 +4307,95 @@ esac''')
                                  ["changed", "Helium settings"]])
         self.assertEqual(target.read_text(), '{"user": 1}\n')
 
+    def browser_play(self, group, variables, **environment):
+        include = (
+            f"    - name: {group}\n"
+            f"      ansible.builtin.include_role: {{name: {group}}}\n"
+        )
+        return self.run_play(
+            include, "-e", json.dumps(variables),
+            ANSIBLE_ROLES_PATH=str(ROOT / "ansible/roles"), **environment)
+
+    def test_helium_policy_reports_restart_and_missing_extension(self):
+        profile_root = self.home / "Helium"
+        profile = profile_root / "Default"
+        profile.mkdir(parents=True)
+        (profile / "Preferences").write_text(
+            json.dumps({"extensions": {"pinned_extensions": []}}))
+        (profile_root / "Local State").write_text("{}\n")
+        (profile / "Secure Preferences").write_text(
+            json.dumps({"extensions": {"settings": {}}}))
+        manifest = self.home / "manifest.plist"
+        manifest.write_text(
+            json.dumps({"pfm_name":
+                        "ExtensionForceInstallWithSearchOrNewTabOverridesEnabled"}))
+        policy = self.home / "policy.plist"
+        self.tool("pgrep", "[ -e \"$HOME/closed\" ] && exit 1\necho 123")
+        self.tool("osascript", "touch \"$HOME/closed\"")
+        self.tool("open", "rm -f \"$HOME/closed\"\ntouch \"$HOME/launched\"")
+        self.tool("plutil", "cat \"$5\"")
+        variables = {
+            "helium_packages": {},
+            "helium_profile_root": str(profile_root),
+            "helium_policy_path": str(policy),
+            "helium_policy_become": False,
+            "helium_manifest_path": str(manifest),
+        }
+
+        result, events = self.browser_play("helium", variables)
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        import plistlib
+        written = plistlib.loads(policy.read_bytes())
+        self.assertTrue(written["ExtensionForceInstallWithSearchOrNewTabOverridesEnabled"])
+        self.assertIn("fgmjlmbojbkmdpofahffgcpkhkngfpef",
+                      written["ExtensionInstallForcelist"])
+        self.assertIn(
+            ["item", "notice", "restart Helium to apply the changed policy"], events)
+        self.assertIn(
+            ["item", "notice", "Startpage extension is missing or disabled; restart Helium, "
+             "enable extension downloads, and check helium://extensions"], events)
+        self.assertIn(["item", "changed", "Helium restarted"], events)
+        self.assertTrue((self.home / "launched").exists())
+
+    def test_waterfox_default_profile_selection_rules(self):
+        self.tool("pgrep", "exit 1")
+
+        def run(name, ini, profiles, expected=None, requested=""):
+            root = self.home / name
+            root.mkdir()
+            for relative in profiles:
+                (root / relative).mkdir(parents=True)
+            (root / "profiles.ini").write_text(ini)
+            variables = {
+                "waterfox_packages": {},
+                "waterfox_roots": [str(root)],
+                "jsh_waterfox_profile": requested,
+                "waterfox_policy_become": False,
+            }
+            result, events = self.browser_play(
+                "waterfox", variables, JSH_PLATFORM="linux")
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            if expected is None:
+                self.assertIn(
+                    ["item", "notice",
+                     "open Waterfox once to create a profile, then rerun"], events)
+            else:
+                self.assertIn(
+                    ["item", "ok", f"Waterfox profile is {root / expected}"], events)
+
+        run("single", "[Profile0]\nName=single\nIsRelative=1\nPath=Profiles/single\n",
+            ["Profiles/single"], "Profiles/single")
+        multiple = ("[Profile0]\nName=first\nIsRelative=1\nPath=Profiles/first\n"
+                    "[Profile1]\nName=second\nIsRelative=1\nPath=Profiles/second\n"
+                    "Default=1\n[InstallA]\nDefault=Profiles/first\n"
+                    "[InstallB]\nDefault=Profiles/second\n")
+        run("install-defaults", multiple,
+            ["Profiles/first", "Profiles/second"], "Profiles/second")
+        run("override", multiple,
+            ["Profiles/first", "Profiles/second"], "Profiles/first", "first")
+        run("missing", "[Profile0]\nName=missing\nPath=Profiles/missing\n", [])
+
     def packages_filter(self, script):
         """Run Python with the packages filter loaded as `packages` and role defaults as YAML."""
         prelude = (
@@ -4483,6 +4472,15 @@ esac''')
             "fonts": {"darwin": {"casks": ["font-jetbrains-mono-nerd-font"]},
                       "debian": {}, "rhel": {}},
             "ghostty": {"darwin": {"casks": ["ghostty"]}, **linux(appimage=ghostty)},
+            "helium": {
+                "darwin": {"casks": ["helium-browser"]},
+                **linux(appimage=[{"name": "helium", "arm": "arm64", "amd": "x86_64",
+                                   "release": "https://api.github.com/repos/imputnet/helium-linux/releases/latest"}]),
+            },
+            "waterfox": {
+                "darwin": {"casks": ["waterfox"]},
+                **linux(flatpak=["net.waterfox.waterfox"]),
+            },
             "tools": {
                 "darwin": {"taps": ["gromgit/fuse", "xguot/difi"], "uv": tools_uv,
                            "brew": "bash-completion duti gromgit/fuse/ntfs-3g-mac imagemagick mas".split()

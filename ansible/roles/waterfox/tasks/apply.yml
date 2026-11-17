@@ -1,0 +1,8 @@
+---
+- name: "{{ waterfox_selected }}/user.js"
+  ansible.builtin.copy:
+    content: |
+      {{ waterfox_user_content }}
+    dest: "{{ waterfox_selected }}/user.js"
+    mode: "0644"
+    backup: true

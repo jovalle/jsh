@@ -1,0 +1,19 @@
+---
+galaxy_info:
+  author: jsh
+  description: Apply Helium policy, profile preferences, and unpacked extensions
+  license: MIT
+  min_ansible_version: "2.22"
+  platforms:
+    - name: MacOSX
+      versions: [all]
+    - name: Debian
+      versions: [all]
+    - name: EL
+      versions: [all]
+dependencies:
+  - role: packages
+    when: not app_apply | default(false) | bool
+    vars:
+      packages_spec: "{{ helium_packages }}"
+      packages_extra: "{{ helium_packages_extra | default({}) }}"

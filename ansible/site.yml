@@ -89,6 +89,20 @@
           tags: [sublime]
       tags: [sublime]
 
+    - name: helium
+      ansible.builtin.include_role:
+        name: helium
+        apply:
+          tags: [helium]
+      tags: [helium]
+
+    - name: waterfox
+      ansible.builtin.include_role:
+        name: waterfox
+        apply:
+          tags: [waterfox]
+      tags: [waterfox]
+
     - name: ai
       ansible.builtin.include_role:
         name: ai
