@@ -1,0 +1,23 @@
+[MASTER]
+ignore=CVS,.git,__pycache__,.venv,venv,node_modules
+jobs=1
+
+[MESSAGES CONTROL]
+disable=C0111,  # missing-docstring
+        C0103,  # invalid-name
+        R0903,  # too-few-public-methods
+        W0212,  # protected-access
+        C0114,  # missing-module-docstring
+        C0115,  # missing-class-docstring
+        C0116   # missing-function-docstring
+
+[FORMAT]
+max-line-length=100
+indent-string='    '
+
+[BASIC]
+good-names=i,j,k,_,fd,op
+
+[DESIGN]
+max-args=7
+max-attributes=10

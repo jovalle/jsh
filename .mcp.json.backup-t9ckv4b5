@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "vision-codex": {
+      "type": "stdio",
+      "command": "/Users/jay/Projects/visioncodex/.venv/bin/vision-codex",
+      "args": [],
+      "tools": [
+        "*"
+      ],
+      "env": {
+        "VISION_CODEX_CODEX": "/opt/homebrew/bin/codex",
+        "VISION_CODEX_ROOTS": "/Users/jay/Projects/jsh:/Users/jay/Projects/visioncodex/fixtures"
+      }
+    }
+  }
+}

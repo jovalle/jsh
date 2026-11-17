@@ -1,149 +1,157 @@
-# Minimal Bash fallback managed by this repository.
-case $- in
-*i*) ;;
-*) return ;;
-esac
+# shellcheck shell=bash
+# Bash fallback for the jsh runtime and conventional interactive shells.
+[[ $- == *i* ]] || return
 
-if [[ ${JSH_BASHRC_LOADED:-0} == 1 ]]; then
-  return
-fi
-JSH_BASHRC_LOADED=1
-
-# Keep startup commands available even when Bash inherits a restricted PATH.
-if [[ -z ${PATH:-} ]] || [[ ":${PATH}:" != *:/usr/bin:* ]]; then
-  PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin${PATH:+:${PATH}}"
-fi
-
-if [[ -z ${JSH_DIR:-} ]]; then
-  _jsh_bashrc=${BASH_SOURCE[0]}
-  while [[ -L ${_jsh_bashrc} ]]; do
-    _jsh_bashrc_dir=$(cd -P "$(dirname "${_jsh_bashrc}")" >/dev/null 2>&1 && pwd)
-    _jsh_bashrc_link=$(readlink "${_jsh_bashrc}")
-    case ${_jsh_bashrc_link} in
-    /*) _jsh_bashrc=${_jsh_bashrc_link} ;;
-    *) _jsh_bashrc=${_jsh_bashrc_dir}/${_jsh_bashrc_link} ;;
-    esac
-  done
-  _jsh_bashrc_dir=$(cd -P "$(dirname "${_jsh_bashrc}")" >/dev/null 2>&1 && pwd)
-  _jsh_candidate=$(cd -P "${_jsh_bashrc_dir}/.." >/dev/null 2>&1 && pwd)
-  if [[ -d ${_jsh_candidate}/bin && -d ${_jsh_candidate}/dotfiles ]]; then
-    JSH_DIR=${_jsh_candidate}
-  else
-    JSH_DIR=${HOME}/.jsh
-  fi
-  unset _jsh_bashrc _jsh_bashrc_dir _jsh_bashrc_link _jsh_candidate
-fi
-export JSH_DIR
-
-_jsh_path_prepend() {
-  local entry
-  local -a updated_path=("$1")
-
-  IFS=: read -r -a _jsh_path_entries <<<"${PATH:-}"
-  for entry in "${_jsh_path_entries[@]}"; do
-    [[ -z ${entry} || ${entry} == "$1" ]] || updated_path+=("${entry}")
-  done
-  PATH=$(
-    IFS=:
-    printf '%s' "${updated_path[*]}"
-  )
-  export PATH
-}
-
-for _jsh_path in "${HOME}/.local/bin" "${JSH_DIR}/local/bin" \
-  "${JSH_DIR}/vendor/fzf/bin" "${JSH_DIR}/bin"; do
-  _jsh_path_prepend "${_jsh_path}"
-done
-unset _jsh_path _jsh_path_entries
-
-if [[ ${JSH_MODE:-} == lite && -r ${JSH_DIR}/dotfiles/.config/shell/runtime.sh ]]; then
-  source "${JSH_DIR}/dotfiles/.config/shell/runtime.sh"
-fi
-
-export EDITOR="${EDITOR:-vim}"
-export VISUAL="${VISUAL:-${EDITOR}}"
-if [[ -z ${RIPGREP_CONFIG_PATH+x} ]]; then
-  export RIPGREP_CONFIG_PATH="${HOME}/.ripgreprc"
-fi
-
-HISTCONTROL=ignoreboth:erasedups
-HISTFILE=${HISTFILE:-${HOME}/.bash_history}
-HISTSIZE=10000
-HISTFILESIZE=20000
-shopt -s checkwinsize cmdhist histappend
-
-alias ..='cd ..'
-alias ...='cd ../..'
-alias ....='cd ../../..'
-alias l='ls -lah'
-alias ll='ls -lh'
-alias la='ls -lAh'
-
-alias g='git'
-alias gs='git status -sb'
-alias ga='git add'
-alias gc='git commit'
-alias gd='git diff'
-alias gl='git log --oneline -20'
-alias gp='git push'
-
-source "${JSH_DIR}/dotfiles/.config/shell/grep.sh"
-
-if [[ -n ${NO_COLOR+x} || ${JSH_PLAIN_OUTPUT:-0} == 1 || ${TERM:-dumb} == dumb ]]; then
-  PS1='\u@\h:\w\$ '
-else
-  PS1='\[\033[36m\]\u@\h\[\033[0m\]:\[\033[34m\]\w\[\033[0m\]\$ '
-fi
-
-if command -v task >/dev/null 2>&1; then
-  eval "$(task --completion bash 2>/dev/null)"
-fi
-if command -v fzf >/dev/null 2>&1; then
-  eval "$(fzf --bash 2>/dev/null)"
-fi
-if command -v direnv >/dev/null 2>&1; then
-  eval "$(direnv hook bash)"
-fi
-
-if [[ -z ${JSH_BASH_FALLBACK_NOTICE_SHOWN:-} ]]; then
-  export JSH_BASH_FALLBACK_NOTICE_SHOWN=1
-  _jsh_bash_notice_color=''
-  _jsh_bash_notice_reset=''
-  if [[ ${JSH_PLAIN_OUTPUT:-0} != 1 && ${TERM:-dumb} != dumb && -z ${NO_COLOR+x} &&
-    ${JSH_COLOR:-auto} != never ]] && { [[ -t 2 ]] || [[ ${JSH_COLOR:-auto} == always ]]; }; then
-    _jsh_bash_notice_color=$'\033[33m'
-    _jsh_bash_notice_reset=$'\033[0m'
-  fi
-  case $(uname -s 2>/dev/null) in
-  Darwin)
-    printf '%s▲%s %s\n' "${_jsh_bash_notice_color}" "${_jsh_bash_notice_reset}" \
-      'jsh: Bash is the fallback. Zsh ships with macOS; switch with: chsh -s /bin/zsh' >&2
-    ;;
-  Linux)
-    if command -v apt-get >/dev/null 2>&1; then
-      _jsh_zsh_install='sudo apt-get install zsh'
-    elif command -v dnf >/dev/null 2>&1; then
-      _jsh_zsh_install='sudo dnf install zsh'
-    elif command -v pacman >/dev/null 2>&1; then
-      _jsh_zsh_install='sudo pacman -S zsh'
-    elif command -v apk >/dev/null 2>&1; then
-      _jsh_zsh_install='sudo apk add zsh'
-    else
-      _jsh_zsh_install='install zsh with your package manager'
-    fi
-    printf '%s▲%s jsh: Bash is the fallback. Install Zsh: %s; then: chsh -s "$(command -v zsh)"\n' \
-      "${_jsh_bash_notice_color}" "${_jsh_bash_notice_reset}" "${_jsh_zsh_install}" >&2
-    unset _jsh_zsh_install
-    ;;
-  *)
-    printf '%s▲%s %s\n' "${_jsh_bash_notice_color}" "${_jsh_bash_notice_reset}" \
-      'jsh: Bash is the fallback. Install Zsh, then run: chsh -s "$(command -v zsh)"' >&2
-    ;;
+_jsh_rc=${BASH_SOURCE[0]}
+while [[ -L ${_jsh_rc} ]]; do
+  _jsh_parent=$(CDPATH='' cd -P "${_jsh_rc%/*}" && pwd)
+  _jsh_target=$(readlink "${_jsh_rc}")
+  case ${_jsh_target} in
+  /*) _jsh_rc=${_jsh_target} ;;
+  *) _jsh_rc=${_jsh_parent}/${_jsh_target} ;;
   esac
-  unset _jsh_bash_notice_color _jsh_bash_notice_reset
+done
+export JSH=${JSH_ROOT:-$(CDPATH='' cd -P "${_jsh_rc%/*}/.." && pwd)}
+unset _jsh_rc _jsh_parent _jsh_target
+export EDITOR=${EDITOR:-vim} VISUAL=${VISUAL:-vim}
+export GIT_BASE=${GIT_BASE:-${HOME}/Projects} WORK_DIR=${WORK_DIR:-${HOME}/Projects}
+export JSH_VENDOR=${JSH_VENDOR:-${XDG_DATA_HOME:-${HOME}/.local/share}/jsh/vendor}
+[[ -d ${JSH_VENDOR} || ! -d ${JSH}/local/vendor ]] || JSH_VENDOR=${JSH}/local/vendor
+export FZF_BASE=${JSH_VENDOR}/fzf
+for _jsh_path in "${HOME}/.cargo/bin" "${HOME}/go/bin" "${FZF_BASE}/bin" \
+  "${JSH}/bin" "${JSH}/local/bin" "${HOME}/.local/bin"; do
+  case :${PATH}: in *:"${_jsh_path}":*) ;; *) PATH=${_jsh_path}:${PATH} ;; esac
+done
+export PATH
+unset _jsh_path
+
+export HISTFILE=${JSH_RUNTIME_DIR:-${XDG_STATE_HOME:-${HOME}/.local/state}/jsh/runtime}/bash_history
+mkdir -p -- "${HISTFILE%/*}"
+[[ -z ${JSH_RUNTIME_DIR:-} ]] || export JSH_RELOAD_PID=$$
+HISTSIZE=50000
+HISTFILESIZE=50000
+HISTCONTROL=ignoreboth:erasedups
+shopt -s histappend checkwinsize
+set -o vi
+has() { type -P -- "$1" >/dev/null 2>&1; }
+case ${OSTYPE:-} in
+darwin*) export JSH_OS=macos ;;
+linux*) export JSH_OS=linux ;;
+*) export JSH_OS=unknown ;;
+esac
+_jsh_agent_shell=0
+[[ -z ${COPILOT_AGENT:-}${CLAUDECODE:-}${GEMINI_CLI:-} ]] || _jsh_agent_shell=1
+export LESS=-FR VIRTUAL_ENV_DISABLE_PROMPT=1 DIRENV_LOG_FORMAT='' DIRENV_WARN_TIMEOUT=30s
+export CLICOLOR=1
+# Discover Homebrew even when Bash was started from a clean login environment.
+for _jsh_path in /opt/homebrew/bin /usr/local/bin /home/linuxbrew/.linuxbrew/bin; do
+  if [[ -x ${_jsh_path}/brew ]]; then
+    case :${PATH}: in *:"${_jsh_path}":*) ;; *) PATH=${PATH}:${_jsh_path} ;; esac
+  fi
+done
+unset _jsh_path
+
+# shellcheck source=lib/shell/output.sh
+. "${JSH}/lib/shell/output.sh"
+# shellcheck source=lib/shell/navigation.sh
+. "${JSH}/lib/shell/navigation.sh"
+# shellcheck source=lib/shell/commands.sh
+. "${JSH}/lib/shell/commands.sh"
+# shellcheck source=lib/shell/prompt.sh
+. "${JSH}/lib/shell/prompt.sh"
+
+# Initialize integrations once: repeated sourcing must not stack prompt hooks or bindings.
+if [[ ${_JSH_BASH_TOOLS_LOADED:-0} != 1 ]]; then
+  _JSH_BASH_TOOLS_LOADED=1
+  # Some installed completion files request nosort even on Bash versions without it.
+  if [[ ${JSH_LOAD_CONFIG:-1} == 1 ]] &&
+    ((BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4))) &&
+    ! declare -F complete >/dev/null; then
+    _JSH_BASH_COMPLETION_SHIM=1
+    complete() {
+      local -a args=()
+      while (($#)); do
+        if [[ $1 == -o && ${2:-} == nosort ]]; then
+          shift 2
+        else
+          args+=("$1")
+          shift
+        fi
+      done
+      builtin complete "${args[@]}"
+    }
+  fi
+  if [[ ${JSH_LOAD_CONFIG:-1} == 1 ]]; then
+    if has brew; then
+      _jsh_path=${PATH}
+      eval "$(command brew shellenv)"
+      # Keep jsh wrappers such as bin/git ahead of Homebrew, and Homebrew ahead of system tools.
+      _jsh_path=${HOME}/.local/bin:${JSH}/local/bin:${JSH}/bin:${FZF_BASE}/bin:${HOME}/go/bin:${HOME}/.cargo/bin:${HOMEBREW_PREFIX:-/opt/homebrew}/bin:${HOMEBREW_PREFIX:-/opt/homebrew}/sbin:${_jsh_path}
+      IFS=: read -ra _jsh_dirs <<<"${_jsh_path}"
+      _jsh_path=
+      for _jsh_dir in "${_jsh_dirs[@]}"; do
+        case :${_jsh_path}: in *:"${_jsh_dir}":*) ;; *) _jsh_path=${_jsh_path:+${_jsh_path}:}${_jsh_dir} ;; esac
+      done
+      export PATH=${_jsh_path}
+      unset _jsh_path _jsh_dirs _jsh_dir
+    fi
+    # Version 1 completion supports Bash 3.2; version 2 requires a newer shell.
+    if ((BASH_VERSINFO[0] > 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 2))); then
+      for _jsh_rc in "${HOMEBREW_PREFIX:-/opt/homebrew}/share/bash-completion/bash_completion" \
+        /usr/local/share/bash-completion/bash_completion /usr/share/bash-completion/bash_completion; do
+        [[ -r ${_jsh_rc} ]] || continue
+        # shellcheck disable=SC1090 # Platform completion path checked above.
+        . "${_jsh_rc}"
+        break
+      done
+    fi
+    if ! type _init_completion >/dev/null 2>&1; then
+      for _jsh_rc in "${HOMEBREW_PREFIX:-/opt/homebrew}/etc/bash_completion" /usr/local/etc/bash_completion /etc/bash_completion; do
+        [[ -r ${_jsh_rc} ]] || continue
+        # shellcheck disable=SC1090 # Platform completion path checked above.
+        . "${_jsh_rc}"
+        break
+      done
+    fi
+  fi
+  [[ ! -r ${JSH_VENDOR}/fzf/shell/key-bindings.bash ]] || . "${JSH_VENDOR}/fzf/shell/key-bindings.bash"
+  [[ ! -r ${JSH_VENDOR}/fzf/shell/completion.bash ]] || . "${JSH_VENDOR}/fzf/shell/completion.bash"
+  if [[ ${JSH_LOAD_CONFIG:-1} == 1 ]]; then
+    # Tool-generated hooks are evaluated only from installed executables.
+    has direnv && eval "$(command direnv hook bash)"
+    has docker && eval "$(command docker completion bash)"
+    has kubectl && eval "$(command kubectl completion bash)"
+    has task && eval "$(command task --completion bash)"
+    has zoxide && eval "$(command zoxide init bash)"
+    has atuin && eval "$(command atuin init bash)"
+  fi
+  if [[ ${_JSH_BASH_COMPLETION_SHIM:-0} == 1 ]]; then
+    unset -f complete
+    unset _JSH_BASH_COMPLETION_SHIM
+  fi
+fi
+# shellcheck source=lib/shell/completion.sh
+. "${JSH}/lib/shell/completion.sh"
+
+jsh() {
+  case ${1:-} in
+  -r | reload)
+    shift
+    [[ $# == 0 ]] || {
+      printf 'Usage: jsh -r | jsh reload\n' >&2
+      return 2
+    }
+    . "${JSH}/dotfiles/.bashrc"
+    ;;
+  *) command "${JSH}/bin/jsh" "$@" ;;
+  esac
+}
+if [[ ${JSH_LOAD_CONFIG:-1} == 1 ]]; then
+  for _jsh_rc in "${HOME}/.bashrc.local" "${JSH}/local/.bashrc"; do
+    # shellcheck disable=SC1090 # Optional machine-local shell configuration.
+    [[ ! -r ${_jsh_rc} ]] || . "${_jsh_rc}"
+  done
+  unset _jsh_rc
 fi
 
-[[ ! -r ${HOME}/.bashrc.local ]] || source "${HOME}/.bashrc.local"
-_jsh_path_prepend "${JSH_DIR}/bin"
-unset _jsh_path_entries
-unset -f _jsh_path_prepend
+_jsh_bash_install_prompt

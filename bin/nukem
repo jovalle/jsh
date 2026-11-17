@@ -6,6 +6,31 @@
 
 set -euo pipefail
 
+SELF=nukem
+case ${BASH_SOURCE[0]} in
+  /*) launcher=${BASH_SOURCE[0]} ;;
+  *) launcher=${PWD}/${BASH_SOURCE[0]} ;;
+esac
+while [[ -L ${launcher} ]]; do
+  parent=$(CDPATH='' cd -P "${launcher%/*}" && pwd)
+  target=$(readlink "${launcher}")
+  case ${target} in
+    /*) launcher=${target} ;;
+    *) launcher=${parent}/${target} ;;
+  esac
+done
+if [[ -z ${JSH_ROOT:-} ]]; then
+  if [[ -n ${JSH_DIR:-} ]]; then
+    JSH_ROOT=${JSH_DIR}
+  elif [[ -f ${launcher%/*}/../lib/shell/output.sh ]]; then
+    JSH_ROOT=$(CDPATH='' cd -P "${launcher%/*}/.." && pwd -P)
+  else
+    JSH_ROOT=${HOME}/.jsh
+  fi
+fi
+# shellcheck source=../lib/shell/output.sh
+. "${JSH_ROOT}/lib/shell/output.sh"
+
 # Timeout for kubectl operations (seconds)
 readonly KUBECTL_TIMEOUT="${NUKEM_TIMEOUT:-30}"
 
@@ -15,77 +40,21 @@ readonly KUBECTL_TIMEOUT="${NUKEM_TIMEOUT:-30}"
 
 if [[ "${JSH_PLAIN_OUTPUT:-0}" != 1 && "${TERM:-dumb}" != dumb &&
   -z ${NO_COLOR+x} && "${JSH_COLOR:-auto}" != never ]] \
-  && { [[ -t 1 ]] || [[ "${JSH_COLOR:-auto}" == always ]]; }; then
-  C_RESET=$'\033[0m' C_BOLD=$'\033[1m' C_DIM=$'\033[2m'
-  C_RED=$'\033[31m' C_GREEN=$'\033[32m' C_YELLOW=$'\033[33m' C_CYAN=$'\033[36m'
+  && { [[ -t 2 ]] || [[ "${JSH_COLOR:-auto}" == always ]]; }; then
+  C_RESET=$'\033[0m' C_DIM=$'\033[2m'
 else
-  C_RESET='' C_BOLD='' C_DIM=''
-  C_RED='' C_GREEN='' C_YELLOW='' C_CYAN=''
+  C_RESET='' C_DIM=''
 fi
 
-_jsh_status_style() {
-  case "$1" in
-    current | ok | success)
-      REPLY_COLOR=${C_GREEN}
-      [[ -n "${C_RESET}" ]] && REPLY_MARK='✔' || REPLY_MARK='[ok]'
-      ;;
-    plan)
-      REPLY_COLOR=${C_CYAN}
-      [[ -n "${C_RESET}" ]] && REPLY_MARK='➜' || REPLY_MARK='[plan]'
-      ;;
-    changed | warn | warning)
-      REPLY_COLOR=${C_YELLOW}
-      [[ -n "${C_RESET}" ]] && REPLY_MARK='▲' || REPLY_MARK='[warn]'
-      ;;
-    error | failed | missing)
-      REPLY_COLOR=${C_RED}
-      [[ -n "${C_RESET}" ]] && REPLY_MARK='✖' || REPLY_MARK='[error]'
-      ;;
-    *)
-      REPLY_COLOR=${C_CYAN}
-      [[ -n "${C_RESET}" ]] && REPLY_MARK='›' || REPLY_MARK='[note]'
-      ;;
-  esac
-}
-_jsh_message() {
-  local state="$1" output_fd=1 color mark reset
-  [[ "${state}" != warn && "${state}" != warning && "${state}" != error && "${state}" != failed ]] || output_fd=2
-  _jsh_status_style "${state}"
-  color=${REPLY_COLOR} mark=${REPLY_MARK} reset=${C_RESET}
-  if [[ ${output_fd} -eq 2 && -z "${reset}" && "${JSH_PLAIN_OUTPUT:-0}" != 1 &&
-    "${TERM:-dumb}" != dumb && -z ${NO_COLOR+x} && "${JSH_COLOR:-auto}" != never ]] \
-    && { [[ -t 2 ]] || [[ "${JSH_COLOR:-auto}" == always ]]; }; then
-    reset=$'\033[0m'
-    [[ "${state}" == error || "${state}" == failed ]] && color=$'\033[31m' && mark='✖' \
-      || { color=$'\033[33m'; mark='▲'; }
-  fi
-  shift
-  printf '%s%s%s %b\n' "${color}" "${mark}" "${reset}" "$*" >&"${output_fd}"
-}
 die() {
-  _jsh_message error "$@" >&2
+  jsh::fail "$@"
   exit 1
 }
 _debug() { printf '%sdebug:%s %s\n' "${C_DIM}" "${C_RESET}" "$*" >&2; }
-info() { _jsh_message note "$@"; }
-success() { _jsh_message success "$@"; }
-warn() { _jsh_message warn "$@" >&2; }
-jsh_section() { printf '\n%s%s%s%s\n' "${C_BOLD}" "${C_CYAN}" "$1" "${C_RESET}"; }
-jsh_status() {
-  _jsh_message "${3:-note}" "$1${2:+ $2}"
-}
-jsh_note() { printf '  %s%s%s\n' "${C_DIM}" "$*" "${C_RESET}"; }
-confirm() {
-  local answer
-  [[ -r /dev/tty && -w /dev/tty ]] || return 1
-  printf '%s [y/N] ' "$1" >/dev/tty
-  IFS= read -r answer </dev/tty || return 1
-  [[ "${answer}" == y || "${answer}" == Y || "${answer}" == yes || "${answer}" == YES ]]
-}
-cli_version() { printf 'nukem 1.0.1\n'; }
+cli_version() { printf '%s 1.0.1\n' "${SELF}"; }
 cli_help() {
-  cat <<'EOF'
-Usage: nukem [options] <namespace>
+  cat <<EOF
+Usage: ${SELF} [options] <namespace>
 
 Options:
   -l, --list          List namespaces stuck in Terminating
@@ -120,26 +89,32 @@ kubectl_cmd() {
   "${cmd[@]}" "$@"
 }
 
+# Print the names of namespaces stuck in Terminating state
+terminating_namespaces() {
+  kubectl_cmd get namespaces -o jsonpath='{range .items[?(@.status.phase=="Terminating")]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true
+}
+
 # List namespaces stuck in Terminating state
 list_terminating() {
-  info "Checking for namespaces in Terminating state..."
+  jsh::info "Checking for namespaces in Terminating state..."
 
   local namespaces
-  namespaces=$(kubectl_cmd get namespaces -o jsonpath='{range .items[?(@.status.phase=="Terminating")]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)
+  namespaces=$(terminating_namespaces)
 
   if [[ -z "${namespaces}" ]]; then
-    success "No namespaces stuck in Terminating state"
+    jsh::ok "No namespaces stuck in Terminating state"
     return 0
   fi
 
-  jsh_section "Terminating Namespaces"
+  printf '\n'
+  jsh::info "Terminating Namespaces"
   while IFS= read -r ns; do
     local finalizers
     finalizers=$(kubectl_cmd get namespace "${ns}" -o jsonpath='{.spec.finalizers}' 2>/dev/null || echo "[]")
     if [[ "${finalizers}" != "[]" && "${finalizers}" != "" ]]; then
-      jsh_status "${ns}" "finalizers ${finalizers}" warn
+      jsh::notice "${ns} finalizers ${finalizers}"
     else
-      jsh_status "${ns}" "no finalizers" skip
+      jsh::info "${ns} no finalizers"
     fi
   done <<<"${namespaces}"
 }
@@ -172,16 +147,18 @@ get_namespace_info() {
 remove_finalizers() {
   local ns="$1"
   local dry_run="${2:-false}"
+  local finalizers="${3:-}"
 
   if [[ "${dry_run}" == "true" ]]; then
-    info "[DRY RUN] Would remove finalizers from namespace '${ns}'"
+    jsh::info "[DRY RUN] Would remove finalizers from namespace '${ns}'"
 
     # Show current state
-    jsh_section "Current Namespace JSON"
+    printf '\n'
+    jsh::info "Current Namespace JSON"
     kubectl_cmd get namespace "${ns}" -o json | head -30
-    jsh_note "Output truncated"
+    jsh::info "Output truncated"
 
-    info "[DRY RUN] Would POST to: /api/v1/namespaces/${ns}/finalize"
+    jsh::info "[DRY RUN] Would POST to: /api/v1/namespaces/${ns}/finalize"
     return 0
   fi
 
@@ -196,14 +173,15 @@ remove_finalizers() {
 
   debug "Applying modified namespace via finalize endpoint..."
   if echo "${modified_json}" | kubectl_cmd replace --raw "/api/v1/namespaces/${ns}/finalize" -f - &>/dev/null; then
-    success "Finalizers removed from namespace '${ns}'"
+    jsh::removed "Finalizers removed from namespace '${ns}'" \
+      "Namespace '${ns}' finalizers were ${finalizers}"
 
     # Wait a moment and check if it's gone
     sleep 2
     if ! kubectl_cmd get namespace "${ns}" &>/dev/null; then
-      success "Namespace '${ns}' has been deleted"
+      jsh::removed "Namespace '${ns}' has been deleted"
     else
-      info "Namespace may take a moment to fully delete"
+      jsh::notice "Namespace may take a moment to fully delete"
     fi
     return 0
   else
@@ -283,37 +261,45 @@ main() {
   fi
 
   # Validate namespace exists and is terminating
-  info "Checking namespace '${namespace}'..."
+  jsh::info "Checking namespace '${namespace}'..."
   local finalizers
   finalizers=$(get_namespace_info "${namespace}")
 
   if [[ "${finalizers}" == "[]" || -z "${finalizers}" ]]; then
-    warn "Namespace '${namespace}' has no finalizers (may delete on its own)"
-    if ! confirm "Proceed anyway?"; then
-      info "Operation cancelled"
+    jsh::notice "Namespace '${namespace}' has no finalizers (may delete on its own)"
+    if ! jsh::confirm "Proceed anyway?" --default no; then
+      jsh::info "Operation cancelled"
       exit 3
     fi
   fi
 
   # Show warning and get confirmation
   if [[ "${force}" != "true" && "${dry_run}" != "true" ]]; then
-    jsh_section "Destructive Operation"
-    jsh_status "Namespace" "${namespace}" error
-    jsh_status "Finalizers" "${finalizers}" warn
-    jsh_note "Irreversible; external resources may be orphaned."
-    jsh_note "Continue only when these finalizers are known to be stuck."
+    printf '\n'
+    jsh::info "Destructive Operation"
+    jsh::info "Namespace ${namespace}"
+    jsh::notice "Finalizers ${finalizers}"
+    jsh::notice "Irreversible; external resources may be orphaned."
+    jsh::notice "Continue only when these finalizers are known to be stuck."
 
-    if ! confirm "Are you sure you want to proceed?"; then
-      info "Operation cancelled"
+    if ! jsh::confirm "Are you sure you want to proceed?" --default no; then
+      jsh::info "Operation cancelled"
       exit 3
     fi
   fi
 
   # Execute
-  remove_finalizers "${namespace}" "${dry_run}"
+  remove_finalizers "${namespace}" "${dry_run}" "${finalizers}"
 }
 
 # Handle interrupts gracefully
 trap 'printf "\n"; die "Interrupted"' INT TERM
 
+if [[ ${1:-} == __complete ]]; then
+  if [[ ${2:-} == namespace ]]; then
+    KUBECTL_CONTEXT=${3:-}
+    terminating_namespaces
+  fi
+  exit 0
+fi
 main "$@"

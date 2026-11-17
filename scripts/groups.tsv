@@ -1,0 +1,26 @@
+# Setup groups in default run order, separated by tabs: name, platforms (all, darwin, or
+# linux), purpose. install.sh checks names against this file and prints it for --help and --list.
+macos	darwin	Apply managed macOS preferences and restart the affected system applications
+linux	linux	Apply Linux file-watching limits, memory and power policy, and the timezone
+dev	all	Install linters, formatters, and commit tooling
+ghostty	all	Install the Ghostty terminal
+containers	all	Install Docker, Colima, Lima, and Podman
+kube	all	Install kubectl, Helm, Helmfile, and k9s
+fonts	all	Install the JetBrains Mono Nerd Font
+password	all	Install the Bitwarden desktop app
+tools	all	Install everyday command-line tools
+services	linux	Configure Linux SSH, GPG, and Podman user services
+apps	all	Install desktop apps, open Markdown in MacDown 3000, and add the foobar2000 SACD/DSD decoder
+desktop	linux	Configure Linux desktop appearance and XFCE panel features
+dock	linux	Configure the Linux application dock and managed pins
+display	all	Configure macOS display density or the X11 split-display shortcut
+keybindings	all	Apply native keyboard settings and managed launcher shortcuts
+wox	all	Install Wox, start it at login, and give it Command+Space or Super+Space
+audio	linux	Configure Linux audio policy, Wave:3 access, and the output shortcut
+wallpaper	all	Apply JSH_WALLPAPER to the active desktop
+vscode	all	Merge VS Code settings and install its Linux package when needed
+sublime	all	Merge Sublime Text preferences after its first launch
+helium	all	Apply Helium policy, profile preferences, and unpacked extensions
+waterfox	all	Apply Waterfox policy and preferences to its default profile
+ai	all	Write global agent instructions and merge OpenCode and Codex settings
+skills	all	Install agent skill repositories and link their published skills
