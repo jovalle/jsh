@@ -19,20 +19,22 @@ prompts stay in VS Code Settings Sync, not here.
 | One check        | `just check syntax`, `just check lint`, `just check shell`                    |
 | Ansible checks   | `just check ansible` (installs Ansible into `local/ansible/`)                 |
 | One shell file   | `bash -n FILE` or `zsh -n FILE`, then `shellcheck -x --severity=warning FILE` |
-| Preview setup    | `just status [GROUP ...]` or `./scripts/NAME.sh --dry-run`                    |
+| Preview setup    | `just status [GROUP ...]`                                                     |
 | List groups      | `just list groups`                                                            |
 | Pre-commit hooks | `just check hooks`                                                            |
 
-`just setup`, `just update`, and `./install.sh` or `./scripts/NAME.sh` without `--dry-run`
+`just setup`, `just update`, and `./install.sh`, `ansible-playbook`, or `./scripts/NAME.sh` without `--dry-run`
 change the live machine; `just update` and `--update` also upgrade installed software. Run
 them only when asked.
 
 ## layout
 
-- `install.sh`: bootstrap. Installs `core` packages and shell plugins, links dotfiles and
-  `bin/`, then runs each named group's `scripts/GROUP.sh` (or just its packages).
-- `scripts/NAME.sh`: one standalone setup group; data it uses lives in `scripts/NAME/`.
-  `scripts/groups.tsv`: every group with its platforms and purpose, in run order.
+- `install.sh`: bootstrap (the curl one-liner). Installs `core` packages and shell plugins,
+  links dotfiles and `bin/`, then runs the named groups: one `ansible-playbook` for every group
+  with a role, then `scripts/GROUP.sh` for the rest.
+- `scripts/NAME.sh`: bootstrap scripts (`shell.sh`, `ansible.sh`) and the Linux-only groups not
+  yet verified in Ansible (`linux`, `services`, `desktop`, `dock`, `audio`); their data lives in
+  `scripts/NAME/`. `scripts/groups.tsv`: every group with its platforms and purpose, in run order.
   `scripts/lib/`: shared Bash (`common.sh` helpers, `apps.sh`, `desktop.sh`).
   `scripts/lib/packages.sh`: package-manager code; `scripts/packages.sh` declares each
   group's packages.
@@ -44,9 +46,10 @@ them only when asked.
   `dotfiles/.gitconfig` sets as `core.hooksPath` (one `dispatch.sh` linked under each hook name;
   it runs a repository's tracked `.githooks/` after `git config jsh.hooks true`, then
   `.git/hooks`).
-- `ansible/`: host configuration, moving here group by group. `site.yml` includes one role
-  per group in `groups.tsv` order, tagged with the group name; `install.sh` runs a group's
-  role when `ansible/roles/GROUP` exists, otherwise `scripts/GROUP.sh`. `scripts/ansible.sh`
+- `ansible/`: host configuration. `site.yml` includes one role per group in `groups.tsv`
+  order, tagged with the group name; shared roles are `packages`, `app`, and `link`; plugins
+  (output callback, `settings` module, filters) are in `ansible/plugins/`. Role helper scripts
+  in `roles/GROUP/files/` source `scripts/lib/common.sh` and print output events. `scripts/ansible.sh`
   installs the pinned versions from `ansible/requirements.*` into `local/ansible/`. To run it
   directly, set `ANSIBLE_CONFIG=ansible/ansible.cfg` and run
   `local/ansible/venv/bin/ansible-playbook ansible/site.yml --tags GROUP --check --diff`.

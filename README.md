@@ -82,17 +82,24 @@ Helium enables experimental web-platform features on Linux and macOS so [Kingpin
 ## Layout
 
 ```sh
-install.sh          # bootstrap
+install.sh          # bootstrap: checkout, core packages, shell, links, then the setup groups
 justfile            # shortcuts and checks
-scripts/            # setup groups, shared code in scripts/lib/, smoke checks in check.py
+ansible/            # host configuration: site.yml runs one role per setup group
+scripts/            # bootstrap scripts, Linux-only groups not yet in Ansible, smoke checks in check.py
 scripts/groups.tsv  # every setup group with its platforms and purpose, in run order
-scripts/packages.sh # package declarations; package-manager code is in scripts/lib/packages.sh
+scripts/packages.sh # core packages and the Linux-only groups' packages
 dotfiles/           # linked into $HOME
 lib/                # shell runtime (lib/shell/), bin/git helpers and global Git hooks (lib/git/)
 bin/                # everyday commands
 ```
 
-`just check` runs syntax checks, ShellCheck, and the shell smoke checks in temporary homes.
+`just check` runs syntax checks, ShellCheck, the smoke checks in temporary homes, and
+`ansible-playbook --syntax-check` plus ansible-lint. `scripts/ansible.sh` installs the pinned
+Ansible into `local/ansible/` the first time a group needs it.
+
+A setup group is a row in `scripts/groups.tsv`, a role in `ansible/roles/GROUP/`, and an
+`include_role` in `ansible/site.yml` with the group's tag. The `linux`, `services`, `desktop`,
+`dock`, and `audio` groups still run `scripts/GROUP.sh` until they are verified on Linux.
 
 `dotfiles/.gitconfig` points `core.hooksPath` at `lib/git/hooks/` in every repository that does
 not set its own: those hooks reject `Co-authored-by` trailers, then run the repository's own

@@ -221,18 +221,27 @@ if [[ ${JSH_UPDATE:-0} == 1 ]]; then
     status=1
   fi
 fi
+# Groups with a role run in one playbook, whose output prints each header and platform skip.
+# Groups without one (Linux-only groups not yet verified on Linux) still run scripts/GROUP.sh.
+playbook_groups=()
+bash_groups=()
 for group in ${selected[@]+"${selected[@]}"}; do
-  # A group with a role runs through Ansible, whose output prints its header and platform skip.
   if [[ -d ${JSH_ROOT}/ansible/roles/${group} ]]; then
-    group_status=0
-    jsh::playbook "${group}" || group_status=$?
-    jsh::event stepclose
-    if ((group_status != 0)); then
-      jsh::fail "${group} failed (${group_status})"
-      status=1
-    fi
-    continue
+    playbook_groups+=("${group}")
+  else
+    bash_groups+=("${group}")
   fi
+done
+if ((${#playbook_groups[@]})); then
+  group_status=0
+  jsh::playbook "${playbook_groups[@]}" || group_status=$?
+  jsh::event stepclose
+  if ((group_status != 0)); then
+    jsh::fail "host configuration failed (${group_status})"
+    status=1
+  fi
+fi
+for group in ${bash_groups[@]+"${bash_groups[@]}"}; do
   group_platform=
   group_purpose=
   while IFS="	" read -r name platform purpose; do

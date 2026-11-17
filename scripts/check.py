@@ -1613,7 +1613,7 @@ esac"""
         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
         self.assertEqual(
             result.stderr,
-            "✕ jsh: expected shell options; use install.sh or scripts/*.sh for setup\n",
+            "✕ jsh: expected shell options; use install.sh for setup\n",
         )
 
     def test_proxy_configuration_heading_is_context(self):
@@ -4860,6 +4860,25 @@ exec /usr/bin/stat "$@"
             {"src": "/vendor/b/src", "dest": "/home/.agents/skills/b"},
             {"src": "/vendor/c", "dest": "/home/.agents/skills/c"},
         ])
+
+    def test_installer_runs_one_playbook_then_bash_groups(self):
+        checkout = self.installer_fixture()
+        for name in ("macos", "tools"):
+            (checkout / "ansible/roles" / name / "tasks").mkdir(parents=True)
+            (checkout / "ansible/roles" / name / "tasks/main.yml").write_text("[]\n")
+        (checkout / "scripts/services.sh").write_text(
+            "printf 'services\\n' >> \"$HOME/playbook.log\"\n")
+        self.mock_playbook()
+        result = subprocess.run(
+            ["bash", str(checkout / "install.sh"), "--dry-run", "macos", "fonts", "tools", "services"],
+            env=self.env | {"JSH_PLATFORM": "debian", "JSH_ANSIBLE_HOME": str(self.home / "ansible")},
+            cwd=self.home, capture_output=True, text=True, timeout=60,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        calls = (self.home / "playbook.log").read_text().splitlines()
+        self.assertEqual(len(calls), 2, calls)
+        self.assertIn("--tags macos,fonts,tools --check --diff", calls[0])
+        self.assertEqual(calls[1], "services")
 
 if __name__ == "__main__":
     unittest.main()
