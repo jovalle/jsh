@@ -1,12 +1,14 @@
 # AGENTS.md
 
-jsh sets up a workstation (macOS, Debian-family Linux, RHEL-family Linux) with Bash scripts.
+jsh sets up a workstation (macOS, Debian-family Linux, RHEL-family Linux) with a Bash
+bootstrap and Ansible roles.
 This checkout is live: `install.sh` links each file under `dotfiles/` into `$HOME` and each
 `bin/` command into `~/.local/bin`, so edits take effect on the developer's machine immediately.
 
 This is the only agent instruction file in this repository. Do not create `CLAUDE.md`,
-`GEMINI.md`, or `.github/copilot-instructions.md`. Agent skills come from the `skills` and `ai`
-scripts. Rules every agent follows in every project live in `ansible/roles/ai/files/instructions.md`;
+`GEMINI.md`, or `.github/copilot-instructions.md`. Agent skills come from the `skills` and
+`ai` setup groups. Rules every agent follows in every project live in
+`ansible/roles/ai/files/instructions.md`;
 the `ai` setup group writes them to each installed agent's home (`~/.copilot/instructions/`,
 `~/.codex/AGENTS.md`, and the OpenCode, Claude, and Gemini equivalents). Custom agents and
 prompts stay in VS Code Settings Sync, not here.
@@ -23,20 +25,19 @@ prompts stay in VS Code Settings Sync, not here.
 | List groups      | `just list groups`                                                            |
 | Pre-commit hooks | `just check hooks`                                                            |
 
-`just setup`, `just update`, and `./install.sh`, `ansible-playbook`, or `./scripts/NAME.sh` without `--dry-run`
-change the live machine; `just update` and `--update` also upgrade installed software. Run
+`just setup`, `just update`, `./install.sh`, `ansible-playbook`, or a bootstrap/helper
+script without `--dry-run` changes the live machine; `just update` and `--update` also upgrade
+installed software. Run
 them only when asked.
 
 ## layout
 
 - `install.sh`: bootstrap (the curl one-liner). Installs `core` packages and shell plugins,
   links dotfiles and `bin/`, then runs the named groups through `ansible/site.yml`.
-- `scripts/NAME.sh`: bootstrap scripts (`shell.sh`, `ansible.sh`). `scripts/groups.tsv`: every
-  setup group with its platforms and purpose, in run order; group data and helpers live with its
-  role under `ansible/roles/NAME/`.
-  `scripts/lib/`: shared Bash (`common.sh` helpers, `apps.sh`, `desktop.sh`).
-  `scripts/lib/packages.sh`: package-manager code; `scripts/packages.sh` declares each
-  group's packages.
+- `scripts/`: bootstrap scripts (`shell.sh`, `ansible.sh`, and `packages.sh`) and the only
+  test file, `check.py`. `scripts/groups.tsv` lists every setup group with its platforms and
+  purpose in run order. `scripts/lib/` holds Bash shared by the bootstrap and role helpers;
+  `scripts/packages.sh` declares only `core` and global `maintenance` packages.
 - `lib/output.md`: output contract. `lib/output.py`: renderer and Python API.
   `lib/verbs.tsv`: step conjugations.
 - `lib/shell/`: commands, navigation, prompt, and completion sourced by `.zshrc`/`.bashrc`.
@@ -47,7 +48,7 @@ them only when asked.
   `.git/hooks`).
 - `ansible/`: host configuration. `site.yml` includes one role per group in `groups.tsv`
   order, tagged with the group name; shared roles are `packages`, `app`, and `link`; plugins
-  (output callback, `settings` module, filters) are in `ansible/plugins/`. Role helper scripts
+  (output callback, `settings` module, filters) are in `ansible/plugins/`. Setup helper scripts
   in `roles/GROUP/files/` source `scripts/lib/common.sh` and print output events. `scripts/ansible.sh`
   installs the pinned versions from `ansible/requirements.*` into `local/ansible/`. To run it
   directly, set `ANSIBLE_CONFIG=ansible/ansible.cfg` and run
@@ -61,9 +62,9 @@ them only when asked.
 
 ## conventions
 
-- Setup scripts start with `#!/usr/bin/env bash`, a one-line purpose comment (printed by
-  `--help`), `set -euo pipefail`, and source `scripts/lib/common.sh` (or `apps.sh`) with
-  `"$@"`; unknown options are rejected.
+- Bootstrap scripts and setup helpers start with `#!/usr/bin/env bash`, a one-line purpose
+  comment (printed by `--help` for standalone scripts), and `set -euo pipefail`. Setup helpers
+  source `scripts/lib/common.sh` (or `apps.sh`) with `"$@"`; unknown options are rejected.
 - Steps must be idempotent: check current state, change only what differs, and report each
   unit once with `jsh::ok`, `jsh::drift`, `jsh::added`, `jsh::changed`, or `jsh::removed`. Use
   `jsh::notice` only for something the user must act on. Honor `JSH_DRY_RUN` through
@@ -76,6 +77,11 @@ them only when asked.
   `lib/output.py`, and `ansible/plugins/` (which may also use Ansible's own APIs). Shell is 2-space indented; see `.editorconfig`.
 - Names: commands read like speech, files and directories are one lowercase word when that
   stays clear.
+- Setup groups are Ansible roles. To add one, add its `scripts/groups.tsv` row, create
+  `ansible/roles/GROUP/`, and add a tagged block/rescue `include_role` to `ansible/site.yml` in
+  the same order and with the indexed platform condition. Keep data and helpers in the role.
+- Linux parity uses the Debian 13 XFCE host `colossus`, only through dry-run scratch copies under
+  `~/.cache/jsh-port`; never run against its live `~/.jsh`. RHEL behavior still needs a host.
 
 ## checks
 

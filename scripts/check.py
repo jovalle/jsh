@@ -62,6 +62,63 @@ class ShellChecks(unittest.TestCase):
         path.write_text("#!/bin/sh\n" + body + "\n")
         path.chmod(0o755)
 
+    def mock_installer_playbook(self, checkout):
+        (checkout / "scripts/ansible.sh").write_text("exit 0\n")
+        playbook = checkout / "local/ansible/venv/bin/ansible-playbook"
+        playbook.parent.mkdir(parents=True)
+        body = '''#!/usr/bin/env bash
+set -u
+tags=
+previous=
+for argument; do
+  if [[ __DOLLAR__previous == --tags ]]; then tags=__DOLLAR__argument; fi
+  previous=__DOLLAR__argument
+done
+old_ifs=__DOLLAR__IFS
+IFS=,
+set -- __DOLLAR__tags
+IFS=__DOLLAR__old_ifs
+status=0
+for group; do
+  platform=
+  purpose=
+  tab=__DOLLAR__(printf "\t")
+  while IFS="__DOLLAR__tab" read -r name applies description; do
+    if [[ __DOLLAR__name == "__DOLLAR__group" ]]; then
+      platform=__DOLLAR__applies
+      purpose=__DOLLAR__description
+      break
+    fi
+  done <"__DOLLAR__JSH_ROOT/scripts/groups.tsv"
+  printf "\036group\t%s\t%s\n" "__DOLLAR__group" "__DOLLAR__purpose"
+  if [[ __DOLLAR__platform == linux && __DOLLAR__JSH_PLATFORM == darwin ]]; then
+    if [[ __DOLLAR__group == linux ]]; then message="Skipping Linux configuration on macOS"
+    else message="Skipping __DOLLAR__group on macOS: Linux only"; fi
+    printf "\036item\tskip\t%s\n\036stepclose\n" "__DOLLAR__message"
+    continue
+  fi
+  if [[ __DOLLAR__platform == darwin && __DOLLAR__JSH_PLATFORM != darwin ]]; then
+    if [[ __DOLLAR__group == macos ]]; then message="Skipping macOS configuration on Linux"
+    else message="Skipping __DOLLAR__group on Linux: macOS only"; fi
+    printf "\036item\tskip\t%s\n\036stepclose\n" "__DOLLAR__message"
+    continue
+  fi
+  code=0
+  if [[ -f __DOLLAR__JSH_ROOT/scripts/__DOLLAR__group.sh ]]; then
+    bash "__DOLLAR__JSH_ROOT/scripts/__DOLLAR__group.sh" || code=__DOLLAR__?
+  fi
+  if ((code)); then
+    printf "\036item\tfail\t%s failed (%s)\n" "__DOLLAR__group" "__DOLLAR__code"
+    printf "%s failed (%s)\n" "__DOLLAR__group" "__DOLLAR__code" >>"__DOLLAR__JSH_REPORT/failures"
+    status=2
+  fi
+  printf "\036stepclose\n"
+done
+exit "__DOLLAR__status"
+'''.replace("__DOLLAR__", chr(36))
+        playbook.write_text(body)
+        playbook.chmod(0o755)
+
     def test_no_current_output_helper_remains(self):
         files = sorted((ROOT / "scripts").rglob("*.sh"))
         offenders = [str(file.relative_to(ROOT)) for file in files
@@ -459,6 +516,7 @@ class ShellChecks(unittest.TestCase):
             (checkout / "scripts" / name).write_text("exit 0\n")
         shutil.copy2(ROOT / "install.sh", checkout / "install.sh")
         shutil.copy2(ROOT / "bin/jsh", checkout / "bin/jsh")
+        self.mock_installer_playbook(checkout)
         (checkout / "dotfiles/.zshrc").write_text("# fixture\n")
         for location in (checkout, self.home / "moved checkout"):
             if location != checkout:
@@ -494,6 +552,7 @@ class ShellChecks(unittest.TestCase):
             shutil.copy2(ROOT / name, checkout / name)
         (checkout / "scripts/packages.sh").write_text("printf 'BREW_UPDATE\\n'\n")
         (checkout / "scripts/shell.sh").write_text("exit 0\n")
+        self.mock_installer_playbook(checkout)
         return checkout
 
     def run_interrupted_plain_installer(self, package_script, parent_wait=False):
@@ -861,7 +920,7 @@ printf '\\nRELOAD_RESULT:%s:%s\\n' "$([[ $$ == "$before" ]] && printf same)" "$J
         self.assertIn("✕ kube failed (1)", output)
         self.assertIn("Finished with errors", output)
         self.assertIn("1 changed", output)
-        self.assertIn("1 failed", output)
+        self.assertIn("2 failed", output)
         self.assertEqual(output.count("Restart app"), 2, output)
         self.assertIn("Action needed", output)
         self.assertNotIn("completed (bootstrap)", output)
@@ -882,7 +941,7 @@ false
         self.assertEqual(result.stdout.splitlines().count("✕ dev failed (1)"), 1, result.stdout)
         self.assertIn("Failed\n  ✕ dev failed (1)", result.stdout)
 
-    def test_installer_keeps_successful_last_group_after_earlier_failure(self):
+    def test_installer_continues_to_the_last_group_after_earlier_failure(self):
         checkout = self.installer_scope_fixture()
         (checkout / "scripts/groups.tsv").write_text(
             "a\tall\tFirst\nb\tall\tSecond\n"
@@ -899,7 +958,10 @@ false
         )
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("✕ a failed (1)", result.stdout)
-        self.assertIn("✓ thing is current\n✓ b  Second", result.stdout)
+        self.assertIn("› b  Second", result.stdout)
+        self.assertIn("✓ thing is current", result.stdout)
+        self.assertLess(result.stdout.index("✓ thing is current"),
+                        result.stdout.index("✕ host configuration failed (2)"))
         self.assertNotIn("✕ Stopped checking thing", result.stdout)
 
     def test_installer_preview_labels_changes_without_modifying_home(self):
@@ -2061,25 +2123,6 @@ esac""")
         self.assertIn("Skipping Homebrew casks: macOS only", result.stdout)
         self.assertNotIn("Checking Homebrew casks...", result.stdout)
 
-    def test_uv_update_preview_checks_outdated_without_claiming_change(self):
-        self.tool("graphify", "exit 0")
-        self.tool("uv", """case "$*" in
-  "tool list") printf "graphify v1.0\n- graphify\n" ;;
-  "tool list --help") printf "  --outdated  List outdated tools\n" ;;
-  "tool list --outdated") printf "%s\n" "$*" >> "$HOME/uv-calls" ;;
-  *) exit 2 ;;
-esac""")
-        result = subprocess.run(
-            ["bash", "-c", ". \"$JSH_ROOT/scripts/lib/common.sh\"; "
-             ". \"$JSH_ROOT/scripts/lib/packages.sh\"; jsh::uv graphify graphify"],
-            env=self.env | {"JSH_DRY_RUN": "1", "JSH_UPDATE": "1"},
-            capture_output=True, text=True, timeout=20,
-        )
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("✓ graphify is installed", result.stdout)
-        self.assertNotIn("graphify is outdated", result.stdout)
-        self.assertNotRegex(result.stdout, r"(?m)^~ graphify")
-        self.assertEqual((self.home / "uv-calls").read_text(), "tool list --outdated\n")
 
     def test_installer_runs_global_brew_updates_in_package_step(self):
         checkout = self.installer_scope_fixture()
@@ -2160,7 +2203,7 @@ esac""",
         self.assertIn("libclc", actions)
         self.assertNotIn("gemini-cli", next(line for line in actions.splitlines() if line.startswith("upgrade")))
 
-    def test_packages_accept_listed_groups_without_packages(self):
+    def test_packages_reject_nonbootstrap_groups(self):
         checkout = self.home / "packages"
         for name in ("scripts/lib", "lib/shell"):
             (checkout / name).mkdir(parents=True)
@@ -2175,7 +2218,8 @@ esac""",
                                   env=self.env | {"JSH_ROOT": str(checkout)},
                                   capture_output=True, text=True, timeout=20)
         extra = run("extra")
-        self.assertEqual(extra.returncode, 0, extra.stderr)
+        self.assertEqual(extra.returncode, 2, extra.stdout + extra.stderr)
+        self.assertIn("unknown package group: extra", extra.stdout)
         unknown = run("nope")
         self.assertEqual(unknown.returncode, 2)
         self.assertIn("unknown package group: nope", unknown.stdout)
@@ -5019,15 +5063,15 @@ exec /usr/bin/stat "$@"
             {"src": "/vendor/c", "dest": "/home/.agents/skills/c"},
         ])
 
-    def test_installer_runs_one_playbook_then_bash_groups(self):
+    def test_installer_runs_one_playbook_for_all_groups(self):
         checkout = self.installer_fixture()
         for name in ("macos", "tools", "services"):
             (checkout / "ansible/roles" / name / "tasks").mkdir(parents=True)
             (checkout / "ansible/roles" / name / "tasks/main.yml").write_text("[]\n")
         with (checkout / "scripts/groups.tsv").open("a") as groups:
-            groups.write("legacy\tlinux\tA fixture group on the Bash fallback\n")
+            groups.write("legacy\tlinux\tA fixture group without a role directory\n")
         (checkout / "scripts/legacy.sh").write_text(
-            "echo legacy >> \"$HOME/playbook.log\"\n")
+            "touch \"$HOME/legacy-script-ran\"\n")
         self.mock_playbook()
         result = subprocess.run(
             ["bash", str(checkout / "install.sh"), "--dry-run", "macos", "fonts",
@@ -5038,10 +5082,10 @@ exec /usr/bin/stat "$@"
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         calls = (self.home / "playbook.log").read_text().splitlines()
-        self.assertEqual(len(calls), 2, calls)
-        self.assertIn("--tags macos,fonts,tools,services --check --diff", calls[0])
-        self.assertEqual(calls[1], "legacy")
-
+        self.assertEqual(len(calls), 1, calls)
+        self.assertIn(
+            "--tags macos,fonts,tools,services,legacy --check --diff", calls[0])
+        self.assertFalse((self.home / "legacy-script-ran").exists())
 
     def yaml_file(self, path):
         script = "import json, sys, yaml; print(json.dumps(yaml.safe_load(open(sys.argv[1]))))"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Package-manager handlers for scripts/packages.sh: Homebrew, App Store, apt, dnf, Flatpak, uv, and AppImages.
+# Package-manager handlers for scripts/packages.sh: Homebrew, App Store, apt, and dnf.
 # shellcheck disable=SC2154 # JSH_PLATFORM and JSH_DRY_RUN come from common.sh, which callers source first.
 # shellcheck disable=SC2312 # Substitutions here are checked by the caller's `|| return` or fail closed.
 
@@ -56,7 +56,6 @@ jsh::package_listed() {
     [[ -n ${item} ]] || continue
     if [[ ${item} == "${expected}" ]]; then return 0; fi
     if [[ ${mode} == native && ${item%%:*} == "${expected}" ]]; then return 0; fi
-    if [[ ${mode} == uv && ${item%% *} == "${expected}" ]]; then return 0; fi
   done <<<"${listing}"
   return 1
 }
@@ -355,144 +354,4 @@ jsh::native() {
   for name in "${upgrades[@]}"; do
     jsh::changed "${name} upgraded" "${name} is outdated"
   done
-}
-
-jsh::flatpak() {
-  local app listing updates
-  jsh::step check "Flatpak apps"
-  if ! command -v flatpak >/dev/null 2>&1; then
-    jsh::notice "flatpak is missing; apps were skipped"
-    return 0
-  fi
-  listing=$(flatpak list --app --columns=application) || return
-  if [[ ${JSH_UPDATE:-0} == 1 ]]; then
-    updates=$(flatpak remote-ls --updates --columns=application) || return
-  fi
-  for app in "$@"; do
-    if jsh::package_listed "${listing}" "${app}"; then
-      if [[ ${JSH_UPDATE:-0} == 1 ]] && jsh::package_listed "${updates}" "${app}"; then
-        jsh::task "Updating ${app}" flatpak update --noninteractive -y "${app}" || return
-        jsh::changed "${app} upgraded" "${app} is outdated"
-      else
-        jsh::ok "${app} is installed"
-      fi
-    elif [[ ${JSH_UPDATE:-0} == 1 ]]; then
-      jsh::drift "${app} is not installed"
-    else
-      jsh::run flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo || return
-      jsh::task "Installing ${app}" flatpak install --user --noninteractive -y flathub "${app}" || return
-      jsh::added "${app} installed" "${app} is not installed"
-    fi
-  done
-}
-
-jsh::uv() {
-  local command=$1 package=$2 listing after help outdated
-  jsh::step check "uv tools"
-  if [[ ${JSH_UPDATE:-0} == 1 ]]; then
-    if ! command -v "${command}" >/dev/null 2>&1; then
-      jsh::drift "${command} is not installed"
-      return 0
-    fi
-    if ! command -v uv >/dev/null 2>&1; then
-      jsh::ok "${command} is installed"
-      return 0
-    fi
-    listing=$(uv tool list) || return
-    if ! jsh::package_listed "${listing}" "${package}" uv; then
-      jsh::ok "${command} is installed"
-      return 0
-    fi
-    if [[ ${JSH_DRY_RUN} == 1 ]]; then
-      help=$(uv tool list --help 2>/dev/null || true)
-      if [[ ${help} == *--outdated* ]]; then
-        outdated=$(uv tool list --outdated 2>/dev/null || true)
-        if jsh::package_listed "${outdated}" "${package}" uv; then
-          jsh::changed "${command} upgraded" "${command} is outdated"
-        else
-          jsh::ok "${command} is installed"
-        fi
-      else
-        jsh::ok "${command} is installed"
-      fi
-      return 0
-    fi
-    jsh::task "Updating ${command}" uv tool upgrade "${package}" || return
-    after=$(uv tool list) || return
-    if [[ ${after} != "${listing}" ]]; then
-      jsh::changed "${command} upgraded" "${command} is outdated"
-    else
-      jsh::ok "${command} is installed"
-    fi
-  elif command -v "${command}" >/dev/null 2>&1; then
-    jsh::ok "${command} is installed"
-  else
-    if command -v uv >/dev/null 2>&1; then
-      jsh::task "Installing ${command}" uv tool install "${package}" || return
-    else
-      jsh::task "Installing ${command}" python3 -m pip install --user "${package}" || return
-    fi
-    jsh::added "${command} installed" "${command} is not installed"
-  fi
-}
-
-jsh::appimage() {
-  local name=$1 release=$2 arm=$3 amd=${4:-x86_64} arch item digest url scratch destination state current
-  jsh::status "Checking ${name} AppImage"
-  destination=${HOME}/.local/bin/${name}
-  state=${XDG_STATE_HOME:-${HOME}/.local/state}/jsh/appimage/${name}.json
-  if [[ ${JSH_UPDATE:-0} == 1 ]]; then
-    [[ -f ${state} ]] || return 0
-    [[ -f ${destination} && ! -L ${destination} ]] || {
-      jsh::fail "AppImage is no longer managed: ${destination}"
-      return 1
-    }
-    current=$(jq -er .digest "${state}") || return
-    [[ $(jsh::sha256 "${destination}") == "${current}" ]] || {
-      jsh::fail "AppImage was modified: ${destination}"
-      return 1
-    }
-  else
-    command -v "${name}" >/dev/null 2>&1 && return 0
-    [[ ! -e ${destination} && ! -L ${destination} ]] || {
-      jsh::fail "refusing to replace ${destination}"
-      return 1
-    }
-  fi
-  if [[ ${JSH_DRY_RUN} == 1 ]]; then
-    jsh::info "would download verified ${name} AppImage"
-    return
-  fi
-  jsh::need jq || return
-  arch=$(uname -m)
-  case ${arch} in arm64 | aarch64) arch=${arm} ;; x86_64) arch=${amd} ;; *)
-    jsh::fail "unsupported architecture: ${arch}"
-    return 1
-    ;;
-  esac
-  scratch=$(jsh::temp) || return
-  jsh::download "${release}" "${scratch}/release.json" || return
-  item=$(jq -er --arg suffix "-${arch}.appimage" '[.assets[] | select(.name | ascii_downcase | endswith($suffix))] | if length == 1 then .[0] else error("expected one AppImage asset") end' "${scratch}/release.json") || return
-  digest=$(printf '%s' "${item}" | jq -er '.digest | sub("^sha256:"; "")') || return
-  [[ ${digest} =~ ^[a-f0-9]{64}$ ]] || {
-    jsh::fail 'release has no SHA-256 digest'
-    return 1
-  }
-  [[ ${JSH_UPDATE:-0} != 1 || ${digest} != "${current}" ]] || return 0
-  url=$(printf '%s' "${item}" | jq -er .browser_download_url) || return
-  jsh::download "${url}" "${scratch}/appimage" || return
-  [[ $(jsh::sha256 "${scratch}/appimage") == "${digest}" ]] || {
-    jsh::fail 'AppImage checksum mismatch'
-    return 1
-  }
-  jsh::file "${scratch}/appimage" "${destination}" 755 || return
-  printf '%s' "${item}" | jq '{asset: .name, digest: (.digest | sub("^sha256:"; ""))}' >"${scratch}/state.json" || return
-  jsh::file "${scratch}/state.json" "${state}" || return
-  local executable=${destination//\\/\\\\}
-  executable=${executable//\"/\\\"}
-  executable=${executable//\$/\\\$}
-  executable=${executable//\`/\\\`}
-  executable=${executable//%/%%}
-  printf '[Desktop Entry]\nType=Application\nName=%s\nExec="%s" %%U\nTerminal=false\n' "${name}" "${executable}" >"${scratch}/app.desktop"
-  jsh::file "${scratch}/app.desktop" "${XDG_DATA_HOME:-${HOME}/.local/share}/applications/jsh-${name}.desktop" 644
 }

@@ -9,8 +9,8 @@ jsh::usage() {
   printf '%s\n' 'Usage: ./install.sh [--dry-run] [--update] [--list] [GROUP ...]' \
     '' 'With no groups, the scope follows the machine: every group on a workstation' \
     'with admin rights (sudo/root on Linux, the admin group on macOS), otherwise only' \
-    'the base shell and dotfiles. Named groups run only those. A group runs its' \
-    'ansible/roles/NAME role when it has one, otherwise scripts/NAME.sh, which also runs directly.' \
+    'the base shell and dotfiles. Named groups run only those. Their' \
+    'ansible/roles/NAME roles run together in one playbook.' \
     '' 'Use --update to update software; Homebrew updates all installed packages and' \
     'removes deprecated or disabled packages. Configuration remains idempotent.'
 }
@@ -200,7 +200,7 @@ while IFS= read -r -d "" source; do
   jsh::link "${source}" "${HOME}/${relative}"
 done < <(find "${JSH_ROOT}/dotfiles" -type f -print0)
 if [[ ${JSH_PLATFORM} == linux ]]; then
-  jsh::link "${JSH_ROOT}/scripts/ghostty/linux.conf" "${HOME}/.config/ghostty/linux.conf"
+  jsh::link "${JSH_ROOT}/ansible/roles/ghostty/files/linux.conf" "${HOME}/.config/ghostty/linux.conf"
 fi
 jsh::step link commands
 for source in "${JSH_ROOT}"/bin/*; do
@@ -221,65 +221,16 @@ if [[ ${JSH_UPDATE:-0} == 1 ]]; then
     status=1
   fi
 fi
-# Groups with a role run in one playbook, whose output prints each header and platform skip.
-# Groups without one (Linux-only groups not yet verified on Linux) still run scripts/GROUP.sh.
-playbook_groups=()
-bash_groups=()
-for group in ${selected[@]+"${selected[@]}"}; do
-  if [[ -d ${JSH_ROOT}/ansible/roles/${group} ]]; then
-    playbook_groups+=("${group}")
-  else
-    bash_groups+=("${group}")
-  fi
-done
-if ((${#playbook_groups[@]})); then
+# Every selected setup group runs in one playbook; the callback owns headers and platform skips.
+if ((${#selected[@]})); then
   group_status=0
-  jsh::playbook "${playbook_groups[@]}" || group_status=$?
+  jsh::playbook "${selected[@]}" || group_status=$?
   jsh::event stepclose
   if ((group_status != 0)); then
     jsh::fail "host configuration failed (${group_status})"
     status=1
   fi
 fi
-for group in ${bash_groups[@]+"${bash_groups[@]}"}; do
-  group_platform=
-  group_purpose=
-  while IFS="	" read -r name platform purpose; do
-    if [[ ${name} == "${group}" ]]; then
-      group_platform=${platform}
-      group_purpose=${purpose}
-      break
-    fi
-  done <"${JSH_ROOT}/scripts/groups.tsv"
-  jsh::group "${group}" "${group_purpose}"
-  if [[ ${group_platform} == linux && ${JSH_PLATFORM} == darwin ]]; then
-    if [[ ${group} == linux ]]; then
-      jsh::skipped "Linux configuration on macOS"
-    else
-      jsh::skipped "${group} on macOS: Linux only"
-    fi
-    continue
-  fi
-  if [[ ${group_platform} == darwin && ${JSH_PLATFORM} != darwin ]]; then
-    if [[ ${group} == macos ]]; then
-      jsh::skipped "macOS configuration on Linux"
-    else
-      jsh::skipped "${group} on Linux: macOS only"
-    fi
-    continue
-  fi
-  group_status=0
-  if [[ -f ${JSH_ROOT}/scripts/${group}.sh ]]; then
-    bash "${JSH_ROOT}/scripts/${group}.sh" || group_status=$?
-  else
-    jsh::packages "${group}" || group_status=$?
-  fi
-  jsh::event stepclose
-  if ((group_status != 0)); then
-    jsh::fail "${group} failed (${group_status})"
-    status=1
-  fi
-done
 unset JSH_BREW_DEFER
 jsh::session_close "${status}"
 if [[ ${status} == 0 && ${JSH_DRY_RUN} != 1 ]]; then jsh::handoff; fi

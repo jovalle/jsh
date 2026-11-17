@@ -85,9 +85,9 @@ Helium enables experimental web-platform features on Linux and macOS so [Kingpin
 install.sh          # bootstrap: checkout, core packages, shell, links, then the setup groups
 justfile            # shortcuts and checks
 ansible/            # host configuration: site.yml runs one role per setup group
-scripts/            # bootstrap scripts, Linux-only groups not yet in Ansible, smoke checks in check.py
+scripts/            # bootstrap scripts, shared role helpers, and smoke checks in check.py
 scripts/groups.tsv  # every setup group with its platforms and purpose, in run order
-scripts/packages.sh # core packages and the Linux-only groups' packages
+scripts/packages.sh # core bootstrap packages and package-manager maintenance
 dotfiles/           # linked into $HOME
 lib/                # shell runtime (lib/shell/), bin/git helpers and global Git hooks (lib/git/)
 bin/                # everyday commands
@@ -98,8 +98,9 @@ bin/                # everyday commands
 Ansible into `local/ansible/` the first time a group needs it.
 
 A setup group is a row in `scripts/groups.tsv`, a role in `ansible/roles/GROUP/`, and an
-`include_role` in `ansible/site.yml` with the group's tag. The `linux`, `services`, `desktop`,
-`dock`, and `audio` groups still run `scripts/GROUP.sh` until they are verified on Linux.
+`include_role` block in `ansible/site.yml` with the group's tag and platform condition. Put
+package declarations, defaults, tasks, templates, and narrowly justified helper scripts in that
+role; `install.sh` sends every selected group to one playbook run.
 
 `dotfiles/.gitconfig` points `core.hooksPath` at `lib/git/hooks/` in every repository that does
 not set its own: those hooks reject `Co-authored-by` trailers, then run the repository's own

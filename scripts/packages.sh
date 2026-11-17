@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install or update the declared packages for the named groups.
+# Install core bootstrap packages or run package-manager maintenance.
 set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck source=scripts/lib/common.sh
@@ -7,8 +7,8 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck source=scripts/lib/packages.sh
 . "${SCRIPT_DIR}/lib/packages.sh"
 
-# Package choices are ordinary shell, grouped by purpose and platform. Groups with an Ansible
-# role declare their packages in ansible/roles/GROUP/defaults/main.yml instead.
+# Host-configuration packages belong to their Ansible roles; only bootstrap and global
+# package-manager maintenance remain here.
 install_group() {
   case $1 in
     maintenance)
@@ -30,8 +30,6 @@ install_group() {
       fi
       ;;
     *)
-      # Groups configured entirely by their own scripts declare no packages here.
-      jsh::is_group "$1" && return 0
       jsh::fail "unknown package group: $1"
       return 2
       ;;

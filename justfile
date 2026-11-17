@@ -1,5 +1,5 @@
 # Everyday jsh operations and local checks. Recipes stay one line and call install.sh,
-# bin/jsh, or one tool; setup logic lives in scripts/.
+# bin/jsh, or one tool; setup logic lives in Ansible roles.
 set shell := ["bash", "-euo", "pipefail", "-c"]
 set positional-arguments
 

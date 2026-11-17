@@ -316,7 +316,7 @@ jsh::is_group() {
   [[ $'\n'${names}$'\n' == *$'\n'"$1"$'\n'* ]]
 }
 
-# Ordinary package lists live in one script; app scripts remain directly runnable.
+# Bootstrap packages and global package-manager maintenance remain in Bash.
 jsh::packages() {
   local status=0
   jsh::status "Starting package checks for $1"
@@ -325,7 +325,7 @@ jsh::packages() {
   return "${status}"
 }
 
-# Ported groups run as roles of ansible/site.yml, which tags each role with its group name.
+# Setup groups run as roles of ansible/site.yml, which tags each role with its group name.
 jsh::playbook() {
   local home=${JSH_ANSIBLE_HOME:-${JSH_ROOT}/local/ansible} group tags update=false keep=false
   local preview=()

@@ -1,6 +1,7 @@
 # Setup groups in default run order, separated by tabs: name, platforms (all, darwin, or
-# linux), purpose. install.sh checks names against this file and prints it for --help and --list;
-# ansible/site.yml includes each group's role in this order (scripts/check.py keeps them aligned).
+# linux), purpose. install.sh validates and prints this index, then sends selected names to one
+# playbook. ansible/site.yml includes every role in the same order; scripts/check.py keeps them
+# aligned.
 macos	darwin	Apply managed macOS preferences and restart the affected system applications
 linux	linux	Apply Linux file-watching limits, memory and power policy, and the timezone
 dev	all	Install linters, formatters, and commit tooling
