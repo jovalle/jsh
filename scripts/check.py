@@ -4308,6 +4308,16 @@ esac''')
         self.assertEqual(target.read_text(), '{"user": 1}\n')
 
     def browser_play(self, group, variables, **environment):
+        variables = {"jsh_script_env": {
+            "JSH_ROOT": str(ROOT),
+            "JSH_PLATFORM": environment.get("JSH_PLATFORM", "darwin"),
+            "JSH_DESKTOP": "",
+            "JSH_HOST": "test",
+            "JSH_UPDATE": "0",
+            "JSH_KEEP_APPS": "0",
+            "JSH_DRY_RUN": "0",
+            "JSH_OUTPUT": "renderer",
+        }} | variables
         include = (
             f"    - name: {group}\n"
             f"      ansible.builtin.include_role: {{name: {group}}}\n"
@@ -4358,6 +4368,89 @@ esac''')
         self.assertIn(["item", "changed", "Helium restarted"], events)
         self.assertTrue((self.home / "launched").exists())
 
+    def test_helium_profile_matches_bash_merge_inputs(self):
+        defaults = (ROOT / "ansible/roles/helium/defaults/main.yml").read_text()
+        self.assertIn("/Library/Managed Preferences/", defaults)
+        self.assertNotIn("/Library/Preferences/net.imput.helium.plist", defaults)
+
+        profile_root = self.home / "Helium"
+        profile = profile_root / "Default"
+        profile.mkdir(parents=True)
+        policy_values = json.loads(
+            (ROOT / "ansible/roles/helium/files/policy.json").read_text())
+        policy_values["ExtensionForceInstallWithSearchOrNewTabOverridesEnabled"] = True
+        policy_values["ExtensionInstallForcelist"].append(
+            "fgmjlmbojbkmdpofahffgcpkhkngfpef")
+        preferences = json.loads(
+            (ROOT / "ansible/roles/helium/files/preferences.json").read_text())
+        preferences["extensions"] = {
+            "pinned_extensions": [*policy_values["ExtensionSettings"], "personal"]}
+        state = json.loads((ROOT / "ansible/roles/helium/files/state.json").read_text())
+        state["browser"] = {"enabled_labs_experiments": [
+            "custom", "enable-experimental-web-platform-features"]}
+        (profile / "Preferences").write_text(json.dumps(preferences))
+        (profile_root / "Local State").write_text(json.dumps(state))
+        (profile / "Secure Preferences").write_text(json.dumps({
+            "extensions": {"settings": {
+                "fgmjlmbojbkmdpofahffgcpkhkngfpef": {"disable_reasons": []}}}}))
+        manifest = self.home / "manifest.plist"
+        manifest.write_text(json.dumps({
+            "policy": {"pfm_name":
+                       "ExtensionForceInstallWithSearchOrNewTabOverridesEnabled"}}))
+        self.tool("pgrep", "exit 1")
+        self.tool("plutil", "cat \"$5\"")
+        variables = {
+            "helium_packages": {},
+            "helium_profile_root": str(profile_root),
+            "helium_policy_path": str(self.home / "policy.plist"),
+            "helium_policy_become": False,
+            "helium_manifest_path": str(manifest),
+        }
+
+        result, events = self.browser_play("helium", variables)
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads((profile / "Preferences").read_text()), preferences)
+        self.assertNotIn("default_search_provider_data", preferences)
+        self.assertEqual(json.loads((profile_root / "Local State").read_text()), state)
+        changed = [event[2] for event in events if event[:2] == ["item", "changed"]]
+        self.assertNotIn(str(profile / "Preferences"), changed)
+        self.assertNotIn(str(profile_root / "Local State"), changed)
+
+    def test_helium_unpacked_helper_previews_secure_preferences(self):
+        jq = shutil.which("jq")
+        if not jq:
+            self.skipTest("jq is required")
+        (self.tools / "jq").symlink_to(jq)
+        self.tool("pgrep", "exit 1")
+        extension = self.home / "extension"
+        extension.mkdir()
+        (extension / "manifest.json").write_text("{}\n")
+        config = self.home / "config"
+        local = config / "jsh/helium"
+        local.mkdir(parents=True)
+        (local / "unpacked.json").write_text(json.dumps([str(extension)]))
+        profile = self.home / "Helium/Default"
+        profile.mkdir(parents=True)
+        secure = profile / "Secure Preferences"
+        secure.write_text("{}\n")
+
+        result = subprocess.run(
+            ["bash", str(ROOT / "ansible/roles/helium/files/unpacked.sh"), str(profile)],
+            env=self.env | {
+                "JSH_ROOT": str(ROOT),
+                "JSH_PLATFORM": "darwin",
+                "JSH_DRY_RUN": "1",
+                "XDG_CONFIG_HOME": str(config),
+            },
+            capture_output=True, text=True, timeout=30,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Secure Preferences differs", result.stdout)
+        self.assertIn("would change", result.stdout)
+        self.assertEqual(secure.read_text(), "{}\n")
+
     def test_waterfox_default_profile_selection_rules(self):
         self.tool("pgrep", "exit 1")
 
@@ -4395,6 +4488,66 @@ esac''')
         run("override", multiple,
             ["Profiles/first", "Profiles/second"], "Profiles/first", "first")
         run("missing", "[Profile0]\nName=missing\nPath=Profiles/missing\n", [])
+
+    def test_waterfox_keeps_bash_user_js_bytes_and_rewrites_toolbar(self):
+        root = self.home / "Waterfox"
+        profile = root / "Profiles/default"
+        profile.mkdir(parents=True)
+        (root / "profiles.ini").write_text(
+            "[Profile0]\nName=default\nIsRelative=1\nPath=Profiles/default\n")
+        config = self.home / "config"
+        overlay_path = config / "jsh/waterfox/user.js"
+        overlay_path.parent.mkdir(parents=True)
+        overlay = "/* local preferences */\nuser_pref(\"overlay.pref\", true);\n"
+        overlay_path.write_text(overlay)
+        base = (ROOT / "ansible/roles/waterfox/files/user.js").read_text()
+        managed = (base + "\n" + overlay).rstrip()
+        expected_user = (
+            "/* unmanaged */\nuser_pref(\"personal.pref\", true);\n\n"
+            "// BEGIN jsh preferences\n" + managed + "\n// END jsh preferences\n")
+        (profile / "user.js").write_bytes(expected_user.encode())
+        layout = {"placements": {
+            "nav-bar": ["back-button", "addon_darkreader_org-browser-action",
+                        "unified-extensions-button",
+                        "ublock0_raymondhill_net-browser-action"],
+            "widget-overflow-fixed-list": ["vpn_proton_ch-browser-action"],
+        }}
+        encoded = json.dumps(json.dumps(layout, separators=(",", ":")),
+                             separators=(",", ":"))
+        (profile / "prefs.js").write_text(
+            "user_pref(\"browser.uiCustomization.state\", " + encoded + ");\n")
+        self.tool("pgrep", "exit 1")
+        self.tool("stat", """if [ "$1" = -L ] && [ "$2" = -c ] && [ "$3" = %a ]; then
+  shift 3
+  exec /usr/bin/stat -L -f %Lp "$@"
+fi
+exec /usr/bin/stat "$@"
+""")
+        variables = {
+            "waterfox_packages": {},
+            "waterfox_roots": [str(root)],
+            "waterfox_policy_become": False,
+        }
+
+        result, _ = self.browser_play(
+            "waterfox", variables, JSH_PLATFORM="linux", XDG_CONFIG_HOME=str(config))
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((profile / "user.js").read_bytes(), expected_user.encode())
+        line = (profile / "prefs.js").read_text().strip()
+        value = line.removeprefix(
+            "user_pref(\"browser.uiCustomization.state\", ").removesuffix(");")
+        rewritten = json.loads(json.loads(value))
+        expected_pinned = [
+            "ublock0_raymondhill_net-browser-action",
+            "vpn_proton_ch-browser-action",
+            "_446900e4-71c2-419f-a6a7-df9c091e268b_-browser-action",
+            "addon_darkreader_org-browser-action",
+            "_ce9f4b1f-24b8-4e9a-9051-b9e472b1b2f2_-browser-action",
+        ]
+        self.assertEqual(rewritten["placements"]["nav-bar"],
+                         ["back-button", *expected_pinned, "unified-extensions-button"])
+        self.assertEqual(rewritten["placements"]["widget-overflow-fixed-list"], [])
 
     def packages_filter(self, script):
         """Run Python with the packages filter loaded as `packages` and role defaults as YAML."""

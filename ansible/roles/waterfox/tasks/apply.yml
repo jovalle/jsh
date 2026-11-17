@@ -2,7 +2,16 @@
 - name: "{{ waterfox_selected }}/user.js"
   ansible.builtin.copy:
     content: |
-      {{ waterfox_user_content }}
+      {{ waterfox_desired_user.stdout }}
     dest: "{{ waterfox_selected }}/user.js"
-    mode: "0644"
+    mode: "{{ waterfox_user_stat.stat.mode | default('0600') }}"
     backup: true
+
+- name: Waterfox toolbar extensions
+  ansible.builtin.command:
+    argv: ["{{ role_path }}/files/toolbar.sh", "{{ waterfox_selected }}"]
+    stdin: "{{ waterfox_policy_values | to_json }}"
+  environment: "{{ jsh_script_env }}"
+  register: waterfox_toolbar
+  changed_when: waterfox_toolbar.stdout is reported_change
+  check_mode: false

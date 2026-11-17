@@ -206,12 +206,6 @@
               ansible.builtin.debug:
                 msg: "Waterfox profile is {{ waterfox_selected }}"
 
-            - name: Waterfox user preferences are initialized
-              ansible.builtin.set_fact:
-                waterfox_user_content: >-
-                  {{ lookup('ansible.builtin.file',
-                            jsh_root ~ '/ansible/roles/waterfox/files/user.js') | trim }}
-
             - name: Waterfox user preference overlays are checked
               ansible.builtin.stat:
                 path: "{{ item }}"
@@ -220,82 +214,104 @@
               loop_control:
                 label: "{{ item }}"
 
-            - name: Waterfox user preference overlays are appended
+            - name: Waterfox user preference overlay is selected
               ansible.builtin.set_fact:
-                waterfox_user_content: >-
-                  {{ waterfox_user_content ~ '\n\n'
-                     ~ (lookup('ansible.builtin.file', item.item) | trim) }}
-              loop: "{{ waterfox_user_overlay_stats.results }}"
-              loop_control:
-                label: "{{ item.item }}"
-              when: >-
-                item.item == (waterfox_user_overlay_stats.results
-                              | selectattr('stat.isreg', 'defined')
-                              | selectattr('stat.isreg') | map(attribute='item') | first | default(''))
+                waterfox_user_overlay: >-
+                  {{ waterfox_user_overlay_stats.results
+                     | selectattr('stat.isreg', 'defined') | selectattr('stat.isreg')
+                     | map(attribute='item') | first | default('') }}
 
-            - name: Current Waterfox user preferences are read
-              ansible.builtin.slurp:
-                src: "{{ waterfox_selected }}/user.js"
-              register: waterfox_current_user_file
-              failed_when: false
-
-            - name: Waterfox managed preference keys are selected
-              ansible.builtin.set_fact:
-                waterfox_managed_keys: >-
-                  {{ waterfox_user_content
-                     | regex_findall("^user_pref\([\"']([^\"']+)[\"']", multiline=true) }}
-                waterfox_current_user: >-
-                  {{ waterfox_current_user_file.content | b64decode
-                     if waterfox_current_user_file.content is defined else '' }}
-                waterfox_kept_lines: []
-                waterfox_in_block: false
-
-            - name: Waterfox unmanaged preferences are kept
-              vars:
-                waterfox_line_keys: >-
-                  {{ item | regex_findall("^user_pref\([\"']([^\"']+)[\"']") }}
-              ansible.builtin.set_fact:
-                waterfox_kept_lines: >-
-                  {{ waterfox_kept_lines + [item]
-                     if not waterfox_in_block
-                        and item != '// BEGIN jsh preferences'
-                        and item != '// END jsh preferences'
-                        and (waterfox_line_keys | length == 0
-                             or (waterfox_line_keys[0] not in waterfox_managed_keys
-                                 and waterfox_line_keys[0] != 'browser.uiCustomization.state'))
-                     else waterfox_kept_lines }}
-                waterfox_in_block: >-
-                  {{ true if item == '// BEGIN jsh preferences'
-                     else false if item == '// END jsh preferences'
-                     else waterfox_in_block }}
-              loop: "{{ waterfox_current_user.splitlines() }}"
-              loop_control:
-                label: "{{ item | truncate(80) }}"
+            - name: Waterfox user preferences are checked
+              ansible.builtin.stat:
+                path: "{{ waterfox_selected }}/user.js"
+              register: waterfox_user_stat
 
             - name: Waterfox user preferences are assembled
-              ansible.builtin.set_fact:
-                waterfox_user_content: >-
-                  {{ ((waterfox_kept_lines | join('\n') | trim) ~ '\n\n'
-                      if waterfox_kept_lines | join('\n') | trim else '')
-                     ~ '// BEGIN jsh preferences\n' ~ (waterfox_user_content | trim)
-                     ~ '\n// END jsh preferences' }}
+              ansible.builtin.command:
+                argv:
+                  - bash
+                  - -c
+                  - |
+                    set -euo pipefail
+                    managed=$(mktemp)
+                    trap 'rm -f "${managed}"' EXIT
+                    cat "$1" >"${managed}"
+                    if [[ -n $2 ]]; then
+                      printf '\n' >>"${managed}"
+                      cat "$2" >>"${managed}"
+                    fi
+                    current=$3
+                    [[ -f ${current} ]] || current=/dev/null
+                    awk '
+                      FNR == NR {
+                        if ($0 ~ /^user_pref\(["\047]/) {
+                          key=$0
+                          sub(/^user_pref\(["\047]/, "", key)
+                          sub(/["\047].*$/, "", key)
+                          if (key == "browser.uiCustomization.state") next
+                          keys[key]=1
+                        }
+                        managed=managed $0 "\n"
+                        next
+                      }
+                      $0 == "// BEGIN jsh preferences" { block=1; next }
+                      $0 == "// END jsh preferences" { block=0; next }
+                      block { next }
+                      /^user_pref\(["\047]/ {
+                        key=$0
+                        sub(/^user_pref\(["\047]/, "", key)
+                        sub(/["\047].*$/, "", key)
+                        if (key in keys || key == "browser.uiCustomization.state") next
+                      }
+                      { kept=kept $0 "\n" }
+                      END {
+                        sub(/[[:space:]]+$/, "", kept)
+                        sub(/[[:space:]]+$/, "", managed)
+                        if (kept != "") printf "%s\n\n", kept
+                        printf "// BEGIN jsh preferences\n%s\n// END jsh preferences\n", managed
+                      }
+                    ' "${managed}" "${current}"
+                  - jsh-waterfox-user
+                  - "{{ jsh_root }}/ansible/roles/waterfox/files/user.js"
+                  - "{{ waterfox_user_overlay }}"
+                  - "{{ waterfox_selected }}/user.js"
+              register: waterfox_desired_user
+              changed_when: false
+              check_mode: false
 
             - name: "{{ waterfox_selected }}/user.js is pending"
               ansible.builtin.copy:
                 content: |
-                  {{ waterfox_user_content }}
+                  {{ waterfox_desired_user.stdout }}
                 dest: "{{ waterfox_selected }}/user.js"
-                mode: "0644"
+                mode: "{{ waterfox_user_stat.stat.mode | default('0600') }}"
                 backup: true
               check_mode: true
               register: waterfox_user_pending
+
+            - name: Waterfox toolbar extensions are checked
+              ansible.builtin.command:
+                argv: ["{{ role_path }}/files/toolbar.sh", "{{ waterfox_selected }}"]
+                stdin: "{{ waterfox_policy_values | to_json }}"
+              environment: >-
+                {{ jsh_script_env | combine({'JSH_TOOLBAR_PROBE': '1'}) }}
+              register: waterfox_toolbar_probe
+              changed_when: false
+              check_mode: false
+
+            - name: ok
+              ansible.builtin.debug:
+                msg: Waterfox profile preferences are current
+              when: >-
+                waterfox_user_pending is not changed
+                and waterfox_toolbar_probe.stdout != 'pending'
 
             - name: Waterfox restarts for its profile settings
               ansible.builtin.include_role:
                 name: app
               vars:
                 app_label: Waterfox
-                app_process: "{{ 'Waterfox' if jsh_platform == 'darwin' else 'waterfox' }}"
+                app_process: waterfox|waterfox-bin|Waterfox
                 app_launch: >-
                   {{ ['open', '-a', 'Waterfox'] if jsh_platform == 'darwin'
                      else ['flatpak', 'run', 'net.waterfox.waterfox']
@@ -304,7 +320,9 @@
                 app_role: waterfox
                 app_tasks: apply.yml
                 app_apply: true
-                app_pending: "{{ waterfox_user_pending is changed }}"
+                app_pending: >-
+                  {{ waterfox_user_pending is changed
+                     or waterfox_toolbar_probe.stdout == 'pending' }}
                 app_live: true
 
             - name: Waterfox profile state directory exists
