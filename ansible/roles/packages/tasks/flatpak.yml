@@ -1,0 +1,38 @@
+---
+- name: Flatpak is found
+  ansible.builtin.command:
+    argv: [sh, -c, command -v flatpak]
+  register: packages_flatpak
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: notice
+  ansible.builtin.debug:
+    msg: flatpak is missing; apps were skipped
+  when: packages_flatpak.rc != 0
+
+- name: Flatpak apps
+  when: packages_flatpak.rc == 0
+  block:
+    - name: Flathub remote
+      community.general.flatpak_remote:
+        name: flathub
+        flatpakrepo_url: https://flathub.org/repo/flathub.flatpakrepo
+        method: user
+        state: present
+
+    - name: Flatpak apps are installed
+      community.general.flatpak:
+        name: "{{ item }}"
+        remote: flathub
+        method: user
+        state: present
+      loop: "{{ packages_selected.flatpak }}"
+
+    - name: Flatpak apps are up to date
+      ansible.builtin.command:
+        argv: "{{ [flatpak, update, --user, --noninteractive, -y] + packages_selected.flatpak }}"
+      register: packages_flatpak_update
+      changed_when: "'Nothing to do' not in packages_flatpak_update.stdout"
+      when: jsh_update | bool

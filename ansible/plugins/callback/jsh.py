@@ -13,7 +13,8 @@ Rules:
   absent), or changed. In check mode, diff lines follow as output items.
 - Probes are silent unless they fail: informational actions, tasks with check_mode false and
   changed_when false, and tasks forced into check mode to see whether a change is pending.
-- A debug task named notice or info becomes that kind of item with its message.
+- A debug task named notice, info, or ok becomes that kind of item with its message; roles use
+  ok to list what was already in place without a module call per entry.
 - Command output lines that already are events (helper scripts) pass through unchanged.
 """
 
@@ -44,8 +45,8 @@ SILENT = {
     "package_facts", "service_facts", "set_fact", "setup", "slurp", "stat",
 }
 PACKAGES = {
-    "apt", "dnf", "flatpak", "homebrew", "homebrew_cask", "homebrew_tap", "mas", "package",
-    "pip",
+    "apt", "dnf", "flatpak", "flatpak_remote", "homebrew", "homebrew_cask", "homebrew_tap", "mas",
+    "package", "pip",
 }
 SUDO_ERRORS = ("a password is required", "Missing sudo password", "incorrect sudo password")
 
@@ -240,7 +241,7 @@ class CallbackModule(CallbackBase):
         if self._group is None or (not item and "results" in raw):
             return
         action = _short(task.action)
-        if action == "debug" and task.name in ("notice", "info"):
+        if action == "debug" and task.name in ("notice", "info", "ok"):
             if not raw.get("skipped"):
                 self._item(task.name, raw.get("msg", ""))
             return
@@ -263,6 +264,8 @@ class CallbackModule(CallbackBase):
         if action in PACKAGES:
             return "changed" if state == "latest" else "added"
         if action == "git" and not raw.get("before"):
+            return "added"
+        if action in ("command", "shell") and args.get("creates"):
             return "added"
         if any(_was_absent(diff) for diff in _diffs(raw)):
             return "added"

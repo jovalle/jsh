@@ -18,4 +18,52 @@
       when: jsh_debug_facts | default(false) | bool
       tags: [always]
 
-  tasks: []
+  tasks:
+    - name: dev
+      ansible.builtin.include_role:
+        name: dev
+        apply:
+          tags: [dev]
+      tags: [dev]
+
+    - name: ghostty
+      ansible.builtin.include_role:
+        name: ghostty
+        apply:
+          tags: [ghostty]
+      tags: [ghostty]
+
+    - name: containers
+      ansible.builtin.include_role:
+        name: containers
+        apply:
+          tags: [containers]
+      tags: [containers]
+
+    - name: kube
+      ansible.builtin.include_role:
+        name: kube
+        apply:
+          tags: [kube]
+      tags: [kube]
+
+    - name: fonts
+      ansible.builtin.include_role:
+        name: fonts
+        apply:
+          tags: [fonts]
+      tags: [fonts]
+
+    - name: password
+      ansible.builtin.include_role:
+        name: password
+        apply:
+          tags: [password]
+      tags: [password]
+
+    - name: tools
+      ansible.builtin.include_role:
+        name: tools
+        apply:
+          tags: [tools]
+      tags: [tools]

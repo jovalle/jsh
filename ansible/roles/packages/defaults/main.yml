@@ -1,0 +1,21 @@
+---
+# Set by each group role's meta dependency: GROUP_packages and GROUP_packages_extra, keyed by
+# all, linux, darwin, debian, or rhel, then by manager (see plugins/filter/packages.py).
+packages_spec: {}
+packages_extra: {}
+
+# Casks that count as installed when the app exists outside Homebrew.
+packages_cask_apps:
+  sublime-text: /Applications/Sublime Text.app
+
+packages_brew_env:
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+  HOMEBREW_NO_INSTALL_CLEANUP: "1"
+  HOMEBREW_NO_INSTALL_UPGRADE: "1"
+  HOMEBREW_NO_ENV_HINTS: "1"
+  SUDO_ASKPASS: /usr/bin/false
+  GIT_TERMINAL_PROMPT: "0"
+
+packages_home: "{{ lookup('ansible.builtin.env', 'HOME') }}"
+packages_data: "{{ lookup('ansible.builtin.env', 'XDG_DATA_HOME') or packages_home ~ '/.local/share' }}"
+packages_state: "{{ lookup('ansible.builtin.env', 'XDG_STATE_HOME') or packages_home ~ '/.local/state' }}"

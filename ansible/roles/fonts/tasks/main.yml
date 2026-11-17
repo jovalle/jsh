@@ -1,0 +1,73 @@
+---
+- name: Font files are checked
+  ansible.builtin.stat:
+    path: "{{ fonts_directory }}/{{ item }}"
+  loop: "{{ fonts_files }}"
+  register: fonts_present
+  when: jsh_platform != 'darwin'
+
+- name: Font release
+  when: >-
+    jsh_platform != 'darwin'
+    and (jsh_update | bool or fonts_present.results | rejectattr('stat.exists') | list | length > 0)
+  block:
+    - name: JetBrains Mono Nerd Font
+      ansible.builtin.command:
+        cmd: "true"
+        creates: "{{ fonts_directory }}/{{ fonts_files[0] }}.preview"
+      when: ansible_check_mode
+
+    - name: Font release is read
+      ansible.builtin.uri:
+        url: "https://api.github.com/repos/{{ fonts_repository }}/releases/latest"
+        return_content: true
+      register: fonts_release
+      when: not ansible_check_mode
+
+    - name: Font download
+      when: not ansible_check_mode
+      vars:
+        fonts_assets: "{{ fonts_release.json.assets | selectattr('name', 'equalto', fonts_asset) | list }}"
+      block:
+        - name: Font release has one verified asset
+          ansible.builtin.assert:
+            that:
+              - fonts_assets | length == 1
+              - fonts_assets[0].digest | default('') is match('^sha256:[0-9a-f]{64}$')
+            fail_msg: "{{ fonts_asset }}: expected one asset with a SHA-256 digest"
+
+        - name: Font scratch directory
+          ansible.builtin.tempfile:
+            state: directory
+          register: fonts_scratch
+          check_mode: false
+
+        - name: Font archive is downloaded
+          ansible.builtin.get_url:
+            url: "{{ fonts_assets[0].browser_download_url }}"
+            dest: "{{ fonts_scratch.path }}/{{ fonts_asset }}"
+            checksum: "{{ fonts_assets[0].digest }}"
+            mode: "0644"
+          changed_when: false
+          check_mode: false
+
+        - name: Font directory exists
+          ansible.builtin.file:
+            path: "{{ fonts_directory }}"
+            state: directory
+            mode: "0755"
+
+        - name: JetBrains Mono Nerd Font
+          ansible.builtin.unarchive:
+            src: "{{ fonts_scratch.path }}/{{ fonts_asset }}"
+            dest: "{{ fonts_directory }}"
+            include: "{{ fonts_files }}"
+            mode: "0644"
+          notify: Font cache is refreshed
+
+        - name: Font scratch directory is removed
+          ansible.builtin.file:
+            path: "{{ fonts_scratch.path }}"
+            state: absent
+          changed_when: false
+          check_mode: false

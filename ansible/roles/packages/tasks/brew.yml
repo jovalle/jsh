@@ -1,0 +1,121 @@
+---
+- name: Homebrew is found
+  ansible.builtin.shell: |
+    command -v brew && exit 0
+    for brew in /opt/homebrew/bin/brew /usr/local/bin/brew /home/linuxbrew/.linuxbrew/bin/brew; do
+      if [ -x "$brew" ]; then echo "$brew"; exit 0; fi
+    done
+    exit 1
+  register: packages_brew
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: Homebrew is installed
+  ansible.builtin.fail:
+    msg: "Install Homebrew first: https://brew.sh"
+  when: packages_brew.rc != 0 and jsh_platform == 'darwin'
+
+- name: notice
+  ansible.builtin.debug:
+    msg: Homebrew is unavailable; shared Homebrew tools were skipped
+  when: packages_brew.rc != 0 and jsh_platform != 'darwin'
+
+- name: Homebrew packages
+  when: packages_brew.rc == 0
+  environment: "{{ packages_brew_env }}"
+  vars:
+    packages_brew_bin: "{{ packages_brew.stdout_lines | last }}"
+    packages_brew_path: "{{ packages_brew_bin | dirname }}"
+    packages_trust: "{{ (lookup('ansible.builtin.env', 'XDG_CONFIG_HOME') ~ '/homebrew')
+                        if lookup('ansible.builtin.env', 'XDG_CONFIG_HOME') else packages_home ~ '/.homebrew' }}"
+  block:
+    # Homebrew trusts taps and settings in this directory, so others must not write to it.
+    - name: Homebrew settings directory is checked
+      ansible.builtin.stat:
+        path: "{{ packages_trust }}"
+        follow: false
+      register: packages_trust_stat
+
+    - name: "{{ packages_trust }} is not group-writable"
+      ansible.builtin.file:
+        path: "{{ packages_trust }}"
+        mode: go-w
+      when: >-
+        packages_trust_stat.stat.isdir | default(false) and not packages_trust_stat.stat.islnk
+        and packages_trust_stat.stat.pw_name == lookup('ansible.builtin.env', 'USER')
+        and (packages_trust_stat.stat.wgrp or packages_trust_stat.stat.woth)
+
+    - name: Homebrew taps are listed
+      ansible.builtin.command:
+        argv: ["{{ packages_brew_bin }}", tap]
+      register: packages_taps
+      changed_when: false
+      check_mode: false
+      when: packages_selected.taps is defined
+
+    - name: ok
+      ansible.builtin.debug:
+        msg: "{{ item }}"
+      loop: "{{ packages_selected.taps | default([]) }}"
+      when: item in packages_taps.stdout_lines
+
+    - name: Homebrew taps are added
+      community.general.homebrew_tap:
+        name: "{{ item }}"
+        path: "{{ packages_brew_path }}"
+      loop: "{{ packages_selected.taps | default([]) }}"
+      when: item not in packages_taps.stdout_lines
+
+    - name: Homebrew formulae are listed
+      ansible.builtin.command:
+        argv: ["{{ packages_brew_bin }}", list, --formula, "-1"]
+      register: packages_formulae
+      changed_when: false
+      check_mode: false
+      when: packages_selected.brew is defined
+
+    - name: ok
+      ansible.builtin.debug:
+        msg: "{{ item }}"
+      loop: "{{ packages_selected.brew | default([]) }}"
+      when: (item | split('/') | last) in packages_formulae.stdout_lines
+
+    # Aliases such as python are not in the listing; the module finds them installed.
+    - name: Homebrew formulae are installed
+      community.general.homebrew:
+        name: "{{ item }}"
+        state: present
+        path: "{{ packages_brew_path }}"
+      loop: "{{ packages_selected.brew | default([]) }}"
+      when: (item | split('/') | last) not in packages_formulae.stdout_lines
+
+    - name: Homebrew casks are listed
+      ansible.builtin.command:
+        argv: ["{{ packages_brew_bin }}", list, --cask, "-1"]
+      register: packages_casks
+      changed_when: false
+      check_mode: false
+      when: packages_selected.casks is defined
+
+    - name: ok
+      ansible.builtin.debug:
+        msg: "{{ item }}"
+      loop: "{{ packages_selected.casks | default([]) }}"
+      when: item in packages_casks.stdout_lines or (packages_cask_apps[item] | default('/nonexistent')) is exists
+
+    - name: Homebrew casks are installed
+      community.general.homebrew_cask:
+        name: "{{ item }}"
+        state: present
+        path: "{{ packages_brew_path }}"
+      loop: "{{ packages_selected.casks | default([]) }}"
+      when: >-
+        item not in packages_casks.stdout_lines
+        and not (packages_cask_apps[item] | default('/nonexistent')) is exists
+
+    - name: App Store apps are installed
+      community.general.mas:
+        id: "{{ item }}"
+        state: present
+      loop: "{{ packages_selected.mas | default([]) }}"

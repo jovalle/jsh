@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  author: jsh
+  description: Install one group's packages with the platform's package managers
+  license: MIT
+  min_ansible_version: "2.22"
+  platforms:
+    - name: MacOSX
+      versions: [all]
+    - name: Debian
+      versions: [all]
+    - name: EL
+      versions: [all]
+# Every group role depends on this role with its own package list.
+allow_duplicates: true
+dependencies: []

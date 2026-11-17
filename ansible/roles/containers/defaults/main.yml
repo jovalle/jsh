@@ -1,0 +1,8 @@
+---
+containers_packages:
+  all:
+    brew: [colima, docker, docker-buildx, docker-compose, lima]
+  debian:
+    apt: [podman]
+  rhel:
+    dnf: [podman]

@@ -1,0 +1,6 @@
+---
+password_packages:
+  darwin:
+    casks: [bitwarden]
+  linux:
+    flatpak: [com.bitwarden.desktop]

@@ -1,0 +1,18 @@
+---
+galaxy_info:
+  author: jsh
+  description: Install the JetBrains Mono Nerd Font
+  license: MIT
+  min_ansible_version: "2.22"
+  platforms:
+    - name: MacOSX
+      versions: [all]
+    - name: Debian
+      versions: [all]
+    - name: EL
+      versions: [all]
+dependencies:
+  - role: packages
+    vars:
+      packages_spec: "{{ fonts_packages }}"
+      packages_extra: "{{ fonts_packages_extra | default({}) }}"

@@ -1,0 +1,16 @@
+---
+fonts_packages:
+  darwin:
+    casks: [font-jetbrains-mono-nerd-font]
+
+# Linux has no font cask, so the release archive is downloaded and verified instead.
+fonts_repository: ryanoasis/nerd-fonts
+fonts_asset: JetBrainsMono.tar.xz
+fonts_files:
+  - JetBrainsMonoNerdFont-Bold.ttf
+  - JetBrainsMonoNerdFont-BoldItalic.ttf
+  - JetBrainsMonoNerdFont-Italic.ttf
+  - JetBrainsMonoNerdFont-Regular.ttf
+fonts_directory: >-
+  {{ (lookup('ansible.builtin.env', 'XDG_DATA_HOME')
+      or lookup('ansible.builtin.env', 'HOME') ~ '/.local/share') ~ '/fonts/jsh' }}

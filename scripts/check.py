@@ -121,21 +121,6 @@ class ShellChecks(unittest.TestCase):
         self.assertIn("Finder was not running", failed_restart)
         self.assertNotIn("~ Finder restarted", failed_restart)
 
-    def test_fonts_on_darwin_check_the_homebrew_cask(self):
-        self.tool("uname", "echo Darwin")
-        self.tool("brew", "case \"$*\" in\n"
-                  "  \"list --cask -1\") echo font-jetbrains-mono-nerd-font ;;\n"
-                  "esac")
-        result = subprocess.run(
-            ["bash", str(ROOT / "scripts/fonts.sh"), "--dry-run"],
-            env=self.env | {"JSH_PLATFORM": "darwin"}, cwd=self.home,
-            capture_output=True, text=True, timeout=20,
-        )
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("Checking Homebrew casks...", result.stdout)
-        self.assertIn("✓ font-jetbrains-mono-nerd-font is installed", result.stdout)
-        self.assertIn("Skipping font download: Homebrew cask covers macOS", result.stdout)
-
     def test_linux_dry_run_skips_failed_timezone_query(self):
         self.tool("uname", "echo Linux")
         self.tool("sysctl", "echo 0")
@@ -2509,7 +2494,7 @@ esac""",
                                  (0, expected, ""))
 
     def test_setup_scripts_reject_unknown_options(self):
-        for name in ("wallpaper.sh", "password.sh", "sublime.sh", "shell.sh"):
+        for name in ("wallpaper.sh", "ansible.sh", "sublime.sh", "shell.sh"):
             with self.subTest(script=name):
                 result = subprocess.run(["bash", str(ROOT / "scripts" / name), "--dry-run", "--bogus"],
                                         env=self.env, cwd=self.home, capture_output=True,
@@ -4296,11 +4281,12 @@ esac''')
 
     def test_playbook_detects_platform_desktop_and_host(self):
         site = ROOT / "ansible/site.yml"
-        named = self.playbook(site, "--check", "-e", "jsh_debug_facts=true",
+        # No role has the facts tag, so only the always-tagged detection tasks run.
+        named = self.playbook(site, "--check", "--tags", "facts", "-e", "jsh_debug_facts=true",
                               JSH_PLATFORM="rhel", JSH_DESKTOP="xfce", JSH_HOST="colossus")
         self.assertEqual(named.returncode, 0, named.stdout + named.stderr)
         self.assertIn("rhel xfce colossus", named.stdout)
-        detected = self.playbook(site, "--check", "-e", "jsh_debug_facts=true")
+        detected = self.playbook(site, "--check", "--tags", "facts", "-e", "jsh_debug_facts=true")
         self.assertEqual(detected.returncode, 0, detected.stdout + detected.stderr)
         host = subprocess.run(["hostname", "-s"], capture_output=True, text=True).stdout.strip()
         platform = "darwin" if os.uname().sysname == "Darwin" else ""
@@ -4443,12 +4429,15 @@ esac''')
         self.assertIn(["item", "skip", "Skipping services on macOS: Linux only"], events)
 
     def test_callback_notice_task_adds_notice(self):
-        role = "- name: notice\n  ansible.builtin.debug: {msg: quit X}\n"
+        role = ("- name: notice\n  ansible.builtin.debug: {msg: quit X}\n"
+                "- name: ok\n  ansible.builtin.debug: {msg: \"{{ item }}\"}\n  loop: [jq, git]\n")
         result, events = self.run_play(
             "    - name: macos\n      ansible.builtin.include_role: {name: macos}\n",
             roles={"macos": role})
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn(["item", "notice", "quit X"], events)
+        self.assertIn(["item", "ok", "jq"], events)
+        self.assertIn(["item", "ok", "git"], events)
 
     def installer_fixture(self):
         checkout = self.home / "checkout"
@@ -4626,6 +4615,110 @@ esac''')
                                  ["changed", "Helium settings"]])
         self.assertEqual(target.read_text(), '{"user": 1}\n')
 
+    def packages_filter(self, script):
+        """Run Python with the packages filter loaded as `packages` and role defaults as YAML."""
+        prelude = (
+            "import importlib.util, json, sys, yaml\n"
+            f"spec = importlib.util.spec_from_file_location('f', {str(ROOT / 'ansible/plugins/filter/packages.py')!r})\n"
+            "module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)\n"
+            "packages = module.FilterModule().filters()['packages']\n"
+        )
+        result = subprocess.run([str(self.venv("python")), "-c", prelude + script],
+                                capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
+
+    def test_packages_filter_merges_platform_and_extra(self):
+        spec = {"all": {"brew": ["a"]}, "linux": {"flatpak": ["f"]},
+                "debian": {"apt": ["p"]}, "darwin": {"casks": ["c"]}}
+        result = self.packages_filter(
+            f"spec = {spec!r}\n"
+            "print(json.dumps([packages(spec, 'debian', {'debian': {'apt': ['q', 'p']}}),\n"
+            "                  packages(spec, 'darwin')]))\n")
+        self.assertEqual(result[0], {"brew": ["a"], "flatpak": ["f"], "apt": ["p", "q"]})
+        self.assertEqual(result[1], {"brew": ["a"], "casks": ["c"]})
+
+    def test_packages_filter_drops_foreign_managers(self):
+        spec = {"all": {"apt": ["p"], "dnf": ["d"], "casks": ["c"], "mas": ["1"]}}
+        result = self.packages_filter(
+            f"spec = {spec!r}\n"
+            "print(json.dumps({p: packages(spec, p) for p in ('darwin', 'debian', 'rhel')}))\n")
+        self.assertEqual(result, {"darwin": {"casks": ["c"], "mas": ["1"]},
+                                  "debian": {"apt": ["p"]}, "rhel": {"dnf": ["d"]}})
+
+    def test_package_roles_match_bash_lists(self):
+        tools = ("bash gum jq unzip zip zsh age ansible atuin bat btop bun coreutils curl "
+                 "diffutils direnv eza fd ffmpeg fnm fzf gawk gettext gh git git-lfs gnu-sed gnupg "
+                 "go go-task grc grep hugo just kew lazygit leaf-markdown-viewer libtiff libxcrypt "
+                 "make mpv ncdu neovim netcat nmap node parallel pnpm poetry readline ripgrep rsync "
+                 "rtk sops speedtest-go sshpass stow summarize syncthing tmux tree uv watch "
+                 "xguot/difi/difi xorriso xz zoxide").split()
+        tools_apt = ("jq make ripgrep rsync tmux unzip zip age ansible bat btop direnv fzf gh "
+                     "git-lfs golang-go grc hugo mpv ncdu netcat-openbsd nmap parallel python3-poetry "
+                     "sshpass stow syncthing yamllint zoxide build-essential bzip2 cargo cifs-utils "
+                     "desktop-file-utils dconf-cli dkms earlyoom eza fd-find flatpak gnome-keyring "
+                     "gnupg libarchive-tools libnotify-bin net-tools nfs-common nodejs ntfs-3g "
+                     "nvme-cli openssh-client openssh-server pipewire-pulse python3-yaml sqlite3 tar "
+                     "wireplumber xbindkeys xclip xdg-utils x11-xserver-utils xz-utils yq "
+                     "systemd-zram-generator").split()
+        tools_dnf = ("jq make rsync tmux unzip zip bzip2 cargo cifs-utils desktop-file-utils "
+                     "dconf dkms earlyoom eza fd-find flatpak gcc gcc-c++ gnome-keyring gnupg2 "
+                     "libarchive libnotify mpv net-tools nfs-utils nodejs ntfs-3g nvme-cli "
+                     "openssh-clients openssh-server pipewire-pulseaudio python3-pyyaml readline "
+                     "ripgrep sqlite syncthing tar wireplumber xbindkeys xclip xdg-utils xrandr xz yq "
+                     "zram-generator").split()
+        tools_uv = [{"command": "just", "package": "rust-just"},
+                    {"command": "tmail", "package": "tmail-cli"}]
+        dev = ("actionlint autopep8 bats-core black commitizen commitlint eslint gitleaks hadolint "
+               "markdownlint-cli pre-commit prettier pylint shellcheck shfmt yamllint").split()
+        dev_uv = [{"command": "check-yaml", "package": "pre-commit-hooks"}]
+        containers = "colima docker docker-buildx docker-compose lima".split()
+        ghostty = [{"name": "ghostty", "arm": "aarch64", "amd": "x86_64",
+                    "release": "https://api.github.com/repos/pkgforge-dev/ghostty-appimage/releases/latest"}]
+
+        def linux(**managers):
+            return {"debian": dict(managers), "rhel": dict(managers)}
+
+        expected = {
+            "dev": {p: {"brew": dev, "uv": dev_uv} for p in ("darwin", "debian", "rhel")},
+            "kube": {p: {"brew": "helm helmfile k9s kubernetes-cli".split()}
+                     for p in ("darwin", "debian", "rhel")},
+            "containers": {"darwin": {"brew": containers},
+                           "debian": {"brew": containers, "apt": ["podman"]},
+                           "rhel": {"brew": containers, "dnf": ["podman"]}},
+            "password": {"darwin": {"casks": ["bitwarden"]},
+                         **linux(flatpak=["com.bitwarden.desktop"])},
+            "fonts": {"darwin": {"casks": ["font-jetbrains-mono-nerd-font"]},
+                      "debian": {}, "rhel": {}},
+            "ghostty": {"darwin": {"casks": ["ghostty"]}, **linux(appimage=ghostty)},
+            "tools": {
+                "darwin": {"taps": ["gromgit/fuse", "xguot/difi"], "uv": tools_uv,
+                           "brew": "bash-completion duti gromgit/fuse/ntfs-3g-mac imagemagick mas".split()
+                           + tools},
+                "debian": {"taps": ["xguot/difi"], "brew": tools, "apt": tools_apt, "uv": tools_uv},
+                "rhel": {"taps": ["xguot/difi"], "brew": tools, "dnf": tools_dnf, "uv": tools_uv},
+            },
+        }
+        roles = str(ROOT / "ansible/roles")
+        result = self.packages_filter(
+            f"roles = {sorted(expected)!r}\n"
+            "out = {}\n"
+            "for role in roles:\n"
+            f"    defaults = yaml.safe_load(open({roles!r} + '/' + role + '/defaults/main.yml'))\n"
+            "    spec = defaults[role + '_packages']\n"
+            "    out[role] = {p: packages(spec, p) for p in ('darwin', 'debian', 'rhel')}\n"
+            "print(json.dumps(out))\n")
+
+        def key(value):
+            return json.dumps(value, sort_keys=True)
+
+        for role, platforms in expected.items():
+            for platform, managers in platforms.items():
+                actual = result[role][platform]
+                self.assertEqual(sorted(actual), sorted(managers), f"{role} {platform}")
+                for manager, names in managers.items():
+                    self.assertEqual(sorted(actual[manager], key=key), sorted(names, key=key),
+                                     f"{role} {platform} {manager}")
 
 if __name__ == "__main__":
     unittest.main()

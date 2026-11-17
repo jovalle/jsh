@@ -1,0 +1,18 @@
+---
+galaxy_info:
+  author: jsh
+  description: Install linters, formatters, and commit tooling
+  license: MIT
+  min_ansible_version: "2.22"
+  platforms:
+    - name: MacOSX
+      versions: [all]
+    - name: Debian
+      versions: [all]
+    - name: EL
+      versions: [all]
+dependencies:
+  - role: packages
+    vars:
+      packages_spec: "{{ dev_packages }}"
+      packages_extra: "{{ dev_packages_extra | default({}) }}"

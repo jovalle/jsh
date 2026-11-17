@@ -1,0 +1,7 @@
+---
+dev_packages:
+  all:
+    brew: [actionlint, autopep8, bats-core, black, commitizen, commitlint, eslint, gitleaks, hadolint,
+           markdownlint-cli, pre-commit, prettier, pylint, shellcheck, shfmt, yamllint]
+    uv:
+      - {command: check-yaml, package: pre-commit-hooks}

@@ -1,0 +1,4 @@
+---
+kube_packages:
+  all:
+    brew: [helm, helmfile, k9s, kubernetes-cli]

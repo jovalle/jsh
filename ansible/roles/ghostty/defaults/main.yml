@@ -1,0 +1,10 @@
+---
+ghostty_packages:
+  darwin:
+    casks: [ghostty]
+  linux:
+    appimage:
+      - name: ghostty
+        release: https://api.github.com/repos/pkgforge-dev/ghostty-appimage/releases/latest
+        arm: aarch64
+        amd: x86_64
