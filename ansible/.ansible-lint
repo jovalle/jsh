@@ -3,3 +3,8 @@
 offline: true
 exclude_paths:
   - requirements.yml
+# Task names are output text (see plugins/callback/jsh.py): `notice` and `info` are lowercase
+# by contract, and items such as "{{ app_label }} restarted" lead with their subject.
+skip_list:
+  - name[casing]
+  - name[template]

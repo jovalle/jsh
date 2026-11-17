@@ -4349,8 +4349,8 @@ esac''')
             "- hosts: localhost\n  gather_facts: false\n  tasks:\n" + tasks)
         result = self.playbook(
             play / "site.yml", *arguments,
-            ANSIBLE_STDOUT_CALLBACK="jsh", ANSIBLE_ROLES_PATH=str(play / "roles"),
-            JSH_OUTPUT="renderer", JSH_PLATFORM="darwin", **environment)
+            **{"ANSIBLE_STDOUT_CALLBACK": "jsh", "ANSIBLE_ROLES_PATH": str(play / "roles"),
+               "JSH_OUTPUT": "renderer", "JSH_PLATFORM": "darwin"} | environment)
         # str.splitlines() also splits at the \x1e marker itself.
         events = [line[1:].split("\t") for line in result.stdout.split("\n")
                   if line.startswith("\x1e")]
@@ -4499,6 +4499,132 @@ esac''')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("Skipping fonts preview: Ansible is not installed yet", result.stdout)
         self.assertFalse((self.home / "ansible").exists())
+
+    def settings(self, **arguments):
+        preview = ["--check", "--diff"] if arguments.pop("_check", False) else []
+        result = subprocess.run(
+            [str(self.venv("ansible")), "localhost", "-m", "settings", "-a", json.dumps(arguments),
+             *preview],
+            env=self.ansible_env(), cwd=self.home, stdin=subprocess.DEVNULL,
+            capture_output=True, text=True, timeout=120,
+        )
+        # Ad-hoc output prints any diff first, then "localhost | STATUS => {json}".
+        return result, json.loads(result.stdout.rsplit("=>", 1)[1])
+
+    def test_settings_deep_merges_and_keeps_unmanaged_keys(self):
+        target = self.home / "settings.json"
+        target.write_text('{"a": {"x": 1, "y": 2}, "k": true}\n')
+        result, output = self.settings(path=str(target), values={"a": {"y": 3}})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(output["changed"])
+        self.assertEqual(json.loads(target.read_text()), {"a": {"x": 1, "y": 3}, "k": True})
+        result, output = self.settings(path=str(target), values={"a": {"y": 3}})
+        self.assertFalse(output["changed"], result.stdout)
+
+    def test_settings_reads_jsonc_target(self):
+        target = self.home / "settings.json"
+        target.write_text('{\n  // line\n  "url": "http://x", /* block */\n  "a": [1, 2,],\n}\n')
+        result, output = self.settings(path=str(target), values={"b": 1})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(target.read_text()), {"url": "http://x", "a": [1, 2], "b": 1})
+
+    def test_settings_invalid_target_fails_without_writing(self):
+        target = self.home / "settings.json"
+        target.write_bytes(b'{"a":')
+        result = subprocess.run(
+            [str(self.venv("ansible")), "localhost", "-m", "settings", "-a",
+             json.dumps({"path": str(target), "values": {"b": 1}})],
+            env=self.ansible_env(), cwd=self.home, stdin=subprocess.DEVNULL,
+            capture_output=True, text=True, timeout=120,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("left unchanged", result.stdout + result.stderr)
+        self.assertEqual(target.read_bytes(), b'{"a":')
+
+    def test_settings_overlays_apply_in_order(self):
+        source = self.home / "source.json"
+        source.write_text('{"a": 1}\n')
+        overlay = self.home / "overlay.json"
+        overlay.write_text('{"a": 2}\n')
+        target = self.home / "settings.json"
+        result, output = self.settings(path=str(target), source=str(source),
+                                       overlays=[str(overlay), str(self.home / "missing.json")])
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(target.read_text()), {"a": 2})
+
+    def test_settings_check_mode_writes_nothing_and_shows_diff(self):
+        target = self.home / "settings.json"
+        target.write_text('{"a": 1}\n')
+        result, output = self.settings(path=str(target), values={"new": 1}, _check=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(output["changed"])
+        self.assertIn('+  "new": 1', result.stdout)
+        self.assertEqual(target.read_text(), '{"a": 1}\n')
+
+    def test_settings_shallow_and_replace(self):
+        target = self.home / "settings.json"
+        target.write_text('{"a": {"x": 1}, "b": 1}\n')
+        self.settings(path=str(target), values={"a": {"y": 1}}, merge="shallow")
+        self.assertEqual(json.loads(target.read_text()), {"a": {"y": 1}, "b": 1})
+        self.settings(path=str(target), values={"c": 1}, merge="replace")
+        self.assertEqual(json.loads(target.read_text()), {"c": 1})
+
+    def app_play(self, target, *arguments, **environment):
+        self.tool("pgrep", '[ -e "$HOME/closed" ] && exit 1\necho 123')
+        self.tool("osascript", 'touch "$HOME/closed"\nprintf "%s\\n" "$*" >> "$HOME/osascript.log"')
+        self.tool("pkill", 'touch "$HOME/closed"')
+        self.tool("helium-launch", 'rm -f "$HOME/closed"\ntouch "$HOME/launched"')
+        settings = f'  settings: {{path: "{target}", values: {{managed: true}}}}\n'
+        main = (
+            "- name: Helium settings are pending\n" + settings +
+            "  check_mode: true\n  register: pending\n"
+            "- name: Helium restarts for its settings\n"
+            "  ansible.builtin.include_role:\n    name: app\n"
+            "  vars:\n    app_label: Helium\n    app_process: Helium\n"
+            f"    app_launch: [\"{self.tools}/helium-launch\"]\n"
+            "    app_role: helium\n    app_tasks: apply.yml\n"
+            "    app_pending: \"{{ pending is changed }}\"\n"
+        )
+        apply = "- name: Helium settings\n" + settings
+        play = self.home / "play/roles/helium/tasks"
+        play.mkdir(parents=True)
+        (play / "apply.yml").write_text(apply)
+        return self.run_play(
+            "    - name: helium\n      ansible.builtin.include_role: {name: helium}\n",
+            *arguments, roles={"helium": main},
+            ANSIBLE_ROLES_PATH=f"{self.home / 'play/roles'}:{ROOT / 'ansible/roles'}",
+            **environment)
+
+    def test_app_role_closes_applies_and_reopens(self):
+        target = self.home / "settings.json"
+        target.write_text('{"user": 1}\n')
+        result, events = self.app_play(target)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        items = [event[1:3] for event in events if event[0] == "item"]
+        self.assertEqual(items, [["info", "Closing Helium"], ["changed", "Helium settings"],
+                                 ["info", "Reopening Helium"], ["changed", "Helium restarted"]])
+        self.assertTrue((self.home / "launched").exists())
+        self.assertEqual(json.loads(target.read_text()), {"user": 1, "managed": True})
+
+    def test_app_role_keep_apps_skips_with_notice(self):
+        target = self.home / "settings.json"
+        target.write_text('{"user": 1}\n')
+        result, events = self.app_play(target, JSH_KEEP_APPS="1")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(["item", "notice", "quit Helium, then run jsh update to apply its settings"],
+                      events)
+        self.assertEqual(target.read_text(), '{"user": 1}\n')
+        self.assertFalse((self.home / "osascript.log").exists())
+
+    def test_app_role_preview_lists_settings_once(self):
+        target = self.home / "settings.json"
+        target.write_text('{"user": 1}\n')
+        result, events = self.app_play(target, "--check")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        items = [event[1:3] for event in events if event[0] == "item"]
+        self.assertEqual(items, [["notice", "Helium must close and reopen for pending changes"],
+                                 ["changed", "Helium settings"]])
+        self.assertEqual(target.read_text(), '{"user": 1}\n')
 
 
 if __name__ == "__main__":

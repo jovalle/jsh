@@ -12,7 +12,7 @@ Rules:
 - Changed results are added (package installs, files that did not exist), removed (state
   absent), or changed. In check mode, diff lines follow as output items.
 - Probes are silent unless they fail: informational actions, tasks with check_mode false and
-  changed_when false, and check-mode probes in a real run.
+  changed_when false, and tasks forced into check mode to see whether a change is pending.
 - A debug task named notice or info becomes that kind of item with its message.
 - Command output lines that already are events (helper scripts) pass through unchanged.
 """
@@ -217,11 +217,13 @@ class CallbackModule(CallbackBase):
     def _silent(self, task, action: str) -> bool:
         if action in SILENT:
             return True
-        if task.check_mode is True and not self._check:
+        # task.check_mode also follows --check, so read what the task itself declares.
+        declared = (task.get_ds() or {}).get("check_mode")
+        if declared is True:
             return True
         changed_when = task.changed_when
         never = changed_when is False or changed_when == [False]
-        return never and task.check_mode is False
+        return never and declared is False
 
     def _passthrough(self, raw: dict) -> bool:
         stdout = raw.get("stdout")
@@ -239,7 +241,8 @@ class CallbackModule(CallbackBase):
             return
         action = _short(task.action)
         if action == "debug" and task.name in ("notice", "info"):
-            self._item(task.name, raw.get("msg", ""))
+            if not raw.get("skipped"):
+                self._item(task.name, raw.get("msg", ""))
             return
         if self._passthrough(raw) or self._silent(task, action):
             return

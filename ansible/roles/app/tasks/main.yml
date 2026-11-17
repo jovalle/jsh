@@ -1,0 +1,50 @@
+---
+# Apps rewrite their settings when they quit, so pending changes are applied while closed.
+- name: App settings are pending
+  when: app_pending | bool
+  block:
+    - name: App process is checked
+      ansible.builtin.command:
+        argv: [pgrep, -u, "{{ app_uid }}", -x, "{{ app_process }}"]
+      register: app_running
+      changed_when: false
+      check_mode: false
+      failed_when: app_running.rc not in [0, 1]
+
+    - name: Settings apply while the app is closed
+      ansible.builtin.include_role:
+        name: "{{ app_role }}"
+        tasks_from: "{{ app_tasks }}"
+      when: app_running.rc != 0
+
+    - name: Running app keeps its settings until it closes
+      when: app_running.rc == 0 and jsh_keep_apps | bool
+      block:
+        - name: Settings apply to the open app
+          ansible.builtin.include_role:
+            name: "{{ app_role }}"
+            tasks_from: "{{ app_tasks }}"
+          when: app_live | bool
+
+        - name: notice
+          ansible.builtin.debug:
+            msg: "{{ 'restart ' ~ app_label ~ ' to apply its changes' if app_live | bool
+                     else 'quit ' ~ app_label ~ ', then run jsh update to apply its settings' }}"
+
+    - name: Running app restarts
+      when: app_running.rc == 0 and not jsh_keep_apps | bool
+      block:
+        - name: notice
+          ansible.builtin.debug:
+            msg: "{{ app_label }} must close and reopen for pending changes"
+          when: ansible_check_mode
+
+        - name: Pending settings preview
+          ansible.builtin.include_role:
+            name: "{{ app_role }}"
+            tasks_from: "{{ app_tasks }}"
+          when: ansible_check_mode
+
+        - name: App restarts with its settings
+          ansible.builtin.include_tasks: restart.yml
+          when: not ansible_check_mode
