@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Wox
+Exec="{{ wox_executable | replace('\', '\\') | replace('"', '\"') | replace('$', '\$') | replace('`', '\`') | replace('%', '%%') }}"
+Terminal=false
+X-GNOME-Autostart-enabled=true

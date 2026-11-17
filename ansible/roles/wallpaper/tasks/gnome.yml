@@ -1,0 +1,19 @@
+---
+- name: GNOME wallpaper keys are listed
+  ansible.builtin.command:
+    argv: [gsettings, list-keys, org.gnome.desktop.background]
+  register: wallpaper_gnome_keys
+  changed_when: false
+  check_mode: false
+
+- name: GNOME wallpaper images are set
+  community.general.dconf:
+    key: "/org/gnome/desktop/background/{{ item | replace('-', '_') }}"
+    value: "{{ ('file://' ~ (wallpaper_realpath.stdout | urlencode)) | to_json }}"
+  loop: [picture-uri, picture-uri-dark]
+  when: item in wallpaper_gnome_keys.stdout_lines
+
+- name: GNOME wallpaper uses zoom
+  community.general.dconf:
+    key: /org/gnome/desktop/background/picture-options
+    value: "'zoom'"

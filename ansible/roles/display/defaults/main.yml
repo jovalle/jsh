@@ -1,0 +1,5 @@
+---
+display_packages:
+  darwin:
+    brew: [displayplacer]
+display_resolution_script: "{{ jsh_root }}/ansible/roles/display/files/resolution.swift"

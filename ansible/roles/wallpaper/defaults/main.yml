@@ -1,0 +1,6 @@
+---
+wallpaper_home: "{{ lookup('ansible.builtin.env', 'HOME') }}"
+wallpaper_image: >-
+  {{ (wallpaper_home ~ '/' ~ jsh_wallpaper[2:]) if jsh_wallpaper.startswith('~/')
+     else jsh_wallpaper if jsh_wallpaper.startswith('/')
+     else lookup('ansible.builtin.env', 'PWD') ~ '/' ~ jsh_wallpaper }}

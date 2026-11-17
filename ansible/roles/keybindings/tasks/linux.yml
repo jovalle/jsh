@@ -1,0 +1,34 @@
+---
+- name: Launcher commands are found
+  ansible.builtin.command:
+    argv: [sh, -c, "command -v \"$1\"", sh, "{{ item.command | split | first }}"]
+  loop: "{{ keybindings_launchers[jsh_desktop] }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: keybindings_commands
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: Launcher shortcuts are managed
+  ansible.builtin.include_tasks: shortcut.yml
+  loop: "{{ keybindings_commands.results }}"
+  loop_control:
+    loop_var: keybindings_launcher
+    label: "{{ keybindings_launcher.item.name }}"
+  vars:
+    keybindings_shortcut_name: "{{ keybindings_launcher.item.name }}"
+    keybindings_shortcut_gnome: "{{ keybindings_launcher.item.binding }}"
+    keybindings_shortcut_xfce: "{{ keybindings_launcher.item.binding | replace('<Control>', '<Primary>') }}"
+    keybindings_shortcut_command: "{{ keybindings_launcher.item.command }}"
+    keybindings_shortcut_slug: "jsh-{{ keybindings_launcher.item.name | lower | replace(' ', '-') }}"
+  when: keybindings_launcher.rc == 0
+
+- name: info
+  ansible.builtin.debug:
+    msg: >-
+      {{ item.item.name }} shortcut: {{ item.item.command | split | first }} is not installed
+  loop: "{{ keybindings_commands.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: item.rc != 0

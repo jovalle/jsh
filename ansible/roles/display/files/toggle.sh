@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # Toggle an X11 ultrawide display between physical and split layouts.
 set -euo pipefail
-SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 export JSH_OUTPUT=plain
 # shellcheck source=scripts/lib/common.sh
-. "${SCRIPT_DIR}/../lib/common.sh" "$@"
+. "${JSH_ROOT:?}/scripts/lib/common.sh" "$@"
 unset JSH_OUTPUT
 
 readonly LEFT_NAME=jsh-left RIGHT_NAME=jsh-right
@@ -84,7 +83,7 @@ finish_layout() {
   local desktop
   desktop=$(linux_desktop)
   [[ ${desktop} != xfce ]] || settle_xfce_layout || return
-  bash "${JSH_ROOT}/scripts/wallpaper.sh" >/dev/null 2>&1 || true
+  jsh::playbook wallpaper >/dev/null 2>&1 || true
   if [[ ${desktop} == xfce ]]; then
     [[ ${1:-} != split ]] || span_xfce_wallpaper
     sleep 0.2

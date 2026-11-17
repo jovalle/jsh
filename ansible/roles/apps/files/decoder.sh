@@ -1,46 +1,91 @@
 #!/usr/bin/env bash
-# Open Markdown in MacDown 3000 and install the macOS SACD/DSD decoder for foobar2000.
+# Install or update the foobar2000 SACD decoder from its SourceForge release feed.
 set -euo pipefail
-SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
-# shellcheck source=scripts/lib/apps.sh
-. "${SCRIPT_DIR}/lib/apps.sh" "$@"
-jsh::packages apps
-[[ $(uname -s) == Darwin ]] || jsh::skip "app configuration: macOS only"
-if [[ -d /Applications/MacDown\ 3000.app ]]; then
-  jsh::step check "MacDown 3000 document handlers"
-  # Setting a default app through LaunchServices asks the user to confirm each type, so
-  # write the handlers to its preferences and restart the per-user lsd, which reads them.
-  domain=com.apple.LaunchServices/com.apple.launchservices.secure
-  defaults export "${domain}" "${APP_TMP}/handlers.plist"
-  handlers=$(plutil -extract LSHandlers json -o - "${APP_TMP}/handlers.plist" 2>/dev/null) || handlers='[]'
-  # .md and .markdown share a declared type; other extensions only have dynamic types,
-  # which LaunchServices records by extension.
-  handlers=$(jq -c --arg bundle app.macdown.macdown3000 '
-    def key: .LSHandlerContentType //
-      if .LSHandlerContentTagClass == "public.filename-extension" then "." + .LSHandlerContentTag else null end;
-    def mine: .LSHandlerRoleAll == $bundle and ([keys[] | select(startswith("LSHandlerRole"))] == ["LSHandlerRoleAll"]);
-    . as $handlers
-    | [$ARGS.positional[] | . as $target
-        | select([$handlers[] | select(key == $target)] | length == 0 or any(.[]; mine | not))] as $stale
-    | {stale: $stale,
-       handlers: (map(select(key as $key | $stale | index([$key]) | not)) + [$stale[]
-         | {LSHandlerRoleAll: $bundle, LSHandlerPreferredVersions: {LSHandlerRoleAll: "-"}}
-           + if startswith(".") then {LSHandlerContentTag: .[1:], LSHandlerContentTagClass: "public.filename-extension"}
-             else {LSHandlerContentType: .} end])}' \
-    --args net.daringfireball.markdown .mdx .mdown .mkd .mkdn .mdwn .mdtext .mdtxt <<<"${handlers}")
-  stale=$(jq -r '.stale | join(" ")' <<<"${handlers}")
-  if [[ -z ${stale} ]]; then
-    jsh::ok "MacDown 3000 opens .md .markdown .mdx .mdown .mkd .mkdn .mdwn .mdtext .mdtxt"
-  else
-    plutil -replace LSHandlers -json "$(jq -c .handlers <<<"${handlers}")" "${APP_TMP}/handlers.plist"
-    jsh::run defaults import "${domain}" "${APP_TMP}/handlers.plist"
-    # launchd restarts lsd on demand; kickstart is refused under System Integrity Protection.
-    lsd=$(launchctl list | awk '$3 == "com.apple.lsd" { print $1 }')
-    [[ ! ${lsd} =~ ^[0-9]+$ ]] || jsh::run kill "${lsd}"
-    formats=${stale/net.daringfireball.markdown/.md .markdown}
-    jsh::changed "MacDown 3000 opens ${formats}" "${formats} do not open in MacDown 3000"
+. "${JSH_ROOT:?}/scripts/lib/common.sh" "$@"
+APP_TMP=$(jsh::temp)
+
+app::with_closed() (
+  local label=$1 pattern=$2 callback=$3 pids index pid
+  shift 3
+  pids=$(pgrep -u "$(id -u)" -x "${pattern}" || :)
+  if [[ -z ${pids} ]]; then
+    "${callback}" "$@"
+    return
   fi
-fi
+  # APP_LIVE=1 marks callbacks whose writes survive while the app stays open.
+  if [[ ${JSH_KEEP_APPS:-0} == 1 ]]; then
+    if [[ ${APP_LIVE:-0} == 1 ]]; then
+      APP_OPEN=1 "${callback}" "$@" || return
+      jsh::notice "restart ${label} to apply its changes"
+    else
+      jsh::notice "quit ${label}, then run jsh update to apply its settings"
+    fi
+    return
+  fi
+  if [[ ${JSH_DRY_RUN:-0} == 1 ]]; then
+    jsh::notice "${label} must close and reopen for pending changes"
+    "${callback}" "$@"
+    return
+  fi
+  command -v "${APP_LAUNCH[0]}" >/dev/null 2>&1 || {
+    jsh::notice "cannot reopen ${label}; close it and rerun"
+    return 1
+  }
+  jsh::info "Closing ${label}"
+  if [[ $(uname -s) == Darwin ]]; then
+    app::bounded 10 osascript -e "tell application \"${label}\" to quit" >/dev/null 2>&1 || {
+      while IFS= read -r pid; do kill -TERM "${pid}" 2>/dev/null || :; done <<<"${pids}"
+    }
+  else
+    while IFS= read -r pid; do kill -TERM "${pid}" 2>/dev/null || :; done <<<"${pids}"
+  fi
+  for ((index = 0; index < 100; index++)); do
+    pgrep -u "$(id -u)" -x "${pattern}" >/dev/null || break
+    sleep 0.1
+  done
+  if pgrep -u "$(id -u)" -x "${pattern}" >/dev/null; then
+    jsh::notice "${label} did not close; changes were skipped"
+    return 1
+  fi
+  app::reopen() {
+    local index
+    jsh::info "Reopening ${label}"
+    jsh::detach "${APP_LAUNCH[@]}"
+    for ((index = 0; index < 50; index++)); do
+      if pgrep -u "$(id -u)" -x "${pattern}" >/dev/null; then
+        jsh::changed "${label} restarted" "${label} needs a restart"
+        return
+      fi
+      sleep 0.1
+    done
+    jsh::info "${label} did not restart; open it manually"
+  }
+  trap app::reopen EXIT
+  "${callback}" "$@"
+)
+
+app::bounded() (
+  local seconds=$1 pid timer result=0
+  shift
+  "$@" &
+  pid=$!
+  (
+    sleep "${seconds}"
+    kill -TERM "${pid}" 2>/dev/null || :
+    sleep 1
+    kill -KILL "${pid}" 2>/dev/null || :
+  ) &
+  timer=$!
+  trap '[[ -z ${pid:-} ]] || kill "${pid}" 2>/dev/null || :; kill "${timer}" 2>/dev/null || :' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  wait "${pid}" || result=$?
+  pid=
+  kill "${timer}" 2>/dev/null || :
+  wait "${timer}" 2>/dev/null || :
+  return "${result}"
+)
+
 components=${HOME}/Library/foobar2000-v2/user-components
 name=foo_input_sacd
 target=${components}/${name}.component

@@ -1,0 +1,15 @@
+---
+keybindings_domain: NSGlobalDomain
+keybindings_defaults_path: /usr/bin:/usr/local/bin
+keybindings_keyboard:
+  KeyRepeat: 2
+  InitialKeyRepeat: 15
+  AppleKeyboardUIMode: 3
+keybindings_menu_shortcuts: {}
+keybindings_launchers:
+  gnome:
+    - {name: Ghostty, binding: "<Super>Return", command: ghostty}
+    - {name: Helium, binding: "<Super>b", command: helium}
+  xfce:
+    - {name: Ghostty, binding: "<Super>Return", command: ghostty}
+    - {name: Helium, binding: "<Super>b", command: helium}

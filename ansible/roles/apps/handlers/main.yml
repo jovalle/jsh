@@ -1,0 +1,13 @@
+---
+- name: LaunchServices rereads document handlers
+  ansible.builtin.shell: |
+    set -o pipefail
+    pid=$(launchctl list | awk '$3 == "com.apple.lsd" { print $1 }')
+    case $pid in
+      *[!0-9]*|"") ;;
+      *) kill "$pid" ;;
+    esac
+  args:
+    executable: /bin/bash
+  changed_when: true
+  when: apps_restart_launchservices | bool

@@ -2199,13 +2199,14 @@ esac""",
         for name in ("pactl", "xrandr", "flock"):
             self.tool(name, "exit 0")
         cases = (
-            ("audio/cycle.sh", "would cycle the default audio output\n"),
-            ("display/toggle.sh", "would toggle the ultrawide display split\n"),
+            ("scripts/audio/cycle.sh", "would cycle the default audio output\n"),
+            ("ansible/roles/display/files/toggle.sh",
+             "would toggle the ultrawide display split\n"),
         )
         for relative, expected in cases:
             with self.subTest(script=relative):
                 result = subprocess.run(
-                    [shutil.which("bash"), str(ROOT / "scripts" / relative), "--dry-run"],
+                    [shutil.which("bash"), str(ROOT / relative), "--dry-run"],
                     env=self.env | {"NO_COLOR": "1", "JSH_DESKTOP": ""},
                     capture_output=True, text=True, timeout=10,
                 )
@@ -2213,7 +2214,7 @@ esac""",
                                  (0, expected, ""))
 
     def test_setup_scripts_reject_unknown_options(self):
-        for name in ("wallpaper.sh", "ansible.sh", "linux.sh", "shell.sh"):
+        for name in ("ansible.sh", "linux.sh", "shell.sh"):
             with self.subTest(script=name):
                 result = subprocess.run(["bash", str(ROOT / "scripts" / name), "--dry-run", "--bogus"],
                                         env=self.env, cwd=self.home, capture_output=True,
@@ -2740,76 +2741,6 @@ jsh::task "failing task" progress-fail
                 with self.assertRaises(ProcessLookupError):
                     os.kill(int(child.read_text()), 0)
                 self.assertEqual(list(self.home.glob("jsh.*")), [])
-
-    def test_wox_disables_clipboard_shortcut_without_changing_other_settings(self):
-        database = self.home / "wox.db"
-        entries = [
-            {"Hotkey": "Cmd+Shift+V", "Query": "cb ", "Disabled": False},
-            {"Hotkey": "Cmd+Shift+X", "Query": "other", "Disabled": False},
-        ]
-        with sqlite3.connect(database) as db:
-            db.execute('CREATE TABLE wox_settings ("key" TEXT PRIMARY KEY, "value" TEXT)')
-            db.executemany('INSERT INTO wox_settings VALUES (?, ?)', [
-                ("MainHotkey@darwin", "cmd+space"),
-                ("QueryHotkeys@darwin", json.dumps(entries)),
-            ])
-        source = (ROOT / "scripts/wox.sh").read_text()
-        harness = self.home / "wox-hotkey.sh"
-        harness.write_text(
-            '#!/usr/bin/env bash\nset -euo pipefail\n'
-            '. "$JSH_ROOT/scripts/lib/common.sh"\n'
-            'platform=darwin hotkey=cmd+space restart=0\n'
-            'wox::database() { printf "%s/wox.db\\n" "$HOME"; }\n'
-            'app::with_closed() { "$3"; }\n' +
-            source[source.index('jsh::step check "Wox hotkey"'):]
-        )
-
-        def run(dry_run="0"):
-            result = subprocess.run(["bash", str(harness)], cwd=self.home,
-                                    env=self.env | {"JSH_DRY_RUN": dry_run},
-                                    capture_output=True, text=True, timeout=10)
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            with sqlite3.connect(database) as db:
-                value = db.execute('SELECT value FROM wox_settings WHERE key = ?',
-                                   ("QueryHotkeys@darwin",)).fetchone()[0]
-            return json.loads(value), result.stdout
-
-        self.assertEqual(run("1")[0], entries)
-        updated, _ = run()
-        self.assertEqual(updated, [entries[0] | {"Disabled": True}, entries[1]])
-        unchanged, output = run()
-        self.assertEqual(unchanged, updated)
-        self.assertIn("Wox Command+Shift+V is disabled", output)
-        with sqlite3.connect(database) as db:
-            db.execute('DELETE FROM wox_settings WHERE key = ?', ("QueryHotkeys@darwin",))
-        result = subprocess.run(["bash", str(harness)], cwd=self.home, env=self.env,
-                                capture_output=True, text=True, timeout=10)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        with sqlite3.connect(database) as db:
-            self.assertIsNone(db.execute('SELECT value FROM wox_settings WHERE key = ?',
-                                         ("QueryHotkeys@darwin",)).fetchone())
-
-    def test_wox_dry_run_reports_required_start(self):
-        source = (ROOT / "scripts/wox.sh").read_text()
-        functions = source[source.index("wox::running() {"):
-                           source.index("wox::database() {")]
-        harness = self.home / "wox-start-preview.sh"
-        harness.write_text(
-            "#!/usr/bin/env bash\nset -euo pipefail\n"
-            ". \"$JSH_ROOT/scripts/lib/common.sh\"\n"
-            "APP_LAUNCH=(wox)\n" + functions +
-            "jsh::step check \"Wox startup\"\n"
-            "wox::open\n"
-        )
-        self.tool("pgrep", "exit 1")
-        result = subprocess.run(
-            ["bash", str(harness)], env=self.env | {"JSH_DRY_RUN": "1"},
-            cwd=self.home, capture_output=True, text=True, timeout=10,
-        )
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("! Wox needs to start  would change", result.stdout)
-        self.assertRegex(result.stdout, r"Preview complete\s+1 would change")
-        self.assertNotIn("Wox startup is unchecked", result.stdout)
 
     def test_xfce_plugin_preview_reports_descriptor_drift(self):
         runtime = self.home / "plugin-fixture"
@@ -4307,6 +4238,167 @@ esac''')
                                  ["changed", "Helium settings"]])
         self.assertEqual(target.read_text(), '{"user": 1}\n')
 
+    def personalization_play(self, group, variables, *arguments, **environment):
+        variables = {
+            "jsh_update": False,
+            "jsh_keep_apps": False,
+            "jsh_wallpaper": "",
+            "jsh_script_env": {
+                "JSH_ROOT": str(ROOT),
+                "JSH_PLATFORM": environment.get("JSH_PLATFORM", "darwin"),
+                "JSH_DESKTOP": environment.get("JSH_DESKTOP", "darwin"),
+                "JSH_HOST": "test",
+                "JSH_UPDATE": "0",
+                "JSH_KEEP_APPS": "0",
+                "JSH_DRY_RUN": "1" if "--check" in arguments else "0",
+                "JSH_OUTPUT": "renderer",
+            },
+        } | variables
+        include = (f"    - name: {group}\n"
+                   f"      ansible.builtin.include_role: {{name: {group}}}\n")
+        return self.run_play(
+            include, *arguments, "-e", json.dumps(variables),
+            ANSIBLE_ROLES_PATH=str(ROOT / "ansible/roles"), **environment)
+
+    @unittest.skipUnless(os.uname().sysname == "Darwin", "writes LaunchServices defaults")
+    def test_apps_role_replaces_only_stale_markdown_handlers(self):
+        import plistlib
+        domain = str(self.home / "launch-services")
+        plist = self.home / "handlers.plist"
+        handlers = [
+            {"LSHandlerContentType": "public.text", "LSHandlerRoleAll": "other.app"},
+            {"LSHandlerContentTag": "mdx", "LSHandlerContentTagClass":
+             "public.filename-extension", "LSHandlerRoleAll": "other.app"},
+        ]
+        with plist.open("wb") as stream:
+            plistlib.dump({"LSHandlers": handlers}, stream)
+        subprocess.run(["defaults", "import", domain, str(plist)], check=True)
+        macdown = self.home / "MacDown 3000.app"
+        macdown.mkdir()
+        result, events = self.personalization_play("apps", {
+            "apps_packages": {},
+            "apps_macdown_application": str(macdown),
+            "apps_launchservices_domain": domain,
+            "apps_decoder_enabled": False,
+            "apps_restart_launchservices": False,
+        })
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        exported = subprocess.run(
+            ["defaults", "export", domain, "-"], check=True, capture_output=True).stdout
+        updated = plistlib.loads(exported)["LSHandlers"]
+        self.assertEqual(next(item for item in updated
+                              if item.get("LSHandlerContentType") == "public.text"), handlers[0])
+        mdx = [item for item in updated if item.get("LSHandlerContentTag") == "mdx"]
+        self.assertEqual(mdx, [{
+            "LSHandlerContentTag": "mdx",
+            "LSHandlerContentTagClass": "public.filename-extension",
+            "LSHandlerPreferredVersions": {"LSHandlerRoleAll": "-"},
+            "LSHandlerRoleAll": "app.macdown.macdown3000",
+        }])
+        changed = [event[2] for event in events if event[:2] == ["item", "changed"]]
+        self.assertEqual(len(changed), 1)
+        self.assertIn(".mdx", changed[0])
+
+    @unittest.skipUnless(os.uname().sysname == "Darwin", "reads macOS defaults")
+    def test_keybindings_role_applies_integer_and_menu_shortcuts(self):
+        domain = str(self.home / "keyboard")
+        subprocess.run(["defaults", "write", domain, "KeyRepeat", "-int", "1"], check=True)
+        variables = {
+            "keybindings_domain": domain,
+            "keybindings_keyboard": {"KeyRepeat": 2},
+            "keybindings_menu_shortcuts": {"Test Menu": "@x"},
+        }
+        result, events = self.personalization_play("keybindings", variables)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        items = [event[1:3] for event in events if event[0] == "item"]
+        self.assertEqual(items, [["changed", "KeyRepeat is 2"],
+                                 ["changed", "Test Menu shortcut is @x"]])
+        result, events = self.personalization_play("keybindings", variables)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual([event[1:3] for event in events if event[0] == "item"],
+                         [["ok", "KeyRepeat is 2"],
+                          ["ok", "Test Menu shortcut is @x"]])
+
+    def test_display_role_reports_resolution_profile(self):
+        self.tool("displayplacer", "exit 0")
+        self.tool("xcrun", "if [ \"$1\" = --find ]; then exit 0; fi\nprintf \"id:1 res:1728x1117 scaling:on\\tBuilt-in display 1\\t300x200 mm\\t1728x1117\\t3456x2234\\ton\\t110.0\\t1728x1117\\t3456x2234\\ton\\t110.0\\n\"")
+        result, events = self.personalization_play("display", {"display_packages": {}})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(["item", "ok",
+                       "Built-in display 1 resolution is 1728x1117 (3456x2234, scaling on)"],
+                      events)
+
+    def test_wox_disables_clipboard_shortcut_without_changing_other_settings(self):
+        database = self.home / "wox.db"
+        entries = [
+            {"Hotkey": "Cmd+Shift+V", "Query": "cb ", "Disabled": False},
+            {"Hotkey": "Cmd+Shift+X", "Query": "other", "Disabled": False},
+        ]
+        with sqlite3.connect(database) as db:
+            db.execute("CREATE TABLE wox_settings (key TEXT PRIMARY KEY, value TEXT)")
+            db.executemany("INSERT INTO wox_settings VALUES (?, ?)", [
+                ("MainHotkey@darwin", "cmd+space"),
+                ("QueryHotkeys@darwin", json.dumps(entries)),
+            ])
+        application = self.home / "Wox.app"
+        application.mkdir()
+        self.tool("pgrep", "echo 123")
+        result, _ = self.personalization_play("wox", {
+            "wox_packages": {},
+            "wox_application": str(application),
+            "wox_agent_path": str(self.home / "jsh.wox.plist"),
+            "wox_database": str(database),
+            "wox_native_shortcuts": False,
+            "jsh_keep_apps": True,
+        })
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        with sqlite3.connect(database) as db:
+            value = db.execute("SELECT value FROM wox_settings WHERE key = ?",
+                               ("QueryHotkeys@darwin",)).fetchone()[0]
+        self.assertEqual(json.loads(value), [entries[0] | {"Disabled": True}, entries[1]])
+
+    def test_wox_dry_run_reports_required_start(self):
+        database = self.home / "wox.db"
+        with sqlite3.connect(database) as db:
+            db.execute("CREATE TABLE wox_settings (key TEXT PRIMARY KEY, value TEXT)")
+            db.execute("INSERT INTO wox_settings VALUES (?, ?)",
+                       ("MainHotkey@darwin", "cmd+space"))
+        application = self.home / "Wox.app"
+        application.mkdir()
+        self.tool("pgrep", "exit 1")
+        result, events = self.personalization_play("wox", {
+            "wox_packages": {},
+            "wox_application": str(application),
+            "wox_agent_path": str(self.home / "jsh.wox.plist"),
+            "wox_database": str(database),
+            "wox_native_shortcuts": False,
+        }, "--check")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(["item", "changed", "Wox started"], events)
+
+    def test_wox_dry_run_reports_hotkey_before_database_is_ready(self):
+        application = self.home / "Wox.app"
+        application.mkdir()
+        self.tool("pgrep", "echo 123")
+        result, events = self.personalization_play("wox", {
+            "wox_packages": {},
+            "wox_application": str(application),
+            "wox_agent_path": str(self.home / "jsh.wox.plist"),
+            "wox_database": str(self.home / "missing.db"),
+            "wox_native_shortcuts": False,
+        }, "--check")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(["item", "changed", "Wox hotkey is cmd+space"], events)
+        self.assertFalse((self.home / "missing.db").exists())
+
+    def test_wallpaper_role_rejects_a_missing_image(self):
+        missing = self.home / "missing.jpg"
+        result, events = self.personalization_play(
+            "wallpaper", {"jsh_wallpaper": str(missing)})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(["item", "fail", f"JSH_WALLPAPER is not a file: {missing} failed"],
+                      events)
+
     def browser_play(self, group, variables, **environment):
         variables = {"jsh_script_env": {
             "JSH_ROOT": str(ROOT),
@@ -4625,6 +4717,22 @@ exec /usr/bin/stat "$@"
             "fonts": {"darwin": {"casks": ["font-jetbrains-mono-nerd-font"]},
                       "debian": {}, "rhel": {}},
             "ghostty": {"darwin": {"casks": ["ghostty"]}, **linux(appimage=ghostty)},
+            "apps": {
+                "darwin": {"brew": ["spicetify-cli"],
+                           "casks": "android-platform-tools citrix-workspace foobar2000 macdown-3000 signal spotify tailscale-app todoist-app vorssaint zoom".split()},
+                **linux(flatpak=["com.spotify.Client", "com.todoist.Todoist"]),
+            },
+            "display": {"darwin": {"brew": ["displayplacer"]},
+                        "debian": {}, "rhel": {}},
+            "wox": {
+                "darwin": {"casks": ["wox"]},
+                "debian": {"apt": ["sqlite3"], "appimage": [{
+                    "name": "wox", "arm": "arm64", "amd": "amd64",
+                    "release": "https://api.github.com/repos/Wox-launcher/Wox/releases/latest"}]},
+                "rhel": {"dnf": ["sqlite"], "appimage": [{
+                    "name": "wox", "arm": "arm64", "amd": "amd64",
+                    "release": "https://api.github.com/repos/Wox-launcher/Wox/releases/latest"}]},
+            },
             "helium": {
                 "darwin": {"casks": ["helium-browser"]},
                 **linux(appimage=[{"name": "helium", "arm": "arm64", "amd": "x86_64",
@@ -4662,6 +4770,14 @@ exec /usr/bin/stat "$@"
                 for manager, names in managers.items():
                     self.assertEqual(sorted(actual[manager], key=key), sorted(names, key=key),
                                      f"{role} {platform} {manager}")
+
+    def test_archon_adds_only_the_apps_casks(self):
+        path = ROOT / "ansible/group_vars/archon.yml"
+        data = self.packages_filter(
+            f"print(json.dumps(yaml.safe_load(open({str(path)!r}))))\n")
+        self.assertEqual(data, {"apps_packages_extra": {"darwin": {"casks": [
+            "bambu-studio", "elgato-stream-deck", "macfuse", "mounty"]}}})
+
     @unittest.skipUnless(os.uname().sysname == "Darwin", "writes a plist with defaults")
     def test_macos_role_reports_each_preference_and_restarts(self):
         domain = str(self.home / "jsh-test")

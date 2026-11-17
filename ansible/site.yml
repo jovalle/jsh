@@ -75,6 +75,41 @@
           tags: [tools]
       tags: [tools]
 
+    - name: apps
+      ansible.builtin.include_role:
+        name: apps
+        apply:
+          tags: [apps]
+      tags: [apps]
+
+    - name: display
+      ansible.builtin.include_role:
+        name: display
+        apply:
+          tags: [display]
+      tags: [display]
+
+    - name: keybindings
+      ansible.builtin.include_role:
+        name: keybindings
+        apply:
+          tags: [keybindings]
+      tags: [keybindings]
+
+    - name: wox
+      ansible.builtin.include_role:
+        name: wox
+        apply:
+          tags: [wox]
+      tags: [wox]
+
+    - name: wallpaper
+      ansible.builtin.include_role:
+        name: wallpaper
+        apply:
+          tags: [wallpaper]
+      tags: [wallpaper]
+
     - name: vscode
       ansible.builtin.include_role:
         name: vscode

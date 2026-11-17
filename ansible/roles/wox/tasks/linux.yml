@@ -1,0 +1,24 @@
+---
+- name: Wox executable is found
+  ansible.builtin.command:
+    argv: [sh, -c, "command -v wox"]
+  register: wox_command
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: Wox Linux values are selected
+  ansible.builtin.set_fact:
+    wox_executable: >-
+      {{ wox_command.stdout if wox_command.rc == 0 else wox_home ~ '/.local/bin/wox' }}
+    wox_present: >-
+      {{ wox_command.rc == 0 or (wox_home ~ '/.local/bin/wox') is file }}
+    wox_platform: linux
+    wox_hotkey: super+space
+    wox_launch: >-
+      {{ [wox_command.stdout if wox_command.rc == 0 else wox_home ~ '/.local/bin/wox'] }}
+
+- name: info
+  ansible.builtin.debug:
+    msg: "Skipping Wox: executable is not installed"
+  when: not wox_present | bool

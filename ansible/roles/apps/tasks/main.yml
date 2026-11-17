@@ -1,0 +1,24 @@
+---
+- name: info
+  ansible.builtin.debug:
+    msg: "Skipping app configuration: macOS only"
+  when: jsh_platform != 'darwin'
+
+- name: MacDown 3000 application is checked
+  ansible.builtin.stat:
+    path: "{{ apps_macdown_application }}"
+  register: apps_macdown
+  when: jsh_platform == 'darwin'
+
+- name: MacDown 3000 document handlers are managed
+  ansible.builtin.include_tasks: handlers.yml
+  when: jsh_platform == 'darwin' and apps_macdown.stat.isdir | default(false)
+
+- name: foobar2000 SACD decoder
+  ansible.builtin.command:
+    argv: ["{{ jsh_root }}/ansible/roles/apps/files/decoder.sh"]
+  environment: "{{ jsh_script_env }}"
+  register: apps_decoder
+  changed_when: apps_decoder.stdout is reported_change
+  check_mode: false
+  when: jsh_platform == 'darwin' and apps_decoder_enabled | bool

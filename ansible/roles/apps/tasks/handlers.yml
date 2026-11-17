@@ -1,0 +1,110 @@
+---
+- name: LaunchServices preferences are read
+  ansible.builtin.command:
+    argv: [defaults, export, "{{ apps_launchservices_domain }}", -]
+  register: apps_launchservices
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: LaunchServices handlers are read
+  ansible.builtin.command:
+    argv: [plutil, -extract, LSHandlers, json, -o, -, -]
+    stdin: "{{ apps_launchservices.stdout }}"
+  register: apps_handlers_json
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: LaunchServices handler comparison is initialized
+  ansible.builtin.set_fact:
+    apps_handler_records: []
+    apps_handlers_current: >-
+      {{ apps_handlers_json.stdout | from_json if apps_handlers_json.rc == 0 else [] }}
+
+- name: LaunchServices handlers are indexed
+  ansible.builtin.set_fact:
+    apps_handler_records: >-
+      {{ apps_handler_records + [{'target': apps_handler_target, 'value': item}] }}
+  vars:
+    apps_handler_target: >-
+      {{ item.LSHandlerContentType | default(
+         '.' ~ item.LSHandlerContentTag
+         if item.LSHandlerContentTagClass | default('') == 'public.filename-extension'
+         else '') }}
+  loop: "{{ apps_handlers_current }}"
+  loop_control:
+    label: "{{ apps_handler_target | default('unmanaged', true) }}"
+
+- name: Missing MacDown 3000 handlers are selected
+  ansible.builtin.set_fact:
+    apps_handlers_stale: >-
+      {{ apps_markdown_targets | difference(apps_handler_records | map(attribute='target') | list) }}
+
+- name: Incorrect MacDown 3000 handlers are selected
+  ansible.builtin.set_fact:
+    apps_handlers_stale: "{{ apps_handlers_stale | union([item.target]) }}"
+  loop: "{{ apps_handler_records }}"
+  loop_control:
+    label: "{{ item.target | default('unmanaged', true) }}"
+  when: >-
+    item.target in apps_markdown_targets
+    and (item.value.LSHandlerRoleAll | default('') != apps_markdown_bundle
+         or item.value.keys() | select('match', '^LSHandlerRole') | list
+            != ['LSHandlerRoleAll'])
+
+- name: Desired LaunchServices handlers are initialized
+  ansible.builtin.set_fact:
+    apps_handlers_desired: >-
+      {{ apps_handler_records | rejectattr('target', 'in', apps_handlers_stale)
+         | map(attribute='value') | list }}
+
+- name: MacDown 3000 handlers are added
+  ansible.builtin.set_fact:
+    apps_handlers_desired: >-
+      {{ apps_handlers_desired + [{
+         'LSHandlerRoleAll': apps_markdown_bundle,
+         'LSHandlerPreferredVersions': {'LSHandlerRoleAll': '-'}}
+         | combine({'LSHandlerContentTag': item[1:],
+                    'LSHandlerContentTagClass': 'public.filename-extension'}
+                   if item.startswith('.')
+                   else {'LSHandlerContentType': item})] }}
+  loop: "{{ apps_markdown_targets | select('in', apps_handlers_stale) }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: MacDown 3000 handler labels are selected
+  ansible.builtin.set_fact:
+    apps_handler_formats: >-
+      {{ apps_handlers_stale
+         | map('regex_replace', '^net\.daringfireball\.markdown$', '.md .markdown')
+         | list }}
+
+- name: "MacDown 3000 opens {{ apps_handler_formats | join(' ') }}"
+  ansible.builtin.shell: |
+    set -euo pipefail
+    entries=()
+    while IFS= read -r entry; do entries+=("$entry"); done < <(
+      jq -r '
+        def plist:
+          if type == "object" then
+            "{ " + (to_entries | map((.key | @json) + " = " + (.value | plist) + ";") | join(" ")) + " }"
+          elif type == "array" then "( " + (map(plist) | join(", ")) + " )"
+          elif type == "string" then @json
+          elif type == "boolean" then if . then "TRUE" else "FALSE" end
+          else tostring end;
+        .[] | plist
+      '
+    )
+    defaults write {{ apps_launchservices_domain | quote }} LSHandlers -array "${entries[@]}"
+  args:
+    executable: /bin/bash
+    stdin: "{{ apps_handlers_desired | to_json }}"
+  changed_when: true
+  notify: LaunchServices rereads document handlers
+  when: apps_handlers_stale | length > 0
+
+- name: ok
+  ansible.builtin.debug:
+    msg: MacDown 3000 opens .md .markdown .mdx .mdown .mkd .mkdn .mdwn .mdtext .mdtxt
+  when: apps_handlers_stale | length == 0

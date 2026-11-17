@@ -1,0 +1,74 @@
+---
+- name: Conflicting XFCE Super+Space shortcut is absent
+  community.general.xfconf:
+    channel: xfce4-keyboard-shortcuts
+    property: /commands/custom/<Super>space
+    state: absent
+  register: wox_xfce_super
+  when: jsh_desktop == 'xfce'
+
+- name: XFCE application finder shortcut is managed
+  ansible.builtin.include_role:
+    name: keybindings
+    tasks_from: shortcut.yml
+  vars:
+    keybindings_shortcut_name: XFCE application finder
+    keybindings_shortcut_gnome: "<Control>space"
+    keybindings_shortcut_xfce: "<Primary>space"
+    keybindings_shortcut_command: xfce4-appfinder
+    keybindings_shortcut_slug: jsh-xfce-application-finder
+  when: jsh_desktop == 'xfce'
+
+- name: GNOME input-source shortcuts are read
+  community.general.dconf:
+    key: "/org/gnome/desktop/wm/keybindings/{{ item }}"
+    state: read
+  loop: [switch-input-source, switch-input-source-backward]
+  register: wox_gnome_switches
+  changed_when: false
+  check_mode: false
+  when: jsh_desktop == 'gnome'
+
+- name: GNOME Super+Space input-source shortcuts are absent
+  community.general.dconf:
+    key: "/org/gnome/desktop/wm/keybindings/{{ item.item }}"
+    value: >-
+      {{ (item.value | default('@as []') | regex_replace('^@as ', '') | from_yaml)
+         | reject('match', '^(<shift>)?<super>space$', ignorecase=true) | list | to_json }}
+  loop: "{{ wox_gnome_switches.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }} has no Super+Space binding"
+  register: wox_gnome_switches_written
+  when: jsh_desktop == 'gnome'
+
+- name: GNOME application-view shortcuts are read
+  community.general.dconf:
+    key: /org/gnome/shell/keybindings/toggle-application-view
+    state: read
+  register: wox_gnome_application
+  changed_when: false
+  check_mode: false
+  when: jsh_desktop == 'gnome'
+
+- name: GNOME application view includes Control+Space
+  vars:
+    wox_gnome_application_current: >-
+      {{ wox_gnome_application.value | default('@as []')
+         | regex_replace('^@as ', '') | from_yaml }}
+  community.general.dconf:
+    key: /org/gnome/shell/keybindings/toggle-application-view
+    value: >-
+      {{ (wox_gnome_application_current
+          if (wox_gnome_application_current
+              | select('match', '^<(control|primary|ctrl)>space$', ignorecase=true)
+              | list | length > 0)
+          else (wox_gnome_application_current | union(['<Control>space']))) | to_json }}
+  when: jsh_desktop == 'gnome'
+
+- name: Linux native shortcut change is recorded
+  ansible.builtin.set_fact:
+    wox_native_restart: >-
+      {{ (wox_xfce_super is changed)
+         if jsh_desktop == 'xfce'
+         else (wox_gnome_switches_written.results | default([])
+               | selectattr('changed') | list | length > 0) }}

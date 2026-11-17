@@ -1,0 +1,67 @@
+---
+- name: displayplacer is found
+  ansible.builtin.command:
+    argv: [sh, -c, "command -v displayplacer"]
+  register: display_displayplacer
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: Swift is found
+  ansible.builtin.command:
+    argv: [xcrun, --find, swift]
+  register: display_swift
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: info
+  ansible.builtin.debug:
+    msg: "Skipping display: displayplacer is not installed"
+  when: display_displayplacer.rc != 0
+
+- name: info
+  ansible.builtin.debug:
+    msg: "Skipping display: Swift is not available"
+  when: display_displayplacer.rc == 0 and display_swift.rc != 0
+
+- name: Display resolution profile is read
+  ansible.builtin.command:
+    argv: [xcrun, swift, "{{ display_resolution_script }}"]
+  register: display_resolution
+  changed_when: false
+  check_mode: false
+  when: display_displayplacer.rc == 0 and display_swift.rc == 0
+
+- name: info
+  ansible.builtin.debug:
+    msg: "Skipping display: no configurable displays"
+  when: display_resolution.stdout is defined and display_resolution.stdout | length == 0
+
+- name: Display resolution changes are initialized
+  ansible.builtin.set_fact:
+    display_pending: []
+  when: display_resolution.stdout is defined and display_resolution.stdout | length > 0
+
+- name: Display resolution profile is evaluated
+  ansible.builtin.include_tasks: profile.yml
+  loop: "{{ display_resolution.stdout_lines | default([]) }}"
+  loop_control:
+    loop_var: display_profile
+    label: "{{ display_profile | split('\t') | first }}"
+
+- name: Display resolutions are applied
+  ansible.builtin.command:
+    argv: "{{ [display_displayplacer.stdout] + (display_pending | map(attribute='argument') | list) }}"
+  changed_when: false
+  check_mode: false
+  when: display_pending | default([]) | length > 0 and not ansible_check_mode
+
+- name: Display resolutions are set
+  ansible.builtin.command:
+    argv: [/usr/bin/true]
+  loop: "{{ display_pending | default([]) }}"
+  loop_control:
+    label: "{{ item.label }}"
+  changed_when: true
+  check_mode: false

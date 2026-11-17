@@ -1,0 +1,4 @@
+---
+apps_packages_extra:
+  darwin:
+    casks: [bambu-studio, elgato-stream-deck, macfuse, mounty]
