@@ -3876,8 +3876,17 @@ esac''')
         } | environment
 
     def playbook(self, playbook, *arguments, **environment):
+        # defaults writes the real user's preferences whatever HOME is, so osx_defaults gets a
+        # stub that refuses; a check that needs it passes its own macos_defaults_path later.
+        blocked = self.home / "blocked"
+        if not blocked.is_dir():
+            blocked.mkdir()
+            stub = blocked / "defaults"
+            stub.write_text("#!/bin/sh\necho 'checks must not write real macOS preferences' >&2\nexit 1\n")
+            stub.chmod(0o755)
+        guard = json.dumps({"macos_defaults_path": str(blocked)})
         return subprocess.run(
-            [str(self.venv("ansible-playbook")), str(playbook), *arguments],
+            [str(self.venv("ansible-playbook")), str(playbook), "-e", guard, *arguments],
             env=self.ansible_env(**environment), cwd=self.home, stdin=subprocess.DEVNULL,
             capture_output=True, text=True, timeout=180,
         )
@@ -5128,6 +5137,19 @@ exit 0''')
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         calls = (self.home / "defaults.log").read_text().splitlines()
         self.assertEqual(calls, ["export broken -"])
+
+    @unittest.skipUnless(os.uname().sysname == "Darwin", "guards the real defaults domain")
+    def test_checks_cannot_write_real_macos_preferences(self):
+        before = subprocess.run(["defaults", "read", "com.apple.screencapture", "location"],
+                                capture_output=True, text=True).stdout
+        result, events = self.run_play(
+            "    - name: macos\n      ansible.builtin.include_role: {name: macos}\n",
+            ANSIBLE_ROLES_PATH=str(ROOT / "ansible/roles"))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("checks must not write real macOS preferences", result.stdout + result.stderr)
+        after = subprocess.run(["defaults", "read", "com.apple.screencapture", "location"],
+                               capture_output=True, text=True).stdout
+        self.assertEqual(after, before)
 
 if __name__ == "__main__":
     unittest.main()
