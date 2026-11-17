@@ -1,0 +1,14 @@
+---
+galaxy_info:
+  author: jsh
+  description: Install agent skill repositories and link their published skills
+  license: MIT
+  min_ansible_version: "2.22"
+  platforms:
+    - name: MacOSX
+      versions: [all]
+    - name: Debian
+      versions: [all]
+    - name: EL
+      versions: [all]
+dependencies: []

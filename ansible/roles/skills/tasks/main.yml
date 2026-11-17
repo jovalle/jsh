@@ -1,0 +1,41 @@
+---
+# Skill repositories track their default branch; jsh update pulls them.
+- name: Skill repositories are cloned # noqa: latest[git]
+  ansible.builtin.git:
+    repo: "{{ item.url }}"
+    dest: "{{ skills_vendor }}/{{ item.name }}"
+    depth: 1
+    update: "{{ jsh_update | bool }}"
+  loop: "{{ skills_repos }}"
+  loop_control:
+    label: "{{ item.name }}"
+  environment:
+    GIT_TERMINAL_PROMPT: "0"
+
+- name: Skill links are listed
+  ansible.builtin.set_fact:
+    skills_published: "{{ skills_links | links(skills_vendor, skills_home ~ '/.agents/skills') }}"
+    skills_local: >-
+      {{ ((skills_local_lists | select('file') | map('ansible.builtin.file') | first | default(''))
+          .splitlines() | reject('equalto', '') | map('split', '\t') | list)
+         | links(skills_home, skills_home ~ '/.agents/skills') }}
+    skills_own: "{{ skills_bundled | links(jsh_root ~ '/dotfiles/.agents/skills', skills_home ~ '/.agents/skills') }}"
+
+- name: notice
+  ansible.builtin.debug:
+    msg: "Skill source is missing: {{ item.src }}"
+  loop: "{{ skills_published | rejectattr('src', 'directory') }}"
+  when: not ansible_check_mode
+
+- name: info
+  ansible.builtin.debug:
+    msg: "local skill {{ item.dest | basename }}: {{ item.src }} is missing"
+  loop: "{{ skills_local | rejectattr('src', 'directory') }}"
+
+- name: Skills are linked
+  ansible.builtin.include_role:
+    name: link
+  vars:
+    link_items: >-
+      {{ (skills_published if ansible_check_mode else skills_published | selectattr('src', 'directory'))
+         + (skills_local | selectattr('src', 'directory')) + skills_own }}

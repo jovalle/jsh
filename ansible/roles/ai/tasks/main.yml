@@ -1,0 +1,106 @@
+---
+- name: Copilot instructions folder exists
+  ansible.builtin.file:
+    path: "{{ ai_home }}/.copilot/instructions"
+    state: directory
+    mode: u+rwx
+  when: (ai_home ~ '/.copilot') is directory
+
+- name: "{{ ai_home }}/.copilot/instructions/jsh.instructions.md"
+  ansible.builtin.copy:
+    dest: "{{ ai_home }}/.copilot/instructions/jsh.instructions.md"
+    mode: "0644"
+    content: |
+      ---
+      description: "Global rules from jsh: commit messages, naming, and secrets."
+      applyTo: "**"
+      ---
+      {{ lookup('ansible.builtin.file', role_path ~ '/files/instructions.md', rstrip=false) }}
+  when: (ai_home ~ '/.copilot') is directory
+
+- name: Agent instructions are written
+  ansible.builtin.copy:
+    src: instructions.md
+    dest: "{{ item }}"
+    mode: "0644"
+  loop: "{{ ai_instructions | select('regex', '.') | list }}"
+  when: item | dirname is directory
+
+- name: OpenCode and Codex are found
+  ansible.builtin.command:
+    argv: [sh, -c, 'command -v "$1"', sh, "{{ item }}"]
+  loop: [opencode, codex]
+  register: ai_commands
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: "{{ ai_config }}/opencode/opencode.json"
+  settings:
+    path: "{{ ai_config }}/opencode/opencode.json"
+    values:
+      $schema: https://opencode.ai/config.json
+      autoupdate: true
+  when: ai_commands.results[0].rc == 0 or (ai_config ~ '/opencode') is directory
+
+- name: Codex settings
+  community.general.ini_file:
+    path: "{{ ai_home }}/.codex/config.toml"
+    section: "{{ item.section }}"
+    option: "{{ item.option }}"
+    value: "{{ item.value }}"
+    no_extra_spaces: false
+    mode: "0600"
+  loop:
+    - {section: null, option: check_for_update_on_startup, value: "true"}
+    - {section: desktop, option: open-link-in-target-preference, value: '"external-browser"'}
+    - {section: desktop, option: open-local-url-in-target-preference, value: '"external-browser"'}
+  loop_control:
+    label: "{{ item.option }} is {{ item.value }}"
+  when: ai_commands.results[1].rc == 0 or (ai_home ~ '/.codex/config.toml') is file
+
+- name: Helium native messaging
+  when: jsh_platform == 'darwin' and ai_helium is directory and ai_native_hosts is file
+  block:
+    - name: Native host registry is read
+      ansible.builtin.slurp:
+        src: "{{ ai_native_hosts }}"
+      register: ai_registry
+
+    - name: Newest native host is selected
+      ansible.builtin.set_fact:
+        ai_host: >-
+          {{ (ai_registry.content | b64decode | from_json).entries | default([])
+             | sort(attribute='updatedAt') | last | default({}) }}
+
+    - name: Native host names are valid
+      ansible.builtin.assert:
+        that: item is match('^[a-zA-Z0-9_.-]+$')
+        fail_msg: invalid native host name
+        quiet: true
+      loop: "{{ ai_host.nativeHostNames | default([]) }}"
+
+    - name: Native host folder exists
+      ansible.builtin.file:
+        path: "{{ ai_helium }}/NativeMessagingHosts"
+        state: directory
+        mode: u+rwx
+      when: ai_host.nativeHostNames | default([]) | length > 0
+
+    - name: Native host manifests are written
+      ansible.builtin.copy:
+        dest: "{{ ai_helium }}/NativeMessagingHosts/{{ item }}.json"
+        mode: "0644"
+        content: |
+          {{ {'allowed_origins': ai_host.extensionIds | map('regex_replace', '^(.*)$', 'chrome-extension://\1/') | list,
+              'description': 'ChatGPT browser native messaging host', 'name': item,
+              'path': ai_host.paths.extensionHostPath, 'type': 'stdio'} | to_nice_json(indent=2) }}
+      loop: "{{ ai_host.nativeHostNames | default([]) }}"
+
+- name: REA CLI, skills, and MCP server
+  ansible.builtin.command:
+    argv: ["{{ role_path }}/files/rea.sh"]
+  environment: "{{ jsh_script_env }}"
+  register: ai_rea
+  changed_when: ai_rea.stdout is reported_change
+  check_mode: false

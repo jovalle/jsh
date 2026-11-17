@@ -1,7 +1,7 @@
 # Global agent instructions
 
-jsh writes this file for every installed coding agent from `scripts/ai/instructions.md` in the jsh
-checkout. Edit it there; `scripts/ai.sh` replaces the copies.
+jsh writes this file for every installed coding agent from `ansible/roles/ai/files/instructions.md`
+in the jsh checkout. Edit it there; the `ai` setup group replaces the copies.
 
 ## Commits
 

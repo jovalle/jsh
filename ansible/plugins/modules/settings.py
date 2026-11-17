@@ -15,7 +15,7 @@ description:
 options:
   path: {description: Settings file to update., type: path, required: true}
   source: {description: JSON or JSONC file with the desired values., type: path}
-  values: {description: Desired values., type: dict}
+  values: {description: Desired values, merged over I(source) when both are given., type: dict}
   overlays:
     description: Optional JSON or JSONC files merged over the desired values in order; missing files are ignored.
     type: list
@@ -84,7 +84,6 @@ def main() -> None:
             mode=dict(type="str", default="0644"),
             backup=dict(type="bool", default=False),
         ),
-        mutually_exclusive=[("source", "values")],
         required_one_of=[("source", "values")],
         supports_check_mode=True,
     )
@@ -92,11 +91,12 @@ def main() -> None:
     path = params["path"]
 
     try:
+        desired = {}
         if params["source"]:
             with open(params["source"], encoding="utf-8") as handle:
                 desired = parse_jsonc(handle.read())
-        else:
-            desired = params["values"]
+        if params["values"]:
+            desired = deep_merge(desired, params["values"])
         for overlay in params["overlays"]:
             if os.path.isfile(overlay):
                 with open(overlay, encoding="utf-8") as handle:

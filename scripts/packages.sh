@@ -18,11 +18,6 @@ install_group() {
         jsh::mas || return
       fi
       ;;
-    ai)
-      jsh::brew formulae opencode || return
-      jsh::brew casks antigravity-cli chatgpt codex copilot-cli || return
-      jsh::uv graphify graphifyy || return
-      ;;
     apps)
       if [[ ${JSH_PLATFORM} == darwin ]]; then
         jsh::brew formulae spicetify-cli || return
@@ -67,15 +62,6 @@ install_group() {
       if [[ ${JSH_PLATFORM} != darwin ]]; then
         jsh::appimage helium https://api.github.com/repos/imputnet/helium-linux/releases/latest arm64 || return
       fi
-      ;;
-    sublime)
-      jsh::brew casks sublime-text || return
-      if [[ ${JSH_PLATFORM} != darwin ]]; then
-        jsh::flatpak com.sublimetext.three || return
-      fi
-      ;;
-    vscode)
-      jsh::brew casks visual-studio-code || return
       ;;
     waterfox)
       jsh::brew casks waterfox || return

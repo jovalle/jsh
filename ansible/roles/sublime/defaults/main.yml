@@ -1,0 +1,13 @@
+---
+sublime_packages:
+  darwin:
+    casks: [sublime-text]
+  linux:
+    flatpak: [com.sublimetext.three]
+
+sublime_home: "{{ lookup('ansible.builtin.env', 'HOME') }}"
+sublime_flatpak: "{{ sublime_home }}/.var/app/com.sublimetext.three/config/sublime-text"
+sublime_directory: >-
+  {{ sublime_home ~ '/Library/Application Support/Sublime Text' if jsh_platform == 'darwin'
+     else sublime_flatpak if sublime_flatpak is directory
+     else (lookup('ansible.builtin.env', 'XDG_CONFIG_HOME') or sublime_home ~ '/.config') ~ '/sublime-text' }}

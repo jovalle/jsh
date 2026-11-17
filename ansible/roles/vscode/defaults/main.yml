@@ -1,0 +1,9 @@
+---
+vscode_packages:
+  darwin:
+    casks: [visual-studio-code]
+
+vscode_home: "{{ lookup('ansible.builtin.env', 'HOME') }}"
+vscode_directory: >-
+  {{ vscode_home ~ '/Library/Application Support/Code/User' if jsh_platform == 'darwin'
+     else (lookup('ansible.builtin.env', 'XDG_CONFIG_HOME') or vscode_home ~ '/.config') ~ '/Code/User' }}

@@ -77,7 +77,7 @@
           ansible.builtin.file:
             path: "{{ item }}"
             state: directory
-            mode: "0755"
+            mode: u+rwx
           loop:
             - "{{ packages_appimage_path | dirname }}"
             - "{{ packages_appimage_record | dirname }}"

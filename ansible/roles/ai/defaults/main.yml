@@ -1,0 +1,19 @@
+---
+ai_packages:
+  all:
+    brew: [opencode]
+    uv:
+      - {command: graphify, package: graphifyy}
+  darwin:
+    casks: [antigravity-cli, chatgpt, codex, copilot-cli]
+
+ai_home: "{{ lookup('ansible.builtin.env', 'HOME') }}"
+ai_config: "{{ lookup('ansible.builtin.env', 'XDG_CONFIG_HOME') or ai_home ~ '/.config' }}"
+# One rules file for every installed agent; each agent's own directory shows it is installed.
+ai_instructions:
+  - "{{ ai_home }}/.codex/AGENTS.md"
+  - "{{ ai_config }}/opencode/AGENTS.md"
+  - "{{ ai_home }}/.claude/CLAUDE.md"
+  - "{{ ai_home }}/.gemini/GEMINI.md"
+ai_helium: "{{ ai_home }}/Library/Application Support/net.imput.helium"
+ai_native_hosts: "{{ ai_home }}/.codex/chrome-native-hosts-v2.json"

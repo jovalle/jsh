@@ -74,3 +74,31 @@
         apply:
           tags: [tools]
       tags: [tools]
+
+    - name: vscode
+      ansible.builtin.include_role:
+        name: vscode
+        apply:
+          tags: [vscode]
+      tags: [vscode]
+
+    - name: sublime
+      ansible.builtin.include_role:
+        name: sublime
+        apply:
+          tags: [sublime]
+      tags: [sublime]
+
+    - name: ai
+      ansible.builtin.include_role:
+        name: ai
+        apply:
+          tags: [ai]
+      tags: [ai]
+
+    - name: skills
+      ansible.builtin.include_role:
+        name: skills
+        apply:
+          tags: [skills]
+      tags: [skills]

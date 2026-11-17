@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # Install the REA CLI, keep the graphify and REA skills current, and register the REA MCP server.
 set -euo pipefail
-SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck source=scripts/lib/common.sh
-. "${SCRIPT_DIR}/../lib/common.sh" "$@"
+. "${JSH_ROOT:?}/scripts/lib/common.sh" "$@"
 
 readonly SKILLS="${HOME}/.agents/skills"
 
@@ -26,7 +25,7 @@ select_node() {
       return 0
     fi
   done
-  jsh::notice 'REA needs a newer Node.js with zstd support; install or select a compatible Node.js, then rerun scripts/ai.sh'
+  jsh::notice 'REA needs a newer Node.js with zstd support; install or select a compatible Node.js, then rerun ./install.sh ai'
   return 1
 }
 

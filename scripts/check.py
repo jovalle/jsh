@@ -1159,109 +1159,27 @@ esac""")
 
     def test_git_repository_updates_suppress_noop_messages(self):
         checkout = self.home / "checkout"
-        for name in ("scripts/lib", "scripts/skills", "lib/shell"):
+        for name in ("scripts/lib", "lib/shell"):
             (checkout / name).mkdir(parents=True)
         for name in ("scripts/lib/common.sh", "lib/shell/output.sh", "lib/output.py",
-                     "lib/verbs.tsv", "scripts/shell.sh", "scripts/skills.sh"):
+                     "lib/verbs.tsv", "scripts/shell.sh"):
             shutil.copy2(ROOT / name, checkout / name)
-        (checkout / "scripts/skills/repos.tsv").write_text("example\thttps://example.invalid/example.git\n")
-        (checkout / "scripts/skills/links.tsv").write_text("")
-        for name in ("fzf", "fzf-tab", "zsh-completions", "zsh-autosuggestions", "zsh-syntax-highlighting", "skills/example"):
+        for name in ("fzf", "fzf-tab", "zsh-completions", "zsh-autosuggestions", "zsh-syntax-highlighting"):
             (self.home / "vendor" / name / ".git").mkdir(parents=True)
         self.tool("git", '''case " $* " in
   *" pull "*) printf '%s\\n' "$*" >> "$HOME/git-calls" ;;
   *" rev-parse "*) printf 'unchanged\\n' ;;
 esac''')
-        for script in ("shell", "skills"):
-            result = subprocess.run(
-                ["bash", str(checkout / "scripts" / f"{script}.sh"), "--update"],
-                env=self.env | {"JSH_ROOT": str(checkout)}, cwd=self.home,
-                capture_output=True, text=True, timeout=20,
-            )
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            expected = "✓ fzf is up to date" if script == "shell" else "✓ example is up to date"
-            self.assertIn(expected, result.stdout)
-        calls = (self.home / "git-calls").read_text().splitlines()
-        self.assertEqual(len(calls), 6)
-        self.assertTrue(all("--quiet" in call for call in calls), calls)
-
-    def test_skills_report_presence_and_preview_update_state(self):
-        checkout = self.home / "skill-modes"
-        for name in ("scripts/lib", "scripts/skills", "lib/shell"):
-            (checkout / name).mkdir(parents=True)
-        for name in ("scripts/lib/common.sh", "lib/shell/output.sh", "lib/output.py",
-                     "lib/verbs.tsv", "scripts/skills.sh"):
-            shutil.copy2(ROOT / name, checkout / name)
-        (checkout / "scripts/skills/repos.tsv").write_text(
-            "example\thttps://example.invalid/example.git\n")
-        (checkout / "scripts/skills/links.tsv").write_text("")
-        (self.home / "vendor/skills/example/.git").mkdir(parents=True)
-        self.tool("git", """case " $* " in
-  *" rev-parse "*) printf "abc1234000000000000000000000000000000000\n" ;;
-  *" ls-remote "*)
-    case "${JSH_REMOTE_STATE:-equal}" in
-      behind) printf "def5678000000000000000000000000000000000\tHEAD\n" ;;
-      equal) printf "abc1234000000000000000000000000000000000\tHEAD\n" ;;
-      fail) exit 1 ;;
-    esac
-    ;;
-esac""")
-
-        def run(*arguments, remote="equal"):
-            result = subprocess.run(
-                ["bash", str(checkout / "scripts/skills.sh"), *arguments],
-                env=self.env | {"JSH_ROOT": str(checkout), "JSH_REMOTE_STATE": remote},
-                cwd=self.home, capture_output=True, text=True, timeout=20,
-            )
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            return result.stdout
-
-        for arguments in ((), ("--dry-run",)):
-            with self.subTest(arguments=arguments):
-                output = run(*arguments)
-                self.assertIn("Checking skill repositories...", output)
-                self.assertIn("✓ example is cloned", output)
-                self.assertNotRegex(output, r"(?m)^~ ")
-
-        behind = run("--dry-run", "--update", remote="behind")
-        self.assertIn("! example is behind  would change", behind)
-        equal = run("--dry-run", "--update", remote="equal")
-        self.assertIn("✓ example is up to date", equal)
-        failed = run("--dry-run", "--update", remote="fail")
-        self.assertIn("example: could not check for updates", failed)
-        for output in (behind, equal, failed):
-            self.assertIn("Checking skill repositories...", output)
-            self.assertNotRegex(output, r"(?m)^~ ")
-
-    def test_skill_update_reports_short_commit_range(self):
-        checkout = self.home / "skills-checkout"
-        for name in ("scripts/lib", "scripts/skills", "lib/shell"):
-            (checkout / name).mkdir(parents=True)
-        for name in ("scripts/lib/common.sh", "lib/shell/output.sh", "lib/output.py",
-                     "lib/verbs.tsv", "scripts/skills.sh"):
-            shutil.copy2(ROOT / name, checkout / name)
-        (checkout / "scripts/skills/repos.tsv").write_text(
-            "ui-ux-pro-max-skill\thttps://example.invalid/skill.git\n")
-        (checkout / "scripts/skills/links.tsv").write_text("")
-        (self.home / "vendor/skills/ui-ux-pro-max-skill/.git").mkdir(parents=True)
-        self.tool("git", """case " $* " in
-  *" rev-parse "*)
-    if [ -f "$HOME/rev-parsed" ]; then
-      printf "def5678000000000000000000000000000000000\n"
-    else
-      : > "$HOME/rev-parsed"
-      printf "abc1234000000000000000000000000000000000\n"
-    fi
-    ;;
-  *" pull "*) exit 0 ;;
-esac""")
         result = subprocess.run(
-            ["bash", str(checkout / "scripts/skills.sh"), "--update"],
+            ["bash", str(checkout / "scripts/shell.sh"), "--update"],
             env=self.env | {"JSH_ROOT": str(checkout)}, cwd=self.home,
             capture_output=True, text=True, timeout=20,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("~ ui-ux-pro-max-skill updated abc1234 → def5678", result.stdout)
+        self.assertIn("✓ fzf is up to date", result.stdout)
+        calls = (self.home / "git-calls").read_text().splitlines()
+        self.assertEqual(len(calls), 5)
+        self.assertTrue(all("--quiet" in call for call in calls), calls)
 
     def test_git_get_uses_matching_profile_key(self):
         profiles = self.home / "profiles.json"
@@ -1424,46 +1342,6 @@ esac''')
         self.assertEqual(pushed.returncode, 0, pushed.stderr)
         for label in ("tracked", "installed"):
             self.assertIn("refs/heads/main", (self.home / f"pushed-{label}").read_text())
-
-    def test_ai_writes_global_agent_instructions(self):
-        jq = shutil.which("jq")
-        if not jq:
-            self.skipTest("jq required")
-        self.tool("jq", f'exec "{jq}" "$@"')
-        runtime = self.home / "fixture"
-        for name in ("scripts/ai", "scripts/lib", "lib/shell"):
-            (runtime / name).mkdir(parents=True)
-        for name in ("scripts/ai.sh", "scripts/ai/instructions.md", "scripts/lib/apps.sh",
-                     "scripts/lib/common.sh", "lib/shell/output.sh", "lib/output.py",
-                     "lib/verbs.tsv"):
-            shutil.copy2(ROOT / name, runtime / name)
-        for name in ("scripts/packages.sh", "scripts/ai/rea.sh"):
-            (runtime / name).write_text("#!/bin/sh\nexit 0\n")
-            (runtime / name).chmod(0o755)
-        for agent in (".codex", ".copilot"):
-            (self.home / agent).mkdir()
-
-        def run():
-            result = subprocess.run(["bash", str(runtime / "scripts/ai.sh")],
-                                    env=self.env | {"JSH_ROOT": str(runtime)}, cwd=self.home,
-                                    capture_output=True, text=True, timeout=30)
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            return result.stdout
-
-        first = run()
-        rules = (ROOT / "scripts/ai/instructions.md").read_text()
-        self.assertEqual((self.home / ".codex/AGENTS.md").read_text(), rules)
-        copilot = (self.home / ".copilot/instructions/jsh.instructions.md").read_text()
-        self.assertTrue(copilot.startswith("---\n"), copilot)
-        self.assertIn('applyTo: "**"\n---\n', copilot)
-        self.assertTrue(copilot.endswith(rules))
-        self.assertIn("~/.codex/AGENTS.md", first)
-        self.assertIn("~/.copilot/instructions/jsh.instructions.md", first)
-        self.assertFalse((self.home / ".claude").exists())
-        second = run()
-        self.assertIn("Ready  Everything is current", second)
-        self.assertIn("✓ ~/.codex/AGENTS.md is current", second)
-        self.assertIn("✓ ~/.copilot/instructions/jsh.instructions.md is current", second)
 
     def test_bash_completions_extend_native_git_and_complete_project_names(self):
         (self.home / "Projects/alpha").mkdir(parents=True)
@@ -2373,7 +2251,7 @@ esac""",
         env = self.env | {"JSH_PLATFORM": "linux", "XDG_STATE_HOME": str(self.home / "state"),
                           "XDG_CONFIG_HOME": str(config)}
         preview = subprocess.run(
-            ["bash", str(ROOT / "scripts/packages.sh"), "--dry-run", "--update", "ai"],
+            ["bash", str(ROOT / "scripts/packages.sh"), "--dry-run", "--update", "maintenance"],
             env=env, capture_output=True, text=True, timeout=30,
         )
         self.assertEqual(preview.returncode, 0, preview.stdout + preview.stderr)
@@ -2382,7 +2260,7 @@ esac""",
         self.assertIn("! gemini-cli is deprecated  would remove", preview.stdout)
         self.assertIn("! libclc is outdated  would change", preview.stdout)
         result = subprocess.run(
-            ["bash", str(ROOT / "scripts/packages.sh"), "--update", "ai"],
+            ["bash", str(ROOT / "scripts/packages.sh"), "--update", "maintenance"],
             env=env, capture_output=True, text=True, timeout=30,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -2435,7 +2313,7 @@ esac""",
                                  (0, expected, ""))
 
     def test_setup_scripts_reject_unknown_options(self):
-        for name in ("wallpaper.sh", "ansible.sh", "sublime.sh", "shell.sh"):
+        for name in ("wallpaper.sh", "ansible.sh", "linux.sh", "shell.sh"):
             with self.subTest(script=name):
                 result = subprocess.run(["bash", str(ROOT / "scripts" / name), "--dry-run", "--bogus"],
                                         env=self.env, cwd=self.home, capture_output=True,
@@ -2444,11 +2322,11 @@ esac""",
                 self.assertIn("unknown option: --bogus", result.stderr)
 
     def test_setup_script_help_names_the_script(self):
-        result = subprocess.run(["bash", str(ROOT / "scripts/sublime.sh"), "--help"],
+        result = subprocess.run(["bash", str(ROOT / "scripts/linux.sh"), "--help"],
                                 env=self.env, capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.splitlines()[0],
-                         "Merge Sublime Text preferences after its first launch.")
+                         "Apply Linux file-watching limits, memory and power policy, and the timezone.")
 
     def test_standalone_script_opens_one_session_with_its_group_header(self):
         child = self.home / "child.sh"
@@ -2839,7 +2717,7 @@ EOF''')
         skill.mkdir(parents=True)
         (skill / ".graphify_version").write_text("1.0")
         result = subprocess.run(
-            ["bash", str(ROOT / "scripts/ai/rea.sh")],
+            ["bash", str(ROOT / "ansible/roles/ai/files/rea.sh")],
             env=self.env | {"JSH_PHASE": "update"}, cwd=self.home,
             capture_output=True, text=True, timeout=20,
         )
@@ -2855,7 +2733,7 @@ EOF''')
         self.assertIsNotNone(bash)
         self.tool("node", "exit 0")
         result = subprocess.run(
-            [bash, str(ROOT / "scripts/ai/rea.sh"), "--dry-run"],
+            [bash, str(ROOT / "ansible/roles/ai/files/rea.sh"), "--dry-run"],
             env=self.env, cwd=self.home, capture_output=True, text=True, timeout=20,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -2871,40 +2749,13 @@ EOF''')
             "esac",
         )
         result = subprocess.run(
-            ["bash", str(ROOT / "scripts/ai/rea.sh"), "--dry-run"],
+            ["bash", str(ROOT / "ansible/roles/ai/files/rea.sh"), "--dry-run"],
             env=self.env, cwd=self.home, capture_output=True, text=True, timeout=20,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("! graphify skill is missing", result.stdout)
         self.assertIn("REA registration unchecked in preview", result.stdout)
         self.assertNotIn("REA has 1 planned registration change", result.stdout)
-
-    def test_vscode_preview_does_not_skip_settings_as_not_installed(self):
-        jq = shutil.which("jq")
-        if not jq:
-            self.skipTest("jq required")
-        self.tool("jq", f"exec {shlex.quote(jq)} \"$@\"")
-        self.tool("uname", "echo Linux")
-        self.tool("rpm", "exit 1")
-        runtime = self.home / "vscode-fixture"
-        for directory in ("scripts/lib", "scripts/vscode", "lib/shell"):
-            (runtime / directory).mkdir(parents=True)
-        for name in ("scripts/vscode.sh", "scripts/lib/apps.sh", "scripts/lib/common.sh",
-                     "lib/shell/output.sh", "lib/output.py", "lib/verbs.tsv"):
-            shutil.copy2(ROOT / name, runtime / name)
-        shutil.copy2(ROOT / "scripts/vscode/settings.json", runtime / "scripts/vscode/settings.json")
-        (runtime / "scripts/packages.sh").write_text("#!/bin/bash\nexit 0\n")
-        result = subprocess.run(
-            ["bash", str(runtime / "scripts/vscode.sh"), "--dry-run"],
-            env=self.env | {"JSH_ROOT": str(runtime), "JSH_PLATFORM": "linux"},
-            cwd=self.home, capture_output=True, text=True, timeout=20,
-        )
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn(
-            "VS Code settings unchecked in preview: VS Code is not installed yet",
-            result.stdout,
-        )
-        self.assertNotIn("Skipping VS Code settings", result.stdout)
 
     def test_rea_update_keeps_npm_output_in_the_log(self):
         self.tool("node", "exit 0")
@@ -2919,7 +2770,7 @@ esac''')
         skill.mkdir(parents=True)
         (skill / ".graphify_version").write_text("1.0")
         result = subprocess.run(
-            ["bash", str(ROOT / "scripts/ai/rea.sh")],
+            ["bash", str(ROOT / "ansible/roles/ai/files/rea.sh")],
             env=self.env | {"JSH_PHASE": "update"},
             cwd=self.home, capture_output=True, text=True, timeout=20,
         )
@@ -4693,6 +4544,55 @@ esac''')
         self.assertIn(["item", "notice", "restart Finder to apply its settings: killall Finder"],
                       events)
         self.assertFalse((self.home / "killall-calls").exists())
+    def test_settings_merges_values_over_source(self):
+        source = self.home / "source.json"
+        source.write_text('{"a": 1, "b": {"x": 1}}\n')
+        target = self.home / "settings.json"
+        result, output = self.settings(path=str(target), source=str(source),
+                                       values={"b": {"y": 2}})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads(target.read_text()), {"a": 1, "b": {"x": 1, "y": 2}})
+
+    def test_link_role_backs_up_replaced_files_and_refuses_directories(self):
+        source = self.home / "source"
+        source.write_text("managed\n")
+        target = self.home / "config/file"
+        target.parent.mkdir()
+        target.write_text("mine\n")
+        (self.home / "dir").mkdir()
+        items = json.dumps({"link_items": [{"src": str(source), "dest": str(target)}]})
+        include = "    - name: macos\n      ansible.builtin.include_role: {name: macos}\n"
+        roles = {"ANSIBLE_ROLES_PATH": f"{self.home / 'play/roles'}:{ROOT / 'ansible/roles'}"}
+        wrapper = {"macos": "- name: Links\n  ansible.builtin.include_role: {name: link}\n"}
+        result, events = self.run_play(include, "-e", items, roles=wrapper, **roles)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(["item", "changed", str(target)], [event[:3] for event in events])
+        self.assertEqual(target.readlink(), source)
+        backups = list((self.home / ".local/state/jsh/backups").rglob("file"))
+        self.assertEqual([backup.read_text() for backup in backups], ["mine\n"])
+        result, events = self.run_play(include, "-e", items, **roles)
+        self.assertIn(["item", "ok", str(target)], [event[:3] for event in events])
+        directory = json.dumps({"link_items": [{"src": str(source), "dest": str(self.home / "dir")}]})
+        result, events = self.run_play(include, "-e", directory, **roles)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue((self.home / "dir").is_dir())
+    def test_links_filter_builds_link_items(self):
+        script = (
+            "import importlib.util, json\n"
+            f"spec = importlib.util.spec_from_file_location('f', {str(ROOT / 'ansible/plugins/filter/links.py')!r})\n"
+            "module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)\n"
+            "links = module.FilterModule().filters()['links']\n"
+            "print(json.dumps([links([{'source': 'repo/skills/a', 'name': 'a'}, ['b/src', 'b'], 'c'],"
+            " '/vendor', '/home/.agents/skills')]))\n"
+        )
+        result = subprocess.run([str(self.venv("python")), "-c", script],
+                                capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)[0], [
+            {"src": "/vendor/repo/skills/a", "dest": "/home/.agents/skills/a"},
+            {"src": "/vendor/b/src", "dest": "/home/.agents/skills/b"},
+            {"src": "/vendor/c", "dest": "/home/.agents/skills/c"},
+        ])
 
 if __name__ == "__main__":
     unittest.main()

@@ -6,8 +6,8 @@ This checkout is live: `install.sh` links each file under `dotfiles/` into `$HOM
 
 This is the only agent instruction file in this repository. Do not create `CLAUDE.md`,
 `GEMINI.md`, or `.github/copilot-instructions.md`. Agent skills come from the `skills` and `ai`
-scripts. Rules every agent follows in every project live in `scripts/ai/instructions.md`;
-`scripts/ai.sh` writes them to each installed agent's home (`~/.copilot/instructions/`,
+scripts. Rules every agent follows in every project live in `ansible/roles/ai/files/instructions.md`;
+the `ai` setup group writes them to each installed agent's home (`~/.copilot/instructions/`,
 `~/.codex/AGENTS.md`, and the OpenCode, Claude, and Gemini equivalents). Custom agents and
 prompts stay in VS Code Settings Sync, not here.
 

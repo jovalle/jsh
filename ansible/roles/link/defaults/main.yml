@@ -1,0 +1,6 @@
+---
+# link_items: list of {src, dest}. Like jsh::link, a replaced file or link is copied to
+# $XDG_STATE_HOME/jsh/backups first, and a real directory is never replaced.
+link_items: []
+link_home: "{{ lookup('ansible.builtin.env', 'HOME') }}"
+link_state: "{{ lookup('ansible.builtin.env', 'XDG_STATE_HOME') or link_home ~ '/.local/state' }}"

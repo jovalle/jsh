@@ -1,0 +1,45 @@
+---
+- name: VS Code package
+  ansible.builtin.include_tasks: linux.yml
+  when: jsh_platform != 'darwin'
+
+- name: VS Code and zsh are found
+  ansible.builtin.command:
+    argv: [sh, -c, 'command -v "$1"', sh, "{{ item }}"]
+  loop: [code, zsh]
+  register: vscode_commands
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: VS Code settings
+  vars:
+    vscode_installed: "{{ vscode_commands.results[0].rc == 0 or vscode_directory is directory }}"
+    vscode_zsh: "{{ vscode_commands.results[1].stdout }}"
+    vscode_key: "{{ 'osx' if jsh_platform == 'darwin' else 'linux' }}"
+  block:
+    - name: info
+      ansible.builtin.debug:
+        msg: >-
+          {{ 'VS Code settings unchecked in preview: VS Code is not installed yet'
+             if vscode_planned | default(false) else 'Skipping VS Code settings: VS Code is not installed' }}
+      when: not vscode_installed
+
+    - name: "{{ vscode_directory }}/settings.json"
+      settings:
+        path: "{{ vscode_directory }}/settings.json"
+        source: "{{ role_path }}/files/settings.json"
+        values: >-
+          {{ {} if not vscode_zsh else
+             {'terminal.integrated.profiles.' ~ vscode_key: {'zsh': {'path': vscode_zsh}},
+              'terminal.integrated.defaultProfile.' ~ vscode_key: 'zsh'} }}
+      when: vscode_installed
+
+    - name: VS Code keybindings are linked
+      ansible.builtin.include_role:
+        name: link
+      vars:
+        link_items:
+          - src: "{{ jsh_root }}/ansible/roles/vscode/files/keybindings.json"
+            dest: "{{ vscode_directory }}/keybindings.json"
+      when: vscode_installed

@@ -1,0 +1,47 @@
+---
+# Debian and RHEL get Microsoft's package from the update API, verified by its SHA-256.
+- name: VS Code package is checked
+  ansible.builtin.package_facts:
+    manager: auto
+
+- name: VS Code package
+  vars:
+    vscode_channel: "{{ 'deb' if jsh_platform == 'debian' else 'rpm' }}"
+    vscode_arch: "{{ 'arm64' if ansible_facts.architecture in ['aarch64', 'arm64'] else 'x64' }}"
+    vscode_api: https://update.code.visualstudio.com/api/update
+    vscode_current: "{{ (ansible_facts.packages.code | default([{}]))[0].version | default('') }}"
+  when: (vscode_current == '' and not jsh_update | bool) or (vscode_current != '' and jsh_update | bool)
+  block:
+    - name: VS Code install is planned
+      ansible.builtin.set_fact:
+        vscode_planned: "{{ ansible_check_mode and vscode_current == '' }}"
+
+    - name: VS Code release is read
+      ansible.builtin.uri:
+        url: "{{ vscode_api }}/linux-{{ vscode_channel }}-{{ vscode_arch }}/stable/latest"
+        return_content: true
+      register: vscode_release
+      check_mode: false
+
+    - name: VS Code package is downloaded
+      ansible.builtin.get_url:
+        url: "{{ vscode_release.json.url }}"
+        dest: "/tmp/jsh-vscode.{{ vscode_channel }}"
+        checksum: "sha256:{{ vscode_release.json.sha256hash }}"
+        mode: "0644"
+      when: vscode_current is not search('^' ~ vscode_release.json.productVersion ~ '$')
+      changed_when: false
+
+    - name: VS Code
+      ansible.builtin.apt:
+        deb: "/tmp/jsh-vscode.deb"
+      become: true
+      when: vscode_channel == 'deb' and vscode_current != vscode_release.json.productVersion
+
+    - name: VS Code
+      ansible.builtin.dnf:
+        name: "/tmp/jsh-vscode.rpm"
+        state: present
+        disable_gpg_check: true # local package; verified by its SHA-256 above
+      become: true
+      when: vscode_channel == 'rpm' and vscode_current != vscode_release.json.productVersion

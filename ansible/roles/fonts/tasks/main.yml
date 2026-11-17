@@ -55,7 +55,7 @@
           ansible.builtin.file:
             path: "{{ fonts_directory }}"
             state: directory
-            mode: "0755"
+            mode: u+rwx
 
         - name: JetBrains Mono Nerd Font
           ansible.builtin.unarchive:
