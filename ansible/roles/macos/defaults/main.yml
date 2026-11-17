@@ -1,0 +1,88 @@
+---
+# Managed preferences; current_host entries are written with -currentHost.
+macos_home: "{{ lookup('ansible.builtin.env', 'HOME') }}"
+# osx_defaults looks for the defaults command only in this path.
+macos_defaults_path: /usr/bin:/usr/local/bin
+# Apps that reread their settings only after a restart, by domain.
+macos_restarts:
+  com.apple.dock: Dock
+  com.apple.finder: Finder
+  com.apple.Spotlight: SystemUIServer
+  com.apple.screencapture: SystemUIServer
+macos_preferences:
+  - {domain: com.apple.finder, key: ShowExternalHardDrivesOnDesktop, type: bool, value: false}
+  - {domain: com.apple.finder, key: ShowHardDrivesOnDesktop, type: bool, value: false}
+  - {domain: com.apple.finder, key: ShowMountedServersOnDesktop, type: bool, value: false}
+  - {domain: com.apple.finder, key: ShowRemovableMediaOnDesktop, type: bool, value: false}
+  - {domain: com.apple.finder, key: FXPreferredViewStyle, type: string, value: "Nlsv"}
+  - {domain: com.apple.finder, key: ShowPathbar, type: bool, value: true}
+  - {domain: com.apple.finder, key: ShowStatusBar, type: bool, value: true}
+  - {domain: com.apple.finder, key: _FXShowPosixPathInTitle, type: bool, value: true}
+  - {domain: com.apple.finder, key: AppleShowAllFiles, type: bool, value: true}
+  - {domain: com.apple.finder, key: DisableAllAnimations, type: bool, value: true}
+  - {domain: com.apple.finder, key: FXEnableExtensionChangeWarning, type: bool, value: false}
+  - {domain: NSGlobalDomain, key: NSAutomaticWindowAnimationsEnabled, type: bool, value: false}
+  - {domain: NSGlobalDomain, key: NSWindowResizeTime, type: float, value: 0.001}
+  - {domain: NSGlobalDomain, key: ApplePressAndHoldEnabled, type: bool, value: false}
+  - {domain: NSGlobalDomain, key: AppleShowAllExtensions, type: bool, value: true}
+  - {domain: NSGlobalDomain, key: NSDocumentSaveNewDocumentsToCloud, type: bool, value: false}
+  - {domain: NSGlobalDomain, key: NSNavPanelExpandedStateForSaveMode, type: bool, value: true}
+  - {domain: NSGlobalDomain, key: NSNavPanelExpandedStateForSaveMode2, type: bool, value: true}
+  - {domain: NSGlobalDomain, key: PMPrintingExpandedStateForPrint, type: bool, value: true}
+  - {domain: NSGlobalDomain, key: PMPrintingExpandedStateForPrint2, type: bool, value: true}
+  - {domain: NSGlobalDomain, key: NSAutomaticCapitalizationEnabled, type: bool, value: false}
+  - {domain: NSGlobalDomain, key: NSAutomaticDashSubstitutionEnabled, type: bool, value: false}
+  - {domain: NSGlobalDomain, key: NSAutomaticPeriodSubstitutionEnabled, type: bool, value: false}
+  - {domain: NSGlobalDomain, key: NSAutomaticQuoteSubstitutionEnabled, type: bool, value: false}
+  - {domain: NSGlobalDomain, key: NSAutomaticSpellingCorrectionEnabled, type: bool, value: false}
+  - {domain: NSGlobalDomain, key: com.apple.sound.beep.feedback, type: bool, value: false}
+  - {domain: NSGlobalDomain, key: com.apple.sound.beep.volume, type: float, value: 0}
+  - {domain: com.apple.desktopservices, key: DSDontWriteNetworkStores, type: bool, value: true}
+  - {domain: com.apple.desktopservices, key: DSDontWriteUSBStores, type: bool, value: true}
+  - domain: com.apple.screencapture
+    key: location
+    type: string
+    value: "{{ macos_home }}/Pictures/Screenshots"
+  - {domain: com.apple.screencapture, key: type, type: string, value: "png"}
+  - {domain: com.apple.screencapture, key: disable-shadow, type: bool, value: true}
+  - {domain: com.apple.AdLib, key: allowApplePersonalizedAdvertising, type: bool, value: false}
+  - {domain: com.apple.AdLib, key: allowIdentifierForAdvertising, type: bool, value: false}
+  - {domain: com.apple.assistant.support, key: "Dictation Enabled", type: bool, value: false}
+  - {domain: com.apple.lookup.shared, key: LookupSuggestionsDisabled, type: bool, value: true}
+  - domain: com.apple.coreservices.useractivityd
+    key: ActivityAdvertisingAllowed
+    type: bool
+    value: true
+    current_host: true
+  - domain: com.apple.coreservices.useractivityd
+    key: ActivityReceivingAllowed
+    type: bool
+    value: true
+    current_host: true
+  - {domain: com.apple.ImageCapture, key: disableHotPlug, type: bool, value: true, current_host: true}
+  - {domain: com.apple.CrashReporter, key: DialogType, type: string, value: "none"}
+  - {domain: com.apple.Spotlight, key: MenuItemHidden, type: bool, value: true}
+  - {domain: com.apple.WindowManager, key: StandardHideWidgets, type: bool, value: true}
+  - {domain: com.apple.WindowManager, key: StageManagerHideWidgets, type: bool, value: true}
+  - {domain: com.apple.systemsound, key: com.apple.sound.beep.volume, type: int, value: 0}
+  - {domain: com.apple.systemsound, key: com.apple.sound.uiaudio.enabled, type: int, value: 0}
+  - {domain: com.apple.TimeMachine, key: DoNotOfferNewDisksForBackup, type: bool, value: true}
+  - {domain: com.apple.Terminal, key: ShowLineMarks, type: int, value: 0}
+  - {domain: com.apple.TextEdit, key: RichText, type: int, value: 0}
+  - {domain: com.apple.TextEdit, key: PlainTextEncoding, type: int, value: 4}
+  - {domain: com.apple.TextEdit, key: PlainTextEncodingForWrite, type: int, value: 4}
+  - {domain: NSGlobalDomain, key: AppleInterfaceStyle, type: string, value: "Dark"}
+  - {domain: NSGlobalDomain, key: AppleInterfaceStyleSwitchesAutomatically, type: bool, value: false}
+  - {domain: com.apple.dock, key: persistent-apps, type: array, value: []}
+  - {domain: com.apple.dock, key: persistent-others, type: array, value: []}
+  - {domain: com.apple.dock, key: launchanim, type: bool, value: false}
+  - {domain: com.apple.dock, key: expose-animation-duration, type: float, value: 0.1}
+  - {domain: com.apple.dock, key: show-recents, type: bool, value: false}
+  - {domain: com.apple.dock, key: autohide, type: bool, value: true}
+  - {domain: com.apple.dock, key: autohide-delay, type: float, value: 0}
+  - {domain: com.apple.dock, key: autohide-time-modifier, type: float, value: 0.5}
+  - {domain: com.apple.dock, key: tilesize, type: int, value: 48}
+  - {domain: com.apple.dock, key: wvous-tl-corner, type: int, value: 0}
+  - {domain: com.apple.dock, key: wvous-tr-corner, type: int, value: 0}
+  - {domain: com.apple.dock, key: wvous-bl-corner, type: int, value: 0}
+  - {domain: com.apple.dock, key: wvous-br-corner, type: int, value: 0}

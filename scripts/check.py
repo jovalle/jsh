@@ -62,65 +62,6 @@ class ShellChecks(unittest.TestCase):
         path.write_text("#!/bin/sh\n" + body + "\n")
         path.chmod(0o755)
 
-    def test_macos_settings_report_each_preference(self):
-        runtime = self.home / "macos-fixture"
-        (runtime / "scripts/lib").mkdir(parents=True)
-        (runtime / "scripts/macos").mkdir()
-        (runtime / "lib/shell").mkdir(parents=True)
-        for name in ("scripts/lib/common.sh", "lib/shell/output.sh", "lib/output.py",
-                     "lib/verbs.tsv", "scripts/macos.sh"):
-            target = runtime / name
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(ROOT / name, target)
-        (runtime / "scripts/macos/preferences.tsv").write_text(
-            "com.apple.finder\tShowHardDrivesOnDesktop\t-bool\tfalse\n"
-            "com.apple.finder\tShowMountedServersOnDesktop\t-bool\tfalse\n"
-            "com.apple.dock\tpersistent-apps\t-array\t\n"
-        )
-        self.tool("uname", "echo Darwin")
-        self.tool("killall", "printf '%s\n' \"$1\" >> \"$HOME/killall-calls\"; "
-                  "[ \"${JSH_TEST_KILLALL_FAIL:-0}\" != 1 ]")
-        self.tool("defaults", "case \"$1:$3\" in\n"
-                  "  read:ShowHardDrivesOnDesktop) echo 0 ;;\n"
-                  "  read:ShowMountedServersOnDesktop) "
-                  "[ \"${JSH_TEST_CURRENT:-0}\" = 1 ] && echo 0 || echo 1 ;;\n"
-                  "  read:persistent-apps) "
-                  "[ \"${JSH_TEST_CURRENT:-0}\" = 1 ] && printf '(\n)\n' || printf '(\nitem\n)\n' ;;\n"
-                  "  read-type:persistent-apps) echo \"Type is array\" ;;\n"
-                  "  read-type:*) echo \"Type is boolean\" ;;\n"
-                  "  write:*) exit 0 ;;\n"
-                  "esac")
-
-        def run(**environment):
-            result = subprocess.run(
-                ["bash", str(runtime / "scripts/macos.sh")],
-                env=self.env | {"JSH_ROOT": str(runtime)} | environment, cwd=self.home,
-                capture_output=True, text=True, timeout=20,
-            )
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            return result.stdout
-
-        changed = run()
-        self.assertIn("Checking macOS settings...", changed)
-        self.assertIn("✓ ShowHardDrivesOnDesktop is false", changed)
-        self.assertIn("! ShowMountedServersOnDesktop is not false", changed)
-        self.assertIn("~ ShowMountedServersOnDesktop set false", changed)
-        self.assertIn("! persistent-apps is not empty", changed)
-        self.assertIn("~ persistent-apps set empty", changed)
-        self.assertIn("Restarting macOS applications...", changed)
-        self.assertIn("~ Finder restarted", changed)
-
-        (self.home / "killall-calls").unlink()
-        current = run(JSH_TEST_CURRENT="1")
-        self.assertIn("✓ persistent-apps is empty", current)
-        self.assertNotIn("Restarting macOS applications...", current)
-        self.assertNotIn("restarted", current)
-        self.assertFalse((self.home / "killall-calls").exists())
-
-        failed_restart = run(JSH_TEST_KILLALL_FAIL="1")
-        self.assertIn("Finder was not running", failed_restart)
-        self.assertNotIn("~ Finder restarted", failed_restart)
-
     def test_linux_dry_run_skips_failed_timezone_query(self):
         self.tool("uname", "echo Linux")
         self.tool("sysctl", "echo 0")
@@ -4719,6 +4660,39 @@ esac''')
                 for manager, names in managers.items():
                     self.assertEqual(sorted(actual[manager], key=key), sorted(names, key=key),
                                      f"{role} {platform} {manager}")
+    @unittest.skipUnless(os.uname().sysname == "Darwin", "writes a plist with defaults")
+    def test_macos_role_reports_each_preference_and_restarts(self):
+        domain = str(self.home / "jsh-test")
+        subprocess.run(["defaults", "write", domain, "A", "-bool", "true"], check=True)
+        subprocess.run(["defaults", "write", domain, "B", "-array", "x"], check=True)
+        self.tool("killall", 'printf "%s\\n" "$1" >> "$HOME/killall-calls"')
+        settings = json.dumps({
+            "macos_defaults_path": "/usr/bin",
+            "macos_restarts": {domain: "Finder"},
+            "macos_preferences": [{"domain": domain, "key": "A", "type": "bool", "value": False},
+                                  {"domain": domain, "key": "B", "type": "array", "value": []}],
+        })
+        include = "    - name: macos\n      ansible.builtin.include_role: {name: macos}\n"
+        roles = {"ANSIBLE_ROLES_PATH": str(ROOT / "ansible/roles")}
+
+        result, events = self.run_play(include, "-e", settings, **roles)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        items = [event[1:3] for event in events if event[0] == "item"]
+        self.assertEqual(items, [["changed", "A is false"], ["changed", "B is empty"],
+                                 ["changed", "Finder restarted"]])
+        self.assertEqual((self.home / "killall-calls").read_text(), "Finder\n")
+
+        (self.home / "killall-calls").unlink()
+        result, events = self.run_play(include, "-e", settings, **roles)
+        items = [event[1:3] for event in events if event[0] == "item"]
+        self.assertEqual(items, [["ok", "A is false"], ["ok", "B is empty"]])
+        self.assertFalse((self.home / "killall-calls").exists())
+
+        subprocess.run(["defaults", "write", domain, "A", "-bool", "true"], check=True)
+        result, events = self.run_play(include, "-e", settings, JSH_KEEP_APPS="1", **roles)
+        self.assertIn(["item", "notice", "restart Finder to apply its settings: killall Finder"],
+                      events)
+        self.assertFalse((self.home / "killall-calls").exists())
 
 if __name__ == "__main__":
     unittest.main()

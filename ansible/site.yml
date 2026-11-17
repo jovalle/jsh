@@ -19,6 +19,13 @@
       tags: [always]
 
   tasks:
+    - name: macos
+      ansible.builtin.include_role:
+        name: macos
+        apply:
+          tags: [macos]
+      tags: [macos]
+      when: jsh_platform == 'darwin'
     - name: dev
       ansible.builtin.include_role:
         name: dev
