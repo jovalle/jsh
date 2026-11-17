@@ -12,6 +12,11 @@
       changed_when: false
       tags: [always]
 
+    - name: Failed groups are initialized
+      ansible.builtin.set_fact:
+        jsh_failed_groups: []
+      tags: [always]
+
     - name: Detected platform
       ansible.builtin.debug:
         msg: "{{ jsh_platform }} {{ jsh_desktop }} {{ jsh_host }}"
@@ -19,135 +24,275 @@
       tags: [always]
 
   tasks:
-    - name: macos
-      ansible.builtin.include_role:
-        name: macos
-        apply:
-          tags: [macos]
+    - name: macos group
       tags: [macos]
-      when: jsh_platform == 'darwin'
-    - name: dev
-      ansible.builtin.include_role:
-        name: dev
-        apply:
-          tags: [dev]
+      block:
+        - name: macos
+          ansible.builtin.include_role:
+            name: macos
+            apply:
+              tags: [macos]
+          tags: [macos]
+          when: jsh_platform == 'darwin'
+      rescue:
+        - name: macos failure is recorded
+          ansible.builtin.set_fact:
+            jsh_failed_groups: "{{ jsh_failed_groups + ['macos'] }}"
+
+    - name: dev group
       tags: [dev]
+      block:
+        - name: dev
+          ansible.builtin.include_role:
+            name: dev
+            apply:
+              tags: [dev]
+          tags: [dev]
+      rescue:
+        - name: dev failure is recorded
+          ansible.builtin.set_fact:
+            jsh_failed_groups: "{{ jsh_failed_groups + ['dev'] }}"
 
-    - name: ghostty
-      ansible.builtin.include_role:
-        name: ghostty
-        apply:
-          tags: [ghostty]
+    - name: ghostty group
       tags: [ghostty]
+      block:
+        - name: ghostty
+          ansible.builtin.include_role:
+            name: ghostty
+            apply:
+              tags: [ghostty]
+          tags: [ghostty]
+      rescue:
+        - name: ghostty failure is recorded
+          ansible.builtin.set_fact:
+            jsh_failed_groups: "{{ jsh_failed_groups + ['ghostty'] }}"
 
-    - name: containers
-      ansible.builtin.include_role:
-        name: containers
-        apply:
-          tags: [containers]
+    - name: containers group
       tags: [containers]
+      block:
+        - name: containers
+          ansible.builtin.include_role:
+            name: containers
+            apply:
+              tags: [containers]
+          tags: [containers]
+      rescue:
+        - name: containers failure is recorded
+          ansible.builtin.set_fact:
+            jsh_failed_groups: "{{ jsh_failed_groups + ['containers'] }}"
 
-    - name: kube
-      ansible.builtin.include_role:
-        name: kube
-        apply:
-          tags: [kube]
+    - name: kube group
       tags: [kube]
+      block:
+        - name: kube
+          ansible.builtin.include_role:
+            name: kube
+            apply:
+              tags: [kube]
+          tags: [kube]
+      rescue:
+        - name: kube failure is recorded
+          ansible.builtin.set_fact:
+            jsh_failed_groups: "{{ jsh_failed_groups + ['kube'] }}"
 
-    - name: fonts
-      ansible.builtin.include_role:
-        name: fonts
-        apply:
-          tags: [fonts]
+    - name: fonts group
       tags: [fonts]
+      block:
+        - name: fonts
+          ansible.builtin.include_role:
+            name: fonts
+            apply:
+              tags: [fonts]
+          tags: [fonts]
+      rescue:
+        - name: fonts failure is recorded
+          ansible.builtin.set_fact:
+            jsh_failed_groups: "{{ jsh_failed_groups + ['fonts'] }}"
 
-    - name: password
-      ansible.builtin.include_role:
-        name: password
-        apply:
-          tags: [password]
+    - name: password group
       tags: [password]
+      block:
+        - name: password
+          ansible.builtin.include_role:
+            name: password
+            apply:
+              tags: [password]
+          tags: [password]
+      rescue:
+        - name: password failure is recorded
+          ansible.builtin.set_fact:
+            jsh_failed_groups: "{{ jsh_failed_groups + ['password'] }}"
 
-    - name: tools
-      ansible.builtin.include_role:
-        name: tools
-        apply:
-          tags: [tools]
+    - name: tools group
       tags: [tools]
+      block:
+        - name: tools
+          ansible.builtin.include_role:
+            name: tools
+            apply:
+              tags: [tools]
+          tags: [tools]
+      rescue:
+        - name: tools failure is recorded
+          ansible.builtin.set_fact:
+            jsh_failed_groups: "{{ jsh_failed_groups + ['tools'] }}"
 
-    - name: apps
-      ansible.builtin.include_role:
-        name: apps
-        apply:
-          tags: [apps]
+    - name: apps group
       tags: [apps]
+      block:
+        - name: apps
+          ansible.builtin.include_role:
+            name: apps
+            apply:
+              tags: [apps]
+          tags: [apps]
+      rescue:
+        - name: apps failure is recorded
+          ansible.builtin.set_fact:
+            jsh_failed_groups: "{{ jsh_failed_groups + ['apps'] }}"
 
-    - name: display
-      ansible.builtin.include_role:
-        name: display
-        apply:
-          tags: [display]
+    - name: display group
       tags: [display]
+      block:
+        - name: display
+          ansible.builtin.include_role:
+            name: display
+            apply:
+              tags: [display]
+          tags: [display]
+      rescue:
+        - name: display failure is recorded
+          ansible.builtin.set_fact:
+            jsh_failed_groups: "{{ jsh_failed_groups + ['display'] }}"
 
-    - name: keybindings
-      ansible.builtin.include_role:
-        name: keybindings
-        apply:
-          tags: [keybindings]
+    - name: keybindings group
       tags: [keybindings]
+      block:
+        - name: keybindings
+          ansible.builtin.include_role:
+            name: keybindings
+            apply:
+              tags: [keybindings]
+          tags: [keybindings]
+      rescue:
+        - name: keybindings failure is recorded
+          ansible.builtin.set_fact:
+            jsh_failed_groups: "{{ jsh_failed_groups + ['keybindings'] }}"
 
-    - name: wox
-      ansible.builtin.include_role:
-        name: wox
-        apply:
-          tags: [wox]
+    - name: wox group
       tags: [wox]
+      block:
+        - name: wox
+          ansible.builtin.include_role:
+            name: wox
+            apply:
+              tags: [wox]
+          tags: [wox]
+      rescue:
+        - name: wox failure is recorded
+          ansible.builtin.set_fact:
+            jsh_failed_groups: "{{ jsh_failed_groups + ['wox'] }}"
 
-    - name: wallpaper
-      ansible.builtin.include_role:
-        name: wallpaper
-        apply:
-          tags: [wallpaper]
+    - name: wallpaper group
       tags: [wallpaper]
+      block:
+        - name: wallpaper
+          ansible.builtin.include_role:
+            name: wallpaper
+            apply:
+              tags: [wallpaper]
+          tags: [wallpaper]
+      rescue:
+        - name: wallpaper failure is recorded
+          ansible.builtin.set_fact:
+            jsh_failed_groups: "{{ jsh_failed_groups + ['wallpaper'] }}"
 
-    - name: vscode
-      ansible.builtin.include_role:
-        name: vscode
-        apply:
-          tags: [vscode]
+    - name: vscode group
       tags: [vscode]
+      block:
+        - name: vscode
+          ansible.builtin.include_role:
+            name: vscode
+            apply:
+              tags: [vscode]
+          tags: [vscode]
+      rescue:
+        - name: vscode failure is recorded
+          ansible.builtin.set_fact:
+            jsh_failed_groups: "{{ jsh_failed_groups + ['vscode'] }}"
 
-    - name: sublime
-      ansible.builtin.include_role:
-        name: sublime
-        apply:
-          tags: [sublime]
+    - name: sublime group
       tags: [sublime]
+      block:
+        - name: sublime
+          ansible.builtin.include_role:
+            name: sublime
+            apply:
+              tags: [sublime]
+          tags: [sublime]
+      rescue:
+        - name: sublime failure is recorded
+          ansible.builtin.set_fact:
+            jsh_failed_groups: "{{ jsh_failed_groups + ['sublime'] }}"
 
-    - name: helium
-      ansible.builtin.include_role:
-        name: helium
-        apply:
-          tags: [helium]
+    - name: helium group
       tags: [helium]
+      block:
+        - name: helium
+          ansible.builtin.include_role:
+            name: helium
+            apply:
+              tags: [helium]
+          tags: [helium]
+      rescue:
+        - name: helium failure is recorded
+          ansible.builtin.set_fact:
+            jsh_failed_groups: "{{ jsh_failed_groups + ['helium'] }}"
 
-    - name: waterfox
-      ansible.builtin.include_role:
-        name: waterfox
-        apply:
-          tags: [waterfox]
+    - name: waterfox group
       tags: [waterfox]
+      block:
+        - name: waterfox
+          ansible.builtin.include_role:
+            name: waterfox
+            apply:
+              tags: [waterfox]
+          tags: [waterfox]
+      rescue:
+        - name: waterfox failure is recorded
+          ansible.builtin.set_fact:
+            jsh_failed_groups: "{{ jsh_failed_groups + ['waterfox'] }}"
 
-    - name: ai
-      ansible.builtin.include_role:
-        name: ai
-        apply:
-          tags: [ai]
+    - name: ai group
       tags: [ai]
+      block:
+        - name: ai
+          ansible.builtin.include_role:
+            name: ai
+            apply:
+              tags: [ai]
+          tags: [ai]
+      rescue:
+        - name: ai failure is recorded
+          ansible.builtin.set_fact:
+            jsh_failed_groups: "{{ jsh_failed_groups + ['ai'] }}"
 
-    - name: skills
-      ansible.builtin.include_role:
-        name: skills
-        apply:
-          tags: [skills]
+    - name: skills group
       tags: [skills]
+      block:
+        - name: skills
+          ansible.builtin.include_role:
+            name: skills
+            apply:
+              tags: [skills]
+          tags: [skills]
+      rescue:
+        - name: skills failure is recorded
+          ansible.builtin.set_fact:
+            jsh_failed_groups: "{{ jsh_failed_groups + ['skills'] }}"
+
+    - name: Host configuration groups succeeded
+      ansible.builtin.fail:
+        msg: "Failed groups: {{ jsh_failed_groups | join(', ') }}"
+      when: jsh_failed_groups | length > 0
+      tags: [always]

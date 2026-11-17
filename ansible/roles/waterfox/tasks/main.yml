@@ -85,15 +85,66 @@
         jsh_platform == 'darwin'
         or (waterfox_command.rc == 0 and waterfox_native.stat.isreg | default(false))
 
-    - name: "{{ waterfox_policy_target | default('Waterfox policy') }}"
+    - name: Waterfox policy is checked
       settings:
         path: "{{ waterfox_policy_target }}"
         values: "{{ waterfox_policy_content }}"
         format: "{{ waterfox_policy_format }}"
         merge: replace
-        backup: true
-      become: "{{ waterfox_policy_become | bool }}"
+      check_mode: true
+      failed_when: false
+      register: waterfox_policy_probe
       when: waterfox_policy_target is defined
+
+    - name: ok
+      ansible.builtin.debug:
+        msg: "{{ waterfox_policy_target }}"
+      when: >-
+        waterfox_policy_target is defined and waterfox_policy_probe.msg is not defined
+        and waterfox_policy_probe is not changed
+
+    - name: "{{ waterfox_policy_target }}"
+      ansible.builtin.command: "true"
+      changed_when: true
+      check_mode: false
+      when: >-
+        waterfox_policy_target is defined and waterfox_policy_probe.msg is not defined
+        and waterfox_policy_probe is changed and ansible_check_mode
+
+    - name: Waterfox policy admin access is checked
+      ansible.builtin.command:
+        argv: [sudo, -n, "true"]
+      register: waterfox_policy_admin
+      changed_when: false
+      check_mode: false
+      failed_when: false
+      when: >-
+        waterfox_policy_probe.msg is not defined and waterfox_policy_probe is changed
+        and not ansible_check_mode and waterfox_policy_become | bool
+
+    - name: "{{ waterfox_policy_target }}"
+      settings:
+        path: "{{ waterfox_policy_target }}"
+        values: "{{ waterfox_policy_content }}"
+        format: "{{ waterfox_policy_format }}"
+        merge: replace
+      become: "{{ waterfox_policy_become | bool }}"
+      when: >-
+        waterfox_policy_target is defined and waterfox_policy_probe.msg is not defined
+        and waterfox_policy_probe is changed and not ansible_check_mode
+        and (not waterfox_policy_become | bool or waterfox_policy_admin.rc | default(1) == 0)
+
+    - name: notice
+      ansible.builtin.debug:
+        msg: >-
+          {{ waterfox_policy_target | default('Waterfox policy') }} needs sudo;
+          run sudo -v first, then rerun
+      when: >-
+        waterfox_policy_target is defined
+        and (waterfox_policy_probe.msg is defined
+             or (waterfox_policy_probe is changed and not ansible_check_mode
+                 and waterfox_policy_become | bool
+                 and waterfox_policy_admin.rc | default(1) != 0))
 
     - name: Waterfox profiles.ini files are checked
       ansible.builtin.stat:

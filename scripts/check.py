@@ -3789,7 +3789,7 @@ class AnsibleChecks(unittest.TestCase):
         return root
 
     def mock_uv(self):
-        self.tool("uv", r'''printf '%s\n' "$*" >> "$HOME/uv.log"
+        self.tool("uv", r'''printf '%s|%s\n' "${UV_PYTHON_PREFERENCE:-}" "$*" >> "$HOME/uv.log"
 case $1 in
   venv)
     for argument; do directory=$argument; done
@@ -3925,8 +3925,13 @@ esac''')
         script = (
             "import json, sys, yaml\n"
             "play = yaml.safe_load(open(sys.argv[1]))[0]\n"
-            "print(json.dumps([t for t in play.get('tasks') or [] "
-            "if 'ansible.builtin.include_role' in t]))\n"
+            "def includes(tasks):\n"
+            "    for task in tasks or []:\n"
+            "        if 'ansible.builtin.include_role' in task: yield task\n"
+            "        yield from includes(task.get('block'))\n"
+            "        yield from includes(task.get('rescue'))\n"
+            "        yield from includes(task.get('always'))\n"
+            "print(json.dumps(list(includes(play.get('tasks')))))\n"
         )
         result = subprocess.run(
             [str(self.venv("python")), "-c", script, str(ROOT / "ansible/site.yml")],
@@ -4071,6 +4076,7 @@ esac''')
             shutil.copy2(ROOT / name, checkout / name)
         (checkout / "scripts/packages.sh").write_text("exit 0\n")
         (checkout / "scripts/shell.sh").write_text("exit 0\n")
+        (checkout / "scripts/ansible.sh").write_text("exit 0\n")
         (checkout / "scripts/fonts.sh").write_text("touch \"$HOME/fonts-script-ran\"\n")
         (checkout / "ansible/roles/fonts/tasks/main.yml").write_text("[]\n")
         return checkout
@@ -4181,7 +4187,7 @@ esac''')
         self.settings(path=str(target), values={"c": 1}, merge="replace")
         self.assertEqual(json.loads(target.read_text()), {"c": 1})
 
-    def app_play(self, target, *arguments, **environment):
+    def app_play(self, target, *arguments, apply_fails=False, **environment):
         self.tool("pgrep", '[ -e "$HOME/closed" ] && exit 1\necho 123')
         self.tool("osascript", 'touch "$HOME/closed"\nprintf "%s\\n" "$*" >> "$HOME/osascript.log"')
         self.tool("pkill", 'touch "$HOME/closed"')
@@ -4197,7 +4203,10 @@ esac''')
             "    app_role: helium\n    app_tasks: apply.yml\n"
             "    app_pending: \"{{ pending is changed }}\"\n"
         )
-        apply = "- name: Helium settings\n" + settings
+        apply = (("- name: Helium settings fail\n"
+                  "  ansible.builtin.command: /usr/bin/false\n"
+                  "  changed_when: false\n") if apply_fails else
+                 "- name: Helium settings\n" + settings)
         play = self.home / "play/roles/helium/tasks"
         play.mkdir(parents=True)
         (play / "apply.yml").write_text(apply)
@@ -4879,6 +4888,246 @@ exec /usr/bin/stat "$@"
         self.assertEqual(len(calls), 2, calls)
         self.assertIn("--tags macos,fonts,tools --check --diff", calls[0])
         self.assertEqual(calls[1], "services")
+
+
+    def yaml_file(self, path):
+        script = "import json, sys, yaml; print(json.dumps(yaml.safe_load(open(sys.argv[1]))))"
+        result = subprocess.run(
+            [str(self.venv("python")), "-c", script, str(path)],
+            capture_output=True, text=True, timeout=60,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
+
+    def test_uv_update_only_upgrades_uv_managed_tools(self):
+        self.tool("just", "exit 0")
+        self.tool("uv", r'''printf '%s\n' "$*" >> "$HOME/uv-tools.log"
+case "$*" in
+  "tool list") printf 'tmail-cli v1.0.0\n- tmail\n' ;;
+  "tool upgrade rust-just") printf 'rust-just is not installed\n' >&2; exit 1 ;;
+  "tool upgrade tmail-cli") printf 'Nothing to upgrade\n' ;;
+esac''')
+        role = '''- name: uv packages
+  ansible.builtin.include_role:
+    name: packages
+  vars:
+    packages_spec:
+      all:
+        uv:
+          - {command: just, package: rust-just}
+          - {command: tmail, package: tmail-cli}
+'''
+        self.tool("tmail", "exit 0")
+        result, _ = self.run_play(
+            "    - name: tools\n      ansible.builtin.include_role: {name: tools}\n",
+            "-e", '{"jsh_platform":"darwin","jsh_update":true}', roles={"tools": role},
+            ANSIBLE_ROLES_PATH=f"{self.home / 'play/roles'}:{ROOT / 'ansible/roles'}",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        calls = (self.home / "uv-tools.log").read_text().splitlines()
+        self.assertEqual(calls.count("tool list"), 1, calls)
+        self.assertNotIn("tool upgrade rust-just", calls)
+        self.assertIn("tool upgrade tmail-cli", calls)
+
+    def test_site_continues_after_a_group_fails_and_exits_nonzero(self):
+        roles = self.home / "site-roles"
+        for name, tasks in {
+            "macos": "- name: group A breaks\n  ansible.builtin.fail: {msg: expected failure}\n",
+            "dev": "- name: ok\n  ansible.builtin.debug: {msg: group B still runs}\n",
+        }.items():
+            target = roles / name / "tasks"
+            target.mkdir(parents=True)
+            (target / "main.yml").write_text(tasks)
+        site = self.home / "site.yml"
+        shutil.copy2(ROOT / "ansible/site.yml", site)
+        result = self.playbook(
+            site, "--tags", "macos,dev", "-e",
+            '{"jsh_platform":"darwin","jsh_host":"test"}',
+            ANSIBLE_STDOUT_CALLBACK="jsh", ANSIBLE_ROLES_PATH=str(roles),
+            JSH_OUTPUT="renderer", JSH_PLATFORM="darwin",
+        )
+        events = [line[1:].split("\t") for line in result.stdout.split("\n")
+                  if line.startswith("\x1e")]
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(["group", "dev", self.purpose("dev")], events)
+        self.assertIn(["item", "ok", "group B still runs"], events)
+        b_item = events.index(["item", "ok", "group B still runs"])
+        final_failure = events.index(["item", "fail", "Host configuration groups succeeded failed"])
+        self.assertEqual(events[b_item + 1], ["stepclose"])
+        self.assertGreater(final_failure, b_item + 1)
+        self.assertIn("macos", result.stdout + result.stderr)
+
+    def test_browser_policy_tasks_probe_without_sudo_then_write_when_needed(self):
+        for role, prefix in (("helium", "Helium"), ("waterfox", "Waterfox")):
+            tasks = self.yaml_file(ROOT / f"ansible/roles/{role}/tasks/main.yml")
+            flattened = []
+            def collect(items):
+                for item in items:
+                    flattened.append(item)
+                    collect(item.get("block", []))
+                    collect(item.get("rescue", []))
+                    collect(item.get("always", []))
+            collect(tasks)
+            probe = next(item for item in flattened if item.get("name") == f"{prefix} policy is checked")
+            self.assertIn("settings", probe)
+            self.assertTrue(probe["check_mode"])
+            self.assertFalse(probe["failed_when"])
+            self.assertNotIn("become", probe)
+            preview = next(item for item in flattened
+                           if item.get("changed_when") is True
+                           and "ansible.builtin.command" in item)
+            self.assertIn("ansible_check_mode", str(preview["when"]))
+            admin = next(item for item in flattened
+                         if item.get("name") == f"{prefix} policy admin access is checked")
+            self.assertEqual(admin["ansible.builtin.command"]["argv"], ["sudo", "-n", "true"])
+            self.assertFalse(admin["failed_when"])
+            write = next(item for item in flattened
+                         if "settings" in item and item.get("check_mode") is not True)
+            self.assertEqual(write["become"], f"{{{{ {role}_policy_become | bool }}}}")
+            self.assertIn("not ansible_check_mode", str(write["when"]))
+            self.assertIn(f"{role}_policy_admin.rc", str(write["when"]))
+            notice = next(item for item in flattened if item.get("name") == "notice"
+                          and "needs sudo" in str(item.get("ansible.builtin.debug", {})))
+            self.assertIn("msg", notice["ansible.builtin.debug"])
+
+    def test_playbook_repairs_ansible_before_every_real_run(self):
+        root = self.checkout()
+        self.mock_playbook()
+        script = root / "scripts/ansible.sh"
+        script.write_text('#!/bin/sh\nprintf "called\\n" >> "$HOME/ansible-bootstrap.log"\n')
+        script.chmod(0o755)
+        result = subprocess.run(
+            ["bash", "-c", '. "$JSH_ROOT/scripts/lib/common.sh"; jsh::playbook fonts'],
+            env=self.env | {"JSH_ROOT": str(root), "JSH_PLATFORM": "darwin",
+                            "JSH_ANSIBLE_HOME": str(self.home / "ansible"),
+                            "JSH_DRY_RUN": "0", "JSH_OUTPUT": "plain"},
+            cwd=self.home, capture_output=True, text=True, timeout=60,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.home / "ansible-bootstrap.log").read_text(), "called\n")
+
+    def test_ansible_bootstrap_uses_only_uv_managed_python(self):
+        self.mock_uv()
+        result = self.bootstrap(self.checkout())
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        calls = (self.home / "uv.log").read_text().splitlines()
+        self.assertTrue(calls, calls)
+        venv = next(line for line in calls if "|venv " in line)
+        self.assertTrue(venv.startswith("only-managed|"), calls)
+
+    def test_settings_back_up_existing_home_files_before_replacing_them(self):
+        target = self.home / ".config/example/settings.json"
+        target.parent.mkdir(parents=True)
+        target.write_text('{"mine": true}\n')
+        result, _ = self.settings(path=str(target), values={"managed": True}, merge="replace")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        backups = list((self.home / ".local/state/jsh/backups").glob(
+            "*/.config/example/settings.json"))
+        self.assertEqual([backup.read_text() for backup in backups], ['{"mine": true}\n'])
+
+    def test_codex_settings_are_backed_up_in_the_jsh_state_tree(self):
+        tasks = self.yaml_file(ROOT / "ansible/roles/ai/tasks/main.yml")
+        names = {task.get("name"): task for task in tasks}
+        backup = names["Existing Codex settings are backed up"]
+        command = backup["ansible.builtin.command"]["argv"]
+        self.assertIn("{{ ai_state }}/jsh/backups/", " ".join(command))
+        self.assertIn("{{ ai_home }}/.codex/config.toml", command)
+        self.assertFalse(backup["changed_when"])
+        current = names["ok"]
+        self.assertEqual(current["ansible.builtin.debug"]["msg"],
+                         "{{ item.item.option }} is {{ item.item.value }}")
+        self.assertIn("ansible_check_mode", str(current["when"]))
+
+    def test_app_reopens_after_settings_apply_fails(self):
+        target = self.home / "settings.json"
+        target.write_text('{"user": 1}\n')
+        result, events = self.app_play(target, apply_fails=True)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue((self.home / "launched").exists(), events)
+        self.assertIn(["item", "info", "Reopening Helium"], events)
+        self.assertIn(["item", "fail", "Helium settings fail failed"], events)
+
+    def test_display_toggle_is_standalone_and_uses_fast_wallpaper_helper(self):
+        toggle = ROOT / "ansible/roles/display/files/toggle.sh"
+        source = toggle.read_text()
+        self.assertIn("JSH_ROOT=${JSH_ROOT:-", source)
+        self.assertNotIn("jsh::playbook", source)
+        self.assertIn("ansible/roles/wallpaper/files/apply.sh", source)
+        wallpaper = (ROOT / "ansible/roles/wallpaper/tasks/main.yml").read_text()
+        self.assertIn("ansible/roles/wallpaper/files/apply.sh", wallpaper)
+        self.tool("xrandr", "exit 0")
+        self.tool("flock", "exit 0")
+        result = subprocess.run(
+            ["bash", str(toggle), "--dry-run"], env=self.env,
+            cwd=self.home, capture_output=True, text=True, timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("would toggle the ultrawide display split", result.stdout)
+
+    def test_flatpak_update_argv_uses_literal_strings(self):
+        tasks = self.yaml_file(ROOT / "ansible/roles/packages/tasks/flatpak.yml")
+        update = tasks[2]["block"][2]
+        self.assertEqual(
+            update["ansible.builtin.command"]["argv"],
+            "{{ ['flatpak', 'update', '--user', '--noninteractive', '-y'] + packages_selected.flatpak }}",
+        )
+
+    def test_vscode_linux_download_uses_private_tempdir_and_skips_in_check_mode(self):
+        tasks = self.yaml_file(ROOT / "ansible/roles/vscode/tasks/linux.yml")
+        package = tasks[1]
+        block = package["block"]
+        temporary = next(task for task in block if "ansible.builtin.tempfile" in task)
+        self.assertEqual(temporary["ansible.builtin.tempfile"]["state"], "directory")
+        download = next(task for task in block if "ansible.builtin.get_url" in task)
+        self.assertIn("vscode_download.path", download["ansible.builtin.get_url"]["dest"])
+        self.assertIn("not ansible_check_mode", str(download["when"]))
+        installs = [task for task in block
+                    if "ansible.builtin.apt" in task or "ansible.builtin.dnf" in task]
+        self.assertEqual(len(installs), 2)
+        self.assertTrue(all("not ansible_check_mode" in str(task["when"]) for task in installs))
+        planned = next(task for task in block if task.get("name") == "VS Code install is planned")
+        self.assertIn("ansible_check_mode", str(planned["ansible.builtin.set_fact"]["vscode_planned"]))
+
+    @unittest.skipUnless(os.uname().sysname == "Darwin", "reads macOS LaunchServices")
+    def test_apps_role_preserves_launchservices_integer_types(self):
+        import plistlib
+        domain = str(self.home / "typed-launch-services")
+        plist = self.home / "typed-handlers.plist"
+        handlers = [{"LSHandlerContentType": "public.text", "LSHandlerRoleAll": "other.app",
+                     "LSHandlerModificationDate": 123456789}]
+        with plist.open("wb") as stream:
+            plistlib.dump({"LSHandlers": handlers}, stream)
+        subprocess.run(["defaults", "import", domain, str(plist)], check=True)
+        macdown = self.home / "MacDown 3000.app"
+        macdown.mkdir()
+        result, _ = self.personalization_play("apps", {
+            "apps_packages": {}, "apps_macdown_application": str(macdown),
+            "apps_launchservices_domain": domain, "apps_decoder_enabled": False,
+            "apps_restart_launchservices": False,
+        })
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        exported = subprocess.run(
+            ["defaults", "export", domain, "-"], check=True, capture_output=True).stdout
+        updated = plistlib.loads(exported)["LSHandlers"]
+        unmanaged = next(item for item in updated
+                         if item.get("LSHandlerContentType") == "public.text")
+        self.assertEqual(unmanaged["LSHandlerModificationDate"], 123456789)
+        self.assertIs(type(unmanaged["LSHandlerModificationDate"]), int)
+
+    def test_apps_role_stops_when_launchservices_export_fails(self):
+        self.tool("defaults", r'''printf '%s\n' "$*" >> "$HOME/defaults.log"
+[ "$1" != export ] || exit 7
+exit 0''')
+        macdown = self.home / "MacDown 3000.app"
+        macdown.mkdir()
+        result, _ = self.personalization_play("apps", {
+            "apps_packages": {}, "apps_macdown_application": str(macdown),
+            "apps_launchservices_domain": "broken", "apps_decoder_enabled": False,
+            "apps_restart_launchservices": False,
+        })
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        calls = (self.home / "defaults.log").read_text().splitlines()
+        self.assertEqual(calls, ["export broken -"])
 
 if __name__ == "__main__":
     unittest.main()

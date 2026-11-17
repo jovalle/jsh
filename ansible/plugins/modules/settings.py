@@ -28,15 +28,22 @@ options:
     choices: [deep, shallow, replace]
     default: deep
   mode: {description: Mode for a new file; an existing file keeps its mode., type: str, default: "0644"}
-  backup: {description: Keep a backup of the previous file., type: bool, default: false}
+  backup:
+    description:
+      - Keep a backup of the previous file (the default).
+      - Files under HOME use the jsh state backup tree; files elsewhere use Ansible backup_local.
+    type: bool
+    default: true
 """
 
 import json
 import os
 import plistlib
 import re
+import shutil
 import subprocess
 import tempfile
+import time
 
 from ansible.module_utils.basic import AnsibleModule
 
@@ -82,7 +89,7 @@ def main() -> None:
             format=dict(type="str", choices=["json", "plist"], default="json"),
             merge=dict(type="str", choices=["deep", "shallow", "replace"], default="deep"),
             mode=dict(type="str", default="0644"),
-            backup=dict(type="bool", default=False),
+            backup=dict(type="bool", default=True),
         ),
         required_one_of=[("source", "values")],
         supports_check_mode=True,
@@ -136,7 +143,21 @@ def main() -> None:
     directory = os.path.dirname(path) or "."
     os.makedirs(directory, mode=0o755, exist_ok=True)
     if params["backup"] and exists:
-        result["backup_file"] = module.backup_local(path)
+        home = os.path.abspath(os.environ.get("HOME", os.path.expanduser("~")))
+        absolute = os.path.abspath(path)
+        if os.path.commonpath([home, absolute]) == home:
+            state = os.environ.get("XDG_STATE_HOME") or os.path.join(home, ".local", "state")
+            relative = os.path.relpath(absolute, home)
+            backup = os.path.join(
+                state, "jsh", "backups", time.strftime("%Y%m%d-%H%M%S") + f"-{os.getpid()}",
+                relative,
+            )
+            os.makedirs(os.path.dirname(backup), mode=0o755, exist_ok=True)
+            shutil.copy2(path, backup)
+            result["backup_file"] = backup
+        else:
+            # Policy files outside HOME stay beside their source through Ansible's backup helper.
+            result["backup_file"] = module.backup_local(path)
     if params["format"] == "plist":
         content = plistlib.dumps(merged, fmt=plistlib.FMT_XML)
     else:

@@ -192,6 +192,8 @@ class CallbackModule(CallbackBase):
             self._close()
             self._group = group
             self._emit("group", group, self._groups[group][1])
+        elif task.name == "Host configuration groups succeeded":
+            self._close()
         elif self._group is not None and task.name:
             self._emit("progress", task.name)
 

@@ -5,7 +5,6 @@
   register: apps_launchservices
   changed_when: false
   check_mode: false
-  failed_when: false
 
 - name: LaunchServices handlers are read
   ansible.builtin.command:
@@ -83,20 +82,15 @@
 - name: "MacDown 3000 opens {{ apps_handler_formats | join(' ') }}"
   ansible.builtin.shell: |
     set -euo pipefail
-    entries=()
-    while IFS= read -r entry; do entries+=("$entry"); done < <(
-      jq -r '
-        def plist:
-          if type == "object" then
-            "{ " + (to_entries | map((.key | @json) + " = " + (.value | plist) + ";") | join(" ")) + " }"
-          elif type == "array" then "( " + (map(plist) | join(", ")) + " )"
-          elif type == "string" then @json
-          elif type == "boolean" then if . then "TRUE" else "FALSE" end
-          else tostring end;
-        .[] | plist
-      '
-    )
-    defaults write {{ apps_launchservices_domain | quote }} LSHandlers -array "${entries[@]}"
+    plist=$(mktemp "${TMPDIR:-/tmp}/jsh-handlers.XXXXXXXX")
+    trap 'rm -f "${plist}"' EXIT
+    defaults export {{ apps_launchservices_domain | quote }} "${plist}"
+    if plutil -extract LSHandlers json -o /dev/null "${plist}" 2>/dev/null; then
+      plutil -replace LSHandlers -json "$(cat)" "${plist}"
+    else
+      plutil -insert LSHandlers -json "$(cat)" "${plist}"
+    fi
+    defaults import {{ apps_launchservices_domain | quote }} "${plist}"
   args:
     executable: /bin/bash
     stdin: "{{ apps_handlers_desired | to_json }}"

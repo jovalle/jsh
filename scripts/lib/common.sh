@@ -329,15 +329,14 @@ jsh::packages() {
 jsh::playbook() {
   local home=${JSH_ANSIBLE_HOME:-${JSH_ROOT}/local/ansible} group tags update=false keep=false
   local preview=()
-  if [[ ! -x ${home}/venv/bin/ansible-playbook ]]; then
-    if [[ ${JSH_DRY_RUN} == 1 ]]; then
-      for group in "$@"; do
-        jsh::group "${group}" "$(jsh::groups table | awk -F'\t' -v name="${group}" '$1 == name { print $2 }')"
-        jsh::skipped "${group} preview: Ansible is not installed yet"
-      done
-      return 0
-    fi
-    jsh::group ansible "Install the pinned Ansible"
+  if [[ ${JSH_DRY_RUN} == 1 && ! -x ${home}/venv/bin/ansible-playbook ]]; then
+    for group in "$@"; do
+      jsh::group "${group}" "$(jsh::groups table | awk -F'\t' -v name="${group}" '$1 == name { print $2 }')"
+      jsh::skipped "${group} preview: Ansible is not installed yet"
+    done
+    return 0
+  fi
+  if [[ ${JSH_DRY_RUN} != 1 ]]; then
     bash "${JSH_ROOT}/scripts/ansible.sh" || return
   fi
   tags=$(

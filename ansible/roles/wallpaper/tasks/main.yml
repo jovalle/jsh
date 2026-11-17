@@ -42,3 +42,11 @@
     - name: XFCE wallpaper is managed
       ansible.builtin.include_tasks: xfce.yml
       when: jsh_desktop == 'xfce'
+
+- name: Linux wallpaper is reapplied
+  ansible.builtin.command:
+    argv: ["{{ jsh_root }}/ansible/roles/wallpaper/files/apply.sh"]
+  environment: "{{ jsh_script_env }}"
+  changed_when: false
+  check_mode: false
+  when: wallpaper_file.stat.isreg | default(false) and jsh_desktop in ['gnome', 'xfce']

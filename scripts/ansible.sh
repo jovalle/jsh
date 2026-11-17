@@ -87,7 +87,7 @@ fi
 # The stamp is written last, so an interrupted or failed install is retried on the next run.
 mkdir -p "${home}"
 rm -f -- "${home}/stamp"
-jsh::task "Creating the Ansible environment" \
+UV_PYTHON_PREFERENCE=only-managed jsh::task "Creating the Ansible environment" \
   "${uv}" venv --quiet --clear --python "${python_version}" "${home}/venv"
 jsh::task "Installing ansible-core" \
   "${uv}" pip install --quiet --python "${home}/venv/bin/python" -r "${requirements}"

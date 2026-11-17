@@ -32,7 +32,7 @@
 
     - name: Flatpak apps are up to date
       ansible.builtin.command:
-        argv: "{{ [flatpak, update, --user, --noninteractive, -y] + packages_selected.flatpak }}"
+        argv: "{{ ['flatpak', 'update', '--user', '--noninteractive', '-y'] + packages_selected.flatpak }}"
       register: packages_flatpak_update
       changed_when: "'Nothing to do' not in packages_flatpak_update.stdout"
       when: jsh_update | bool

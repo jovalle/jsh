@@ -42,38 +42,41 @@
   check_mode: false
   failed_when: app_stopped.rc == 0
 
-- name: Settings apply while the app is closed
-  ansible.builtin.include_role:
-    name: "{{ app_role }}"
-    tasks_from: "{{ app_tasks }}"
+- name: Settings apply and the app reopens
+  block:
+    - name: Settings apply while the app is closed
+      ansible.builtin.include_role:
+        name: "{{ app_role }}"
+        tasks_from: "{{ app_tasks }}"
 
-- name: info
-  ansible.builtin.debug:
-    msg: "Reopening {{ app_label }}"
+  always:
+    - name: info
+      ansible.builtin.debug:
+        msg: "Reopening {{ app_label }}"
 
-- name: App is launched
-  ansible.builtin.shell: >-
-    {{ app_launch | map('quote') | join(' ') }} </dev/null >/dev/null 2>&1 &
-  changed_when: false
-  check_mode: false
+    - name: App is launched
+      ansible.builtin.shell: >-
+        {{ app_launch | map('quote') | join(' ') }} </dev/null >/dev/null 2>&1 &
+      changed_when: false
+      check_mode: false
 
-- name: App is running again
-  ansible.builtin.command:
-    argv: [pgrep, -u, "{{ app_uid }}", -x, "{{ app_process }}"]
-  register: app_reopened
-  until: app_reopened.rc == 0
-  retries: 5
-  delay: 1
-  changed_when: false
-  check_mode: false
-  failed_when: false
+    - name: App is running again
+      ansible.builtin.command:
+        argv: [pgrep, -u, "{{ app_uid }}", -x, "{{ app_process }}"]
+      register: app_reopened
+      until: app_reopened.rc == 0
+      retries: 5
+      delay: 1
+      changed_when: false
+      check_mode: false
+      failed_when: false
 
-- name: "{{ app_label }} restarted"
-  ansible.builtin.command: "true"
-  when: app_reopened.rc == 0
-  changed_when: true
+    - name: "{{ app_label }} restarted"
+      ansible.builtin.command: "true"
+      when: app_reopened.rc == 0
+      changed_when: true
 
-- name: info
-  ansible.builtin.debug:
-    msg: "{{ app_label }} did not restart; open it manually"
-  when: app_reopened.rc != 0
+    - name: info
+      ansible.builtin.debug:
+        msg: "{{ app_label }} did not restart; open it manually"
+      when: app_reopened.rc != 0

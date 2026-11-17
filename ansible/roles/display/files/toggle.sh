@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Toggle an X11 ultrawide display between physical and split layouts.
 set -euo pipefail
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
+JSH_ROOT=${JSH_ROOT:-$(cd -- "${SCRIPT_DIR}/../../../.." && pwd -P)}
+export JSH_ROOT
 export JSH_OUTPUT=plain
 # shellcheck source=scripts/lib/common.sh
 . "${JSH_ROOT:?}/scripts/lib/common.sh" "$@"
@@ -11,7 +14,7 @@ readonly LEFT_NAME=jsh-left RIGHT_NAME=jsh-right
 linux_desktop() {
   local session
   session=${XDG_CURRENT_DESKTOP:-}:${DESKTOP_SESSION:-}
-  case ${session,,} in
+  case $(printf '%s' "${session}" | tr '[:upper:]' '[:lower:]') in
     *xfce*) printf '%s\n' xfce ;;
     *gnome*) printf '%s\n' gnome ;;
   esac
@@ -83,7 +86,7 @@ finish_layout() {
   local desktop
   desktop=$(linux_desktop)
   [[ ${desktop} != xfce ]] || settle_xfce_layout || return
-  jsh::playbook wallpaper >/dev/null 2>&1 || true
+  "${JSH_ROOT}/ansible/roles/wallpaper/files/apply.sh" >/dev/null 2>&1 || true
   if [[ ${desktop} == xfce ]]; then
     [[ ${1:-} != split ]] || span_xfce_wallpaper
     sleep 0.2

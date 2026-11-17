@@ -9,6 +9,7 @@ ai_packages:
 
 ai_home: "{{ lookup('ansible.builtin.env', 'HOME') }}"
 ai_config: "{{ lookup('ansible.builtin.env', 'XDG_CONFIG_HOME') or ai_home ~ '/.config' }}"
+ai_state: "{{ lookup('ansible.builtin.env', 'XDG_STATE_HOME') or ai_home ~ '/.local/state' }}"
 # One rules file for every installed agent; each agent's own directory shows it is installed.
 ai_instructions:
   - "{{ ai_home }}/.codex/AGENTS.md"

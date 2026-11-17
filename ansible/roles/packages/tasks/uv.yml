@@ -8,13 +8,25 @@
   check_mode: false
   failed_when: false
 
+- name: uv tools are listed
+  ansible.builtin.command:
+    argv: [uv, tool, list]
+  register: packages_uv_list
+  changed_when: false
+  check_mode: false
+  when: jsh_update | bool
+
 - name: ok
   ansible.builtin.debug:
     msg: "{{ item.item.command }}"
   loop: "{{ packages_uv.results }}"
   loop_control:
     label: "{{ item.item.command }}"
-  when: item.rc == 0 and not jsh_update | bool
+  when: >-
+    item.rc == 0
+    and (not jsh_update | bool
+         or item.item.package not in
+            (packages_uv_list.stdout_lines | default([]) | map('split') | map('first') | list))
 
 # Without uv, pip installs into the user site, as the Bash setup did.
 - name: uv tools are installed
@@ -39,4 +51,7 @@
   loop: "{{ packages_uv.results }}"
   loop_control:
     label: "{{ item.item.command }}"
-  when: jsh_update | bool and item.rc == 0
+  when: >-
+    jsh_update | bool and item.rc == 0
+    and item.item.package in
+        (packages_uv_list.stdout_lines | default([]) | map('split') | map('first') | list)

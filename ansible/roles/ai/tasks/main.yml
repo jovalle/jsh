@@ -43,6 +43,39 @@
       autoupdate: true
   when: ai_commands.results[0].rc == 0 or (ai_config ~ '/opencode') is directory
 
+- name: Codex settings are checked
+  community.general.ini_file:
+    path: "{{ ai_home }}/.codex/config.toml"
+    section: "{{ item.section }}"
+    option: "{{ item.option }}"
+    value: "{{ item.value }}"
+    no_extra_spaces: false
+    mode: "0600"
+  loop: &codex_settings
+    - {section: null, option: check_for_update_on_startup, value: "true"}
+    - {section: desktop, option: open-link-in-target-preference, value: '"external-browser"'}
+    - {section: desktop, option: open-local-url-in-target-preference, value: '"external-browser"'}
+  loop_control:
+    label: "{{ item.option }} is {{ item.value }}"
+  check_mode: true
+  register: ai_codex_settings
+  when: ai_commands.results[1].rc == 0 or (ai_home ~ '/.codex/config.toml') is file
+
+- name: Existing Codex settings are backed up
+  ansible.builtin.command:
+    argv:
+      - sh
+      - -c
+      - 'mkdir -p "$(dirname "$2")" && cp -Pp "$1" "$2"'
+      - sh
+      - "{{ ai_home }}/.codex/config.toml"
+      - "{{ ai_state }}/jsh/backups/{{ now(fmt='%Y%m%d-%H%M%S') }}-ansible/.codex/config.toml"
+  changed_when: false
+  check_mode: false
+  when: >-
+    not ansible_check_mode and (ai_home ~ '/.codex/config.toml') is file
+    and ai_codex_settings.results | default([]) | selectattr('changed') | list | length > 0
+
 - name: Codex settings
   community.general.ini_file:
     path: "{{ ai_home }}/.codex/config.toml"
@@ -51,13 +84,29 @@
     value: "{{ item.value }}"
     no_extra_spaces: false
     mode: "0600"
-  loop:
-    - {section: null, option: check_for_update_on_startup, value: "true"}
-    - {section: desktop, option: open-link-in-target-preference, value: '"external-browser"'}
-    - {section: desktop, option: open-local-url-in-target-preference, value: '"external-browser"'}
+  loop: *codex_settings
   loop_control:
     label: "{{ item.option }} is {{ item.value }}"
-  when: ai_commands.results[1].rc == 0 or (ai_home ~ '/.codex/config.toml') is file
+  when: >-
+    not ansible_check_mode
+    and (ai_commands.results[1].rc == 0 or (ai_home ~ '/.codex/config.toml') is file)
+
+- name: Codex settings preview
+  ansible.builtin.command: "true"
+  loop: "{{ ai_codex_settings.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.option }} is {{ item.item.value }}"
+  changed_when: true
+  check_mode: false
+  when: ansible_check_mode and item is changed
+
+- name: ok
+  ansible.builtin.debug:
+    msg: "{{ item.item.option }} is {{ item.item.value }}"
+  loop: "{{ ai_codex_settings.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.option }} is {{ item.item.value }}"
+  when: ansible_check_mode and item is not changed
 
 - name: Helium native messaging
   when: jsh_platform == 'darwin' and ai_helium is directory and ai_native_hosts is file

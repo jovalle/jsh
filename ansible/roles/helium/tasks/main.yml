@@ -64,19 +64,64 @@
                           + ['fgmjlmbojbkmdpofahffgcpkhkngfpef']}, recursive=true)
              if jsh_platform == 'darwin' else helium_policy_values }}
 
+    - name: Helium policy is checked
+      settings:
+        path: "{{ helium_policy_path }}"
+        values: "{{ helium_policy_values }}"
+        format: "{{ 'plist' if jsh_platform == 'darwin' else 'json' }}"
+        merge: replace
+      check_mode: true
+      failed_when: false
+      register: helium_policy_probe
+
+    - name: ok
+      ansible.builtin.debug:
+        msg: "{{ helium_policy_path }}"
+      when: helium_policy_probe.msg is not defined and helium_policy_probe is not changed
+
+    - name: "{{ helium_policy_path }}"
+      ansible.builtin.command: "true"
+      changed_when: true
+      check_mode: false
+      when: >-
+        helium_policy_probe.msg is not defined and helium_policy_probe is changed
+        and ansible_check_mode
+
+    - name: Helium policy admin access is checked
+      ansible.builtin.command:
+        argv: [sudo, -n, "true"]
+      register: helium_policy_admin
+      changed_when: false
+      check_mode: false
+      failed_when: false
+      when: >-
+        helium_policy_probe.msg is not defined and helium_policy_probe is changed
+        and not ansible_check_mode and helium_policy_become | bool
+
     - name: "{{ helium_policy_path }}"
       settings:
         path: "{{ helium_policy_path }}"
         values: "{{ helium_policy_values }}"
         format: "{{ 'plist' if jsh_platform == 'darwin' else 'json' }}"
         merge: replace
-        backup: true
       become: "{{ helium_policy_become | bool }}"
-      register: helium_policy
+      when: >-
+        helium_policy_probe.msg is not defined and helium_policy_probe is changed
+        and not ansible_check_mode
+        and (not helium_policy_become | bool or helium_policy_admin.rc | default(1) == 0)
+      register: helium_policy_write
+
+    - name: notice
+      ansible.builtin.debug:
+        msg: "{{ helium_policy_path }} needs sudo; run sudo -v first, then rerun"
+      when: >-
+        helium_policy_probe.msg is defined
+        or (helium_policy_probe is changed and not ansible_check_mode
+            and helium_policy_become | bool and helium_policy_admin.rc | default(1) != 0)
 
     - name: Helium policy change is recorded
       ansible.builtin.set_fact:
-        helium_policy_changed: "{{ helium_policy is changed }}"
+        helium_policy_changed: "{{ helium_policy_write is changed }}"
 
     - name: Helium policy process is checked
       ansible.builtin.command:
