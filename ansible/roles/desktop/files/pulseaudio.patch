@@ -46,7 +46,7 @@
 +                          g_str_equal (state, "live") ? 0 : -1;
 +      if (button->menu != NULL)
 +        pulseaudio_menu_set_jsh_mic_state (button->menu, button->jsh_state);
-+      path = g_strdup_printf ("%s/.jsh/scripts/audio/microphone-%s.svg",
++      path = g_strdup_printf ("%s/.jsh/ansible/roles/audio/files/microphone-%s.svg",
 +                              g_get_home_dir (), state);
 +      gtk_image_set_from_file (GTK_IMAGE (button->recording_indicator), path);
 +      g_free (path);

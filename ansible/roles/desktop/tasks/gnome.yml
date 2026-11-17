@@ -1,0 +1,157 @@
+---
+- name: GNOME prefers dark colors
+  community.general.dconf:
+    key: /org/gnome/desktop/interface/color-scheme
+    value: >-
+      {{ "prefer-dark" | to_json }}
+
+- name: GNOME Arc-Dark theme locations are checked
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    get_checksum: false
+  loop:
+    - /usr/share/themes/Arc-Dark
+    - "{{ desktop_home }}/.themes/Arc-Dark"
+  register: desktop_gnome_arc_themes
+
+- name: GNOME GTK theme is writable
+  ansible.builtin.command:
+    argv: [gsettings, writable, org.gnome.desktop.interface, gtk-theme]
+  register: desktop_gnome_theme_writable
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: GNOME uses the Arc-Dark GTK theme
+  community.general.dconf:
+    key: /org/gnome/desktop/interface/gtk-theme
+    value: >-
+      {{ "Arc-Dark" | to_json }}
+  when: >-
+    desktop_gnome_theme_writable.stdout == "true" and
+    desktop_gnome_arc_themes.results | selectattr("stat.isdir", "defined")
+    | selectattr("stat.isdir") | list | length > 0
+
+- name: GNOME extension tools are found
+  ansible.builtin.command:
+    argv: [sh, -c, "command -v gnome-extensions && gnome-shell --version"]
+  register: desktop_gnome_extension_tools
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: GNOME Shell major version is recorded
+  ansible.builtin.set_fact:
+    desktop_gnome_shell_version: >-
+      {{ desktop_gnome_extension_tools.stdout | regex_search("[0-9]+") }}
+  when: desktop_gnome_extension_tools.rc == 0
+
+- name: info
+  ansible.builtin.debug:
+    msg: "GNOME extensions: gnome-extensions is not installed"
+  when: desktop_gnome_extension_tools.rc != 0
+
+- name: GNOME extension locations are checked
+  ansible.builtin.stat:
+    path: "{{ item.1 }}/{{ item.0 }}"
+    get_checksum: false
+  loop: >-
+    {{ (desktop_gnome_extensions_install + desktop_gnome_extensions_enable)
+       | unique | product([desktop_data + "/gnome-shell/extensions",
+                           "/usr/share/gnome-shell/extensions"]) }}
+  loop_control:
+    label: "{{ item.0 }} in {{ item.1 }}"
+  register: desktop_gnome_extension_locations
+  when: desktop_gnome_extension_tools.rc == 0
+
+- name: GNOME present extensions are recorded
+  ansible.builtin.set_fact:
+    desktop_gnome_extensions_present: >-
+      {{ desktop_gnome_extension_locations.results | default([])
+         | selectattr("stat.isdir", "defined") | selectattr("stat.isdir")
+         | map(attribute="item.0") | unique | list }}
+  when: desktop_gnome_extension_tools.rc == 0
+
+- name: GNOME requested extensions are installed
+  ansible.builtin.include_tasks: extension.yml
+  loop: "{{ desktop_gnome_extensions_install }}"
+  loop_control:
+    loop_var: desktop_extension_uuid
+    label: "{{ desktop_extension_uuid }}"
+  when: desktop_gnome_extension_tools.rc == 0
+
+- name: GNOME enabled extensions are read
+  community.general.dconf:
+    key: /org/gnome/shell/enabled-extensions
+    state: read
+  register: desktop_gnome_enabled_read
+  changed_when: false
+  check_mode: false
+  when: desktop_gnome_extension_tools.rc == 0
+
+- name: GNOME enabled extensions are set
+  vars:
+    desktop_gnome_enabled: >-
+      {{ desktop_gnome_enabled_read.value | default("@as []")
+         | regex_replace("^@as ", "") | from_yaml }}
+    desktop_gnome_enabled_wanted: >-
+      {{ desktop_gnome_enabled
+         | reject("equalto", "ding@rastersoft.com")
+         | reject("equalto", "desktop-icons@csoriano")
+         | union(desktop_gnome_extensions_enable
+                 | intersect(desktop_gnome_extensions_present | default([]))) }}
+  community.general.dconf:
+    key: /org/gnome/shell/enabled-extensions
+    value: "{{ desktop_gnome_enabled_wanted | to_json }}"
+  when: desktop_gnome_extension_tools.rc == 0
+
+- name: notice
+  ansible.builtin.debug:
+    msg: "{{ item }} is not installed; rerun jsh update desktop after installation"
+  loop: "{{ desktop_gnome_extensions_enable | difference(desktop_gnome_extensions_present | default([])) }}"
+  loop_control:
+    label: "{{ item }}"
+  when: desktop_gnome_extension_tools.rc == 0
+
+- name: GNOME disabled extensions are read
+  community.general.dconf:
+    key: /org/gnome/shell/disabled-extensions
+    state: read
+  register: desktop_gnome_disabled_read
+  changed_when: false
+  check_mode: false
+  when: desktop_gnome_extension_tools.rc == 0
+
+- name: GNOME desktop icon extensions are disabled
+  vars:
+    desktop_gnome_disabled: >-
+      {{ desktop_gnome_disabled_read.value | default("@as []")
+         | regex_replace("^@as ", "") | from_yaml }}
+  community.general.dconf:
+    key: /org/gnome/shell/disabled-extensions
+    value: >-
+      {{ desktop_gnome_disabled
+         | union(["ding@rastersoft.com", "desktop-icons@csoriano"])
+         | to_json }}
+  when: desktop_gnome_extension_tools.rc == 0
+
+- name: GNOME user extensions are enabled
+  community.general.dconf:
+    key: /org/gnome/shell/disable-user-extensions
+    value: "false"
+  when: desktop_gnome_extension_tools.rc == 0
+
+- name: Vitals schemas are checked
+  ansible.builtin.stat:
+    path: "{{ desktop_data }}/gnome-shell/extensions/Vitals@CoreCoding.com/schemas"
+    get_checksum: false
+  register: desktop_vitals_schemas
+  when: desktop_gnome_extension_tools.rc == 0
+
+- name: GNOME Vitals hot sensors are set
+  community.general.dconf:
+    key: /org/gnome/shell/extensions/vitals/hot-sensors
+    value: "{{ desktop_gnome_vitals }}"
+  environment:
+    GSETTINGS_SCHEMA_DIR: "{{ desktop_data }}/gnome-shell/extensions/Vitals@CoreCoding.com/schemas"
+  when: desktop_vitals_schemas.stat.isdir | default(false)

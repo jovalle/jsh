@@ -2184,7 +2184,7 @@ esac""",
         for name in ("pactl", "xrandr", "flock"):
             self.tool(name, "exit 0")
         cases = (
-            ("scripts/audio/cycle.sh", "would cycle the default audio output\n"),
+            ("ansible/roles/audio/files/cycle.sh", "would cycle the default audio output\n"),
             ("ansible/roles/display/files/toggle.sh",
              "would toggle the ultrawide display split\n"),
         )
@@ -2729,14 +2729,14 @@ jsh::task "failing task" progress-fail
 
     def test_xfce_plugin_preview_reports_descriptor_drift(self):
         runtime = self.home / "plugin-fixture"
-        (runtime / "scripts/desktop/audio").mkdir(parents=True)
+        (runtime / "ansible/roles/desktop/files").mkdir(parents=True)
         (runtime / "scripts/lib").mkdir(parents=True)
         (runtime / "lib/shell").mkdir(parents=True)
         for name in ("scripts/lib/common.sh", "scripts/lib/desktop.sh",
                      "lib/shell/output.sh", "lib/output.py", "lib/verbs.tsv"):
             target = runtime / name
             shutil.copy2(ROOT / name, target)
-        source = (ROOT / "scripts/desktop/plugin.sh").read_text()
+        source = (ROOT / "ansible/roles/desktop/files/plugin.sh").read_text()
         source = source.replace(
             "stock=/usr/share/xfce4/panel/plugins/pulseaudio.desktop",
             "stock=${JSH_TEST_STOCK}",
@@ -2744,9 +2744,9 @@ jsh::task "failing task" progress-fail
             "target=/usr/share/xfce4/panel/plugins/jsh-pulseaudio.desktop",
             "target=${JSH_TEST_TARGET}",
         )
-        script = runtime / "scripts/desktop/plugin.sh"
+        script = runtime / "ansible/roles/desktop/files/plugin.sh"
         script.write_text(source)
-        (runtime / "scripts/desktop/audio/pulseaudio.patch").touch()
+        (runtime / "ansible/roles/desktop/files/pulseaudio.patch").touch()
 
         stock = self.home / "pulseaudio.desktop"
         target = self.home / "jsh-pulseaudio.desktop"
@@ -2789,9 +2789,9 @@ jsh::task "failing task" progress-fail
         self.assertNotIn("update is unchecked in preview", display)
 
     def test_desktop_panel_reapply_reports_each_setting_once(self):
-        source = (ROOT / "scripts/desktop.sh").read_text()
+        source = (ROOT / "ansible/roles/desktop/files/panel.sh").read_text()
         functions = source[source.index("xfconf_set() {"):
-                           source.index("configure_screensaver() {")]
+                           source.index("case ${1:-apply} in")]
         harness = self.home / "panel-reapply.sh"
         harness.write_text(
             "#!/usr/bin/env bash\nset -euo pipefail\n"
@@ -2800,7 +2800,7 @@ jsh::task "failing task" progress-fail
             "panel_files_changed=0\npanel_quiet=0\n" + functions +
             "apply_panel() { xfconf_set xfce4-panel /test string wanted; }\n"
             "jsh::step check \"XFCE panel\"\n"
-            "configure_panel\n"
+            "apply_panel\nrestart_panel\n"
         )
         self.tool("xfconf-query", "state=\"$HOME/xfconf-state\"\n"
                   "case \" $* \" in\n"
@@ -2846,7 +2846,7 @@ jsh::task "failing task" progress-fail
             (applications / desktop_id).touch()
         self.tool("xfconf-query", "exit 0")
         result = subprocess.run(
-            ["bash", str(ROOT / "scripts/dock.sh"), "--dry-run"],
+            ["bash", str(ROOT / "ansible/roles/dock/files/pins.sh"), "--dry-run"],
             env=self.env | {"JSH_DESKTOP": "xfce"}, cwd=self.home,
             capture_output=True, text=True, timeout=10,
         )
@@ -2962,11 +2962,11 @@ class OutputChecks(unittest.TestCase):
                          "cafe-on-symbolic.svg</img><click>/mock/jsh/bin/cafe --xfce-toggle"
                          "</click><tool>Cafe: Active (Sleep disabled - Click to allow sleep)"
                          "</tool>\n"
-                         "<img>/mock/jsh/scripts/audio/microphone-muted.svg</img><tool>"
+                         "<img>/mock/jsh/ansible/roles/audio/files/microphone-muted.svg</img><tool>"
                          "Elgato Wave:3: Muted</tool>\n"
-                         "<img>/mock/jsh/scripts/audio/microphone-live.svg</img><tool>"
+                         "<img>/mock/jsh/ansible/roles/audio/files/microphone-live.svg</img><tool>"
                          "Elgato Wave:3: Live</tool>\n"
-                         "<img>/mock/jsh/scripts/audio/microphone-unavailable.svg</img>"
+                         "<img>/mock/jsh/ansible/roles/audio/files/microphone-unavailable.svg</img>"
                          "<tool>Elgato Wave:3: Unavailable</tool>\n")
 
     def test_python_sessionless_items_match_bash(self):
@@ -4880,12 +4880,14 @@ exec /usr/bin/stat "$@"
         for name in ("macos", "tools", "services"):
             (checkout / "ansible/roles" / name / "tasks").mkdir(parents=True)
             (checkout / "ansible/roles" / name / "tasks/main.yml").write_text("[]\n")
-        (checkout / "scripts/desktop.sh").write_text(
-            "echo desktop >> \"$HOME/playbook.log\"\n")
+        with (checkout / "scripts/groups.tsv").open("a") as groups:
+            groups.write("legacy\tlinux\tA fixture group on the Bash fallback\n")
+        (checkout / "scripts/legacy.sh").write_text(
+            "echo legacy >> \"$HOME/playbook.log\"\n")
         self.mock_playbook()
         result = subprocess.run(
             ["bash", str(checkout / "install.sh"), "--dry-run", "macos", "fonts",
-             "tools", "services", "desktop"],
+             "tools", "services", "legacy"],
             env=self.env | {"JSH_PLATFORM": "debian",
                             "JSH_ANSIBLE_HOME": str(self.home / "ansible")},
             cwd=self.home, capture_output=True, text=True, timeout=60,
@@ -4894,7 +4896,7 @@ exec /usr/bin/stat "$@"
         calls = (self.home / "playbook.log").read_text().splitlines()
         self.assertEqual(len(calls), 2, calls)
         self.assertIn("--tags macos,fonts,tools,services --check --diff", calls[0])
-        self.assertEqual(calls[1], "desktop")
+        self.assertEqual(calls[1], "legacy")
 
 
     def yaml_file(self, path):
@@ -4942,6 +4944,37 @@ exec /usr/bin/stat "$@"
                          ["systemd-logind reloads"])
         self.assertEqual(files["/etc/udev/rules.d/90-jsh-usb-wakeup.rules"],
                          ["USB udev rules reload"])
+
+    def test_linux_desktop_roles_keep_package_and_audio_contracts(self):
+        desktop = self.yaml_file(ROOT / "ansible/roles/desktop/defaults/main.yml")
+        common = [
+            "fontconfig", "xfce4-appfinder", "arc-theme", "papirus-icon-theme",
+            "pavucontrol", "xfce4-clipman-plugin", "xfce4-cpugraph-plugin",
+            "xfce4-docklike-plugin", "xfce4-fsguard-plugin", "xfce4-genmon-plugin",
+            "xfce4-netload-plugin", "xfce4-pulseaudio-plugin", "xfce4-screensaver",
+            "xfce4-systemload-plugin", "xfce4-taskmanager", "xfce4-terminal",
+        ]
+        self.assertEqual(desktop["desktop_packages"]["debian"]["apt"], common)
+        self.assertEqual(desktop["desktop_packages"]["rhel"]["dnf"], common)
+        colossus = self.yaml_file(ROOT / "ansible/group_vars/colossus.yml")
+        self.assertEqual(colossus["desktop_packages_extra"]["debian"]["apt"], [
+            "build-essential", "pkg-config", "patch", "gettext", "meson",
+            "libgtk-3-dev", "libpulse-dev", "libxfce4panel-2.0-dev",
+            "libxfce4ui-2-dev", "libxfconf-0-dev", "libkeybinder-3.0-dev",
+            "libnotify-dev", "libwnck-3-dev", "libexo-2-dev",
+            "libxfce4windowing-0-dev",
+        ])
+        audio = self.yaml_file(ROOT / "ansible/roles/audio/tasks/main.yml")
+        wave = next(task for task in audio if task.get("name") == "Wave:3 udev rules are current")
+        self.assertEqual(wave["ansible.builtin.copy"]["dest"],
+                         "/etc/udev/rules.d/70-jsh-wave3.rules")
+        self.assertEqual(wave["notify"], "Wave:3 udev rules reload")
+        autostart = next(task for task in audio
+                         if task.get("name") == "Microphone startup mute is configured")
+        self.assertEqual(autostart["ansible.builtin.template"]["src"], "microphone.desktop.j2")
+        policy = next(task for task in audio
+                      if task.get("name") == "WirePlumber audio policy is current")
+        self.assertEqual(policy["notify"], "WirePlumber restarts")
 
     def test_linux_without_cached_sudo_keeps_the_action_notice(self):
         self.tool("sudo", "exit 1")

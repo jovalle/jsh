@@ -1,0 +1,18 @@
+---
+galaxy_info:
+  author: jsh
+  description: Configure Linux desktop appearance and XFCE panel features
+  license: MIT
+  min_ansible_version: "2.22"
+  platforms:
+    - name: Debian
+      versions: [all]
+    - name: EL
+      versions: [all]
+dependencies:
+  - role: packages
+    vars:
+      packages_spec: >-
+        {{ desktop_packages if jsh_desktop == "xfce" else {} }}
+      packages_extra: >-
+        {{ desktop_packages_extra | default({}) if jsh_desktop == "xfce" else {} }}

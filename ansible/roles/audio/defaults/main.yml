@@ -1,0 +1,10 @@
+---
+audio_home: >-
+  {{ lookup("ansible.builtin.env", "HOME") }}
+audio_config: >-
+  {{ lookup("ansible.builtin.env", "XDG_CONFIG_HOME") or (audio_home + "/.config") }}
+audio_policy_source: >-
+  {{ jsh_audio_policy if jsh_audio_policy | length > 0
+     else (role_path + "/files/colossus.conf") if jsh_host == "colossus"
+     else "" }}
+audio_become: "{{ not ansible_check_mode }}"

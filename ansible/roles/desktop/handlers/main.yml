@@ -1,0 +1,21 @@
+---
+- name: notice
+  ansible.builtin.debug:
+    msg: "restart the XFCE panel to apply its settings: jsh update desktop"
+  listen: XFCE panel restarts
+  when: jsh_keep_apps | bool
+
+- name: XFCE panel restarts now
+  ansible.builtin.command:
+    argv: ["{{ role_path }}/files/panel.sh", restart]
+  environment: "{{ jsh_script_env }}"
+  changed_when: desktop_panel_restart.stdout is reported_change
+  check_mode: false
+  register: desktop_panel_restart
+  listen: XFCE panel restarts
+  when: not jsh_keep_apps | bool and not ansible_check_mode
+
+- name: notice
+  ansible.builtin.debug:
+    msg: Log out and back in so GNOME Shell loads extension changes
+  listen: GNOME session reload is needed

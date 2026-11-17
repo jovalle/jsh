@@ -1,0 +1,79 @@
+---
+- name: info
+  ansible.builtin.debug:
+    msg: "dock: no GNOME or XFCE session"
+  when: jsh_desktop not in ["gnome", "xfce"]
+
+- name: Dock desktop tool is found
+  vars:
+    dock_tool_name: >-
+      {{ "xfconf-query" if jsh_desktop == "xfce" else "gsettings" }}
+  ansible.builtin.command:
+    argv: [sh, -c, 'command -v "$1"', sh, "{{ dock_tool_name }}"]
+  register: dock_tool
+  changed_when: false
+  check_mode: false
+  failed_when: false
+  when: jsh_desktop in ["gnome", "xfce"]
+
+- name: info
+  vars:
+    dock_tool_name: >-
+      {{ "xfconf-query" if jsh_desktop == "xfce" else "gsettings" }}
+  ansible.builtin.debug:
+    msg: "dock: {{ dock_tool_name }} is not installed"
+  when: jsh_desktop in ["gnome", "xfce"] and dock_tool.rc != 0
+
+- name: Managed dock desktop entries are found
+  ansible.builtin.command:
+    argv: ["{{ role_path }}/files/pins.sh", list]
+  environment: "{{ jsh_script_env }}"
+  register: dock_pins
+  changed_when: false
+  check_mode: false
+  when: jsh_desktop in ["gnome", "xfce"] and dock_tool.rc == 0
+
+- name: info
+  ansible.builtin.debug:
+    msg: "dock: no managed applications are installed"
+  when: dock_pins.stdout | default("") | length == 0
+
+- name: XFCE docklike pins are current
+  ansible.builtin.command:
+    argv: ["{{ role_path }}/files/pins.sh", apply]
+  environment: "{{ jsh_script_env }}"
+  register: dock_xfce
+  changed_when: dock_xfce.stdout is reported_change
+  check_mode: false
+  when:
+    - jsh_desktop == "xfce"
+    - dock_tool.rc == 0
+    - dock_pins.stdout | length > 0
+
+- name: GNOME favorite applications are read
+  community.general.dconf:
+    key: /org/gnome/shell/favorite-apps
+    state: read
+  register: dock_gnome_favorites
+  changed_when: false
+  check_mode: false
+  when:
+    - jsh_desktop == "gnome"
+    - dock_tool.rc == 0
+    - dock_pins.stdout | length > 0
+
+- name: GNOME favorite applications include managed pins
+  vars:
+    dock_gnome_current: >-
+      {{ dock_gnome_favorites.value | default("@as []")
+         | regex_replace("^@as ", "") | from_yaml }}
+    dock_gnome_managed: >-
+      {{ dock_pins.stdout.split(";") | reject("equalto", "")
+         | map("regex_replace", "^.*/", "") | list }}
+  community.general.dconf:
+    key: /org/gnome/shell/favorite-apps
+    value: "{{ dock_gnome_current | union(dock_gnome_managed) | to_json }}"
+  when:
+    - jsh_desktop == "gnome"
+    - dock_tool.rc == 0
+    - dock_pins.stdout | length > 0

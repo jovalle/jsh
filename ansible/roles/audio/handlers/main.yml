@@ -1,0 +1,40 @@
+---
+- name: Wave:3 udev configuration reloads
+  ansible.builtin.command:
+    argv: [udevadm, control, --reload]
+  become: true
+  changed_when: false
+  check_mode: false
+  listen: Wave:3 udev rules reload
+  when: not ansible_check_mode
+
+- name: Wave:3 USB device is retriggered
+  ansible.builtin.command:
+    argv:
+      - udevadm
+      - trigger
+      - --action=change
+      - --subsystem-match=usb
+      - --attr-match=idVendor=0fd9
+      - --attr-match=idProduct=0070
+  become: true
+  changed_when: false
+  check_mode: false
+  listen: Wave:3 udev rules reload
+  when: not ansible_check_mode
+
+- name: Wave:3 udev rules reloaded
+  ansible.builtin.command:
+    argv: [udevadm, settle]
+  become: true
+  changed_when: true
+  listen: Wave:3 udev rules reload
+  when: not ansible_check_mode
+
+- name: WirePlumber restarted
+  ansible.builtin.systemd_service:
+    name: wireplumber.service
+    scope: user
+    state: restarted
+  listen: WirePlumber restarts
+  when: not ansible_check_mode and audio_systemctl.rc | default(1) == 0

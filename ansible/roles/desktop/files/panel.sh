@@ -1,14 +1,12 @@
 #!/usr/bin/env bash
-# Configure Linux desktop appearance and XFCE panel features.
+# Reconcile XFCE panel plugins and their managed settings.
 set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck source=scripts/lib/common.sh
-. "${SCRIPT_DIR}/lib/common.sh" "$@"
-[[ ${JSH_DESKTOP} == gnome || ${JSH_DESKTOP} == xfce ]] ||
-  jsh::skip "desktop configuration: no GNOME or XFCE session"
-jsh::packages desktop
-case ${JSH_DESKTOP} in gnome) desktop_name=GNOME ;; xfce) desktop_name=XFCE ;; esac
-panel_files_changed=0
+. "${JSH_ROOT:?}/scripts/lib/common.sh" "$@"
+# shellcheck source=scripts/lib/desktop.sh
+. "${JSH_ROOT:?}/scripts/lib/desktop.sh"
+[[ ${JSH_DESKTOP} == xfce ]] || jsh::skip "XFCE panel: not an XFCE session"
 panel_quiet=0
 
 xfconf_set() {
@@ -19,10 +17,10 @@ xfconf_set() {
       ((panel_quiet)) || jsh::ok "${channel}${property} is ${value}"
       return 0
     fi
-    xfconf-query -c "${channel}" -p "${property}" -s "${value}" >/dev/null
+    jsh::run xfconf-query -c "${channel}" -p "${property}" -s "${value}" >/dev/null
   else
     before='(unset)'
-    xfconf-query -c "${channel}" -p "${property}" -n -t "${type}" -s "${value}" >/dev/null
+    jsh::run xfconf-query -c "${channel}" -p "${property}" -n -t "${type}" -s "${value}" >/dev/null
   fi
   before=${before//$'\n'/, }
   if ((!panel_quiet)); then
@@ -34,17 +32,16 @@ xfconf_set() {
 write_if_changed() {
   local target=$1 mode=$2 temporary
   ((panel_quiet)) || jsh::status "${target}"
-  mkdir -p -- "${target%/*}"
-  temporary=$(mktemp "${target}.XXXXXX")
+  temporary=$(jsh::temp)/managed
   command cat >"${temporary}"
   if cmp -s "${temporary}" "${target}"; then
     rm -f -- "${temporary}"
     ((panel_quiet)) || jsh::ok "${target/#${HOME}/\~} is current"
     return
   fi
-  install -m "${mode}" "${temporary}" "${target}"
+  jsh::run mkdir -p -- "${target%/*}"
+  jsh::run install -m "${mode}" "${temporary}" "${target}"
   rm -f -- "${temporary}"
-  panel_files_changed=1
   if ((!panel_quiet)); then
     jsh::changed "${target/#${HOME}/\~} written" \
       "${target/#${HOME}/\~} differs"
@@ -92,7 +89,7 @@ managed_plugin() {
   max_id=$(xfconf-query -c xfce4-panel -lv 2>/dev/null |
     sed -n 's|^/plugins/plugin-\([0-9][0-9]*\).*|\1|p' | sort -n | tail -1)
   id=$((${max_id:-0} + 1))
-  xfconf-query -c xfce4-panel -p "/plugins/plugin-${id}" -n -t string -s "${type}" >/dev/null
+  jsh::run xfconf-query -c xfce4-panel -p "/plugins/plugin-${id}" -n -t string -s "${type}" >/dev/null
   ((panel_quiet)) || jsh::added "panel plugin ${id} is ${type}" \
     "panel plugin ${id} is missing"
   xfconf_set xfce4-panel "/plugins/plugin-${id}/jsh-managed" bool true
@@ -157,7 +154,7 @@ apply_panel() {
   [[ -z ${actions_id} ]] || plugin_ids+=("${actions_id}")
   for id in "${plugin_ids[@]}"; do arguments+=(-t int -s "${id}"); done
   if [[ ${plugin_ids[*]} != "${existing_ids[*]}" ]]; then
-    xfconf-query -c xfce4-panel -p "/panels/panel-${panel_id}/plugin-ids" -a "${arguments[@]}" >/dev/null
+    jsh::run xfconf-query -c xfce4-panel -p "/panels/panel-${panel_id}/plugin-ids" -a "${arguments[@]}" >/dev/null
   fi
 
   xfconf_set xfce4-panel "/plugins/plugin-${cpu_id}/mode" int 0
@@ -181,7 +178,7 @@ label=disk
 label_visible=true
 mnt=/
 EOF
-  write_if_changed "${HOME}/.config/xfce4/panel/net-led.sh" 0755 <"${SCRIPT_DIR}/desktop/panel/net.sh"
+  write_if_changed "${HOME}/.config/xfce4/panel/net-led.sh" 0755 <"${SCRIPT_DIR}/net.sh"
   write_rc "${HOME}/.config/xfce4/panel/genmon-${net_id}.rc" 0644 <<EOF
 Command=${HOME}/.config/xfce4/panel/net-led.sh
 UseLabel=0
@@ -189,9 +186,8 @@ Text=
 UpdatePeriod=100
 EOF
   if [[ -e ${HOME}/.config/xfce4/panel/cafe-status.sh || -e ${HOME}/.config/xfce4/panel/cafe-toggle.sh ]]; then
-    rm -f "${HOME}/.config/xfce4/panel/cafe-status.sh" "${HOME}/.config/xfce4/panel/cafe-toggle.sh"
-    panel_files_changed=1
-  fi
+    jsh::run rm -f "${HOME}/.config/xfce4/panel/cafe-status.sh" "${HOME}/.config/xfce4/panel/cafe-toggle.sh"
+    fi
   write_rc "${HOME}/.config/xfce4/panel/genmon-${cafe_id}.rc" 0644 <<EOF
 Command=${JSH_ROOT}/bin/cafe --xfce-status
 UseLabel=0
@@ -251,20 +247,10 @@ EOF
   xfconf_set xfce4-panel "/plugins/plugin-${clock_id}/digital-time-format" string '%Y-%m-%d %H:%M:%S'
 }
 
-configure_panel() {
-  local before after
-  before=$(xfconf-query -c xfce4-panel -lv 2>/dev/null || true)
-  apply_panel
-  after=$(xfconf-query -c xfce4-panel -lv 2>/dev/null || true)
-  [[ ${before} != "${after}" || ${panel_files_changed} != 0 ]] || return 0
+restart_panel() {
   pgrep -x xfce4-panel >/dev/null 2>&1 || return 0
-  if [[ ${JSH_KEEP_APPS:-0} == 1 ]]; then
-    jsh::notice 'restart the XFCE panel to apply its settings: ~/.jsh/scripts/desktop.sh'
-    return 0
-  fi
-  # Plugins save their in-memory settings on exit, so reapply once the panel has stopped.
   if DISPLAY=${DISPLAY:-:0} timeout 5 xfce4-panel --quit >/dev/null 2>&1; then
-    trap 'jsh::detach env DISPLAY=${DISPLAY:-:0} xfce4-panel; jsh::cleanup' EXIT
+    trap jsh::cleanup EXIT
     for _ in {1..50}; do
       pgrep -x xfce4-panel >/dev/null 2>&1 || break
       sleep 0.1
@@ -273,7 +259,7 @@ configure_panel() {
     apply_panel
     panel_quiet=0
     jsh::detach env DISPLAY="${DISPLAY:-:0}" xfce4-panel
-    trap 'jsh::cleanup' EXIT
+    trap - EXIT
     for _ in {1..50}; do
       pgrep -x xfce4-panel >/dev/null 2>&1 && break
       sleep 0.1
@@ -283,139 +269,15 @@ configure_panel() {
     else
       jsh::info "XFCE panel was not restarted"
     fi
+  elif DISPLAY=${DISPLAY:-:0} timeout 5 xfce4-panel -r >/dev/null 2>&1; then
+    jsh::changed "XFCE panel restarted" "XFCE panel needs a restart"
   else
-    if DISPLAY=${DISPLAY:-:0} timeout 5 xfce4-panel -r >/dev/null 2>&1; then
-      jsh::changed "XFCE panel restarted" "XFCE panel needs a restart"
-    else
-      sleep 1
-      if pgrep -x xfce4-panel >/dev/null 2>&1; then
-        jsh::info "XFCE panel was not restarted"
-      else
-        jsh::detach env DISPLAY="${DISPLAY:-:0}" xfce4-panel
-        for _ in {1..50}; do
-          pgrep -x xfce4-panel >/dev/null 2>&1 && break
-          sleep 0.1
-        done
-        if pgrep -x xfce4-panel >/dev/null 2>&1; then
-          jsh::changed "XFCE panel restarted" "XFCE panel needs a restart"
-        else
-          jsh::info "XFCE panel was not restarted"
-        fi
-      fi
-    fi
+    jsh::info "XFCE panel was not restarted"
   fi
 }
 
-configure_screensaver() {
-  jsh::status "screensaver settings"
-  local autostart=${HOME}/.config/autostart/light-locker.desktop
-  pgrep -x light-locker >/dev/null 2>&1 && pkill -x light-locker 2>/dev/null || true
-  write_if_changed "${autostart}" 0644 <<'EOF'
-[Desktop Entry]
-Type=Application
-Name=Screen Locker
-Exec=light-locker
-Hidden=true
-EOF
-  xfconf_set xfce4-session /general/LockCommand string xflock4
-  if command -v xfce4-screensaver >/dev/null 2>&1; then
-    xfconf_set xfce4-screensaver /saver/enabled bool true
-    xfconf_set xfce4-screensaver /saver/mode int 0
-    xfconf_set xfce4-screensaver /lock/enabled bool true
-    xfconf_set xfce4-screensaver /lock/saver-activation/enabled bool true
-    xfconf_set xfce4-screensaver /lock/saver-activation/delay int 0
-    pgrep -f '[x]fce4-screensaver' >/dev/null 2>&1 ||
-      jsh::detach env DISPLAY="${DISPLAY:-:0}" xfce4-screensaver
-  fi
-  xfconf_set xfce4-power-manager /xfce4-power-manager/dpms-enabled bool true
-  xfconf_set xfce4-power-manager /xfce4-power-manager/dpms-on-ac-sleep uint 10
-  xfconf_set xfce4-power-manager /xfce4-power-manager/dpms-on-ac-off uint 15
-  xfconf_set xfce4-power-manager /xfce4-power-manager/lock-screen-suspend-hibernate bool true
-  xfconf_set xfce4-power-manager /xfce4-power-manager/power-button-action uint 1
-}
-
-configure_xfce() {
-  jsh::status "appearance and shortcuts"
-  local distro_id menu_icon=tux menu_id icon_theme target_zsh
-  xfconf_set xfce4-desktop /desktop-icons/style int 0
-  xfconf_set xfce4-terminal /font-name string 'JetBrainsMono Nerd Font, JetBrainsMono Nerd Font Mono, FiraCode Nerd Font, Hack Nerd Font, MesloLGS Nerd Font, JetBrains Mono, DejaVu Sans Mono, Symbols Nerd Font, monospace 11'
-  xfconf_set xfce4-terminal /font-use-system bool false
-  xfconf_set xsettings /Gtk/MonospaceFontName string 'JetBrainsMono Nerd Font 11'
-  xfconf_set xfce4-keyboard-shortcuts '/commands/custom/<Super><Shift>s' string 'xfce4-screenshooter -rc'
-  xfconf_set xfce4-keyboard-shortcuts '/xfwm4/custom/<Super>Left' string tile_left_key
-  xfconf_set xfce4-keyboard-shortcuts '/xfwm4/custom/<Super>Right' string tile_right_key
-  xfconf_set xfce4-keyboard-shortcuts '/xfwm4/custom/<Super>Up' string tile_up_key
-  xfconf_set xfce4-keyboard-shortcuts '/xfwm4/custom/<Super>Down' string tile_down_key
-  xfconf_set xfwm4 /general/tile_on_move bool true
-  xfconf_set xfce4-appfinder /always-center bool true
-  xfconf_set xfce4-appfinder /enable-service bool true
-  distro_id=$(awk -F= '$1 == "ID" {gsub(/["\047]/, "", $2); print $2}' /etc/os-release)
-  if [[ ${distro_id} == debian ]]; then
-    menu_icon=emblem-debian-white
-  elif [[ -f /usr/share/icons/Papirus/24x24/apps/distributor-logo-${distro_id}.svg ]]; then
-    menu_icon=distributor-logo-${distro_id}
-  fi
-  while read -r menu_id; do
-    xfconf_set xfce4-panel "${menu_id}/custom-menu" bool false
-    xfconf_set xfce4-panel "${menu_id}/button-icon" string "${menu_icon}"
-    xfconf_set xfce4-panel "${menu_id}/show-button-title" bool false
-  done < <(xfconf-query -c xfce4-panel -lv | awk '$2 == "applicationsmenu" {print $1}')
-  [[ ! -d /usr/share/themes/Arc-Dark && ! -d ${HOME}/.themes/Arc-Dark ]] || {
-    xfconf_set xsettings /Net/ThemeName string Arc-Dark
-    xfconf_set xfwm4 /general/theme string Arc-Dark
-  }
-  for icon_theme in Papirus-Dark Qogir-Dark Arc; do
-    if [[ -d /usr/share/icons/${icon_theme} || -d ${HOME}/.icons/${icon_theme} ]]; then
-      xfconf_set xsettings /Net/IconThemeName string "${icon_theme}"
-      break
-    fi
-  done
-  xfconf_set xfce4-terminal /color-foreground string '#D7DAE0'
-  xfconf_set xfce4-terminal /color-background string '#0D1117'
-  xfconf_set xfce4-terminal /color-cursor string '#D7DAE0'
-  xfconf_set xfce4-terminal /color-cursor-use-default bool false
-  xfconf_set xfce4-terminal /color-use-theme bool false
-  if target_zsh=$(command -v zsh 2>/dev/null) && [[ -x ${target_zsh} ]]; then
-    xfconf_set xfce4-terminal /custom-command string "${target_zsh}"
-    xfconf_set xfce4-terminal /run-custom-command bool true
-    xfconf_set xfce4-terminal /command-login-shell bool true
-  fi
-  configure_panel
-  configure_screensaver
-}
-
-configure_gnome() {
-  jsh::status "appearance"
-  jsh::gsetting org.gnome.desktop.interface color-scheme "'prefer-dark'"
-  if [[ $(gsettings writable org.gnome.desktop.interface gtk-theme 2>/dev/null) == true &&
-  (-d /usr/share/themes/Arc-Dark || -d ${HOME}/.themes/Arc-Dark) ]]; then
-    jsh::gsetting org.gnome.desktop.interface gtk-theme "'Arc-Dark'"
-  fi
-}
-
-. "${SCRIPT_DIR}/lib/desktop.sh"
-desktop=${JSH_DESKTOP}
-case ${desktop} in
-  xfce) command -v xfconf-query >/dev/null 2>&1 || jsh::skip "desktop configuration: xfconf-query is not installed" ;;
-  gnome) command -v gsettings >/dev/null 2>&1 || jsh::skip "desktop configuration: gsettings is not installed" ;;
-  *) jsh::skip "desktop configuration: no GNOME or XFCE session" ;;
+case ${1:-apply} in
+  apply) apply_panel ;;
+  restart) restart_panel ;;
+  *) jsh::fail "Usage: $0 [apply|restart]"; exit 2 ;;
 esac
-if [[ ${JSH_DRY_RUN:-0} == 1 ]]; then
-  jsh::step check "${desktop_name} desktop"
-  jsh::info "${desktop_name} desktop is unchecked in preview"
-  exit 0
-fi
-if [[ ${desktop} == gnome ]]; then
-  bash "${SCRIPT_DIR}/desktop/extensions.sh" "$@"
-elif [[ ${JSH_HOST} == colossus ]]; then
-  bash "${SCRIPT_DIR}/desktop/plugin.sh" "$@"
-fi
-jsh::step check "${desktop_name} desktop"
-"configure_${desktop}"
-jsh::status "desktop avatar"
-avatar=${JSH_USER_AVATAR:-${SCRIPT_DIR}/desktop/avatar.jpg}
-if [[ -r ${avatar} ]]; then
-  write_if_changed "${HOME}/.face" 0644 <"${avatar}"
-else
-  jsh::info "desktop avatar source is unavailable"
-fi

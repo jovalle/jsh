@@ -1,0 +1,170 @@
+---
+desktop_home: '{{ lookup("ansible.builtin.env", "HOME") }}'
+desktop_data: '{{ lookup("ansible.builtin.env", "XDG_DATA_HOME") or (desktop_home + "/.local/share") }}'
+desktop_config: '{{ lookup("ansible.builtin.env", "XDG_CONFIG_HOME") or (desktop_home + "/.config") }}'
+desktop_avatar: '{{ lookup("ansible.builtin.env", "JSH_USER_AVATAR") or (role_path + "/files/avatar.jpg")
+  }}'
+desktop_packages:
+  debian:
+    apt:
+      - fontconfig
+      - xfce4-appfinder
+      - arc-theme
+      - papirus-icon-theme
+      - pavucontrol
+      - xfce4-clipman-plugin
+      - xfce4-cpugraph-plugin
+      - xfce4-docklike-plugin
+      - xfce4-fsguard-plugin
+      - xfce4-genmon-plugin
+      - xfce4-netload-plugin
+      - xfce4-pulseaudio-plugin
+      - xfce4-screensaver
+      - xfce4-systemload-plugin
+      - xfce4-taskmanager
+      - xfce4-terminal
+  rhel:
+    dnf:
+      - fontconfig
+      - xfce4-appfinder
+      - arc-theme
+      - papirus-icon-theme
+      - pavucontrol
+      - xfce4-clipman-plugin
+      - xfce4-cpugraph-plugin
+      - xfce4-docklike-plugin
+      - xfce4-fsguard-plugin
+      - xfce4-genmon-plugin
+      - xfce4-netload-plugin
+      - xfce4-pulseaudio-plugin
+      - xfce4-screensaver
+      - xfce4-systemload-plugin
+      - xfce4-taskmanager
+      - xfce4-terminal
+desktop_xfce_settings:
+  - channel: xfce4-desktop
+    property: /desktop-icons/style
+    type: int
+    value: 0
+  - channel: xfce4-terminal
+    property: /font-name
+    type: string
+    value: JetBrainsMono Nerd Font, JetBrainsMono Nerd Font Mono, FiraCode Nerd Font, Hack Nerd Font,
+      MesloLGS Nerd Font, JetBrains Mono, DejaVu Sans Mono, Symbols Nerd Font, monospace 11
+  - channel: xfce4-terminal
+    property: /font-use-system
+    type: bool
+    value: false
+  - channel: xsettings
+    property: /Gtk/MonospaceFontName
+    type: string
+    value: JetBrainsMono Nerd Font 11
+  - channel: xfce4-keyboard-shortcuts
+    property: /commands/custom/<Super><Shift>s
+    type: string
+    value: xfce4-screenshooter -rc
+  - channel: xfce4-keyboard-shortcuts
+    property: /xfwm4/custom/<Super>Left
+    type: string
+    value: tile_left_key
+  - channel: xfce4-keyboard-shortcuts
+    property: /xfwm4/custom/<Super>Right
+    type: string
+    value: tile_right_key
+  - channel: xfce4-keyboard-shortcuts
+    property: /xfwm4/custom/<Super>Up
+    type: string
+    value: tile_up_key
+  - channel: xfce4-keyboard-shortcuts
+    property: /xfwm4/custom/<Super>Down
+    type: string
+    value: tile_down_key
+  - channel: xfwm4
+    property: /general/tile_on_move
+    type: bool
+    value: true
+  - channel: xfce4-appfinder
+    property: /always-center
+    type: bool
+    value: true
+  - channel: xfce4-appfinder
+    property: /enable-service
+    type: bool
+    value: true
+  - channel: xfce4-terminal
+    property: /color-foreground
+    type: string
+    value: '#D7DAE0'
+  - channel: xfce4-terminal
+    property: /color-background
+    type: string
+    value: '#0D1117'
+  - channel: xfce4-terminal
+    property: /color-cursor
+    type: string
+    value: '#D7DAE0'
+  - channel: xfce4-terminal
+    property: /color-cursor-use-default
+    type: bool
+    value: false
+  - channel: xfce4-terminal
+    property: /color-use-theme
+    type: bool
+    value: false
+desktop_xfce_screensaver_settings:
+  - channel: xfce4-session
+    property: /general/LockCommand
+    type: string
+    value: xflock4
+  - channel: xfce4-screensaver
+    property: /saver/enabled
+    type: bool
+    value: true
+    screensaver: true
+  - channel: xfce4-screensaver
+    property: /saver/mode
+    type: int
+    value: 0
+    screensaver: true
+  - channel: xfce4-screensaver
+    property: /lock/enabled
+    type: bool
+    value: true
+    screensaver: true
+  - channel: xfce4-screensaver
+    property: /lock/saver-activation/enabled
+    type: bool
+    value: true
+    screensaver: true
+  - channel: xfce4-screensaver
+    property: /lock/saver-activation/delay
+    type: int
+    value: 0
+    screensaver: true
+  - channel: xfce4-power-manager
+    property: /xfce4-power-manager/dpms-enabled
+    type: bool
+    value: true
+  - channel: xfce4-power-manager
+    property: /xfce4-power-manager/dpms-on-ac-sleep
+    type: uint
+    value: 10
+  - channel: xfce4-power-manager
+    property: /xfce4-power-manager/dpms-on-ac-off
+    type: uint
+    value: 15
+  - channel: xfce4-power-manager
+    property: /xfce4-power-manager/lock-screen-suspend-hibernate
+    type: bool
+    value: true
+  - channel: xfce4-power-manager
+    property: /xfce4-power-manager/power-button-action
+    type: uint
+    value: 1
+desktop_gnome_extensions_install:
+  - Vitals@CoreCoding.com
+desktop_gnome_extensions_enable:
+  - apps-menu@gnome-shell-extensions.gcampax.github.com
+  - window-list@gnome-shell-extensions.gcampax.github.com
+  - Vitals@CoreCoding.com
+desktop_gnome_vitals: '[''_processor_usage_'', ''_memory_usage_'', ''_system_load_1m_'', ''_storage_free_'']'

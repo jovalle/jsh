@@ -30,11 +30,10 @@ them only when asked.
 ## layout
 
 - `install.sh`: bootstrap (the curl one-liner). Installs `core` packages and shell plugins,
-  links dotfiles and `bin/`, then runs the named groups: one `ansible-playbook` for every group
-  with a role, then `scripts/GROUP.sh` for the rest.
-- `scripts/NAME.sh`: bootstrap scripts (`shell.sh`, `ansible.sh`) and the Linux-only groups not
-  yet verified in Ansible (`linux`, `services`, `desktop`, `dock`, `audio`); their data lives in
-  `scripts/NAME/`. `scripts/groups.tsv`: every group with its platforms and purpose, in run order.
+  links dotfiles and `bin/`, then runs the named groups through `ansible/site.yml`.
+- `scripts/NAME.sh`: bootstrap scripts (`shell.sh`, `ansible.sh`). `scripts/groups.tsv`: every
+  setup group with its platforms and purpose, in run order; group data and helpers live with its
+  role under `ansible/roles/NAME/`.
   `scripts/lib/`: shared Bash (`common.sh` helpers, `apps.sh`, `desktop.sh`).
   `scripts/lib/packages.sh`: package-manager code; `scripts/packages.sh` declares each
   group's packages.

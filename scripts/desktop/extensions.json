@@ -1,9 +1,0 @@
-{
-  "install": ["Vitals@CoreCoding.com"],
-  "enable": [
-    "apps-menu@gnome-shell-extensions.gcampax.github.com",
-    "window-list@gnome-shell-extensions.gcampax.github.com",
-    "Vitals@CoreCoding.com"
-  ],
-  "vitals": "['_processor_usage_', '_memory_usage_', '_system_load_1m_', '_storage_free_']"
-}

@@ -183,6 +183,38 @@
           ansible.builtin.set_fact:
             jsh_failed_groups: "{{ jsh_failed_groups + ['apps'] }}"
 
+    - name: desktop group
+      tags: [desktop]
+      block:
+        - name: desktop
+          ansible.builtin.include_role:
+            name: desktop
+            apply:
+              tags: [desktop]
+          tags: [desktop]
+          when: jsh_platform != 'darwin'
+      rescue:
+        - name: desktop failure is recorded
+          ansible.builtin.set_fact:
+            jsh_failed_groups: >-
+              {{ jsh_failed_groups + ["desktop"] }}
+
+    - name: dock group
+      tags: [dock]
+      block:
+        - name: dock
+          ansible.builtin.include_role:
+            name: dock
+            apply:
+              tags: [dock]
+          tags: [dock]
+          when: jsh_platform != 'darwin'
+      rescue:
+        - name: dock failure is recorded
+          ansible.builtin.set_fact:
+            jsh_failed_groups: >-
+              {{ jsh_failed_groups + ["dock"] }}
+
     - name: display group
       tags: [display]
       block:
@@ -224,6 +256,22 @@
         - name: wox failure is recorded
           ansible.builtin.set_fact:
             jsh_failed_groups: "{{ jsh_failed_groups + ['wox'] }}"
+
+    - name: audio group
+      tags: [audio]
+      block:
+        - name: audio
+          ansible.builtin.include_role:
+            name: audio
+            apply:
+              tags: [audio]
+          tags: [audio]
+          when: jsh_platform != 'darwin'
+      rescue:
+        - name: audio failure is recorded
+          ansible.builtin.set_fact:
+            jsh_failed_groups: >-
+              {{ jsh_failed_groups + ["audio"] }}
 
     - name: wallpaper group
       tags: [wallpaper]

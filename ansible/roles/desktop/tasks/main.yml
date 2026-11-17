@@ -1,0 +1,60 @@
+---
+- name: info
+  ansible.builtin.debug:
+    msg: "desktop configuration: no GNOME or XFCE session"
+  when: jsh_desktop not in ["gnome", "xfce"]
+
+- name: XFCE tools are found
+  ansible.builtin.command:
+    argv: [sh, -c, "command -v xfconf-query"]
+  register: desktop_xfconf
+  changed_when: false
+  check_mode: false
+  failed_when: false
+  when: jsh_desktop == "xfce"
+
+- name: info
+  ansible.builtin.debug:
+    msg: "desktop configuration: xfconf-query is not installed"
+  when: jsh_desktop == "xfce" and desktop_xfconf.rc != 0
+
+- name: GNOME tools are found
+  ansible.builtin.command:
+    argv: [sh, -c, "command -v gsettings"]
+  register: desktop_gsettings
+  changed_when: false
+  check_mode: false
+  failed_when: false
+  when: jsh_desktop == "gnome"
+
+- name: info
+  ansible.builtin.debug:
+    msg: "desktop configuration: gsettings is not installed"
+  when: jsh_desktop == "gnome" and desktop_gsettings.rc != 0
+
+- name: XFCE desktop is configured
+  ansible.builtin.include_tasks: xfce.yml
+  when: jsh_desktop == "xfce" and desktop_xfconf.rc == 0
+
+- name: GNOME desktop is configured
+  ansible.builtin.include_tasks: gnome.yml
+  when: jsh_desktop == "gnome" and desktop_gsettings.rc == 0
+
+- name: Desktop avatar source is checked
+  ansible.builtin.stat:
+    path: "{{ desktop_avatar }}"
+    get_checksum: false
+  register: desktop_avatar_file
+  when: jsh_desktop in ["gnome", "xfce"]
+
+- name: Desktop avatar is current
+  ansible.builtin.copy:
+    src: "{{ desktop_avatar }}"
+    dest: "{{ desktop_home }}/.face"
+    mode: "0644"
+  when: desktop_avatar_file.stat.isreg | default(false)
+
+- name: info
+  ansible.builtin.debug:
+    msg: Desktop avatar source is unavailable
+  when: desktop_avatar_file.stat is defined and not desktop_avatar_file.stat.isreg | default(false)

@@ -143,7 +143,7 @@ def status():
 
 def panel():
     state = status()
-    icon = SCRIPT.parent.parent / "scripts/audio" / f"microphone-{state}.svg"
+    icon = SCRIPT.parent.parent / "ansible/roles/audio/files" / f"microphone-{state}.svg"
     label = {"live": "Live", "muted": "Muted", "unavailable": "Unavailable"}[state]
     print(f"<img>{icon}</img><tool>Elgato Wave:3: {label}</tool>")
 

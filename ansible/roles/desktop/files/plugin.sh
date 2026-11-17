@@ -3,9 +3,9 @@
 set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck source=scripts/lib/common.sh
-. "${SCRIPT_DIR}/../lib/common.sh" "$@"
+. "${JSH_ROOT:?}/scripts/lib/common.sh" "$@"
 # shellcheck source=scripts/lib/desktop.sh
-. "${SCRIPT_DIR}/../lib/desktop.sh"
+. "${JSH_ROOT:?}/scripts/lib/desktop.sh"
 [[ $(uname -s) == Linux && ${JSH_HOST} == colossus && ${JSH_DESKTOP} == xfce ]] ||
   jsh::skip "XFCE audio plugin: requires Linux XFCE on colossus"
 command -v apt-get >/dev/null 2>&1 || jsh::skip "XFCE audio plugin: apt-get is not available"
@@ -22,7 +22,7 @@ libdir=$(pkg-config --variable=libdir libxfce4panel-2.0)
   exit 1
 }
 library=${libdir}/xfce4/panel/plugins/libjsh-pulseaudio.so
-patch=${SCRIPT_DIR}/audio/pulseaudio.patch
+patch=${SCRIPT_DIR}/pulseaudio.patch
 fingerprint=$(sha256sum <"${patch}")
 fingerprint=${fingerprint%% *}
 temporary=$(jsh::temp)
@@ -83,7 +83,7 @@ source=${temporary}/xfce4-pulseaudio-plugin-${version}
 jsh::download "${releases}/${series}/${asset}" "${temporary}/${asset}"
 tar -xf "${temporary}/${asset}" -C "${temporary}"
 if [[ ! -f ${source}/meson.build ]] || ! patch -d "${source}" -p1 --dry-run -s -i "${patch}" >/dev/null 2>&1; then
-  jsh::notice "scripts/desktop/audio/pulseaudio.patch does not apply to XFCE audio plugin ${version}; port it, then rerun${installed:+ (keeping ${installed})}"
+  jsh::notice "ansible/roles/desktop/files/pulseaudio.patch does not apply to XFCE audio plugin ${version}; port it, then rerun${installed:+ (keeping ${installed})}"
   exit 0
 fi
 jsh::task 'Patching XFCE audio plugin' patch -d "${source}" -p1 -i "${patch}"
@@ -93,13 +93,6 @@ staged=${library}.$$.tmp
 jsh::root install -m 0644 "${source}/build/panel-plugin/libpulseaudio-plugin.so" "${staged}"
 jsh::root mv -f -- "${staged}" "${library}"
 jsh::system_file "${descriptor}" "${target}"
-if command -v xfce4-panel >/dev/null 2>&1 && pgrep -x xfce4-panel >/dev/null 2>&1; then
-  if jsh::run xfce4-panel -r; then
-    jsh::changed "XFCE panel restarted" "XFCE panel needs a restart"
-  else
-    jsh::info "XFCE panel was not restarted"
-  fi
-fi
 if [[ -n ${installed} && ${installed} != "${version}" ]]; then
   jsh::changed "XFCE Wave:3 audio plugin set ${version}" \
     "XFCE Wave:3 audio plugin is not ${version}"

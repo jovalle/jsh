@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 # Cycle Linux audio outputs while excluding managed disabled sinks.
 set -euo pipefail
-SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 export JSH_OUTPUT=plain
 # shellcheck source=scripts/lib/common.sh
-. "${SCRIPT_DIR}/../lib/common.sh" "$@"
+. "${JSH_ROOT:?}/scripts/lib/common.sh" "$@"
 unset JSH_OUTPUT
 
 output_is_excluded() {

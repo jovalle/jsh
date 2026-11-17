@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Configure the Linux application dock and managed pins.
+# Reconcile XFCE docklike pins with installed desktop entries.
 set -euo pipefail
-SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck source=scripts/lib/common.sh
-. "${SCRIPT_DIR}/lib/common.sh" "$@"
+. "${JSH_ROOT:?}/scripts/lib/common.sh" "$@"
+# shellcheck source=scripts/lib/desktop.sh
+. "${JSH_ROOT:?}/scripts/lib/desktop.sh"
 
 find_desktop_file() {
   local candidate directory
@@ -110,33 +111,6 @@ write_pins() {
   fi
 }
 
-configure_gnome_dock() {
-  local pins=$1 file desktop_id current existing serialized separator=''
-  local -a favorites=()
-  current=$(gsettings get org.gnome.shell favorite-apps) || {
-    jsh::fail 'Unable to read existing GNOME favorites.'
-    return 1
-  }
-  while IFS= read -r existing; do [[ -z ${existing} ]] || favorites+=("${existing}"); done < <(
-    grep -o "'[^']*'" <<<"${current}" | tr -d "'"
-  )
-  while IFS= read -r file; do
-    [[ -n ${file} ]] || continue
-    desktop_id=${file##*/}
-    [[ " ${favorites[*]} " == *" ${desktop_id} "* ]] || favorites+=("${desktop_id}")
-  done < <(tr ';' '\n' <<<"${pins}")
-  serialized='['
-  for desktop_id in "${favorites[@]}"; do
-    serialized+="${separator}'${desktop_id}'"
-    separator=', '
-  done
-  serialized+=']'
-  [[ ${current} == "${serialized}" ]] || {
-    gsettings set org.gnome.shell favorite-apps "${serialized}"
-    dock_changed=1
-  }
-}
-
 configure_xfce_dock() {
   local pins=$1 panel_dir target plugin_id panel_id id filename plugin_type panel_before panel_after
   local other_id other_type dock_present=0
@@ -229,30 +203,33 @@ configure_xfce_dock() {
   fi
 }
 
-. "${SCRIPT_DIR}/lib/desktop.sh"
-desktop=${JSH_DESKTOP}
-jsh::step check "dock pins"
-dock_changed=0
-dock_details=()
-pins=$(dock_pins)
-[[ -n ${pins} ]] || jsh::skip "dock: no managed applications are installed"
-case ${desktop} in
-  xfce) command -v xfconf-query >/dev/null 2>&1 || jsh::skip "dock: xfconf-query is not installed" ;;
-  gnome) command -v gsettings >/dev/null 2>&1 || jsh::skip "dock: gsettings is not installed" ;;
-  *) jsh::skip "dock: no GNOME or XFCE session" ;;
+mode=apply
+for argument in "$@"; do
+  case ${argument} in apply | list) mode=${argument} ;; esac
+done
+case ${mode} in
+  list)
+    dock_pins
+    ;;
+  apply)
+    dock_changed=0
+    dock_details=()
+    pins=$(dock_pins)
+    [[ -n ${pins} ]] || jsh::skip "dock: no managed applications are installed"
+    command -v xfconf-query >/dev/null 2>&1 || jsh::skip "dock: xfconf-query is not installed"
+    desired_names=$(jsh::desktop_names "${pins}")
+    if [[ ${JSH_DRY_RUN:-0} == 1 ]]; then
+      jsh::info "XFCE dock pins are unchecked in preview: ${desired_names}"
+      exit 0
+    fi
+    configure_xfce_dock "${pins}"
+    if ((dock_changed)); then
+      jsh::changed "XFCE dock pins set ${desired_names}" \
+        "XFCE dock pins are not ${desired_names}"
+      for detail in "${dock_details[@]}"; do jsh::info "${detail}"; done
+    else
+      jsh::ok "XFCE dock pins are ${desired_names}"
+    fi
+    ;;
+  *) jsh::fail "Usage: $0 [apply|list]"; exit 2 ;;
 esac
-case ${desktop} in xfce) desktop_name=XFCE ;; gnome) desktop_name=GNOME ;; esac
-desired_names=$(jsh::desktop_names "${pins}")
-if [[ ${JSH_DRY_RUN:-0} == 1 ]]; then
-  jsh::info "${desktop_name} dock pins are unchecked in preview: ${desired_names}"
-  exit 0
-fi
-jsh::status "${desktop_name} dock layout"
-"configure_${desktop}_dock" "${pins}"
-if ((dock_changed)); then
-  jsh::changed "${desktop_name} dock pins set ${desired_names}" \
-    "${desktop_name} dock pins are not ${desired_names}"
-  for detail in "${dock_details[@]}"; do jsh::info "${detail}"; done
-else
-  jsh::ok "${desktop_name} dock pins are ${desired_names}"
-fi
