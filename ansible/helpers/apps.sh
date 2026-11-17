@@ -3,7 +3,7 @@
 # shellcheck disable=SC2154 # Shared paths and launch command are supplied by callers.
 
 # shellcheck source=scripts/lib/common.sh
-. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/common.sh" "$@"
+. "${JSH_ROOT:?}/scripts/lib/common.sh" "$@"
 
 app::jsonc() {
   local parsed

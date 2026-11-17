@@ -3,8 +3,8 @@
 set -euo pipefail
 # shellcheck source=scripts/lib/common.sh
 . "${JSH_ROOT:?}/scripts/lib/common.sh" "$@"
-# shellcheck source=scripts/lib/desktop.sh
-. "${JSH_ROOT:?}/scripts/lib/desktop.sh"
+# shellcheck source=ansible/helpers/desktop.sh
+. "${JSH_ROOT:?}/ansible/helpers/desktop.sh"
 
 find_desktop_file() {
   local candidate directory

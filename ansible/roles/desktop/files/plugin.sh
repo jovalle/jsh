@@ -4,8 +4,8 @@ set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck source=scripts/lib/common.sh
 . "${JSH_ROOT:?}/scripts/lib/common.sh" "$@"
-# shellcheck source=scripts/lib/desktop.sh
-. "${JSH_ROOT:?}/scripts/lib/desktop.sh"
+# shellcheck source=ansible/helpers/desktop.sh
+. "${JSH_ROOT:?}/ansible/helpers/desktop.sh"
 [[ $(uname -s) == Linux && ${JSH_HOST} == colossus && ${JSH_DESKTOP} == xfce ]] ||
   jsh::skip "XFCE audio plugin: requires Linux XFCE on colossus"
 command -v apt-get >/dev/null 2>&1 || jsh::skip "XFCE audio plugin: apt-get is not available"

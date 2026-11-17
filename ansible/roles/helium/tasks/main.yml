@@ -238,7 +238,7 @@
                 root=$2
                 policy=$3
                 set --
-                . "${JSH_ROOT:?}/scripts/lib/apps.sh"
+                . "${JSH_ROOT:?}/ansible/helpers/apps.sh"
                 current=${APP_TMP}/current-preferences.json
                 app::jsonc "${preferences}" >"${current}"
                 jq -n --slurpfile base "${JSH_ROOT}/ansible/roles/helium/files/preferences.json" \

@@ -4,8 +4,8 @@ set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck source=scripts/lib/common.sh
 . "${JSH_ROOT:?}/scripts/lib/common.sh" "$@"
-# shellcheck source=scripts/lib/desktop.sh
-. "${JSH_ROOT:?}/scripts/lib/desktop.sh"
+# shellcheck source=ansible/helpers/desktop.sh
+. "${JSH_ROOT:?}/ansible/helpers/desktop.sh"
 [[ ${JSH_DESKTOP} == xfce ]] || jsh::skip "XFCE panel: not an XFCE session"
 panel_quiet=0
 

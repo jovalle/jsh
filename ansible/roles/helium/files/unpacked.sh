@@ -3,8 +3,8 @@
 set -euo pipefail
 profile=${1:?}
 shift
-# shellcheck source=scripts/lib/apps.sh
-. "${JSH_ROOT:?}/scripts/lib/apps.sh" "$@"
+# shellcheck source=ansible/helpers/apps.sh
+. "${JSH_ROOT:?}/ansible/helpers/apps.sh" "$@"
 APP_TMP=${APP_TMP:?}
 secure=${profile}/Secure\ Preferences
 APP_LAUNCH=(open -a Helium)

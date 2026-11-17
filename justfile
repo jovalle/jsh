@@ -3,7 +3,7 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
 set positional-arguments
 
-shell_files := `{ printf '%s\n' install.sh; find scripts lib -type f -name '*.sh'; for file in bin/*; do [ -f "$file" ] && head -n 1 "$file" | grep -Eq 'sh$' && printf '%s\n' "$file" || true; done; } | tr '\n' ' '`
+shell_files := `{ printf '%s\n' install.sh; find scripts lib ansible/helpers ansible/roles -type f -name '*.sh'; for file in bin/*; do [ -f "$file" ] && head -n 1 "$file" | grep -Eq 'sh$' && printf '%s\n' "$file" || true; done; } | tr '\n' ' '`
 bash_rc := "dotfiles/.bashrc dotfiles/.bash_profile"
 zsh_files := "dotfiles/.zshrc lib/shell/commands.sh lib/shell/navigation.sh"
 

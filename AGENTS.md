@@ -36,8 +36,9 @@ them only when asked.
   links dotfiles and `bin/`, then runs the named groups through `ansible/site.yml`.
 - `scripts/`: bootstrap scripts (`shell.sh`, `ansible.sh`, and `packages.sh`) and the only
   test file, `check.py`. `scripts/groups.tsv` lists every setup group with its platforms and
-  purpose in run order. `scripts/lib/` holds Bash shared by the bootstrap and role helpers;
-  `scripts/packages.sh` declares only `core` and global `maintenance` packages.
+  purpose in run order. `scripts/lib/` holds Bash shared by the bootstrap;
+  `ansible/helpers/` holds role libraries; `scripts/packages.sh` declares only `core` and global
+  `maintenance` packages.
 - `lib/output.md`: output contract. `lib/output.py`: renderer and Python API.
   `lib/verbs.tsv`: step conjugations.
 - `lib/shell/`: commands, navigation, prompt, and completion sourced by `.zshrc`/`.bashrc`.
@@ -48,8 +49,9 @@ them only when asked.
   `.git/hooks`).
 - `ansible/`: host configuration. `site.yml` includes one role per group in `groups.tsv`
   order, tagged with the group name; shared roles are `packages`, `app`, and `link`; plugins
-  (output callback, `settings` module, filters) are in `ansible/plugins/`. Setup helper scripts
-  in `roles/GROUP/files/` source `scripts/lib/common.sh` and print output events. `scripts/ansible.sh`
+  (output callback, `settings` module, filters) are in `ansible/plugins/`. Shared role libraries
+  live in `ansible/helpers/`; setup helper scripts in `roles/GROUP/files/` source
+  `scripts/lib/common.sh` and print output events. `scripts/ansible.sh`
   installs the pinned versions from `ansible/requirements.*` into `local/ansible/`. To run it
   directly, set `ANSIBLE_CONFIG=ansible/ansible.cfg` and run
   `local/ansible/venv/bin/ansible-playbook ansible/site.yml --tags GROUP --check --diff`.

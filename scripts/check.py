@@ -2493,7 +2493,7 @@ printf 'last output without newline'
             {f"key{index}": {"value": f"text {index}"} for index in range(10000)}))
         (self.home / "settings.jsonc").write_text('{\n  // comment\n  "url": "a//b",\n}\n')
         (self.home / "list.json").write_text("[1]\n")
-        code = ('. "$JSH_ROOT/scripts/lib/apps.sh"\n'
+        code = ('. "$JSH_ROOT/ansible/helpers/apps.sh"\n'
                 'app::jsonc "$HOME/large.json" | jq -r .key9999.value\n'
                 'app::jsonc "$HOME/settings.jsonc" | jq -c .\n'
                 'app::jsonc "$HOME/list.json" || echo rejected\n')
@@ -2587,7 +2587,7 @@ EOF''')
         harness = self.home / "app-reopen.sh"
         harness.write_text(
             "#!/usr/bin/env bash\nset -euo pipefail\n"
-            ". \"$JSH_ROOT/scripts/lib/apps.sh\"\n"
+            ". \"$JSH_ROOT/ansible/helpers/apps.sh\"\n"
             "APP_LAUNCH=(long-launch)\n"
             "apply_settings() { :; }\n"
             "app::with_closed TestApp test-app apply_settings\n"
@@ -2775,8 +2775,9 @@ jsh::task "failing task" progress-fail
         runtime = self.home / "plugin-fixture"
         (runtime / "ansible/roles/desktop/files").mkdir(parents=True)
         (runtime / "scripts/lib").mkdir(parents=True)
+        (runtime / "ansible/helpers").mkdir(parents=True)
         (runtime / "lib/shell").mkdir(parents=True)
-        for name in ("scripts/lib/common.sh", "scripts/lib/desktop.sh",
+        for name in ("scripts/lib/common.sh", "ansible/helpers/desktop.sh",
                      "lib/shell/output.sh", "lib/output.py", "lib/verbs.tsv"):
             target = runtime / name
             shutil.copy2(ROOT / name, target)

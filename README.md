@@ -84,8 +84,8 @@ Helium enables experimental web-platform features on Linux and macOS so [Kingpin
 ```sh
 install.sh          # bootstrap: checkout, core packages, shell, links, then the setup groups
 justfile            # shortcuts and checks
-ansible/            # host configuration: site.yml runs one role per setup group
-scripts/            # bootstrap scripts, shared role helpers, and smoke checks in check.py
+ansible/            # host configuration: roles, their shared helpers, and site.yml
+scripts/            # bootstrap scripts and smoke checks in check.py
 scripts/groups.tsv  # every setup group with its platforms and purpose, in run order
 scripts/packages.sh # core bootstrap packages and package-manager maintenance
 dotfiles/           # linked into $HOME
