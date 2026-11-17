@@ -1,0 +1,14 @@
+---
+galaxy_info:
+  author: jsh
+  description: Apply JSH_WALLPAPER to the active desktop
+  license: MIT
+  min_ansible_version: "2.22"
+  platforms:
+    - name: MacOSX
+      versions: [all]
+    - name: Debian
+      versions: [all]
+    - name: EL
+      versions: [all]
+dependencies: []

@@ -15,7 +15,7 @@ jsh::usage() {
     'removes deprecated or disabled packages. Configuration remains idempotent.'
 }
 
-# Read every option first; group names are checked against the checkout's scripts/groups.tsv.
+# Read every option first; group names are checked against site.yml and role metadata.
 help=0
 list=0
 groups=()

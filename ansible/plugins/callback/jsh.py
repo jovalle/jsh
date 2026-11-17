@@ -6,8 +6,9 @@ Like jsh::event in lib/shell/output.sh, events are also recorded under JSH_REPOR
 summary.
 
 Rules:
-- A play-level include_role whose name is a group in scripts/groups.tsv opens that group. Its
-  tasks, meta dependencies, and nested includes report under it until the next group.
+- A play-level include_role from ansible/site.yml opens that group; role metadata supplies its
+  purpose and platforms. Tasks, meta dependencies, and nested includes report under it until the
+  next group.
 - Task names and loop labels are the item text, so they state the end state.
 - Changed results are added (package installs, files that did not exist), removed (state
   absent), or changed. In check mode, diff lines follow as output items.
@@ -35,6 +36,8 @@ import os
 import sys
 from pathlib import Path
 
+import yaml
+
 from ansible import context
 from ansible.plugins.callback import CallbackBase
 
@@ -60,6 +63,33 @@ def _field(value: object) -> str:
     for character in ("\t", "\r", "\n"):
         text = text.replace(character, " ")
     return text.replace(MARKER, "")
+
+
+def _site_groups(root: Path) -> dict[str, tuple[str, str]]:
+    play = yaml.safe_load((root / "ansible/site.yml").read_text(encoding="utf-8"))[0]
+
+    def includes(tasks):
+        for task in tasks or []:
+            if "ansible.builtin.include_role" in task:
+                yield task
+            yield from includes(task.get("block"))
+            yield from includes(task.get("rescue"))
+            yield from includes(task.get("always"))
+
+    platforms = {
+        frozenset(("MacOSX",)): "darwin",
+        frozenset(("Debian", "EL")): "linux",
+        frozenset(("MacOSX", "Debian", "EL")): "all",
+    }
+    groups = {}
+    for task in includes(play.get("tasks")):
+        name = task["ansible.builtin.include_role"]["name"]
+        meta = yaml.safe_load(
+            (root / "ansible/roles" / name / "meta/main.yml").read_text(encoding="utf-8")
+        )["galaxy_info"]
+        supported = frozenset(platform["name"] for platform in meta["platforms"])
+        groups[name] = (platforms[supported], meta["description"])
+    return groups
 
 
 def _diffs(result: dict) -> list:
@@ -95,13 +125,7 @@ class CallbackModule(CallbackBase):
     def __init__(self):
         super().__init__()
         self._root = Path(os.environ.get("JSH_ROOT") or Path(__file__).resolve().parents[3])
-        self._groups = {}
-        groups = self._root / "scripts/groups.tsv"
-        if groups.is_file():
-            for line in groups.read_text(encoding="utf-8").splitlines():
-                fields = line.split("\t")
-                if line and not line.startswith("#") and len(fields) == 3:
-                    self._groups[fields[0]] = (fields[1], fields[2])
+        self._groups = _site_groups(self._root)
         report = os.environ.get("JSH_REPORT")
         self._report = Path(report) if report and Path(report).is_dir() else None
         self._wire = os.environ.get("JSH_OUTPUT") == "renderer"

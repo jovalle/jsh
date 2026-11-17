@@ -35,8 +35,7 @@ them only when asked.
 - `install.sh`: bootstrap (the curl one-liner). Installs `core` packages and shell plugins,
   links dotfiles and `bin/`, then runs the named groups through `ansible/site.yml`.
 - `scripts/`: bootstrap scripts (`shell.sh`, `ansible.sh`, and `packages.sh`) and the only
-  test file, `check.py`. `scripts/groups.tsv` lists every setup group with its platforms and
-  purpose in run order. `scripts/lib/` holds Bash shared by the bootstrap;
+  test file, `check.py`. `scripts/lib/` holds Bash shared by the bootstrap;
   `ansible/helpers/` holds role libraries; `scripts/packages.sh` declares only `core` and global
   `maintenance` packages.
 - `lib/output.md`: output contract. `lib/output.py`: renderer and Python API.
@@ -47,13 +46,12 @@ them only when asked.
   `dotfiles/.gitconfig` sets as `core.hooksPath` (one `dispatch.sh` linked under each hook name;
   it runs a repository's tracked `.githooks/` after `git config jsh.hooks true`, then
   `.git/hooks`).
-- `ansible/`: host configuration. `site.yml` includes one role per group in `groups.tsv`
-  order, tagged with the group name; shared roles are `packages`, `app`, and `link`; plugins
-  (output callback, `settings` module, filters) are in `ansible/plugins/`. Shared role libraries
-  live in `ansible/helpers/`; setup helper scripts in `roles/GROUP/files/` source
-  `scripts/lib/common.sh` and print output events. `scripts/ansible.sh`
-  installs the pinned versions from `ansible/requirements.*` into `local/ansible/`. To run it
-  directly, set `ANSIBLE_CONFIG=ansible/ansible.cfg` and run
+- `ansible/`: host configuration. `site.yml` defines setup group membership and order; each
+  included role metadata declares its purpose and supported platforms. Shared roles are
+  `packages`, `app`, and `link`; plugins (output callback, `settings` module, filters) are in
+  `ansible/plugins/`. Shared role libraries live in `ansible/helpers/`; setup helper scripts in `roles/GROUP/files/` source
+  `scripts/lib/common.sh` and print output events. `scripts/ansible.sh` installs the pinned
+  versions from `ansible/requirements.*` into `local/ansible/`. To run it directly, set `ANSIBLE_CONFIG=ansible/ansible.cfg` and run
   `local/ansible/venv/bin/ansible-playbook ansible/site.yml --tags GROUP --check --diff`.
 - `bin/`: everyday commands and the isolated `jsh` runtime.
 - `dotfiles/`: home-relative configuration.
@@ -79,9 +77,10 @@ them only when asked.
   `lib/output.py`, and `ansible/plugins/` (which may also use Ansible's own APIs). Shell is 2-space indented; see `.editorconfig`.
 - Names: commands read like speech, files and directories are one lowercase word when that
   stays clear.
-- Setup groups are Ansible roles. To add one, add its `scripts/groups.tsv` row, create
-  `ansible/roles/GROUP/`, and add a tagged block/rescue `include_role` to `ansible/site.yml` in
-  the same order and with the indexed platform condition. Keep data and helpers in the role.
+- Setup groups are Ansible roles. To add one, create `ansible/roles/GROUP/` with a metadata
+  description and MacOSX, Debian, and/or EL platforms, then add a tagged block/rescue
+  `include_role` to `ansible/site.yml` in run order with the matching platform condition. Keep
+  data and helpers in the role.
 - Linux parity uses the Debian 13 XFCE host `colossus`, only through dry-run scratch copies under
   `~/.cache/jsh-port`; never run against its live `~/.jsh`. RHEL behavior still needs a host.
 

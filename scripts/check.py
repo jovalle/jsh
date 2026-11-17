@@ -27,6 +27,54 @@ SHELLS = list(
 )
 
 
+def copy_group_sources(checkout):
+    site = checkout / "ansible/site.yml"
+    site.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(ROOT / "ansible/site.yml", site)
+    for source in (ROOT / "ansible/roles").glob("*/meta/main.yml"):
+        target = checkout / source.relative_to(ROOT)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+
+
+def write_group_sources(checkout, groups):
+    tasks = []
+    platform_names = {
+        "all": ("MacOSX", "Debian", "EL"),
+        "darwin": ("MacOSX",),
+        "linux": ("Debian", "EL"),
+    }
+    conditions = {
+        "all": "",
+        "darwin": "      when: jsh_platform == 'darwin'\n",
+        "linux": "      when: jsh_platform != 'darwin'\n",
+    }
+    for name, platform, purpose in groups:
+        tasks.append(
+            f"    - name: {name}\n"
+            "      ansible.builtin.include_role:\n"
+            f"        name: {name}\n"
+            f"        apply: {{tags: [{name}]}}\n"
+            f"      tags: [{name}]\n"
+            f"{conditions[platform]}"
+        )
+        meta = checkout / f"ansible/roles/{name}/meta/main.yml"
+        meta.parent.mkdir(parents=True, exist_ok=True)
+        platforms = "".join(
+            f"    - name: {item}\n      versions: [all]\n"
+            for item in platform_names[platform]
+        )
+        meta.write_text(
+            "---\ngalaxy_info:\n"
+            f"  description: {purpose}\n"
+            f"  platforms:\n{platforms}"
+            "dependencies: []\n"
+        )
+    site = checkout / "ansible/site.yml"
+    site.parent.mkdir(parents=True, exist_ok=True)
+    site.write_text("---\n- hosts: localhost\n  gather_facts: false\n  tasks:\n" + "".join(tasks))
+
+
 class ShellChecks(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="jsh-shell-")
@@ -68,6 +116,12 @@ class ShellChecks(unittest.TestCase):
         playbook.parent.mkdir(parents=True)
         body = '''#!/usr/bin/env bash
 set -u
+export JSH_OUTPUT=renderer
+playbook_args=("__DOLLAR__@")
+set --
+. "__DOLLAR__JSH_ROOT/scripts/lib/common.sh"
+set -- "__DOLLAR__{playbook_args[@]}"
+unset playbook_args
 tags=
 previous=
 for argument; do
@@ -80,16 +134,19 @@ set -- __DOLLAR__tags
 IFS=__DOLLAR__old_ifs
 status=0
 for group; do
-  platform=
+  platform=all
   purpose=
   tab=__DOLLAR__(printf "\t")
-  while IFS="__DOLLAR__tab" read -r name applies description; do
-    if [[ __DOLLAR__name == "__DOLLAR__group" ]]; then
-      platform=__DOLLAR__applies
-      purpose=__DOLLAR__description
-      break
-    fi
-  done <"__DOLLAR__JSH_ROOT/scripts/groups.tsv"
+  while IFS="__DOLLAR__tab" read -r name description; do
+    if [[ __DOLLAR__name == "__DOLLAR__group" ]]; then purpose=__DOLLAR__description; break; fi
+  done < <(jsh::groups table)
+  supported=0
+  while IFS= read -r name; do
+    if [[ __DOLLAR__name == "__DOLLAR__group" ]]; then supported=1; break; fi
+  done < <(jsh::groups here)
+  if (( ! supported )); then
+    if [[ __DOLLAR__JSH_PLATFORM == darwin ]]; then platform=linux; else platform=darwin; fi
+  fi
   printf "\036group\t%s\t%s\n" "__DOLLAR__group" "__DOLLAR__purpose"
   if [[ __DOLLAR__platform == linux && __DOLLAR__JSH_PLATFORM == darwin ]]; then
     if [[ __DOLLAR__group == linux ]]; then message="Skipping Linux configuration on macOS"
@@ -509,8 +566,9 @@ exit "__DOLLAR__status"
         for name in ("scripts/lib", "lib/shell", "bin", "dotfiles"):
             (checkout / name).mkdir(parents=True)
         for name in ("scripts/lib/common.sh", "lib/shell/output.sh", "lib/output.py",
-                     "lib/verbs.tsv", "scripts/groups.tsv"):
+                     "lib/verbs.tsv"):
             shutil.copy2(ROOT / name, checkout / name)
+        copy_group_sources(checkout)
         # Keep real link/backup logic; avoid package installation and downloads.
         for name in ("packages.sh", "shell.sh"):
             (checkout / "scripts" / name).write_text("exit 0\n")
@@ -548,8 +606,9 @@ exit "__DOLLAR__status"
         for name in ("scripts/lib", "lib/shell", "bin", "dotfiles"):
             (checkout / name).mkdir(parents=True)
         for name in ("scripts/lib/common.sh", "lib/shell/output.sh", "lib/output.py",
-                     "lib/verbs.tsv", "scripts/groups.tsv", "install.sh"):
+                     "lib/verbs.tsv", "install.sh"):
             shutil.copy2(ROOT / name, checkout / name)
+        copy_group_sources(checkout)
         (checkout / "scripts/packages.sh").write_text("printf 'BREW_UPDATE\\n'\n")
         (checkout / "scripts/shell.sh").write_text("exit 0\n")
         self.mock_installer_playbook(checkout)
@@ -605,8 +664,11 @@ exit "__DOLLAR__status"
 
     def test_installer_detects_platform_and_skips_other_platform_groups(self):
         checkout = self.installer_scope_fixture()
-        (checkout / "scripts/groups.tsv").write_text(
-            "macos\tdarwin\tMac settings\nlinux\tlinux\tLinux settings\ndev\tall\tDeveloper tools\n")
+        write_group_sources(checkout, [
+            ("macos", "darwin", "Mac settings"),
+            ("linux", "linux", "Linux settings"),
+            ("dev", "all", "Developer tools"),
+        ])
         self.tool("id", "if [ \"$1\" = -Gn ]; then echo \"staff admin\"; else exec /usr/bin/id \"$@\"; fi")
         result = subprocess.run(
             ["bash", str(checkout / "install.sh")],
@@ -772,9 +834,11 @@ exit "__DOLLAR__status"
 
     def test_installer_lists_groups_and_runs_them_in_file_order(self):
         checkout = self.installer_scope_fixture()
-        (checkout / "scripts/groups.tsv").write_text(
-            "# fixture\nmacos\tdarwin\tMac settings\nlinux\tlinux\tLinux settings\n"
-            "dev\tall\tDeveloper tools\n")
+        write_group_sources(checkout, [
+            ("macos", "darwin", "Mac settings"),
+            ("linux", "linux", "Linux settings"),
+            ("dev", "all", "Developer tools"),
+        ])
         for name in ("macos", "linux", "dev"):
             (checkout / f"scripts/{name}.sh").write_text(f'printf "%s\\n" {name} >> "$HOME/ran"\n')
         self.tool("id", 'if [ "$1" = -Gn ]; then echo "staff admin"; else exec /usr/bin/id "$@"; fi')
@@ -793,16 +857,28 @@ exit "__DOLLAR__status"
         self.assertLess(result.stdout.index("› macos"), result.stdout.index("› linux"))
         self.assertLess(result.stdout.index("› linux"), result.stdout.index("› dev"))
 
-    def test_installer_rejects_malformed_groups_file(self):
+    def test_installer_rejects_malformed_group_sources(self):
         checkout = self.installer_scope_fixture()
-        for row in ("dev\tmacOS\tTools\n", "dev\tall\n"):
-            with self.subTest(row=row):
-                (checkout / "scripts/groups.tsv").write_text("# fixture\n" + row)
+        cases = (
+            ("site", "---\n- hosts: localhost\n  tasks:\n"
+             "    - name: dev\n      ansible.builtin.include_role:\n"
+             "        apply: {tags: [dev]}\n",
+             "site.yml line 5"),
+            ("metadata", "---\ngalaxy_info:\n  description: Tools\n",
+             "ansible/roles/dev/meta/main.yml"),
+        )
+        for source, contents, error in cases:
+            with self.subTest(source=source):
+                write_group_sources(checkout, [("dev", "all", "Tools")])
+                if source == "site":
+                    (checkout / "ansible/site.yml").write_text(contents)
+                else:
+                    (checkout / "ansible/roles/dev/meta/main.yml").write_text(contents)
                 result = subprocess.run(["/bin/bash", str(checkout / "install.sh"), "--list"],
                                         env=self.env, cwd=self.home, capture_output=True,
                                         text=True, timeout=20)
                 self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
-                self.assertIn("groups.tsv line 2", result.stderr)
+                self.assertIn(error, result.stderr)
 
     def test_piped_install_defers_group_names_to_the_checkout(self):
         self.tool("git", "exit 0")
@@ -943,9 +1019,8 @@ false
 
     def test_installer_continues_to_the_last_group_after_earlier_failure(self):
         checkout = self.installer_scope_fixture()
-        (checkout / "scripts/groups.tsv").write_text(
-            "a\tall\tFirst\nb\tall\tSecond\n"
-        )
+        write_group_sources(checkout, [("a", "all", "First"),
+                                       ("b", "all", "Second")])
         (checkout / "scripts/a.sh").write_text("exit 1\n")
         (checkout / "scripts/b.sh").write_text(
             '. "$JSH_ROOT/scripts/lib/common.sh"\n'
@@ -1026,8 +1101,9 @@ jsh::changed "Ghostty settings"
                 for name in ("scripts/lib", "lib/shell", "bin", "dotfiles"):
                     (checkout / name).mkdir(parents=True)
                 for name in ("scripts/lib/common.sh", "lib/shell/output.sh", "lib/output.py",
-                             "lib/verbs.tsv", "scripts/groups.tsv", "install.sh"):
+                             "lib/verbs.tsv", "install.sh"):
                     shutil.copy2(ROOT / name, checkout / name)
+                copy_group_sources(checkout)
                 (checkout / "scripts/packages.sh").write_text("exit 3\n" if script == "packages" else "exit 0\n")
                 (checkout / "scripts/shell.sh").write_text("exit 3\n" if script == "shell" else "exit 0\n")
                 result = subprocess.run(
@@ -2212,7 +2288,6 @@ esac""",
             shutil.copy2(ROOT / name, checkout / name)
         if (ROOT / "scripts/lib/packages.sh").exists():
             shutil.copy2(ROOT / "scripts/lib/packages.sh", checkout / "scripts/lib/packages.sh")
-        (checkout / "scripts/groups.tsv").write_text("extra\tall\tA group with no packages\n")
         def run(group):
             return subprocess.run(["bash", str(checkout / "scripts/packages.sh"), "--dry-run", group],
                                   env=self.env | {"JSH_ROOT": str(checkout)},
@@ -3809,7 +3884,7 @@ class AnsibleChecks(unittest.TestCase):
     def checkout(self):
         """Copy the parts of the checkout setup scripts read, so tests can change them."""
         root = self.home / "jsh"
-        for part in ("scripts/lib", "scripts/groups.tsv", "lib", "ansible", "scripts/ansible.sh"):
+        for part in ("scripts/lib", "lib", "ansible", "scripts/ansible.sh"):
             source = ROOT / part
             if source.is_dir():
                 shutil.copytree(source, root / part, ignore=shutil.ignore_patterns("__pycache__"))
@@ -3955,41 +4030,88 @@ esac''')
         if platform:
             self.assertIn(f"darwin darwin {host}", detected.stdout)
 
-    def test_site_includes_match_groups_index(self):
-        groups = []
-        for line in (ROOT / "scripts/groups.tsv").read_text().splitlines():
-            if line and not line.startswith("#"):
-                name, platform, _ = line.split("\t")
-                groups.append((name, platform))
+    def test_site_groups_have_matching_role_metadata(self):
         script = (
             "import json, sys, yaml\n"
-            "play = yaml.safe_load(open(sys.argv[1]))[0]\n"
+            "root = sys.argv[1]\n"
+            "play = yaml.safe_load(open(root + '/ansible/site.yml'))[0]\n"
             "def includes(tasks):\n"
             "    for task in tasks or []:\n"
             "        if 'ansible.builtin.include_role' in task: yield task\n"
             "        yield from includes(task.get('block'))\n"
             "        yield from includes(task.get('rescue'))\n"
             "        yield from includes(task.get('always'))\n"
-            "print(json.dumps(list(includes(play.get('tasks')))))\n"
+            "rows = []\n"
+            "for task in includes(play.get('tasks')):\n"
+            "    name = task['ansible.builtin.include_role']['name']\n"
+            "    meta = yaml.safe_load(open(f'{root}/ansible/roles/{name}/meta/main.yml'))\n"
+            "    info = meta['galaxy_info']\n"
+            "    names = tuple(platform['name'] for platform in info['platforms'])\n"
+            "    platform = {('MacOSX',): 'darwin', "
+            "('Debian', 'EL'): 'linux', "
+            "('MacOSX', 'Debian', 'EL'): "
+            "'all'}[names]\n"
+            "    rows.append([name, platform, info['description'], task])\n"
+            "print(json.dumps(rows))\n"
         )
         result = subprocess.run(
-            [str(self.venv("python")), "-c", script, str(ROOT / "ansible/site.yml")],
+            [str(self.venv("python")), "-c", script, str(ROOT)],
             capture_output=True, text=True, timeout=60,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        includes = json.loads(result.stdout)
-        order = [name for name, _ in groups]
-        platforms = dict(groups)
-        names = [task["ansible.builtin.include_role"]["name"] for task in includes]
-        self.assertEqual(names, sorted(names, key=order.index))
-        for task in includes:
-            name = task["ansible.builtin.include_role"]["name"]
-            self.assertIn(name, platforms)
+        groups = json.loads(result.stdout)
+        self.assertEqual(len({name for name, _, _, _ in groups}), len(groups))
+        self.assertTrue({"packages", "app", "link"}.isdisjoint(
+            name for name, _, _, _ in groups))
+        for name, platform, purpose, task in groups:
+            self.assertNotEqual(purpose, "", name)
             self.assertEqual(task.get("tags"), [name])
-            self.assertEqual(task["ansible.builtin.include_role"].get("apply"), {"tags": [name]})
+            self.assertEqual(task["ansible.builtin.include_role"].get("apply"),
+                             {"tags": [name]})
             expected = {"all": None, "darwin": "jsh_platform == 'darwin'",
-                        "linux": "jsh_platform != 'darwin'"}[platforms[name]]
+                        "linux": "jsh_platform != 'darwin'"}[platform]
             self.assertEqual(task.get("when"), expected, name)
+
+    def test_shell_groups_follow_site_and_role_metadata(self):
+        root = self.home / "groups"
+        (root / "scripts/lib").mkdir(parents=True)
+        (root / "ansible/roles/beta/meta").mkdir(parents=True)
+        (root / "ansible/roles/alpha/meta").mkdir(parents=True)
+        shutil.copy2(ROOT / "scripts/lib/common.sh", root / "scripts/lib/common.sh")
+        shutil.copytree(ROOT / "lib", root / "lib")
+        (root / "ansible/site.yml").write_text(
+            "---\n- hosts: localhost\n  tasks:\n"
+            "    - name: beta\n      ansible.builtin.include_role:\n        name: beta\n"
+            "        apply: {tags: [beta]}\n      tags: [beta]\n"
+            "      when: jsh_platform == 'darwin'\n"
+            "    - name: alpha\n      ansible.builtin.include_role:\n        name: alpha\n"
+            "        apply: {tags: [alpha]}\n      tags: [alpha]\n")
+        (root / "ansible/roles/beta/meta/main.yml").write_text(
+            "---\ngalaxy_info:\n  description: Beta purpose\n  platforms:\n"
+            "    - name: MacOSX\n      versions: [all]\ndependencies: []\n")
+        (root / "ansible/roles/alpha/meta/main.yml").write_text(
+            "---\ngalaxy_info:\n  description: Alpha purpose\n  platforms:\n"
+            "    - name: MacOSX\n      versions: [all]\n"
+            "    - name: Debian\n      versions: [all]\n"
+            "    - name: EL\n      versions: [all]\ndependencies: []\n")
+        expected = {
+            ("darwin", ""): "beta\nalpha\n",
+            ("darwin", "here"): "beta\nalpha\n",
+            ("linux", "here"): "alpha\n",
+            ("darwin", "table"): "beta\tBeta purpose\nalpha\tAlpha purpose\n",
+        }
+        for (platform, view), output in expected.items():
+            with self.subTest(platform=platform, view=view):
+                result = subprocess.run(
+                    ["bash", "-c",
+                     ". \"$JSH_ROOT/scripts/lib/common.sh\"; jsh::groups \"$1\"",
+                     "test", view],
+                    env=self.env | {"JSH_ROOT": str(root), "JSH_OUTPUT": "plain",
+                                    "JSH_PLATFORM": platform},
+                    capture_output=True, text=True, timeout=20,
+                )
+                self.assertEqual((result.returncode, result.stdout, result.stderr),
+                                 (0, output, ""))
 
     def run_play(self, tasks, *arguments, roles=None, **environment):
         """Run a playbook with the jsh callback and return (result, events)."""
@@ -4010,9 +4132,10 @@ esac''')
         return result, [event for event in events if event[0] != "progress"]
 
     def purpose(self, group):
-        for line in (ROOT / "scripts/groups.tsv").read_text().splitlines():
-            if line.startswith(group + "\t"):
-                return line.split("\t")[2]
+        meta = ROOT / f"ansible/roles/{group}/meta/main.yml"
+        for line in meta.read_text().splitlines():
+            if line.startswith("  description: "):
+                return line.removeprefix("  description: ")
         self.fail(group)
 
     def test_callback_reports_ok_added_changed_removed_and_loop_labels(self):
@@ -4122,8 +4245,9 @@ esac''')
         for name in ("scripts/lib", "lib/shell", "bin", "dotfiles", "ansible/roles/fonts/tasks"):
             (checkout / name).mkdir(parents=True)
         for name in ("scripts/lib/common.sh", "lib/shell/output.sh", "lib/output.py",
-                     "lib/verbs.tsv", "scripts/groups.tsv", "install.sh"):
+                     "lib/verbs.tsv", "install.sh"):
             shutil.copy2(ROOT / name, checkout / name)
+        copy_group_sources(checkout)
         (checkout / "scripts/packages.sh").write_text("exit 0\n")
         (checkout / "scripts/shell.sh").write_text("exit 0\n")
         (checkout / "scripts/ansible.sh").write_text("exit 0\n")
@@ -5069,8 +5193,13 @@ exec /usr/bin/stat "$@"
         for name in ("macos", "tools", "services"):
             (checkout / "ansible/roles" / name / "tasks").mkdir(parents=True)
             (checkout / "ansible/roles" / name / "tasks/main.yml").write_text("[]\n")
-        with (checkout / "scripts/groups.tsv").open("a") as groups:
-            groups.write("legacy\tlinux\tA fixture group without a role directory\n")
+        write_group_sources(checkout, [
+            ("macos", "darwin", "Mac settings"),
+            ("fonts", "all", "Fonts"),
+            ("tools", "all", "Tools"),
+            ("services", "linux", "Services"),
+            ("legacy", "linux", "A fixture group without a role directory"),
+        ])
         (checkout / "scripts/legacy.sh").write_text(
             "touch \"$HOME/legacy-script-ran\"\n")
         self.mock_playbook()

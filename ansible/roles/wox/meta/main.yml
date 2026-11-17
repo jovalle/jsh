@@ -1,7 +1,7 @@
 ---
 galaxy_info:
   author: jsh
-  description: Install Wox, start it at login, and configure its launcher shortcut
+  description: Install Wox, start it at login, and give it Command+Space or Super+Space
   license: MIT
   min_ansible_version: "2.22"
   platforms:

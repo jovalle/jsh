@@ -1,6 +1,6 @@
 ---
-# One play configures this workstation. Each setup group in scripts/groups.tsv is a role,
-# included in the same order with its name as the tag.
+# One play configures this workstation. Each setup group is a role included in run order with
+# its name as the tag; the role metadata supplies its purpose and supported platforms.
 - name: Workstation
   hosts: localhost
   gather_facts: true

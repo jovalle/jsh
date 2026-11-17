@@ -285,29 +285,108 @@ jsh::sha256() {
   fi
 }
 
-# Setup groups come from scripts/groups.tsv: every name, the names for this platform (here), or
-# name and purpose rows (table). A malformed row is reported before anything is printed.
-jsh::groups() {
-  local here=linux output
-  [[ ${JSH_PLATFORM} != darwin ]] || here=darwin
-  if ! output=$(awk -F'\t' -v view="${1:-}" -v here="${here}" '
-    /^#/ || /^[ \t]*$/ { next }
-    NF != 3 || $1 == "" || $3 == "" || ($2 != "all" && $2 != "darwin" && $2 != "linux") {
-      bad = NR
+# Setup groups come from site.yml in include order. Role metadata supplies each purpose and
+# whether the group supports all platforms, macOS only, or Linux only.
+jsh::_load_groups() {
+  [[ ${_JSH_GROUPS_LOADED:-0} != 1 ]] || return 0
+  local output name meta description platform relative
+  local names='' table='' darwin='' linux=''
+  if ! output=$(awk '
+    /^[ \t]*ansible\.builtin\.include_role:[ \t]*$/ {
+      if (pending) { bad = pending; exit 2 }
+      pending = NR
+      next
+    }
+    pending {
+      if (/^[ \t]*(#.*)?$/) { next }
+      if (/^[ \t]+name:[ \t]*[a-z][a-z0-9_-]*[ \t]*$/) {
+        name = $0
+        sub(/^[ \t]+name:[ \t]*/, "", name)
+        sub(/[ \t]*$/, "", name)
+        if (seen[name]++) { bad = NR; exit 2 }
+        rows = rows name "\n"
+        pending = 0
+        next
+      }
+      bad = pending
       exit 2
     }
-    view == "table" { rows = rows $1 "\t" $3 "\n"; next }
-    view == "here" && $2 != "all" && $2 != here { next }
-    { rows = rows $1 "\n" }
     END {
+      if (pending && !bad) { bad = pending }
+      if (!bad && rows == "") { bad = 1 }
       if (bad) { print bad; exit 2 }
       printf "%s", rows
-    }' "${JSH_ROOT}/scripts/groups.tsv"); then
-    [[ -z ${output} ]] || jsh::fail "groups.tsv line ${output}: expected NAME," \
-      'all|darwin|linux, and PURPOSE separated by tabs' >&2
+    }
+  ' "${JSH_ROOT}/ansible/site.yml"); then
+    [[ -z ${output} ]] || jsh::fail "site.yml line ${output}: expected a unique include_role name" >&2
     return 2
   fi
-  [[ -z ${output} ]] || printf '%s\n' "${output}"
+  while IFS= read -r name; do
+    [[ -n ${name} ]] || continue
+    meta=${JSH_ROOT}/ansible/roles/${name}/meta/main.yml
+    relative=${meta#"${JSH_ROOT}/"}
+    [[ -r ${meta} ]] || {
+      jsh::fail "${relative}: expected galaxy_info.description and platforms" >&2
+      return 2
+    }
+    description=$(sed -n 's/^  description:[[:space:]]*\([^[:space:]].*\)$/\1/p' "${meta}")
+    [[ -n ${description} && ${description} != *$'\n'* && ${description} != *$'\t'* ]] || {
+      jsh::fail "${relative}: expected one plain galaxy_info.description" >&2
+      return 2
+    }
+    if ! platform=$(awk '
+      /^  platforms:[ \t]*$/ {
+        if (seen) { bad = 1 }
+        seen = 1
+        active = 1
+        next
+      }
+      active && /^    - name:[ \t]*/ {
+        name = $0
+        sub(/^    - name:[ \t]*/, "", name)
+        sub(/[ \t]*$/, "", name)
+        if (name == "MacOSX") { mac++ }
+        else if (name == "Debian") { debian++ }
+        else if (name == "EL") { el++ }
+        else { bad = 1 }
+        next
+      }
+      active && /^[^ \t]/ { active = 0 }
+      END {
+        if (!seen || bad || mac > 1 || debian > 1 || el > 1) { exit 2 }
+        if (mac == 1 && debian == 0 && el == 0) { print "darwin" }
+        else if (mac == 0 && debian == 1 && el == 1) { print "linux" }
+        else if (mac == 1 && debian == 1 && el == 1) { print "all" }
+        else { exit 2 }
+      }
+    ' "${meta}"); then
+      jsh::fail "${relative}: expected MacOSX, Debian and EL platform metadata" >&2
+      return 2
+    fi
+    names+=${name}$'\n'
+    table+=${name}$'\t'${description}$'\n'
+    [[ ${platform} == linux ]] || darwin+=${name}$'\n'
+    [[ ${platform} == darwin ]] || linux+=${name}$'\n'
+  done <<<"${output}"
+  _JSH_GROUPS_ALL=${names}
+  _JSH_GROUPS_TABLE=${table}
+  _JSH_GROUPS_DARWIN=${darwin}
+  _JSH_GROUPS_LINUX=${linux}
+  _JSH_GROUPS_LOADED=1
+}
+jsh::groups() {
+  jsh::_load_groups || return
+  case ${1:-} in
+    table) printf "%s" "${_JSH_GROUPS_TABLE}" ;;
+    here)
+      if [[ ${JSH_PLATFORM} == darwin ]]; then
+        printf "%s" "${_JSH_GROUPS_DARWIN}"
+      else
+        printf "%s" "${_JSH_GROUPS_LINUX}"
+      fi
+      ;;
+    *) printf "%s" "${_JSH_GROUPS_ALL}" ;;
+  esac
 }
 jsh::is_group() {
   local names
@@ -470,11 +549,21 @@ if [[ -z ${JSH_OUTPUT+x} ]]; then
   jsh::_report_count "${JSH_REPORT}/failures"
   _JSH_SESSION_FAILURE_START=${_jsh_count}
   _jsh_group_purpose=
-  if [[ -r ${JSH_ROOT}/scripts/groups.tsv ]]; then
-    _jsh_group_purpose=$(awk -F $'\t' -v name="${JSH_SCRIPT_NAME}" \
-      '$1 == name { print $3; exit }' "${JSH_ROOT}/scripts/groups.tsv")
+  _jsh_group_meta=${JSH_ROOT}/ansible/roles/${JSH_SCRIPT_NAME}/meta/main.yml
+  if [[ -r ${_jsh_group_meta} ]] && awk -v wanted="${JSH_SCRIPT_NAME}" '
+    /^[ \t]*ansible\.builtin\.include_role:[ \t]*$/ { included = 1; next }
+    included && /^[ \t]+name:[ \t]*/ {
+      name = $0
+      sub(/^[ \t]+name:[ \t]*/, "", name)
+      sub(/[ \t]*$/, "", name)
+      if (name == wanted) { found = 1; exit }
+      included = 0
+    }
+    END { exit !found }
+  ' "${JSH_ROOT}/ansible/site.yml"; then
+    _jsh_group_purpose=$(sed -n 's/^  description:[[:space:]]*//p' "${_jsh_group_meta}")
   fi
   jsh::group "${JSH_SCRIPT_NAME}" "${_jsh_group_purpose}"
-  unset _jsh_group_purpose
+  unset _jsh_group_meta _jsh_group_purpose
 fi
 unset JSH_SCRIPT_NAME
