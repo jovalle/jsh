@@ -9,7 +9,7 @@
 
 - name: notice
   ansible.builtin.debug:
-    msg: open Sublime Text once, then rerun ./install.sh sublime
+    msg: open Sublime Text once, then rerun make configure sublime
   when: >-
     sublime_directory is not directory
     and (sublime_command.rc == 0 or '/Applications/Sublime Text.app' is directory

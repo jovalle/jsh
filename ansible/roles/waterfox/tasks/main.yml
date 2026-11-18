@@ -238,7 +238,7 @@
           ansible.builtin.debug:
             msg: >-
               choose a Waterfox profile with JSH_WATERFOX_PROFILE='name or path'
-              ./install.sh waterfox
+              make configure waterfox
           when: waterfox_requested | length == 0 and waterfox_defaults | length != 1
 
         - name: Waterfox selected profile is set

@@ -14,18 +14,23 @@ This clones into `~/.jsh` (or `JSH_HOME`), installs Git, Zsh, and the shell plug
 `dotfiles/` into your home, and opens the `jsh` shell. From a checkout:
 
 ```sh
-./install.sh --dry-run        # preview
-./install.sh helium waterfox  # also set up named groups
-./install.sh --update tools   # update the group and installed Homebrew packages
+./install.sh --dry-run  # preview
+./install.sh --update   # update core packages and shell plugins
 ```
 
-The `tools` group installs [just](https://github.com/casey/just), which runs shortcuts from
-a checkout:
+Apps, agents, and system settings are configured separately, through the Ansible setup groups:
 
 ```sh
-just update       # update software and settings
-just status       # preview what setup would change
-just list groups  # list setup groups
+make configure                   # every setup group (needs admin rights)
+make configure helium waterfox   # only the named groups
+```
+
+Other shortcuts from a checkout, through the `make` that ships with macOS and Linux:
+
+```sh
+jsh update                     # update software and settings
+scripts/configure.sh --dry-run # preview what configuration would change
+make list groups               # list setup groups
 ```
 
 Homebrew updates include installed dependencies and other outdated packages, and remove
@@ -57,7 +62,7 @@ needs an Apple Account signed in to the App Store and cached sudo credentials (`
 | `nukem`                         | Clears finalizers from a namespace stuck terminating                              |
 | `jsh`                           | Opens this checkout's shell without installing anything                           |
 | `jsh init [-n] [-y]`            | Sources `local/init/*.zsh` in this shell; `-n` previews, `-y` never prompts       |
-| `jsh update [GROUP ...]`        | Runs `install.sh --update` without closing open apps, then lists apps to restart  |
+| `jsh update [GROUP ...]`        | Runs `install.sh --update` and `scripts/configure.sh --update`, keeping apps open |
 | `jssh HOST`                     | Opens SSH with the jsh runtime shipped to a temporary directory on the host       |
 | `proxy`                         | Runs a command with HTTP/HTTPS proxy variables set                                |
 | `cafe`                          | Keeps the screen awake until stopped                                              |
@@ -82,8 +87,9 @@ Helium enables experimental web-platform features on Linux and macOS so [Kingpin
 ## Layout
 
 ```sh
-install.sh          # bootstrap: checkout, core packages, shell, links, then the setup groups
-justfile            # shortcuts and checks
+install.sh          # bootstrap: checkout, core packages, shell, links
+scripts/configure.sh # setup groups through Ansible (make configure)
+Makefile            # shortcuts and checks
 ansible/            # site.yml group order, role metadata, tasks, and shared helpers
 scripts/            # bootstrap scripts and smoke checks in check.py
 scripts/packages.sh # core bootstrap packages and package-manager maintenance
@@ -92,14 +98,14 @@ lib/                # shell runtime (lib/shell/), bin/git helpers and global Git
 bin/                # everyday commands
 ```
 
-`just check` runs syntax checks, ShellCheck, the smoke checks in temporary homes, and
+`make check` runs syntax checks, ShellCheck, the smoke checks in temporary homes, and
 `ansible-playbook --syntax-check` plus ansible-lint. `scripts/ansible.sh` installs the pinned
 Ansible into `local/ansible/` the first time a group needs it.
 
 A setup group is a role in `ansible/roles/GROUP/` whose metadata declares its purpose and
 platforms, plus an `include_role` block in `ansible/site.yml` with its tag and matching platform
 condition. Put package declarations, defaults, tasks, templates, and narrowly justified helper
-scripts in that role; `install.sh` sends every selected group to one playbook run.
+scripts in that role; `scripts/configure.sh` sends every selected group to one playbook run.
 
 `dotfiles/.gitconfig` points `core.hooksPath` at `lib/git/hooks/` in every repository that does
 not set its own: those hooks reject `Co-authored-by` trailers, then run the repository's own
@@ -108,7 +114,7 @@ followed by anything installed in `.git/hooks`. pre-commit refuses to install wh
 `core.hooksPath` is set, so install the commit checks with
 `GIT_CONFIG_GLOBAL=/dev/null pre-commit install` after installing `pre-commit` and Go.
 Gitleaks scans staged changes, including `archive/`. If it reports a credential, remove it
-from the staged changes and rotate it if it was exposed. `just check hooks` runs the checks
+from the staged changes and rotate it if it was exposed. `make check hooks` runs the checks
 manually; Gitleaks still scans only staged changes.
 
 The Secrets CI check scans incoming Git history, including merged commits, using the

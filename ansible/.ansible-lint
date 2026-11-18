@@ -1,5 +1,5 @@
 ---
-# Run from ansible/ by `just check ansible`.
+# Run from ansible/ by `make check ansible`.
 offline: true
 exclude_paths:
   - requirements.yml

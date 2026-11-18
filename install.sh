@@ -1,35 +1,32 @@
 #!/usr/bin/env bash
-# Bootstrap jsh, link dotfiles, and set up explicitly named apps or system settings.
+# Bootstrap jsh: core packages, shell plugins, dotfiles, and commands. Configure with make configure.
 
 set -euo pipefail
 
 export JSH_SESSION_START=$SECONDS
 
 jsh::usage() {
-  printf '%s\n' 'Usage: ./install.sh [--dry-run] [--update] [--list] [GROUP ...]' \
-    '' 'With no groups, the scope follows the machine: every group on a workstation' \
-    'with admin rights (sudo/root on Linux, the admin group on macOS), otherwise only' \
-    'the base shell and dotfiles. Named groups run only those. Their' \
-    'ansible/roles/NAME roles run together in one playbook.' \
-    '' 'Use --update to update software; Homebrew updates all installed packages and' \
-    'removes deprecated or disabled packages. Configuration remains idempotent.'
+  printf '%s\n' 'Usage: ./install.sh [--dry-run] [--update]' \
+    '' 'Install core packages and shell plugins, then link dotfiles and commands.' \
+    'Apps, agents, and system settings are configured separately with make configure.' \
+    '' 'Use --update to update core packages and shell plugins.'
 }
 
-# Read every option first; group names are checked against site.yml and role metadata.
+# Read every option first.
 help=0
-list=0
-groups=()
 for argument in "$@"; do
   case ${argument} in
     --help | -h) help=1 ;;
-    --list) list=1 ;;
     --dry-run) export JSH_DRY_RUN=1 ;;
     --update) export JSH_UPDATE=1 ;;
     -*)
       printf 'jsh: unknown option or group: %s\n' "${argument}" >&2
       exit 2
       ;;
-    *) groups+=("${argument}") ;;
+    *)
+      printf 'jsh: install.sh takes no groups; run make configure %s\n' "${argument}" >&2
+      exit 2
+      ;;
   esac
 done
 
@@ -37,9 +34,8 @@ done
 source_path=${BASH_SOURCE[0]:-}
 if [[ -z ${source_path} || ! -f ${source_path} || ! -d $(dirname -- "${source_path}")/scripts ]]; then
   target=${JSH_HOME:-${HOME}/.jsh}
-  if ((help || list)); then
+  if ((help)); then
     jsh::usage
-    printf '\nGroups: run %s/install.sh --list after installing.\n' "${target}"
     exit 0
   fi
   [[ ! -e ${target} && ! -L ${target} ]] || {
@@ -70,28 +66,10 @@ set --
 export JSH_OUTPUT=plain
 # shellcheck source=scripts/lib/common.sh
 . "${JSH_ROOT}/scripts/lib/common.sh"
-jsh::groups >/dev/null || exit 2
-if ((list)); then
-  jsh::groups
-  exit 0
-fi
 if ((help)); then
   jsh::usage
-  printf '\nGroups:\n'
-  while IFS=$'\t' read -r name purpose; do
-    printf '  %-12s %s\n' "${name}" "${purpose}"
-  done < <(jsh::groups table)
   exit 0
 fi
-# Validate every name before making changes; core and shell always run first.
-for group in ${groups[@]+"${groups[@]}"}; do
-  case ${group} in core | shell) continue ;; esac
-  jsh::is_group "${group}" || {
-    printf 'jsh: unknown option or group: %s\n' "${group}" >&2
-    printf 'jsh: rerun %s/install.sh with names from --list\n' "${JSH_ROOT}" >&2
-    exit 2
-  }
-done
 export JSH_PACKAGE_STATE=${JSH_TMP}/packages
 
 jsh::handoff() {
@@ -118,33 +96,6 @@ mkdir -p "${JSH_REPORT}"
 : >"${JSH_REPORT}/failures"
 : >"${JSH_REPORT}/notices"
 _JSH_SESSION_OWNER=plain
-
-# Without named groups, select every workstation group when the user has admin access.
-skip_workstation=0
-if ((${#groups[@]} == 0)); then
-  workstation=0
-  if [[ ${JSH_PLATFORM} == darwin ]]; then
-    [[ ${EUID} != 0 && " $(id -Gn) " == *" admin "* ]] && workstation=1
-  elif jsh::admin; then
-    workstation=1
-  elif [[ " $(id -Gn) " == *' sudo '* || " $(id -Gn) " == *' wheel '* ]]; then
-    jsh::notice 'Workstation setup needs sudo; run sudo -v first, then rerun ./install.sh'
-  fi
-  if ((workstation)); then
-    while IFS= read -r group; do groups+=("${group}"); done < <(jsh::groups)
-  else
-    skip_workstation=1
-  fi
-fi
-
-# Bootstrap core, shell, and links always run first.
-selected=()
-for group in ${groups[@]+"${groups[@]}"}; do
-  case ${group} in core | shell) ;; *) selected+=("${group}") ;; esac
-done
-if [[ ${JSH_UPDATE:-0} == 1 ]]; then
-  export JSH_BREW_DEFER=1
-fi
 
 action=Install
 [[ ${JSH_UPDATE:-0} != 1 ]] || action=Update
@@ -207,31 +158,8 @@ for source in "${JSH_ROOT}"/bin/*; do
   [[ -f ${source} && -x ${source} ]] || continue
   jsh::link "${source}" "${HOME}/.local/bin/${source##*/}"
 done
-if ((skip_workstation)); then
-  jsh::skipped "workstation groups: needs admin rights"
-fi
 
-status=0
-if [[ ${JSH_UPDATE:-0} == 1 ]]; then
-  jsh::group packages
-  group_status=0
-  JSH_BREW_DEFER=0 jsh::packages maintenance || group_status=$?
-  if ((group_status != 0)); then
-    jsh::fail "packages failed (${group_status})"
-    status=1
-  fi
-fi
-# Every selected setup group runs in one playbook; the callback owns headers and platform skips.
-if ((${#selected[@]})); then
-  group_status=0
-  jsh::playbook "${selected[@]}" || group_status=$?
-  jsh::event stepclose
-  if ((group_status != 0)); then
-    jsh::fail "host configuration failed (${group_status})"
-    status=1
-  fi
-fi
-unset JSH_BREW_DEFER
-jsh::session_close "${status}"
-if [[ ${status} == 0 && ${JSH_DRY_RUN} != 1 ]]; then jsh::handoff; fi
-exit "${status}"
+jsh::info 'Run "make configure" to set up apps, agents, and system settings'
+
+jsh::session_close 0
+if [[ ${JSH_DRY_RUN} != 1 ]]; then jsh::handoff; fi

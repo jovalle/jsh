@@ -1,7 +1,7 @@
 """Render playbook results as jsh output events.
 
 Each event uses the wire format from lib/output.md. With JSH_OUTPUT=renderer the events go to
-stdout for the renderer install.sh started; otherwise lib/output.py formats them in-process.
+stdout for the renderer install.sh or scripts/configure.sh started; otherwise lib/output.py formats them in-process.
 Like jsh::event in lib/shell/output.sh, events are also recorded under JSH_REPORT for the run
 summary.
 

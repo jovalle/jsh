@@ -17,15 +17,17 @@ case ${1:-} in
 	printf '%s\n' 'Usage: jsh [shell-options]' \
 		'       jsh update [GROUP ...]' \
 		'Open Zsh, or Bash when Zsh is unavailable.' \
-		'Update runs install.sh --update without closing open apps, then lists apps to restart.' \
-		'Install and configure with install.sh; host settings live in ansible/.'
+		'Update runs install.sh --update, then scripts/configure.sh --update without' \
+		'closing open apps, then lists apps to restart.' \
+		'Install with install.sh; configure with make configure (ansible/).'
 	exit 0
 	;;
 update)
 	shift
 	JSH_KEEP_APPS=1
 	export JSH_KEEP_APPS
-	exec bash "${JSH_ROOT}/install.sh" --update "$@"
+	bash "${JSH_ROOT}/install.sh" --update
+	exec bash "${JSH_ROOT}/scripts/configure.sh" --update "$@"
 	;;
 '' | -*) ;;
 *)

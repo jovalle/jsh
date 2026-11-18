@@ -25,7 +25,7 @@ select_node() {
       return 0
     fi
   done
-  jsh::notice 'REA needs a newer Node.js with zstd support; install or select a compatible Node.js, then rerun ./install.sh ai'
+  jsh::notice 'REA needs a newer Node.js with zstd support; install or select a compatible Node.js, then rerun `make configure ai`'
   return 1
 }
 

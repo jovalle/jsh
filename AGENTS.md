@@ -17,23 +17,24 @@ prompts stay in VS Code Settings Sync, not here.
 
 | Task             | Command                                                                       |
 | ---------------- | ----------------------------------------------------------------------------- |
-| All checks       | `just check`                                                                  |
-| One check        | `just check syntax`, `just check lint`, `just check shell`                    |
-| Ansible checks   | `just check ansible` (installs Ansible into `local/ansible/`)                 |
+| All checks       | `make check`                                                                  |
+| One check        | `make check syntax`, `make check lint`, `make check shell`                    |
+| Ansible checks   | `make check ansible` (installs Ansible into `local/ansible/`)                 |
 | One shell file   | `bash -n FILE` or `zsh -n FILE`, then `shellcheck -x --severity=warning FILE` |
-| Preview setup    | `just status [GROUP ...]`                                                     |
-| List groups      | `just list groups`                                                            |
-| Pre-commit hooks | `just check hooks`                                                            |
+| Preview setup    | `scripts/configure.sh --dry-run [GROUP ...]`                                  |
+| List groups      | `make list groups`                                                            |
+| Pre-commit hooks | `make check hooks`                                                            |
 
-`just setup`, `just update`, `./install.sh`, `ansible-playbook`, or a bootstrap/helper
-script without `--dry-run` changes the live machine; `just update` and `--update` also upgrade
-installed software. Run
-them only when asked.
+`make configure`, `jsh update`, `./install.sh`, `scripts/configure.sh`,
+`ansible-playbook`, or a bootstrap/helper script without `--dry-run` changes the live machine;
+`jsh update` and `--update` also upgrade installed software. Run them only when asked.
 
 ## layout
 
 - `install.sh`: bootstrap (the curl one-liner). Installs `core` packages and shell plugins,
-  links dotfiles and `bin/`, then runs the named groups through `ansible/site.yml`.
+  then links dotfiles and `bin/`. It runs no setup groups.
+- `scripts/configure.sh` (`make configure [GROUP ...]`): runs the setup groups through
+  `ansible/site.yml`; with no groups, every group when the user has admin rights.
 - `scripts/`: bootstrap scripts (`shell.sh`, `ansible.sh`, and `packages.sh`) and the only
   test file, `check.py`. `scripts/lib/` holds Bash shared by the bootstrap;
   `ansible/helpers/` holds role libraries; `scripts/packages.sh` declares only `core` and global
@@ -55,7 +56,7 @@ them only when asked.
   `local/ansible/venv/bin/ansible-playbook ansible/site.yml --tags GROUP --check --diff`.
 - `bin/`: everyday commands and the isolated `jsh` runtime.
 - `dotfiles/`: home-relative configuration.
-- `justfile`: one-line shortcuts and checks.
+- `Makefile`: one-line shortcuts and checks.
 - `scripts/check.py`: `unittest` smoke checks for interactive Bash and Zsh.
 - Generated or machine-local, never edit: `local/`, `archive/`, `.venv/`, `tmp/`.
   Scratch files go in `tmp/`.
@@ -107,7 +108,7 @@ them only when asked.
 - Always: read the surrounding code first, keep diffs minimal and in the existing style,
   run the narrowest relevant check, and say what was verified.
 - Ask first: deleting files; adding dependencies; running setup without `--dry-run` or
-  anything needing `sudo`; changing `.pre-commit-config.yaml`, `justfile` checks, or Git
+  anything needing `sudo`; changing `.pre-commit-config.yaml`, `Makefile` checks, or Git
   hooks; touching credentials, SSH, or Git identity handling.
 - Never: commit secrets or personal data; read or print credentials; edit generated or
   vendored paths; run commands that wait on a password prompt.

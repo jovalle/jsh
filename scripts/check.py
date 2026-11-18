@@ -606,12 +606,18 @@ exit "__DOLLAR__status"
         for name in ("scripts/lib", "lib/shell", "bin", "dotfiles"):
             (checkout / name).mkdir(parents=True)
         for name in ("scripts/lib/common.sh", "lib/shell/output.sh", "lib/output.py",
-                     "lib/verbs.tsv", "install.sh"):
+                     "lib/verbs.tsv", "install.sh", "scripts/configure.sh"):
             shutil.copy2(ROOT / name, checkout / name)
         copy_group_sources(checkout)
         (checkout / "scripts/packages.sh").write_text("printf 'BREW_UPDATE\\n'\n")
         (checkout / "scripts/shell.sh").write_text("exit 0\n")
         self.mock_installer_playbook(checkout)
+        return checkout
+
+    def configure_fixture(self):
+        # scripts/configure.sh requires an installed checkout at ~/.jsh.
+        checkout = self.installer_scope_fixture()
+        (self.home / ".jsh").symlink_to(checkout)
         return checkout
 
     def run_interrupted_plain_installer(self, package_script, parent_wait=False):
@@ -626,7 +632,7 @@ exit "__DOLLAR__status"
             (checkout / "install.sh").write_text(source)
         self.tool("python3", "exit 1")
         process = subprocess.Popen(
-            ["bash", str(checkout / "install.sh"), "core"],
+            ["bash", str(checkout / "install.sh")],
             env=self.env | {"NO_COLOR": "1"}, cwd=self.home,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
             start_new_session=True,
@@ -648,7 +654,7 @@ exit "__DOLLAR__status"
     def test_plain_installer_interrupt_reports_parent_step(self):
         output = self.run_interrupted_plain_installer("exit 0\n", parent_wait=True)
         self.assertIn("✕ Stopped detecting platform", output)
-        self.assertIn("✕ core  Bootstrap packages and the checkout link", output)
+        self.assertNotIn("✕ core  Bootstrap packages and the checkout link", output)
         self.assertIn("Finished with errors", output)
 
     def test_plain_installer_interrupt_reports_child_step(self):
@@ -659,7 +665,7 @@ exit "__DOLLAR__status"
             "sleep 30 >/dev/null 2>&1 & wait $!\n"
         )
         self.assertIn("✕ Stopped checking packages", output)
-        self.assertIn("✕ core  Bootstrap packages and the checkout link", output)
+        self.assertNotIn("✕ core  Bootstrap packages and the checkout link", output)
         self.assertIn("Finished with errors", output)
 
     def test_installer_detects_platform_and_skips_other_platform_groups(self):
@@ -677,13 +683,19 @@ exit "__DOLLAR__status"
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("Detected macOS", result.stdout)
+        result = subprocess.run(
+            ["bash", str(checkout / "scripts/configure.sh")],
+            env=self.env | {"JSH_PLATFORM": "darwin"}, cwd=self.home,
+            capture_output=True, text=True, timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("› linux  Linux settings", result.stdout)
         self.assertIn("Skipping Linux configuration on macOS", result.stdout)
 
     def test_named_groups_print_no_skips_for_unnamed_groups(self):
-        checkout = self.installer_scope_fixture()
+        checkout = self.configure_fixture()
         result = subprocess.run(
-            ["bash", str(checkout / "install.sh"), "vscode"],
+            ["bash", str(checkout / "scripts/configure.sh"), "vscode"],
             env=self.env | {"JSH_PLATFORM": "darwin"}, cwd=self.home,
             capture_output=True, text=True, timeout=20,
         )
@@ -695,43 +707,52 @@ exit "__DOLLAR__status"
         checkout = self.installer_scope_fixture()
         self.tool("python3", "exit 1")
         result = subprocess.run(
-            ["bash", str(checkout / "install.sh"), "--dry-run", "linux", "desktop"],
+            ["bash", str(checkout / "install.sh"), "--dry-run"],
             env=self.env | {"JSH_PLATFORM": "darwin"}, cwd=self.home,
             capture_output=True, text=True, timeout=20,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("Detecting platform...", result.stdout)
-        self.assertIn("Skipping Linux configuration on macOS", result.stdout)
-        self.assertIn("Skipping desktop on macOS: Linux only", result.stdout)
         self.assertIn("Preview complete  1 would change", result.stdout)
         self.assertNotIn(" failed", result.stdout)
-
-    def test_installer_without_admin_skips_workstation_groups_under_links(self):
-        checkout = self.installer_scope_fixture()
-        self.tool("id", "if [ \"$1\" = -Gn ]; then echo staff; else exec /usr/bin/id \"$@\"; fi")
+        (self.home / ".jsh").symlink_to(checkout)
         result = subprocess.run(
-            ["bash", str(checkout / "install.sh"), "--dry-run"],
+            ["bash", str(checkout / "scripts/configure.sh"), "--dry-run", "linux", "desktop"],
             env=self.env | {"JSH_PLATFORM": "darwin"}, cwd=self.home,
             capture_output=True, text=True, timeout=20,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("› links  Dotfiles and commands", result.stdout)
-        self.assertIn("Skipping workstation groups: needs admin rights", result.stdout)
+        self.assertIn("Skipping Linux configuration on macOS", result.stdout)
+        self.assertIn("Skipping desktop on macOS: Linux only", result.stdout)
+        self.assertIn("Preview complete", result.stdout)
+        self.assertNotIn(" failed", result.stdout)
+
+    def test_configure_without_admin_skips_setup_groups(self):
+        checkout = self.configure_fixture()
+        self.tool("id", "if [ \"$1\" = -Gn ]; then echo staff; else exec /usr/bin/id \"$@\"; fi")
+        result = subprocess.run(
+            ["bash", str(checkout / "scripts/configure.sh"), "--dry-run"],
+            env=self.env | {"JSH_PLATFORM": "darwin"}, cwd=self.home,
+            capture_output=True, text=True, timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("› configure  Apps, agents, and system settings", result.stdout)
+        self.assertIn("Skipping setup groups: needs admin rights", result.stdout)
         self.assertNotIn("› macos", result.stdout)
 
-    def test_installer_without_cached_sudo_records_action_needed(self):
-        checkout = self.installer_scope_fixture()
+    def test_configure_without_cached_sudo_records_action_needed(self):
+        checkout = self.configure_fixture()
         self.tool("id", "if [ \"$1\" = -Gn ]; then echo staff sudo; else exec /usr/bin/id \"$@\"; fi")
         self.tool("sudo", "exit 1")
         result = subprocess.run(
-            ["bash", str(checkout / "install.sh"), "--dry-run"],
+            ["bash", str(checkout / "scripts/configure.sh"), "--dry-run"],
             env=self.env | {"JSH_PLATFORM": "debian"}, cwd=self.home,
             capture_output=True, text=True, timeout=20,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("Skipping workstation groups: needs admin rights", result.stdout)
+        self.assertIn("Skipping setup groups: needs admin rights", result.stdout)
         self.assertIn(
-            "Workstation setup needs sudo; run sudo -v first, then rerun ./install.sh",
+            "Configuration needs sudo; run `sudo -v` first, then rerun `make configure`",
             result.stdout,
         )
         self.assertIn("Action needed", result.stdout)
@@ -745,12 +766,19 @@ exit "__DOLLAR__status"
                                        self.env | {"NO_COLOR": "1", "JSH_PLATFORM": "darwin"})
         # A clear erases the line, so only text after the last one stays visible.
         lines = [line.split("\r\x1b[K")[-1] for line in display.split("\r\n")]
-        self.assertIn("› packages", lines, display)
+        self.assertIn("› links  Dotfiles and commands", lines, display)
         self.assertIn("✓ ~/.testrc linked", lines, display)
-        self.assertIn("✓ links  Dotfiles and commands", lines, display)
+        self.assertNotIn("✓ links  Dotfiles and commands", lines, display)
         self.assertTrue(any(line.startswith("Ready  ") for line in lines), display)
         self.assertEqual([line for line in lines if "Linking dotfiles..." in line
                           or "Linking commands..." in line], [], display)
+        display = self.run_on_terminal(
+            f'cd "$HOME" && bash "{checkout}/scripts/configure.sh" --update dev',
+            self.env | {"NO_COLOR": "1", "JSH_PLATFORM": "darwin"})
+        lines = [line.split("\r\x1b[K")[-1] for line in display.split("\r\n")]
+        self.assertIn("› packages", lines, display)
+        self.assertTrue(any(line.startswith("› dev") for line in lines), display)
+        self.assertTrue(any(line.startswith("Ready  ") for line in lines), display)
 
     def test_installer_reports_scope_before_package_work(self):
         checkout = self.installer_scope_fixture()
@@ -776,35 +804,40 @@ exit "__DOLLAR__status"
         checkout = self.installer_scope_fixture()
         (checkout / "scripts/packages.sh").write_text("sleep 0.5\n")
         (self.home / ".jsh").symlink_to(checkout)
-        master, slave = pty.openpty()
-        process = subprocess.Popen(
-            ["bash", str(checkout / "install.sh"), "tools"],
-            env=self.env, cwd=self.home, stdin=subprocess.DEVNULL, stdout=slave, stderr=slave,
-        )
-        os.close(slave)
-        output = bytearray()
-        while True:
-            try:
-                chunk = os.read(master, 65536)
-            except OSError:
-                break
-            if not chunk:
-                break
-            output.extend(chunk)
-        os.close(master)
-        self.assertEqual(process.wait(timeout=10), 0, output)
-        display = re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", output.decode(errors="replace"))
-        for component in ("core", "shell", "links", "tools"):
-            self.assertIn(f"› {component}", display)
-            self.assertIn(f"\x1b[1;36m› {component}\x1b[0m".encode(), output)
-        self.assertIn("Everything is current", display)
-        self.assertNotIn("  0 failed", display)
+        def run(*command):
+            master, slave = pty.openpty()
+            process = subprocess.Popen(
+                ["bash", *command],
+                env=self.env, cwd=self.home, stdin=subprocess.DEVNULL, stdout=slave, stderr=slave,
+            )
+            os.close(slave)
+            output = bytearray()
+            while True:
+                try:
+                    chunk = os.read(master, 65536)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                output.extend(chunk)
+            os.close(master)
+            self.assertEqual(process.wait(timeout=10), 0, output)
+            return output
+        for command, components in (((str(checkout / "install.sh"),), ("core", "shell", "links")),
+                                    ((str(checkout / "scripts/configure.sh"), "tools"), ("tools",))):
+            output = run(*command)
+            display = re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", output.decode(errors="replace"))
+            for component in components:
+                self.assertIn(f"› {component}", display)
+                self.assertIn(f"\x1b[1;36m› {component}\x1b[0m".encode(), output)
+            self.assertIn("Everything is current", display)
+            self.assertNotIn("  0 failed", display)
 
     def test_installer_scope_includes_distinct_desktop(self):
         checkout = self.installer_scope_fixture()
         env = self.env | {"JSH_PLATFORM": "debian", "JSH_DESKTOP": "xfce"}
         result = subprocess.run(
-            ["bash", str(checkout / "install.sh"), "--dry-run", "core"], env=env,
+            ["bash", str(checkout / "install.sh"), "--dry-run"], env=env,
             cwd=self.home, capture_output=True, text=True, timeout=20,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -818,19 +851,25 @@ exit "__DOLLAR__status"
 
     def test_installer_rejects_unknown_names_before_changes(self):
         checkout = self.installer_scope_fixture()
-        for argument in ("--minimal", "nope", "git"):
-            with self.subTest(argument=argument):
-                result = subprocess.run(
-                    ["bash", str(checkout / "install.sh"), argument],
-                    env=self.env, cwd=self.home,
-                    capture_output=True, text=True, timeout=20,
-                )
-                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
-                self.assertIn("unknown option or group", result.stderr)
-                if not argument.startswith("-"):
-                    self.assertIn(f"rerun {checkout.resolve()}/install.sh with names from --list",
-                                  result.stderr)
-                self.assertFalse((self.home / ".jsh").exists())
+        for script in ("install.sh", "scripts/configure.sh"):
+            for argument in ("--minimal", "nope", "git", "core"):
+                with self.subTest(script=script, argument=argument):
+                    result = subprocess.run(
+                        ["bash", str(checkout / script), argument],
+                        env=self.env, cwd=self.home,
+                        capture_output=True, text=True, timeout=20,
+                    )
+                    self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                    if argument.startswith("-"):
+                        self.assertIn("unknown option or group", result.stderr)
+                    elif script == "install.sh":
+                        self.assertIn(f"install.sh takes no groups; run make configure {argument}",
+                                      result.stderr)
+                    else:
+                        self.assertIn(f"unknown option or group: {argument}", result.stderr)
+                        self.assertIn("rerun with names from make list groups", result.stderr)
+                    self.assertEqual(result.stdout, "")
+                    self.assertFalse((self.home / ".jsh").exists())
 
     def test_installer_lists_groups_and_runs_them_in_file_order(self):
         checkout = self.installer_scope_fixture()
@@ -842,8 +881,9 @@ exit "__DOLLAR__status"
         for name in ("macos", "linux", "dev"):
             (checkout / f"scripts/{name}.sh").write_text(f'printf "%s\\n" {name} >> "$HOME/ran"\n')
         self.tool("id", 'if [ "$1" = -Gn ]; then echo "staff admin"; else exec /usr/bin/id "$@"; fi')
+        (self.home / ".jsh").symlink_to(checkout)
         def run(*args):
-            return subprocess.run(["/bin/bash", str(checkout / "install.sh"), *args],
+            return subprocess.run(["/bin/bash", str(checkout / "scripts/configure.sh"), *args],
                                   env=self.env | {"JSH_PLATFORM": "darwin"}, cwd=self.home,
                                   capture_output=True, text=True, timeout=20)
         self.assertEqual(run("--list").stdout, "macos\nlinux\ndev\n")
@@ -874,7 +914,8 @@ exit "__DOLLAR__status"
                     (checkout / "ansible/site.yml").write_text(contents)
                 else:
                     (checkout / "ansible/roles/dev/meta/main.yml").write_text(contents)
-                result = subprocess.run(["/bin/bash", str(checkout / "install.sh"), "--list"],
+                result = subprocess.run(["/bin/bash", str(checkout / "scripts/configure.sh"),
+                                         "--list"],
                                         env=self.env, cwd=self.home, capture_output=True,
                                         text=True, timeout=20)
                 self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
@@ -886,15 +927,18 @@ exit "__DOLLAR__status"
         def piped(*args):
             return subprocess.run(["/bin/bash", "-s", "--", *args], input=script, env=self.env,
                                   cwd=self.home, capture_output=True, text=True, timeout=20)
-        preview = piped("--dry-run", "nope")
+        preview = piped("--dry-run")
         self.assertEqual(preview.returncode, 0, preview.stdout + preview.stderr)
         self.assertIn("would clone", preview.stdout)
+        named = piped("--dry-run", "nope")
+        self.assertEqual(named.returncode, 2, named.stdout + named.stderr)
+        self.assertIn("install.sh takes no groups; run make configure nope", named.stderr)
         bogus = piped("--bogus")
         self.assertEqual(bogus.returncode, 2)
         self.assertIn("unknown option", bogus.stderr)
         helped = piped("--help")
         self.assertEqual(helped.returncode, 0)
-        self.assertIn(f"run {self.home}/.jsh/install.sh --list", helped.stdout)
+        self.assertIn("configured separately with make configure", helped.stdout)
         self.assertFalse((self.home / ".jsh").exists())
 
     def test_installer_reloads_the_existing_runtime_without_nesting(self):
@@ -929,7 +973,7 @@ esac
                 output = self.run_terminal(
                     shell,
                     f'''before=$$
-bash {shlex.quote(str(checkout / "install.sh"))} core
+bash {shlex.quote(str(checkout / "install.sh"))}
 printf '\\nRELOAD_RESULT:%s:%s\\n' "$([[ $$ == "$before" ]] && printf same)" "$JSH_TEST_LOADS"
 ''',
                     JSH_LOAD_CONFIG="1",
@@ -950,7 +994,7 @@ printf '\\nRELOAD_RESULT:%s:%s\\n' "$([[ $$ == "$before" ]] && printf same)" "$J
         )
         launcher.chmod(0o755)
         output = self.run_terminal(
-            "/bin/bash", f'bash {shlex.quote(str(checkout / "install.sh"))} core',
+            "/bin/bash", f'bash {shlex.quote(str(checkout / "install.sh"))}',
             JSH_RUNTIME_DIR="", JSH_LOAD_CONFIG="0",
         )
         self.assertIn("Opening the jsh runtime...", output)
@@ -959,36 +1003,37 @@ printf '\\nRELOAD_RESULT:%s:%s\\n' "$([[ $$ == "$before" ]] && printf same)" "$J
 
     def test_installer_preview_and_failure_do_not_request_reload(self):
         checkout = self.installer_scope_fixture()
-        for args in (("--dry-run", "core"), ("dev",)):
+        (self.home / ".jsh").symlink_to(checkout)
+        for args in (("install.sh", "--dry-run"), ("scripts/configure.sh", "dev")):
             with self.subTest(args=args):
                 (checkout / "scripts/dev.sh").write_text("exit 7\n")
                 result = subprocess.run(
-                    ["bash", str(checkout / "install.sh"), *args],
+                    ["bash", str(checkout / args[0]), *args[1:]],
                     env=self.env | {"JSH_RELOAD_PID": "12345"}, cwd=self.home,
                     capture_output=True, text=True, timeout=20,
                 )
-                self.assertEqual(result.returncode, 0 if args[0] == "--dry-run" else 1,
+                self.assertEqual(result.returncode, 0 if args[1] == "--dry-run" else 1,
                                  result.stdout + result.stderr)
                 self.assertFalse((self.home / "runtime/reload-12345").exists())
 
     def test_installer_offers_reload_for_runtime_without_reload_hook(self):
         checkout = self.installer_scope_fixture()
         result = subprocess.run(
-            ["bash", str(checkout / "install.sh"), "core"],
+            ["bash", str(checkout / "install.sh")],
             env=self.env, cwd=self.home, capture_output=True, text=True, timeout=20,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('Run "jsh reload" to refresh the current runtime', result.stdout)
 
-    def test_installer_summarizes_changes_and_failed_groups(self):
-        checkout = self.installer_scope_fixture()
+    def test_configure_summarizes_changes_and_failed_groups(self):
+        checkout = self.configure_fixture()
         (checkout / "scripts/dev.sh").write_text("exit 0\n")
         (checkout / "scripts/ghostty.sh").write_text(
             '. "$JSH_ROOT/scripts/lib/common.sh"\njsh::changed "example"\njsh::notice "Restart app"\n'
         )
         (checkout / "scripts/kube.sh").write_text("exit 1\n")
         result = subprocess.run(
-            ["bash", str(checkout / "install.sh"), "dev", "ghostty", "kube", "core", "shell"],
+            ["bash", str(checkout / "scripts/configure.sh"), "dev", "ghostty", "kube"],
             env=self.env, cwd=self.home, capture_output=True, text=True, timeout=20,
         )
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
@@ -1001,8 +1046,8 @@ printf '\\nRELOAD_RESULT:%s:%s\\n' "$([[ $$ == "$before" ]] && printf same)" "$J
         self.assertIn("Action needed", output)
         self.assertNotIn("completed (bootstrap)", output)
 
-    def test_installer_emits_one_failure_item_for_a_failing_group(self):
-        checkout = self.installer_scope_fixture()
+    def test_configure_emits_one_failure_item_for_a_failing_group(self):
+        checkout = self.configure_fixture()
         (checkout / "scripts/dev.sh").write_text("""set -e
 . "$JSH_ROOT/scripts/lib/common.sh"
 jsh::step check links
@@ -1010,15 +1055,15 @@ jsh::ok x
 false
 """)
         result = subprocess.run(
-            ["bash", str(checkout / "install.sh"), "dev"],
+            ["bash", str(checkout / "scripts/configure.sh"), "dev"],
             env=self.env, cwd=self.home, capture_output=True, text=True, timeout=20,
         )
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertEqual(result.stdout.splitlines().count("✕ dev failed (1)"), 1, result.stdout)
         self.assertIn("Failed\n  ✕ dev failed (1)", result.stdout)
 
-    def test_installer_continues_to_the_last_group_after_earlier_failure(self):
-        checkout = self.installer_scope_fixture()
+    def test_configure_continues_to_the_last_group_after_earlier_failure(self):
+        checkout = self.configure_fixture()
         write_group_sources(checkout, [("a", "all", "First"),
                                        ("b", "all", "Second")])
         (checkout / "scripts/a.sh").write_text("exit 1\n")
@@ -1028,7 +1073,7 @@ false
             'jsh::ok "thing is current"\n'
         )
         result = subprocess.run(
-            ["bash", str(checkout / "install.sh"), "a", "b"],
+            ["bash", str(checkout / "scripts/configure.sh"), "a", "b"],
             env=self.env, cwd=self.home, capture_output=True, text=True, timeout=20,
         )
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
@@ -1053,14 +1098,14 @@ false
         self.assertIn("No settings changed", result.stdout)
         self.assertFalse((self.home / ".zshrc").exists())
 
-    def test_installer_keeps_task_output_in_the_log(self):
-        checkout = self.installer_scope_fixture()
+    def test_configure_keeps_task_output_in_the_log(self):
+        checkout = self.configure_fixture()
         (checkout / "scripts/dev.sh").write_text(
             '. "$JSH_ROOT/scripts/lib/common.sh"\n'
             'if read -r line; then echo "read:$line"; else echo stdin-closed; fi\n'
             'jsh::task "Configuring dev" bash -c "echo raw-config-output"\n'
             'jsh::changed "dev settings"\n')
-        result = subprocess.run(["bash", str(checkout / "install.sh"), "dev"], env=self.env,
+        result = subprocess.run(["bash", str(checkout / "scripts/configure.sh"), "dev"], env=self.env,
                                 cwd=self.home, input="typed\n", stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, text=True, timeout=20)
         self.assertEqual(result.returncode, 0, result.stdout)
@@ -1071,8 +1116,8 @@ false
         marks = [out.index(text) for text in ("› dev", "dev settings", "Ready")]
         self.assertEqual(marks, sorted(marks), out)
 
-    def test_installer_failure_keeps_diagnostics_and_continues(self):
-        checkout = self.installer_scope_fixture()
+    def test_configure_failure_keeps_diagnostics_and_continues(self):
+        checkout = self.configure_fixture()
         (checkout / "scripts/dev.sh").write_text('''
 . "$JSH_ROOT/scripts/lib/common.sh"
 jsh::task "Updating Git" bash -c 'echo useful-error; exit 7' || exit $?
@@ -1082,7 +1127,7 @@ jsh::task "Updating Git" bash -c 'echo useful-error; exit 7' || exit $?
 jsh::changed "Ghostty settings"
 ''')
         result = subprocess.run(
-            ["bash", str(checkout / "install.sh"), "--update", "dev", "ghostty"],
+            ["bash", str(checkout / "scripts/configure.sh"), "--update", "dev", "ghostty"],
             env=self.env, cwd=self.home, capture_output=True, text=True, timeout=20,
         )
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
@@ -1107,7 +1152,7 @@ jsh::changed "Ghostty settings"
                 (checkout / "scripts/packages.sh").write_text("exit 3\n" if script == "packages" else "exit 0\n")
                 (checkout / "scripts/shell.sh").write_text("exit 3\n" if script == "shell" else "exit 0\n")
                 result = subprocess.run(
-                    ["bash", str(checkout / "install.sh"), "dev"],
+                    ["bash", str(checkout / "install.sh")],
                     env=self.env | {"HOME": str(checkout)}, cwd=checkout,
                     capture_output=True, text=True, timeout=20,
                 )
@@ -2200,8 +2245,8 @@ esac""")
         self.assertNotIn("Checking Homebrew casks...", result.stdout)
 
 
-    def test_installer_runs_global_brew_updates_in_package_step(self):
-        checkout = self.installer_scope_fixture()
+    def test_configure_runs_global_brew_updates_in_package_step(self):
+        checkout = self.configure_fixture()
         for name in ("scripts/packages.sh", "scripts/lib/packages.sh"):
             shutil.copy2(ROOT / name, checkout / name)
         jq = shutil.which("jq")
@@ -2215,7 +2260,7 @@ esac""")
   upgrade) printf '%s\\n' "$*" >> "$HOME/actions"; printf 'UPGRADED %s\\n' "$*" ;;
 esac''')
         result = subprocess.run(
-            ["bash", str(checkout / "install.sh"), "--update", "ghostty"],
+            ["bash", str(checkout / "scripts/configure.sh"), "--update", "ghostty"],
             env=self.env | {"JSH_PLATFORM": "darwin"}, cwd=self.home,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=30,
         )
@@ -3595,7 +3640,7 @@ with output.session():
         spec = importlib.util.spec_from_file_location("jsh_output", ROOT / "lib/output.py")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        text = "Configuration needs sudo; run `sudo -v` first, then rerun `scripts/configure.sh`"
+        text = "Configuration needs sudo; run `sudo -v` first, then rerun `make configure`"
         self.assertEqual(module.format_notice(text, 40), [
             "  • Configuration needs sudo; run",
             "    `sudo -v` first, then rerun",
@@ -4283,9 +4328,10 @@ esac''')
         for name in ("scripts/lib", "lib/shell", "bin", "dotfiles", "ansible/roles/fonts/tasks"):
             (checkout / name).mkdir(parents=True)
         for name in ("scripts/lib/common.sh", "lib/shell/output.sh", "lib/output.py",
-                     "lib/verbs.tsv", "install.sh"):
+                     "lib/verbs.tsv", "install.sh", "scripts/configure.sh"):
             shutil.copy2(ROOT / name, checkout / name)
         copy_group_sources(checkout)
+        (self.home / ".jsh").symlink_to(checkout)
         (checkout / "scripts/packages.sh").write_text("exit 0\n")
         (checkout / "scripts/shell.sh").write_text("exit 0\n")
         (checkout / "scripts/ansible.sh").write_text("exit 0\n")
@@ -4300,32 +4346,32 @@ esac''')
         path.write_text("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$HOME/playbook.log\"\n")
         path.chmod(0o755)
 
-    def install(self, checkout, *arguments):
+    def configure(self, checkout, *arguments):
         return subprocess.run(
-            ["bash", str(checkout / "install.sh"), *arguments],
+            ["bash", str(checkout / "scripts/configure.sh"), *arguments],
             env=self.env | {"JSH_PLATFORM": "darwin",
                             "JSH_ANSIBLE_HOME": str(self.home / "ansible")},
             cwd=self.home, capture_output=True, text=True, timeout=60,
         )
 
-    def test_installer_runs_ansible_for_ported_groups(self):
+    def test_configure_runs_ansible_for_ported_groups(self):
         checkout = self.installer_fixture()
         self.mock_playbook()
-        result = self.install(checkout, "--dry-run", "fonts")
+        result = self.configure(checkout, "--dry-run", "fonts")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         log = (self.home / "playbook.log").read_text()
         self.assertIn("--tags fonts --check --diff", log)
         self.assertFalse((self.home / "fonts-script-ran").exists())
         (self.home / "playbook.log").unlink()
-        result = self.install(checkout, "--update", "fonts")
+        result = self.configure(checkout, "--update", "fonts")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         log = (self.home / "playbook.log").read_text()
         self.assertIn('"jsh_update": true', log)
         self.assertNotIn("--check", log)
 
-    def test_installer_dry_run_without_ansible_skips_groups(self):
+    def test_configure_dry_run_without_ansible_skips_groups(self):
         checkout = self.installer_fixture()
-        result = self.install(checkout, "--dry-run", "fonts")
+        result = self.configure(checkout, "--dry-run", "fonts")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("Skipping fonts preview: Ansible is not installed yet", result.stdout)
         self.assertFalse((self.home / "ansible").exists())
@@ -5262,7 +5308,7 @@ exec /usr/bin/stat "$@"
             {"src": "/vendor/c", "dest": "/home/.agents/skills/c"},
         ])
 
-    def test_installer_runs_one_playbook_for_all_groups(self):
+    def test_configure_runs_one_playbook_for_all_groups(self):
         checkout = self.installer_fixture()
         for name in ("macos", "tools", "services"):
             (checkout / "ansible/roles" / name / "tasks").mkdir(parents=True)
@@ -5278,7 +5324,7 @@ exec /usr/bin/stat "$@"
             "touch \"$HOME/legacy-script-ran\"\n")
         self.mock_playbook()
         result = subprocess.run(
-            ["bash", str(checkout / "install.sh"), "--dry-run", "macos", "fonts",
+            ["bash", str(checkout / "scripts/configure.sh"), "--dry-run", "macos", "fonts",
              "tools", "services", "legacy"],
             env=self.env | {"JSH_PLATFORM": "debian",
                             "JSH_ANSIBLE_HOME": str(self.home / "ansible")},

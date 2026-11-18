@@ -40,7 +40,7 @@
 
 - name: notice
   ansible.builtin.debug:
-    msg: Wox did not create its settings; open Wox, then rerun ./install.sh wox
+    msg: Wox did not create its settings; open Wox, then rerun make configure wox
   when: wox_main_hotkey.rc != 0 and not ansible_check_mode
 
 - name: Wox clipboard hotkeys are counted
