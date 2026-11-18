@@ -3949,6 +3949,27 @@ esac''')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("~ Ansible updated", result.stdout)
 
+    def test_ansible_bootstrap_reinstalls_when_interpreter_is_missing(self):
+        self.mock_uv()
+        root = self.checkout()
+        self.assertEqual(self.bootstrap(root).returncode, 0)
+        playbook = self.home / "ansible/venv/bin/ansible-playbook"
+        playbook.write_text("#!/missing/python\n")
+        result = self.bootstrap(root)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("~ Ansible updated", result.stdout)
+        self.assertEqual(subprocess.run([str(playbook)]).returncode, 0)
+
+    def test_ansible_bootstrap_reinstalls_when_environment_moves(self):
+        self.mock_uv()
+        root = self.checkout()
+        self.assertEqual(self.bootstrap(root).returncode, 0)
+        moved = self.home / "moved-ansible"
+        shutil.copytree(self.home / "ansible", moved)
+        result = self.bootstrap(root, JSH_ANSIBLE_HOME=str(moved))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("~ Ansible updated", result.stdout)
+
     def test_ansible_bootstrap_failure_writes_no_stamp(self):
         self.mock_uv()
         root = self.checkout()

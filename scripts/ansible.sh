@@ -63,12 +63,13 @@ jsh::status Ansible
 scratch=$(jsh::temp)
 {
   cat "${requirements}" "${collections}"
-  printf 'python %s\n' "${python_version}"
+  printf 'python %s\nhome %s\n' "${python_version}" "${home}"
 } >"${scratch}/stamp"
 wanted=$(jsh::sha256 "${scratch}/stamp")
 current=
 [[ ! -f ${home}/stamp ]] || current=$(<"${home}/stamp")
-if [[ ${current} == "${wanted}" && -x ${home}/venv/bin/ansible-playbook ]]; then
+if [[ ${current} == "${wanted}" && -x ${home}/venv/bin/ansible-playbook ]] &&
+  PYTHONDONTWRITEBYTECODE=1 "${home}/venv/bin/ansible-playbook" --version >/dev/null 2>&1; then
   jsh::ok "Ansible is current"
   exit 0
 fi
