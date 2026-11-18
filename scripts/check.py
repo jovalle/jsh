@@ -4623,12 +4623,21 @@ esac''')
             ANSIBLE_ROLES_PATH=str(ROOT / "ansible/roles"), **environment)
 
     def test_helium_policy_reports_restart_and_missing_extension(self):
+        import plistlib
+
         profile_root = self.home / "Helium"
         profile = profile_root / "Default"
         profile.mkdir(parents=True)
-        (profile / "Preferences").write_text(
-            json.dumps({"extensions": {"pinned_extensions": []}}))
-        (profile_root / "Local State").write_text("{}\n")
+        role = ROOT / "ansible/roles/helium/files"
+        prefs = json.loads((role / "preferences.json").read_text())
+        prefs["extensions"] = {"pinned_extensions": [
+            "blockjmkbacgjkknlgpkjjiijinjdanf", "jplgfhpmjnbigmhklmmbgecoobifkmpa",
+            "nngceckbapebfimnlniiiahkandclblb"]}
+        (profile / "Preferences").write_text(json.dumps(prefs))
+        state = json.loads((role / "state.json").read_text())
+        state["browser"] = {"enabled_labs_experiments": [
+            "enable-experimental-web-platform-features"]}
+        (profile_root / "Local State").write_text(json.dumps(state))
         (profile / "Secure Preferences").write_text(
             json.dumps({"extensions": {"settings": {}}}))
         manifest = self.home / "manifest.plist"
@@ -4636,33 +4645,54 @@ esac''')
             json.dumps({"pfm_name":
                         "ExtensionForceInstallWithSearchOrNewTabOverridesEnabled"}))
         policy = self.home / "policy.plist"
+        onepassword = "aeblfdkhhhdcdjpifhhbdiojplfjncoa"
+        stale_policy = plistlib.dumps({"ExtensionInstallForcelist": [onepassword]})
+        policy.write_bytes(stale_policy)
+        python = shlex.quote(str(self.venv("python")))
+        self.tool(
+            "sudo",
+            f"{python} -c 'import os; raise SystemExit(os.getsid(0) != {os.getsid(0)})' || exit 1\n"
+            '[ -e "$HOME/sudo-authorized" ] || exit 1\n'
+            '[ "$1" != -n ] || exit 0\n'
+            'while [ "$#" -gt 0 ] && [ "$1" != /bin/sh ]; do shift; done\n'
+            '[ "$#" -gt 0 ] || exit 1\n'
+            'exec "$@"',
+        )
         self.tool("pgrep", "[ -e \"$HOME/closed\" ] && exit 1\necho 123")
         self.tool("osascript", "touch \"$HOME/closed\"")
         self.tool("open", "rm -f \"$HOME/closed\"\ntouch \"$HOME/launched\"")
         self.tool("plutil", "cat \"$5\"")
+        self.tool("killall", "exit 0")
         variables = {
             "helium_packages": {},
             "helium_profile_root": str(profile_root),
             "helium_policy_path": str(policy),
-            "helium_policy_become": False,
+            "helium_policy_become": True,
             "helium_manifest_path": str(manifest),
         }
 
+        blocked, _ = self.browser_play("helium", variables)
+        self.assertNotEqual(blocked.returncode, 0)
+        self.assertIn("Run sudo -v first, then rerun", blocked.stdout)
+        self.assertEqual(policy.read_bytes(), stale_policy)
+        self.assertFalse((self.home / "launched").exists())
+
+        (self.home / "sudo-authorized").touch()
         result, events = self.browser_play("helium", variables)
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        import plistlib
         written = plistlib.loads(policy.read_bytes())
         self.assertTrue(written["ExtensionForceInstallWithSearchOrNewTabOverridesEnabled"])
         self.assertIn("fgmjlmbojbkmdpofahffgcpkhkngfpef",
                       written["ExtensionInstallForcelist"])
-        self.assertIn(
-            ["item", "notice", "restart Helium to apply the changed policy"], events)
+        self.assertIn("nngceckbapebfimnlniiiahkandclblb", written["ExtensionInstallForcelist"])
+        self.assertNotIn(onepassword, written["ExtensionInstallForcelist"])
         self.assertIn(
             ["item", "notice", "Startpage extension is missing or disabled; restart Helium, "
              "enable extension downloads, and check helium://extensions"], events)
         self.assertIn(["item", "changed", "Helium restarted"], events)
         self.assertTrue((self.home / "launched").exists())
+        self.assertNotIn(["item", "changed", str(profile / "Preferences")], events)
 
     def test_helium_linux_does_not_check_the_macos_startpage_extension(self):
         profile_root = self.home / "Helium"
@@ -4705,12 +4735,14 @@ esac''')
             "fgmjlmbojbkmdpofahffgcpkhkngfpef")
         preferences = json.loads(
             (ROOT / "ansible/roles/helium/files/preferences.json").read_text())
-        preferences["extensions"] = {
-            "pinned_extensions": [*policy_values["ExtensionSettings"], "personal"]}
+        toolbar_order = list(reversed(policy_values["ExtensionSettings"]))
+        preferences["extensions"] = {"pinned_extensions": [*toolbar_order, "personal", "other"]}
+        existing = preferences | {"extensions": {"pinned_extensions": [
+            "personal", "aeblfdkhhhdcdjpifhhbdiojplfjncoa", *reversed(toolbar_order), "other"]}}
         state = json.loads((ROOT / "ansible/roles/helium/files/state.json").read_text())
         state["browser"] = {"enabled_labs_experiments": [
             "custom", "enable-experimental-web-platform-features"]}
-        (profile / "Preferences").write_text(json.dumps(preferences))
+        (profile / "Preferences").write_text(json.dumps(existing))
         (profile_root / "Local State").write_text(json.dumps(state))
         (profile / "Secure Preferences").write_text(json.dumps({
             "extensions": {"settings": {
@@ -4721,12 +4753,14 @@ esac''')
                        "ExtensionForceInstallWithSearchOrNewTabOverridesEnabled"}}))
         self.tool("pgrep", "exit 1")
         self.tool("plutil", "cat \"$5\"")
+        self.tool("killall", "exit 0")
         variables = {
             "helium_packages": {},
             "helium_profile_root": str(profile_root),
             "helium_policy_path": str(self.home / "policy.plist"),
             "helium_policy_become": False,
             "helium_manifest_path": str(manifest),
+            "helium_toolbar_order": toolbar_order,
         }
 
         result, events = self.browser_play("helium", variables)
@@ -4735,6 +4769,8 @@ esac''')
         self.assertEqual(json.loads((profile / "Preferences").read_text()), preferences)
         self.assertNotIn("default_search_provider_data", preferences)
         self.assertEqual(json.loads((profile_root / "Local State").read_text()), state)
+        result, events = self.browser_play("helium", variables)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         changed = [event[2] for event in events if event[:2] == ["item", "changed"]]
         self.assertNotIn(str(profile / "Preferences"), changed)
         self.assertNotIn(str(profile_root / "Local State"), changed)

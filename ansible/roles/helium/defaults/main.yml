@@ -19,6 +19,10 @@ helium_policy_path: >-
   {{ '/Library/Managed Preferences/' ~ helium_user ~ '/net.imput.helium.plist'
      if jsh_platform == 'darwin' else '/etc/chromium/policies/managed/jsh-helium.json' }}
 helium_policy_become: true
+helium_toolbar_order:
+  - blockjmkbacgjkknlgpkjjiijinjdanf  # uBlock Origin
+  - jplgfhpmjnbigmhklmmbgecoobifkmpa  # Proton VPN
+  - nngceckbapebfimnlniiiahkandclblb  # Bitwarden
 helium_manifest_path: >-
   {{ '/Applications/Helium.app/Contents/Resources/net.imput.helium.manifest/Contents/Resources/'
      ~ 'net.imput.helium.manifest' }}

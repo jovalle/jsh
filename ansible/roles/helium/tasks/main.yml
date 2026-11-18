@@ -71,32 +71,37 @@
         format: "{{ 'plist' if jsh_platform == 'darwin' else 'json' }}"
         merge: replace
       check_mode: true
-      failed_when: false
       register: helium_policy_probe
 
     - name: ok
       ansible.builtin.debug:
         msg: "{{ helium_policy_path }}"
-      when: helium_policy_probe.msg is not defined and helium_policy_probe is not changed
+      when: helium_policy_probe is not changed
 
     - name: "{{ helium_policy_path }}"
       ansible.builtin.command: "true"
       changed_when: true
       check_mode: false
-      when: >-
-        helium_policy_probe.msg is not defined and helium_policy_probe is changed
-        and ansible_check_mode
+      when: helium_policy_probe is changed and ansible_check_mode
 
     - name: Helium policy admin access is checked
       ansible.builtin.command:
         argv: [sudo, -n, "true"]
+      vars:
+        # Cached sudo authorization belongs to the invoking terminal session.
+        ansible_worker_session_isolation: false
       register: helium_policy_admin
       changed_when: false
       check_mode: false
       failed_when: false
       when: >-
-        helium_policy_probe.msg is not defined and helium_policy_probe is changed
+        helium_policy_probe is changed
         and not ansible_check_mode and helium_policy_become | bool
+
+    - name: Helium policy requires administrator access
+      ansible.builtin.fail:
+        msg: "{{ helium_policy_path }} needs sudo. Run sudo -v first, then rerun."
+      when: helium_policy_admin.rc | default(0) != 0
 
     - name: "{{ helium_policy_path }}"
       settings:
@@ -105,42 +110,14 @@
         format: "{{ 'plist' if jsh_platform == 'darwin' else 'json' }}"
         merge: replace
       become: "{{ helium_policy_become | bool }}"
-      when: >-
-        helium_policy_probe.msg is not defined and helium_policy_probe is changed
-        and not ansible_check_mode
-        and (not helium_policy_become | bool or helium_policy_admin.rc | default(1) == 0)
+      vars:
+        ansible_worker_session_isolation: false
+      when: helium_policy_probe is changed and not ansible_check_mode
       register: helium_policy_write
-
-    - name: notice
-      ansible.builtin.debug:
-        msg: "{{ helium_policy_path }} needs sudo; run sudo -v first, then rerun"
-      when: >-
-        helium_policy_probe.msg is defined
-        or (helium_policy_probe is changed and not ansible_check_mode
-            and helium_policy_become | bool and helium_policy_admin.rc | default(1) != 0)
 
     - name: Helium policy change is recorded
       ansible.builtin.set_fact:
         helium_policy_changed: "{{ helium_policy_write is changed }}"
-
-    - name: Helium policy process is checked
-      ansible.builtin.command:
-        argv:
-          - pgrep
-          - -u
-          - "{{ lookup('ansible.builtin.pipe', 'id -u') }}"
-          - -x
-          - helium|Helium|helium-bin
-      register: helium_policy_process
-      changed_when: false
-      check_mode: false
-      failed_when: helium_policy_process.rc not in [0, 1]
-      when: helium_policy_changed | bool
-
-    - name: notice
-      ansible.builtin.debug:
-        msg: restart Helium to apply the changed policy
-      when: helium_policy_changed | bool and helium_policy_process.rc == 0
 
     - name: Helium search policy manifest is read
       ansible.builtin.command:
@@ -224,6 +201,27 @@
         msg: "Helium profile is {{ helium_profile }}"
       when: helium_profiles | length == 1
 
+    - name: Helium policy waits for a manual restart
+      when: helium_policy_changed | bool and (jsh_keep_apps | bool or helium_profiles | length != 1)
+      block:
+        - name: Helium policy process is checked
+          ansible.builtin.command:
+            argv:
+              - pgrep
+              - -u
+              - "{{ lookup('ansible.builtin.pipe', 'id -u') }}"
+              - -x
+              - helium|Helium|helium-bin
+          register: helium_policy_process
+          changed_when: false
+          check_mode: false
+          failed_when: helium_policy_process.rc not in [0, 1]
+
+        - name: notice
+          ansible.builtin.debug:
+            msg: restart Helium to apply the changed policy
+          when: helium_policy_process.rc == 0
+
     - name: Helium profile preferences are managed
       when: helium_profiles | length == 1
       block:
@@ -237,21 +235,26 @@
                 preferences=$1
                 root=$2
                 policy=$3
+                toolbar_order=$4
                 set --
                 . "${JSH_ROOT:?}/ansible/helpers/apps.sh"
                 current=${APP_TMP}/current-preferences.json
                 app::jsonc "${preferences}" >"${current}"
                 jq -n --slurpfile base "${JSH_ROOT}/ansible/roles/helium/files/preferences.json" \
-                  --argjson policy "${policy}" --slurpfile current "${current}" '
-                  [$policy.ExtensionSettings // {} | to_entries[] |
-                    select(.value.toolbar_pin == "force_pinned") | .key] as $pinned |
+                  --argjson policy "${policy}" --argjson order "${toolbar_order}" \
+                  --slurpfile current "${current}" '
+                  [($policy.ExtensionSettings // {}) | to_entries | sort_by(.key)[] |
+                    select(.value.toolbar_pin == "force_pinned") | .key] as $forced |
+                  ([$order[] | select(. as $id | $forced | index($id))] +
+                    [$forced[] | select(. as $id | $order | index($id) | not)]) as $pinned |
                   [($policy.ExtensionInstallForcelist // [])[] | split(";")[0]] as $managed |
+                  # Remove the pin left by the old 1Password policy unless explicitly force-pinned.
+                  ($pinned + $managed + ["aeblfdkhhhdcdjpifhhbdiojplfjncoa"]) as $replaced |
                   ($current[0].extensions.pinned_extensions // []) as $existing |
                   if ($existing | type) != "array" or any($existing[]; type != "string") then
                     error("Helium pinned extensions must be a string array")
                   else $base[0] * {extensions: {pinned_extensions:
-                    ($pinned + [$existing[] | select(. as $id |
-                      ($pinned + $managed) | index($id) | not)])}} end
+                    ($pinned + [$existing[] | select(. as $id | $replaced | index($id) | not)])}} end
                 ' >"${APP_TMP}/preferences.json"
                 if [[ -f "${root}/Local State" ]]; then
                   app::jsonc "${root}/Local State" >"${APP_TMP}/current-state.json"
@@ -275,6 +278,7 @@
               - "{{ helium_preferences }}"
               - "{{ helium_profile_root }}"
               - "{{ helium_policy_values | to_json }}"
+              - "{{ helium_toolbar_order | to_json }}"
           environment: "{{ jsh_script_env }}"
           register: helium_desired
           changed_when: false
@@ -389,5 +393,8 @@
             app_tasks: apply.yml
             app_apply: true
             app_pending: >-
-              {{ helium_preferences_pending is changed or helium_state_pending is changed }}
+              {{ helium_preferences_pending is changed or helium_state_pending is changed
+                 or (not jsh_keep_apps | bool
+                     and (helium_policy_changed | bool
+                          or (ansible_check_mode and helium_policy_probe is changed))) }}
             app_live: false
