@@ -29,7 +29,7 @@
         - name: notice
           ansible.builtin.debug:
             msg: "{{ 'restart ' ~ app_label ~ ' to apply its changes' if app_live | bool
-                     else 'quit ' ~ app_label ~ ', then run jsh update to apply its settings' }}"
+                     else 'quit ' ~ app_label ~ ', then run `jsh update` to apply its settings' }}"
 
     - name: Running app restarts
       when: app_running.rc == 0 and not jsh_keep_apps | bool

@@ -2351,9 +2351,9 @@ exec "{real_python}" "$@"
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(result.stderr, "")
         self.assertEqual(result.stdout.count("› parent"), 1, result.stdout)
-        for line in ("Checking things...", "✓ a", "✓ b", "✓ parent",
-                     "Ready  Everything is current"):
+        for line in ("Checking things...", "✓ a", "✓ b", "Ready  Everything is current"):
             self.assertIn(line, result.stdout)
+        self.assertNotIn("✓ parent", result.stdout)
         self.assertEqual((self.home / "child-output").read_text(), "renderer\n")
         self.assertEqual((self.home / "renderers").read_text(), "render\n")
 
@@ -2408,9 +2408,8 @@ exec "{real_python}" "$@"
                         display = stream.read()
                     self.assertLess(elapsed, 5)
                     if failing:
-                        self.assertIn(
-                            "✓ started\n✕ daemon-True failed (1)\n✕ daemon-True\n", display,
-                        )
+                        self.assertIn("✓ started\n✕ daemon-True failed (1)\n", display)
+                        self.assertNotIn("✕ daemon-True\n", display)
                         self.assertNotIn("✕ Stopped starting vm", display)
                         self.assertIn("Failed\n  ✕ daemon-True failed (1)", display)
                     else:
@@ -2435,9 +2434,8 @@ exec "{real_python}" "$@"
         result = subprocess.run(["bash", str(script)], env=self.env | {"NO_COLOR": "1"},
                                 capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-        self.assertIn(
-            "✓ x\n✕ failure failed (1)\n✕ failure\n", result.stdout,
-        )
+        self.assertIn("✓ x\n✕ failure failed (1)\n", result.stdout)
+        self.assertNotIn("✕ failure\n", result.stdout)
         self.assertNotIn("✕ Stopped checking links", result.stdout)
         self.assertIn("Failed\n  ✕ failure failed (1)", result.stdout)
 
@@ -2458,11 +2456,8 @@ exec "{real_python}" "$@"
                     capture_output=True, text=True, timeout=10,
                 )
                 self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-                self.assertIn(
-                    "✓ x\n✕ vscode failed (1)\n✕ vscode  "
-                    "Merge VS Code settings and install its Linux package when needed\n",
-                    result.stdout,
-                )
+                self.assertIn("✓ x\n✕ vscode failed (1)\n", result.stdout)
+                self.assertNotIn("✕ vscode  Merge VS Code settings", result.stdout)
                 self.assertNotIn("✕ Stopped checking links", result.stdout)
                 self.assertIn("Failed\n  ✕ vscode failed (1)", result.stdout)
 
@@ -2593,7 +2588,8 @@ esac""")
             capture_output=True, text=True, timeout=10,
         )
         self.assertEqual(succeeded.returncode, 0, succeeded.stdout + succeeded.stderr)
-        self.assertIn("✓ packages", succeeded.stdout)
+        self.assertIn("› packages", succeeded.stdout)
+        self.assertNotIn("✓ packages", succeeded.stdout)
         self.assertNotIn("failed", succeeded.stdout)
 
         failed = subprocess.run(
@@ -3194,7 +3190,7 @@ with output.session():
         self.assertEqual(stdout.getvalue().splitlines(), [
             "", "› tools  Install tools", "Checking packages...",
             "✓ jq is installed", "! rg is not installed",
-            "Skipping optional package", "✓ tools  Install tools",
+            "Skipping optional package",
         ])
         self.assertEqual(stderr.getvalue(), "")
 
@@ -3337,7 +3333,7 @@ with output.session():
         self.assertEqual(result.returncode, 0, result.stderr)
         return result.stdout
 
-    def test_items_stream_and_group_closes_with_result(self):
+    def test_items_stream_and_group_closes_without_result(self):
         events = [
             ("group", "macos", "Apply managed macOS preferences"),
             ("step", "check", "macOS settings"),
@@ -3349,8 +3345,7 @@ with output.session():
             out = self.render(events, "--report", directory)
         self.assertEqual(out.splitlines(), [
             "", "› macos  Apply managed macOS preferences",
-            "Checking macOS settings...", "✓ A is false", "✓ B is false",
-            "✓ macos  Apply managed macOS preferences", "",
+            "Checking macOS settings...", "✓ A is false", "✓ B is false", "",
             "Ready  Everything is current  0m 00s",
         ])
 
@@ -3363,9 +3358,9 @@ with output.session():
             plain = self.run_output_shell(
                 "/bin/bash", code, JSH_OUTPUT="plain", JSH_REPORT=directory,
             ).stdout.decode()
-        self.assertEqual(plain.splitlines(), out.splitlines()[:6])
+        self.assertEqual(plain.splitlines(), out.splitlines()[:5])
 
-    def test_group_result_marks_failures_and_skips(self):
+    def test_group_close_prints_no_result_after_failures_and_skips(self):
         out = self.render([
             ("group", "broken", "Failure group"),
             ("item", "fail", "work failed"),
@@ -3378,10 +3373,8 @@ with output.session():
         ])
         self.assertEqual(out.splitlines(), [
             "", "› broken  Failure group", "✕ work failed",
-            "✕ broken  Failure group", "", "› skipped  Skip group",
-            "Skipping unavailable work", "– skipped  Skip group", "",
-            "› mixed  Mixed group", "✓ work is current",
-            "Skipping optional work", "✓ mixed  Mixed group",
+            "", "› skipped  Skip group", "Skipping unavailable work", "",
+            "› mixed  Mixed group", "✓ work is current", "Skipping optional work",
         ])
         code = (
             '. "$JSH_ROOT/lib/shell/output.sh"; '
@@ -3397,7 +3390,7 @@ with output.session():
             ).stdout.decode()
         self.assertEqual(plain, out)
 
-    def test_plain_group_results_include_child_report_events(self):
+    def test_plain_groups_show_child_report_events_without_results(self):
         code = (
             '. "$JSH_ROOT/lib/shell/output.sh"; '
             'jsh::group skipped "Skip group"; '
@@ -3412,8 +3405,7 @@ with output.session():
             ).stdout.decode()
         self.assertEqual(out.splitlines(), [
             "", "› skipped  Skip group", "Skipping child",
-            "– skipped  Skip group", "", "› failed  Failure group",
-            "✕ child", "✕ failed  Failure group",
+            "", "› failed  Failure group", "✕ child",
         ])
 
     def test_terminal_streams_items_above_the_spinner(self):
@@ -3430,7 +3422,6 @@ with output.session():
         permanent = [line for line in lines if line]
         self.assertEqual(permanent, [
             "› macos  Apply managed macOS preferences", "✓ A is false",
-            "✓ macos  Apply managed macOS preferences",
         ])
         self.assertFalse(
             any("Checking macOS settings" in line for line in permanent), permanent,
@@ -3448,9 +3439,10 @@ with output.session():
             rendered = self.render(events, "--report", directory)
         expected = [
             "", "› b  Second", "Checking thing...",
-            "✓ thing is current", "✓ b  Second",
+            "✓ thing is current",
         ]
         self.assertEqual(rendered.splitlines()[:len(expected)], expected)
+        self.assertNotIn("✓ b  Second", rendered)
         self.assertNotIn("✕ Stopped checking thing", rendered)
 
         code = (
@@ -3464,7 +3456,7 @@ with output.session():
             ).stdout.decode()
         self.assertEqual(plain.splitlines(), expected)
 
-    def test_cross_process_failed_run_keeps_last_group_successful_with_parity(self):
+    def test_cross_process_failed_run_prints_no_group_results_with_parity(self):
         code = (
             '. "$JSH_ROOT/lib/shell/output.sh"; '
             'jsh::group a First; jsh::fail "a failed (1)"; '
@@ -3474,8 +3466,8 @@ with output.session():
             'jsh::event stepclose; jsh::event end 0 1'
         )
         expected = [
-            "", "› a  First", "✕ a failed (1)", "✕ a  First", "",
-            "› b  Second", "Checking thing...", "✓ thing is current", "✓ b  Second",
+            "", "› a  First", "✕ a failed (1)", "",
+            "› b  Second", "Checking thing...", "✓ thing is current",
         ]
         outputs = {}
         for mode in ("plain", "renderer"):
@@ -3496,8 +3488,9 @@ with output.session():
                     outputs[mode] = result.stdout.decode()
         self.assertEqual(outputs["plain"].splitlines(), expected)
         self.assertEqual(outputs["renderer"].splitlines()[:len(expected)], expected)
-        self.assertIn("✓ thing is current\n✓ b  Second", outputs["plain"])
-        self.assertIn("✓ thing is current\n✓ b  Second", outputs["renderer"])
+        for output in outputs.values():
+            self.assertNotIn("✕ a  First", output)
+            self.assertNotIn("✓ b  Second", output)
 
     def test_packages_closes_the_child_step(self):
         code = (
@@ -3525,7 +3518,7 @@ with output.session():
         line = renderer._spinner_line(None, "")
         self.assertEqual(line, "\x1b[1m| Checking thing...\x1b[0m")
 
-    def test_interrupted_step_prints_stopped_then_failed_group(self):
+    def test_interrupted_step_prints_stopped_without_group_result(self):
         with tempfile.TemporaryDirectory(prefix="jsh-report-") as directory:
             out = self.render([
                 ("group", "links", "Dotfiles and commands"),
@@ -3535,8 +3528,7 @@ with output.session():
             ], "--report", directory)
         self.assertEqual(out.splitlines(), [
             "", "› links  Dotfiles and commands", "Checking links...",
-            "✓ one link is current", "✕ Stopped checking links",
-            "✕ links  Dotfiles and commands", "",
+            "✓ one link is current", "✕ Stopped checking links", "",
             "Finished with errors  Everything is current  0m 00s",
         ])
 
@@ -3593,9 +3585,34 @@ with output.session():
         lines = out.splitlines()
         for line in (
             "Finished with errors  1 changed  1 failed  0m 40s",
-            "Failed", "  ✕ just failed (1)", "Action needed", "  Restart Ghostty",
+            "Failed", "  ✕ just failed (1)", "Action needed", "  • Restart Ghostty",
         ):
             self.assertIn(line, lines)
+
+    def test_notice_wraps_with_hanging_indent_and_keeps_code_whole(self):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("jsh_output", ROOT / "lib/output.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        text = "Configuration needs sudo; run `sudo -v` first, then rerun `scripts/configure.sh`"
+        self.assertEqual(module.format_notice(text, 40), [
+            "  • Configuration needs sudo; run",
+            "    `sudo -v` first, then rerun",
+            "    `scripts/configure.sh`",
+        ])
+        colored = module.format_notice("run `sudo -v` now", 0, color=True)
+        self.assertEqual(colored, [
+            "  \x1b[1;33m•\x1b[0m run \x1b[36msudo -v\x1b[0m now",
+        ])
+        common = (ROOT / "scripts/lib/common.sh").read_text()
+        function = re.search(r"^jsh::_notice_lines\(\) \{\n.*?^\}\n", common,
+                             re.M | re.S)[0]
+        code = (f'. "{ROOT}/lib/shell/output.sh"; {function}'
+                f'jsh::_notice_lines {shlex.quote(text)} 36')
+        result = subprocess.run(["bash", "-c", code], env=os.environ | {"NO_COLOR": "1"},
+                                capture_output=True, text=True, timeout=20)
+        self.assertEqual(result.stdout.splitlines(), module.format_notice(text, 40))
 
     def test_renderer_sanitizes_all_terminal_event_text(self):
         display = self.render_terminal([
@@ -4217,7 +4234,7 @@ esac''')
         self.assertNotEqual(result.returncode, 0)
         kinds = [event[1] for event in events if event[0] == "item"]
         self.assertIn("fail", kinds, events)
-        self.assertIn(["item", "notice", "run sudo -v first, then rerun"], events)
+        self.assertIn(["item", "notice", "run `sudo -v` first, then rerun"], events)
 
     def test_callback_passes_helper_events_through(self):
         role = r"""- name: helper ran
@@ -4427,7 +4444,7 @@ esac''')
         target.write_text('{"user": 1}\n')
         result, events = self.app_play(target, JSH_KEEP_APPS="1")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn(["item", "notice", "quit Helium, then run jsh update to apply its settings"],
+        self.assertIn(["item", "notice", "quit Helium, then run `jsh update` to apply its settings"],
                       events)
         self.assertEqual(target.read_text(), '{"user": 1}\n')
         self.assertFalse((self.home / "osascript.log").exists())
@@ -5477,7 +5494,7 @@ exec /usr/bin/stat "$@"
         self.assertFalse(marker.exists(), events)
         self.assertIn(
             ["item", "notice",
-             "Linux system configuration needs sudo; run sudo -v first, then rerun"],
+             "Linux system configuration needs sudo; run `sudo -v` first, then rerun"],
             events,
         )
 

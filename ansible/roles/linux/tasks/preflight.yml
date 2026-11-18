@@ -10,7 +10,7 @@
 
 - name: notice
   ansible.builtin.debug:
-    msg: Linux system configuration needs sudo; run sudo -v first, then rerun
+    msg: Linux system configuration needs sudo; run `sudo -v` first, then rerun
   when:
     - linux_user != "root"
     - not ansible_check_mode

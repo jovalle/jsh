@@ -133,31 +133,6 @@ jsh::_report_count() {
 }
 
 jsh::_plain_group_close() {
-  local items=${_jsh_plain_group_items:-0} skips=${_jsh_plain_group_skips:-0}
-  local failed=${_jsh_plain_group_failed:-0} symbol code
-  [[ -n ${_jsh_plain_group_name+x} ]] || return 0
-  if [[ -d ${JSH_REPORT:-} ]]; then
-    jsh::_report_count "${JSH_REPORT}/items"
-    items=$((_jsh_count - ${_jsh_plain_group_item_start:-0}))
-    jsh::_report_count "${JSH_REPORT}/skips"
-    skips=$((_jsh_count - ${_jsh_plain_group_skip_start:-0}))
-    jsh::_report_count "${JSH_REPORT}/failures"
-    if ((_jsh_count > ${_jsh_plain_group_failure_start:-0})); then failed=1; fi
-  fi
-  if ((failed)); then
-    symbol=✕ code=31
-  elif ((items > 0 && items == skips)); then
-    symbol=– code=2
-  else
-    symbol=✓ code=32
-  fi
-  jsh::paint 1 "${code}" "${symbol}"
-  printf " %s" "${_jsh_plain_group_name}"
-  if [[ -n ${_jsh_plain_group_purpose:-} ]]; then
-    printf "  "
-    jsh::paint 1 2 "${_jsh_plain_group_purpose}"
-  fi
-  printf "\n"
   unset _jsh_plain_group_name _jsh_plain_group_purpose
 }
 

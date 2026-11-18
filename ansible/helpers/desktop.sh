@@ -110,7 +110,7 @@ jsh::system_file() {
     return
   fi
   if [[ ${JSH_DRY_RUN:-0} != 1 ]] && ! jsh::admin; then
-    jsh::notice "${destination} needs sudo; run sudo -v first, then rerun"
+    jsh::notice "${destination} needs sudo; run \`sudo -v\` first, then rerun"
     return 0
   fi
   if [[ -e ${destination} ]]; then

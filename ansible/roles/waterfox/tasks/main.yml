@@ -138,7 +138,7 @@
       ansible.builtin.debug:
         msg: >-
           {{ waterfox_policy_target | default('Waterfox policy') }} needs sudo;
-          run sudo -v first, then rerun
+          run `sudo -v` first, then rerun
       when: >-
         waterfox_policy_target is defined
         and (waterfox_policy_probe.msg is defined
@@ -330,7 +330,7 @@
               changed_when: false
               check_mode: false
 
-            - name: "{{ waterfox_selected }}/user.js is pending"
+            - name: "{{ waterfox_selected | default('Waterfox profile') }}/user.js is pending"
               ansible.builtin.copy:
                 content: |
                   {{ waterfox_desired_user.stdout }}

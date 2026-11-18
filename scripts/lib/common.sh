@@ -506,8 +506,52 @@ jsh::summary() {
   fi
   if [[ -s ${JSH_REPORT:-}/notices ]]; then
     printf "\n%s\n" "$(jsh::paint 1 '1;33' 'Action needed')"
-    while IFS= read -r event; do printf "  %s\n" "${event}"; done <"${JSH_REPORT}/notices"
+    local width=0
+    [[ ! -t 1 ]] || width=$(($(tput cols 2>/dev/null || echo 80) - 4))
+    ((width <= 0 || width >= 20)) || width=20
+    while IFS= read -r event; do
+      [[ -z ${event} ]] || jsh::_notice_lines "${event}" "${width}"
+    done <"${JSH_REPORT}/notices"
   fi
+}
+
+# Usage: jsh::_notice_lines TEXT WIDTH. Prints a bullet with a hanging indent, wrapping at
+# WIDTH (0 disables wrapping) without splitting `code` spans, which are shown in cyan.
+jsh::_notice_lines() {
+  local text=$1 width=$2 line='' token shown size used=0 prefix
+  local -a tokens=()
+  while [[ -n ${text} ]]; do
+    text=${text#"${text%%[! ]*}"}
+    [[ -n ${text} ]] || break
+    if [[ ${text} =~ ^\`([^\`]+)\`(.*)$ ]]; then
+      tokens+=("\`${BASH_REMATCH[1]}\`")
+      text=${BASH_REMATCH[2]}
+    else
+      token=${text%%[ \`]*}
+      [[ -n ${token} ]] || token=${text:0:1}
+      tokens+=("${token}")
+      text=${text:${#token}}
+    fi
+  done
+  prefix="  $(jsh::paint 1 '1;33' '•') "
+  for token in "${tokens[@]}"; do
+    shown=${token}
+    if [[ ${token} == \`?*\` && ${_jsh_color_1:-0} == 1 ]]; then
+      shown=$(jsh::paint 1 36 "${token:1:${#token}-2}")
+      size=$((${#token} - 2))
+    else
+      size=${#token}
+    fi
+    if [[ -n ${line} ]] && ((width && used + 1 + size > width)); then
+      printf '%s%s\n' "${prefix}" "${line}"
+      prefix='    '
+      line='' used=0
+    fi
+    if [[ -n ${line} ]]; then line+=' '; used=$((used + 1)); fi
+    line+=${shown}
+    used=$((used + size))
+  done
+  printf '%s%s\n' "${prefix}" "${line}"
 }
 
 jsh::session_close() {

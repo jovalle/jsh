@@ -76,7 +76,7 @@ if [[ -f ${library} ]] && cmp -s "${descriptor}" "${target}"; then
   exit 0
 fi
 if ! jsh::admin; then
-  jsh::notice "XFCE audio plugin ${version} needs sudo; run sudo -v first, then rerun"
+  jsh::notice "XFCE audio plugin ${version} needs sudo; run \`sudo -v\` first, then rerun"
   exit 0
 fi
 source=${temporary}/xfce4-pulseaudio-plugin-${version}

@@ -65,6 +65,39 @@ def _paint(text: str, code: str, color: bool) -> str:
     return f"\x1b[{code}m{text}\x1b[0m"
 
 
+def _code_spans(text: str, color: bool) -> List[Tuple[str, int]]:
+    """Split text into words and `code` spans as (display, width) tokens."""
+    tokens = []
+    for part in re.split(r"(`[^`]+`)", text):
+        if len(part) > 2 and part.startswith("`") and part.endswith("`"):
+            shown = part[1:-1] if color else part
+            tokens.append((_paint(shown, "36", color), len(shown)))
+        else:
+            tokens.extend((word, len(word)) for word in part.split())
+    return tokens
+
+
+def format_notice(text: str, width: int = 0, color: bool = False) -> List[str]:
+    """Format one Action needed entry as a bullet with a hanging indent."""
+    bullet = "  " + _paint("•", "1;33", color) + " "
+    indent = "    "
+    lines: List[str] = []
+    line, used = "", 0
+    limit = max(width - len(indent), 20) if width else 0
+    for shown, size in _code_spans(_display_path(_sanitize(text)), color):
+        if line and limit and used + 1 + size > limit:
+            lines.append(line)
+            line, used = "", 0
+        if line:
+            line += " "
+            used += 1
+        line += shown
+        used += size
+    lines.append(line)
+    return [(bullet if index == 0 else indent) + line
+            for index, line in enumerate(lines)]
+
+
 def _sanitize(text: str) -> str:
     text = CSI.sub("", text)
     text = OSC.sub("", text)
@@ -103,6 +136,8 @@ def format_item(kind: str, text: str, was: str = "", preview: bool = False,
     if kind not in SYMBOLS:
         return [_paint(f"    {text}", "2", color)]
     symbol, code = SYMBOLS[kind]
+    if kind == "notice" and color:
+        text = re.sub(r"`([^`]+)`", lambda match: _paint(match[1], "36", color), text)
     return [f"{_paint(symbol, code, color)} {text}"]
 
 
@@ -273,23 +308,10 @@ class Renderer:
         with self._lock:
             if self._group is None:
                 return
-            name, purpose = self._group
-            failed = self._group_failed
-            skip_only = self._group_items > 0 and self._group_items == self._group_skips
             self._group = None
             self._group_items = 0
             self._group_skips = 0
             self._group_failed = False
-        if failed:
-            symbol, code = "✕", "31"
-        elif skip_only:
-            symbol, code = "–", "2"
-        else:
-            symbol, code = "✓", "32"
-        result = f"{_paint(symbol, code, self.color)} {name}"
-        if purpose:
-            result += "  " + _paint(purpose, "2", self.color)
-        self._write(result)
 
     def _item(self, kind: str, text: str, was: str = "") -> None:
         lines = format_item(kind, text, was, self.preview, self.color)
@@ -351,8 +373,10 @@ class Renderer:
         if notices:
             self._write()
             self._write(_paint("Action needed", "1;33", self.color))
+            width = self._width() if self.tty else 0
             for notice in notices:
-                self._write(f"  {notice}")
+                for line in format_notice(notice, width, self.color):
+                    self._write(line)
 
     def feed(self, line: str) -> bool:
         """Consume one wire line and return false once an end event is seen."""

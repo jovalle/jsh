@@ -101,7 +101,7 @@ app::policy() {
     return
   fi
   if ! jsh::admin; then
-    jsh::notice "${target} needs sudo; run sudo -v first, then rerun"
+    jsh::notice "${target} needs sudo; run \`sudo -v\` first, then rerun"
     return
   fi
   # Back up the original policy before privileged replacement.
@@ -139,7 +139,7 @@ app::with_closed() (
       APP_OPEN=1 "${callback}" "$@" || return
       jsh::notice "restart ${label} to apply its changes"
     else
-      jsh::notice "quit ${label}, then run jsh update to apply its settings"
+      jsh::notice "quit ${label}, then run \`jsh update\` to apply its settings"
     fi
     return
   fi

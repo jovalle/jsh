@@ -33,7 +33,7 @@ toolbar || exit 0
 if [[ ${JSH_TOOLBAR_PROBE:-0} == 1 ]]; then
   printf "pending\n"
 elif [[ ${JSH_KEEP_APPS:-0} == 1 ]] && pgrep -u "$(id -u)" -x "waterfox|waterfox-bin|Waterfox" >/dev/null; then
-  jsh::notice "quit Waterfox, then run jsh update to pin its toolbar extensions"
+  jsh::notice "quit Waterfox, then run \`jsh update\` to pin its toolbar extensions"
 else
   jsh::file "${APP_TMP}/prefs.js" "${selected}/prefs.js"
 fi

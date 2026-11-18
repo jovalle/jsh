@@ -252,7 +252,7 @@ jsh::mas() {
   listing=$(mas outdated --json | jq -r "[.adamID, .name] | @tsv") || return
   [[ -n ${listing} ]] || return 0
   if [[ ${JSH_DRY_RUN} != 1 ]] && ! jsh::admin; then
-    jsh::notice "App Store updates need sudo; run sudo -v first, then rerun"
+    jsh::notice "App Store updates need sudo; run \`sudo -v\` first, then rerun"
     return 0
   fi
   while IFS=$'\t' read -r id name; do
@@ -288,7 +288,7 @@ jsh::native() {
           jsh::drift "${name} is not installed"
         fi
       done
-      jsh::notice "${manager} updates need sudo; run sudo -v first, then rerun"
+      jsh::notice "${manager} updates need sudo; run \`sudo -v\` first, then rerun"
       return 0
     fi
     root=0
@@ -332,7 +332,7 @@ jsh::native() {
   if ((${#missing[@]})); then
     if ((root == 0)); then
       for name in "${missing[@]}"; do jsh::drift "${name} is not installed"; done
-      jsh::notice "Install with sudo: ${manager} install ${missing[*]}"
+      jsh::notice "Install with sudo: \`${manager} install ${missing[*]}\`"
       return 1
     fi
     if [[ ${manager} == apt ]]; then

@@ -315,7 +315,7 @@ class CallbackModule(CallbackBase):
         for line in details[-10:]:
             self._emit("item", "output", line)
         if any(error in json.dumps(raw, default=str) for error in SUDO_ERRORS):
-            self._emit("item", "notice", "run sudo -v first, then rerun")
+            self._emit("item", "notice", "run `sudo -v` first, then rerun")
 
     def v2_runner_on_ok(self, result):
         self._done(result)

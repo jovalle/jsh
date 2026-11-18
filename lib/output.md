@@ -12,23 +12,20 @@ It excludes `bin/git`, `lib/git/`, `bin/kubecolor`, `bin/kubectx`, `bin/kubens`,
 
 ## Vocabulary
 
-| Symbol      | Kind         | Meaning                                    | Color     |
-| ----------- | ------------ | ------------------------------------------ | --------- |
-| `›`         | group        | A group header                             | bold cyan |
-| spinner     | step         | Transient work in progress at the bottom   | bold      |
-| `✓`         | group result | A successful group                         | green     |
-| `–`         | group result | A group containing only skip items         | gray      |
-| `✕`         | group result | A group containing a failure               | red       |
-| `✓`         | ok           | Checked and already correct                | green     |
-| `!`         | drift        | Checked and not as wanted                  | yellow    |
-| `+`         | added        | Added this run                             | green     |
-| `~`         | changed      | Changed this run                           | yellow    |
-| `-`         | removed      | Removed this run                           | red       |
-| `✕`         | fail         | Failed work                                | red       |
-| none        | info         | Context or detection                       | gray      |
-| none        | skip         | Text starts with `Skipping` plus one space | gray      |
-| `!`         | notice       | Action the user must take                  | yellow    |
-| four spaces | output       | Command output under its work              | gray      |
+| Symbol      | Kind    | Meaning                                    | Color     |
+| ----------- | ------- | ------------------------------------------ | --------- |
+| `›`         | group   | A group header                             | bold cyan |
+| spinner     | step    | Transient work in progress at the bottom   | bold      |
+| `✓`         | ok      | Checked and already correct                | green     |
+| `!`         | drift   | Checked and not as wanted                  | yellow    |
+| `+`         | added   | Added this run                             | green     |
+| `~`         | changed | Changed this run                           | yellow    |
+| `-`         | removed | Removed this run                           | red       |
+| `✕`         | fail    | Failed work                                | red       |
+| none        | info    | Context or detection                       | gray      |
+| none        | skip    | Text starts with `Skipping` plus one space | gray      |
+| `!`         | notice  | Action the user must take                  | yellow    |
+| four spaces | output  | Command output under its work              | gray      |
 
 ## Line formats
 
@@ -37,7 +34,6 @@ It excludes `bin/git`, `lib/git/`, `bin/kubecolor`, `bin/kubectx`, `bin/kubens`,
 - Failure: `✕ Failed to install just`.
 - Skip: `Skipping Linux configuration on macOS`, in gray.
 - Plain mode: `Checking macOS settings...`, then items as they arrive.
-- Group result: `✓ macos  Apply managed macOS preferences`, with the purpose in gray.
 
 These are the target transcripts. On a terminal, the spinner is a transient bottom line. Each item clears it, prints permanently, and redraws the active step beneath the item. No step completion line remains.
 
@@ -47,11 +43,9 @@ These are the target transcripts. On a terminal, the spinner is a transient bott
 ✓ ShowHardDrivesOnDesktop is false
 ✓ ShowMountedServersOnDesktop is false
 <spinner> Checking macOS settings...
-...
-✓ macos  Apply managed macOS preferences
 ```
 
-A real run can mix current, changed, and failed facts. The group result follows its final item directly.
+A real run can mix current, changed, and failed facts. A group ends with its final item; no result line follows.
 
 ```text
 › core
@@ -61,7 +55,6 @@ A real run can mix current, changed, and failed facts. The group result follows 
 ✕ Failed to install just
     <last lines of the error output, gray>
     Log: ~/.local/state/jsh/logs/...
-✕ core
 ```
 
 A preview uses the same layout and retains the planned action.
@@ -70,34 +63,31 @@ A preview uses the same layout and retains the planned action.
 › tools  Install everyday command-line tools
 Checking packages...
 ! jq is not installed  would add
-✓ tools  Install everyday command-line tools
 ```
 
-An interrupted active step prints the streamed items first, then the stopped line and failed group result.
+An interrupted active step prints the streamed items first, then the stopped line.
 
 ```text
 › links  Dotfiles and commands
 Checking links...
 ✓ ~/.zshrc linked
 ✕ Stopped checking links
-✕ links  Dotfiles and commands
 ```
 
-A skip-only group closes with `–`; a group containing both normal and skip items closes with `✓`.
-
-```text
-› linux  Apply Linux settings
-Skipping Linux configuration on macOS
-– linux  Apply Linux settings
-```
-
-Without a terminal, the renderer and Bash fallback print the step once and stream the same permanent item and result lines.
+Without a terminal, the renderer and Bash fallback print the step once and stream the same permanent item lines.
 
 ```text
 › macos  Apply managed macOS preferences
 Checking macOS settings...
 ✓ ShowHardDrivesOnDesktop is false
-✓ macos  Apply managed macOS preferences
+```
+
+The closing summary lists notices under `Action needed` as yellow `•` bullets. On a terminal, long notices wrap at the window width with a four-space hanging indent. Write commands in a notice between backticks: wrapping never splits a code span, and with color it is shown in cyan without the backticks.
+
+```text
+Action needed
+  • Configuration needs sudo; run `sudo -v`
+    first, then rerun `make configure`
 ```
 
 ## APIs
@@ -110,9 +100,9 @@ A compatibility block at the end of `lib/shell/output.sh` retains the legacy out
 
 ## Groups
 
-`jsh::group NAME PURPOSE` closes any open group, prints a blank line and its header, and opens the new group. A group closes at the next group, session end, or renderer EOF. Its result is `✕` after any failure, `–` when every item is a skip, and `✓` otherwise. The result line repeats the name and optional purpose.
+`jsh::group NAME PURPOSE` closes any open group, prints a blank line and its header, and opens the new group. A group closes at the next group, session end, or renderer EOF. Closing a group prints nothing.
 
-Plain sessions use the shared `JSH_REPORT` records to include item, skip, and failure events emitted by child processes when choosing the result. The process that opened a plain group closes it.
+Plain sessions use the shared `JSH_REPORT` records to track item, skip, and failure events emitted by child processes. The process that opened a plain group closes it.
 
 ## Steps and verbs
 
