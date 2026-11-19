@@ -82,7 +82,7 @@ Checking macOS settings...
 ✓ ShowHardDrivesOnDesktop is false
 ```
 
-The closing summary lists notices under `Action needed` as yellow `•` bullets. On a terminal, long notices wrap at the window width with a four-space hanging indent. Write commands in a notice between backticks: wrapping never splits a code span, and with color it is shown in cyan without the backticks.
+The closing summary lists notices under `Action needed` as yellow `•` bullets. A run with no changes reports `Everything is current`, or `No changes made` when notices are pending. On a terminal, long notices wrap at the window width with a four-space hanging indent. Write commands in a notice between backticks: wrapping never splits a code span, and with color it is shown in cyan without the backticks.
 
 ```text
 Action needed

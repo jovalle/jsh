@@ -353,6 +353,8 @@ class Renderer:
             for kind in CHANGE_KINDS:
                 if counts[kind]:
                     summary += f"  {counts[kind]} {kind}"
+        elif notices:
+            summary += "  No changes made"
         else:
             summary += "  Everything is current"
         if failures:

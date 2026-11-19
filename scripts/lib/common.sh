@@ -492,6 +492,8 @@ jsh::summary() {
     ((added == 0)) || printf "  %s added" "${added}"
     ((changed == 0)) || printf "  %s changed" "${changed}"
     ((removed == 0)) || printf "  %s removed" "${removed}"
+  elif [[ -s ${JSH_REPORT:-}/notices ]]; then
+    printf "  No changes made"
   else
     printf "  Everything is current"
   fi

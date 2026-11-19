@@ -3634,6 +3634,14 @@ with output.session():
         ):
             self.assertIn(line, lines)
 
+    def test_renderer_summary_with_only_notices_is_not_current(self):
+        with tempfile.TemporaryDirectory(prefix="jsh-output-") as directory:
+            report = Path(directory)
+            (report / "notices").write_text("Restart Ghostty\n")
+            out = self.render([("end", "6")], "--report", str(report))
+        self.assertIn("Ready  No changes made  0m 06s", out.splitlines())
+        self.assertNotIn("Everything is current", out)
+
     def test_notice_wraps_with_hanging_indent_and_keeps_code_whole(self):
         import importlib.util
 
