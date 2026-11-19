@@ -3652,7 +3652,7 @@ with output.session():
         self.assertEqual(module.format_notice(text, 40), [
             "  • Configuration needs sudo; run",
             "    `sudo -v` first, then rerun",
-            "    `scripts/configure.sh`",
+            "    `make configure`",
         ])
         colored = module.format_notice("run `sudo -v` now", 0, color=True)
         self.assertEqual(colored, [
