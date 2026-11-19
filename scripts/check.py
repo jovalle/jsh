@@ -5672,7 +5672,7 @@ esac''')
             probe = next(item for item in flattened if item.get("name") == f"{prefix} policy is checked")
             self.assertIn("settings", probe)
             self.assertTrue(probe["check_mode"])
-            self.assertFalse(probe["failed_when"])
+            self.assertFalse(probe.get("failed_when", False))
             self.assertNotIn("become", probe)
             preview = next(item for item in flattened
                            if item.get("changed_when") is True
@@ -5685,7 +5685,15 @@ esac''')
             write = next(item for item in flattened
                          if "settings" in item and item.get("check_mode") is not True)
             self.assertEqual(write["become"], f"{{{{ {role}_policy_become | bool }}}}")
+            for task in (admin, write):
+                self.assertIs(task["vars"]["ansible_worker_session_isolation"], False)
             self.assertIn("not ansible_check_mode", str(write["when"]))
+            # Helium stops with a failure; Waterfox skips the write and leaves a notice.
+            stop = next((item for item in flattened if "ansible.builtin.fail" in item
+                         and "needs sudo" in str(item["ansible.builtin.fail"])), None)
+            if stop is not None:
+                self.assertIn(f"{role}_policy_admin.rc", str(stop["when"]))
+                continue
             self.assertIn(f"{role}_policy_admin.rc", str(write["when"]))
             notice = next(item for item in flattened if item.get("name") == "notice"
                           and "needs sudo" in str(item.get("ansible.builtin.debug", {})))

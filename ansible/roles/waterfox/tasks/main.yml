@@ -114,6 +114,9 @@
     - name: Waterfox policy admin access is checked
       ansible.builtin.command:
         argv: [sudo, -n, "true"]
+      vars:
+        # Cached sudo authorization belongs to the invoking terminal session.
+        ansible_worker_session_isolation: false
       register: waterfox_policy_admin
       changed_when: false
       check_mode: false
@@ -129,6 +132,8 @@
         format: "{{ waterfox_policy_format }}"
         merge: replace
       become: "{{ waterfox_policy_become | bool }}"
+      vars:
+        ansible_worker_session_isolation: false
       when: >-
         waterfox_policy_target is defined and waterfox_policy_probe.msg is not defined
         and waterfox_policy_probe is changed and not ansible_check_mode
