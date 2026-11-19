@@ -25,12 +25,12 @@ make configure                   # every setup group (needs admin rights)
 make configure helium waterfox   # only the named groups
 ```
 
-Other commands from a checkout (`make` ships with macOS and Linux):
+Other shortcuts from a checkout, through the `make` that ships with macOS and Linux:
 
 ```sh
-jsh update                      # update software and settings
-scripts/configure.sh --dry-run  # preview what configuration would change
-make list groups                # list setup groups
+jsh update                     # update software and settings
+scripts/configure.sh --dry-run # preview what configuration would change
+make list groups               # list setup groups
 ```
 
 Homebrew updates include installed dependencies and other outdated packages, and remove

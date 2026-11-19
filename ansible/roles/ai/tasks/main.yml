@@ -41,6 +41,8 @@
     values:
       $schema: https://opencode.ai/config.json
       autoupdate: true
+    absent:
+      - [mcp, notion]
   when: ai_commands.results[0].rc == 0 or (ai_config ~ '/opencode') is directory
 
 - name: Codex settings are checked

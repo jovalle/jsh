@@ -4445,6 +4445,18 @@ esac''')
         self.settings(path=str(target), values={"c": 1}, merge="replace")
         self.assertEqual(json.loads(target.read_text()), {"c": 1})
 
+    def test_settings_removes_absent_paths(self):
+        target = self.home / "settings.json"
+        target.write_text('{"mcp": {"notion": {"url": "x"}, "rea": {}}, "a": 1}\n')
+        result, output = self.settings(path=str(target), values={"a": 1},
+                                       absent=[["mcp", "notion"], ["missing", "key"]])
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(output["changed"])
+        self.assertEqual(json.loads(target.read_text()), {"mcp": {"rea": {}}, "a": 1})
+        result, output = self.settings(path=str(target), values={"a": 1},
+                                       absent=[["mcp", "notion"]])
+        self.assertFalse(output["changed"], result.stdout)
+
     def app_play(self, target, *arguments, apply_fails=False, **environment):
         self.tool("pgrep", '[ -e "$HOME/closed" ] && exit 1\necho 123')
         self.tool("osascript", 'touch "$HOME/closed"\nprintf "%s\\n" "$*" >> "$HOME/osascript.log"')

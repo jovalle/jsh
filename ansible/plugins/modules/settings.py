@@ -27,6 +27,11 @@ options:
     type: str
     choices: [deep, shallow, replace]
     default: deep
+  absent:
+    description: Key paths, each a list of nested keys, removed after merging; missing keys are ignored.
+    type: list
+    elements: list
+    default: []
   mode: {description: Mode for a new file; an existing file keeps its mode., type: str, default: "0644"}
   backup:
     description:
@@ -36,6 +41,7 @@ options:
     default: true
 """
 
+import copy
 import json
 import os
 import plistlib
@@ -75,6 +81,15 @@ def deep_merge(current: dict, desired: dict) -> dict:
     return merged
 
 
+def remove_path(value: dict, keys: list) -> None:
+    for key in keys[:-1]:
+        value = value.get(key)
+        if not isinstance(value, dict):
+            return
+    if keys:
+        value.pop(keys[-1], None)
+
+
 def canonical(value: dict) -> str:
     return json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False, default=str)
 
@@ -88,6 +103,7 @@ def main() -> None:
             overlays=dict(type="list", elements="path", default=[]),
             format=dict(type="str", choices=["json", "plist"], default="json"),
             merge=dict(type="str", choices=["deep", "shallow", "replace"], default="deep"),
+            absent=dict(type="list", elements="list", default=[]),
             mode=dict(type="str", default="0644"),
             backup=dict(type="bool", default=True),
         ),
@@ -130,6 +146,9 @@ def main() -> None:
         merged = {**current, **desired}
     else:
         merged = desired
+    merged = copy.deepcopy(merged)
+    for keys in params["absent"]:
+        remove_path(merged, [str(key) for key in keys])
 
     before, after = canonical(current), canonical(merged)
     changed = not exists or before != after
