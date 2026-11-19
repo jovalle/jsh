@@ -4895,11 +4895,13 @@ esac''')
     def test_waterfox_default_profile_selection_rules(self):
         self.tool("pgrep", "exit 1")
 
-        def run(name, ini, profiles, expected=None, requested=""):
+        def run(name, ini, profiles, expected=None, requested="", files=None):
             root = self.home / name
             root.mkdir()
             for relative in profiles:
                 (root / relative).mkdir(parents=True)
+            for relative, text in (files or {}).items():
+                (root / relative).write_text(text)
             (root / "profiles.ini").write_text(ini)
             variables = {
                 "waterfox_packages": {},
@@ -4929,6 +4931,19 @@ esac''')
         run("override", multiple,
             ["Profiles/first", "Profiles/second"], "Profiles/first", "first")
         run("missing", "[Profile0]\nName=missing\nPath=Profiles/missing\n", [])
+        installs = ("[Profile0]\nName=old\nIsRelative=1\nPath=Profiles/old\n"
+                    "[Profile1]\nName=new\nIsRelative=1\nPath=Profiles/new\n"
+                    "[Profile2]\nName=stale\nIsRelative=1\nPath=Profiles/stale\n"
+                    "Default=1\n[InstallA]\nDefault=Profiles/new\n"
+                    "[InstallB]\nDefault=Profiles/old\n")
+        run("newest-build", installs,
+            ["Profiles/old", "Profiles/new", "Profiles/stale"], "Profiles/new",
+            files={
+                "Profiles/old/compatibility.ini":
+                    "[Compatibility]\nLastVersion=153.1.0_20260827164222/20260827164222\n",
+                "Profiles/new/compatibility.ini":
+                    "[Compatibility]\nLastVersion=153.5.0_20261013130543/20261013130543\n",
+            })
 
     def test_waterfox_keeps_bash_user_js_bytes_and_rewrites_toolbar(self):
         root = self.home / "Waterfox"
