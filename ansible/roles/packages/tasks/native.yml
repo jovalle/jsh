@@ -1,0 +1,31 @@
+---
+- name: Installed packages are listed
+  ansible.builtin.package_facts:
+    manager: auto
+
+- name: ok
+  ansible.builtin.debug:
+    msg: "{{ item }}"
+  loop: "{{ packages_native }}"
+  when: item in ansible_facts.packages
+  vars:
+    packages_native: "{{ packages_selected.apt | default(packages_selected.dnf | default([])) }}"
+
+- name: Native packages are installed
+  ansible.builtin.package:
+    name: "{{ item }}"
+    state: present
+  become: true
+  loop: "{{ packages_native }}"
+  when: item not in ansible_facts.packages
+  vars:
+    packages_native: "{{ packages_selected.apt | default(packages_selected.dnf | default([])) }}"
+
+- name: Native packages are up to date
+  ansible.builtin.package:
+    name: "{{ packages_native | select('in', ansible_facts.packages) | list }}"
+    state: latest # noqa package-latest -- jsh update upgrades only the declared packages
+  become: true
+  when: jsh_update | bool
+  vars:
+    packages_native: "{{ packages_selected.apt | default(packages_selected.dnf | default([])) }}"

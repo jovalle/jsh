@@ -1,0 +1,21 @@
+---
+# Build dependencies for the patched XFCE audio plugin (roles/desktop/files/plugin.sh).
+packages_roles_extra:
+  desktop:
+    xfce:
+      apt:
+        - build-essential
+        - pkg-config
+        - patch
+        - gettext
+        - meson
+        - libgtk-3-dev
+        - libpulse-dev
+        - libxfce4panel-2.0-dev
+        - libxfce4ui-2-dev
+        - libxfconf-0-dev
+        - libkeybinder-3.0-dev
+        - libnotify-dev
+        - libwnck-3-dev
+        - libexo-2-dev
+        - libxfce4windowing-0-dev

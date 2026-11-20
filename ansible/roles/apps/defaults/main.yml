@@ -1,0 +1,15 @@
+---
+apps_macdown_application: /Applications/MacDown 3000.app
+apps_launchservices_domain: com.apple.LaunchServices/com.apple.launchservices.secure
+apps_decoder_enabled: true
+apps_markdown_bundle: app.macdown.macdown3000
+apps_markdown_targets:
+  - net.daringfireball.markdown
+  - .mdx
+  - .mdown
+  - .mkd
+  - .mkdn
+  - .mdwn
+  - .mdtext
+  - .mdtxt
+apps_restart_launchservices: true

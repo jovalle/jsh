@@ -1,0 +1,58 @@
+---
+- name: Screenshot folder exists
+  ansible.builtin.file:
+    path: "{{ item.value }}"
+    state: directory
+    mode: u+rwx
+  loop: "{{ macos_preferences | selectattr('domain', 'equalto', 'com.apple.screencapture')
+            | selectattr('key', 'equalto', 'location') }}"
+  loop_control:
+    label: "{{ item.value }}"
+
+- name: macOS preferences are set
+  community.general.osx_defaults:
+    domain: "{{ item.domain }}"
+    key: "{{ item.key }}"
+    type: "{{ item.type }}"
+    value: "{{ item.value }}"
+    host: "{{ 'currentHost' if item.current_host | default(false) else omit }}"
+    path: "{{ macos_defaults_path }}"
+  loop: "{{ macos_preferences }}"
+  loop_control:
+    label: >-
+      {{ item.key }} is {{ 'empty' if item.type == 'array' and not item.value
+         else (item.value | string | lower if item.type == 'bool' else item.value) }}
+  register: macos_written
+
+- name: Changed preferences are mapped to apps
+  ansible.builtin.set_fact:
+    macos_restart: >-
+      {{ macos_written.results | selectattr('changed') | map(attribute='item.domain')
+         | select('in', macos_restarts) | map('extract', macos_restarts) | unique | list }}
+
+- name: Apps reread their settings
+  ansible.builtin.command:
+    argv:
+      - killall
+      - "{{ item }}"
+  loop: "{{ macos_restart }}"
+  loop_control:
+    label: "{{ item }} restarted"
+  register: macos_killed
+  changed_when: macos_killed.rc == 0
+  failed_when: false
+  when: not ansible_check_mode and not jsh_keep_apps | bool
+
+- name: info
+  ansible.builtin.debug:
+    msg: "{{ item.item }} was not running"
+  loop: "{{ macos_killed.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.rc is defined and item.rc != 0
+
+- name: notice
+  ansible.builtin.debug:
+    msg: "restart {{ item }} to apply its settings: killall {{ item }}"
+  loop: "{{ macos_restart }}"
+  when: jsh_keep_apps | bool

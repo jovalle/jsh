@@ -1,0 +1,26 @@
+---
+- name: Display resolution profile has the expected fields
+  ansible.builtin.assert:
+    that: desktop_display_fields | length == 11
+    fail_msg: Unexpected display resolution profile
+  vars:
+    desktop_display_fields: "{{ desktop_display_profile | split('\t') }}"
+
+- name: ok
+  ansible.builtin.debug:
+    msg: >-
+      {{ desktop_display_fields[1] }} resolution is {{ desktop_display_fields[7] }}
+      ({{ desktop_display_fields[8] }}, scaling {{ desktop_display_fields[9] }})
+  vars:
+    desktop_display_fields: "{{ desktop_display_profile | split('\t') }}"
+  when: desktop_display_fields[3:6] == desktop_display_fields[7:10]
+
+- name: Pending display resolution is recorded
+  ansible.builtin.set_fact:
+    desktop_display_pending: >-
+      {{ desktop_display_pending + [{'argument': desktop_display_fields[0],
+         'label': desktop_display_fields[1] ~ ' resolution set ' ~ desktop_display_fields[7] ~ ' ('
+                  ~ desktop_display_fields[8] ~ ', scaling ' ~ desktop_display_fields[9] ~ ')'}] }}
+  vars:
+    desktop_display_fields: "{{ desktop_display_profile | split('\t') }}"
+  when: desktop_display_fields[3:6] != desktop_display_fields[7:10]

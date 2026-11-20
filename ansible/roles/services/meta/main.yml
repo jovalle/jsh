@@ -1,0 +1,14 @@
+---
+galaxy_info:
+  author: jsh
+  description: Configure Linux SSH, GPG, and Podman user services
+  license: MIT
+  min_ansible_version: "2.22"
+  platforms:
+    - name: Debian
+      versions:
+        - all
+    - name: EL
+      versions:
+        - all
+dependencies: []

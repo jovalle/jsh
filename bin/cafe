@@ -1,682 +1,385 @@
-#!/usr/bin/env bash
-# shellcheck shell=bash
-#
-# Cross-platform utility to keep your system awake during long-running tasks.
-# Works on macOS (caffeinate), Linux (systemd-inhibit, gnome-session-inhibit,
-# xdg-screensaver), and falls back to keeping a process running.
-#
-# "Un cafe para mantener el sistema despierto"
+#!/usr/bin/env python3
 
-set -euo pipefail
+from __future__ import annotations
 
-# =============================================================================
-# Configuration
-# =============================================================================
+import ctypes
+import getpass
+import os
+import platform
+import shutil
+import signal
+import subprocess
+import sys
+import time
+from ctypes import wintypes
+from pathlib import Path
 
-readonly SCRIPT_NAME="${0##*/}"
+SCRIPT = Path(__file__).resolve()
+sys.path.insert(0, str(SCRIPT.parent.parent / "lib"))
+import output
 
-# Default duration (seconds) - 0 means indefinite
-CAFE_DURATION="${CAFE_DURATION:-0}"
+APP_NAME = "caffeine"
+LINUX_CHILD_ARGUMENT = "--linux-inhibited"
+LINUX_INHIBITORS = ("gnome-session-inhibit", "systemd-inhibit")
+MACOS_CHILD_ARGUMENT = "--macos-inhibited"
+REASON = "Keep the screen active"
+WINDOWS_ACTIVITY_INTERVAL_SECONDS = 30
+PID_FILE = Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / (
+    f"cafe.{os.environ.get('USER') or getpass.getuser()}.pid"
+)
 
-# Default inhibit reasons
-CAFE_REASON="${CAFE_REASON:-User requested via cafe command}"
 
-# PID file for background mode
-readonly CAFE_PID_FILE="${XDG_RUNTIME_DIR:-/tmp}/cafe.${USER:-$(id -un)}.pid"
+def print_validation(summary: str, inspection_command: str) -> None:
+    output.ok(f"Validation passed: {summary}")
+    output.info(f"Inspect: {inspection_command}")
 
-# =============================================================================
-# Output
-# =============================================================================
 
-if [[ "${JSH_PLAIN_OUTPUT:-0}" != 1 && "${TERM:-dumb}" != dumb &&
-  -z ${NO_COLOR+x} && "${JSH_COLOR:-auto}" != never ]] \
-  && { [[ -t 1 ]] || [[ "${JSH_COLOR:-auto}" == always ]]; }; then
-  C_RESET=$'\033[0m' C_DIM=$'\033[2m'
-  C_RED=$'\033[31m' C_GREEN=$'\033[32m' C_YELLOW=$'\033[33m' C_CYAN=$'\033[36m'
-else
-  C_RESET='' C_DIM=''
-  C_RED='' C_GREEN='' C_YELLOW='' C_CYAN=''
-fi
+def wait_until_stopped(status: str, on_interval=None) -> None:
+    output.info(f"Caffeine active: {status}")
+    output.info("Press Ctrl+C to stop.")
 
-_jsh_status_style() {
-  case "$1" in
-    current | ok | success)
-      REPLY_COLOR=${C_GREEN}
-      [[ -n "${C_RESET}" ]] && REPLY_MARK='✔' || REPLY_MARK='[ok]'
-      ;;
-    plan)
-      REPLY_COLOR=${C_CYAN}
-      [[ -n "${C_RESET}" ]] && REPLY_MARK='➜' || REPLY_MARK='[plan]'
-      ;;
-    changed | warn | warning)
-      REPLY_COLOR=${C_YELLOW}
-      [[ -n "${C_RESET}" ]] && REPLY_MARK='▲' || REPLY_MARK='[warn]'
-      ;;
-    error | failed | missing)
-      REPLY_COLOR=${C_RED}
-      [[ -n "${C_RESET}" ]] && REPLY_MARK='✖' || REPLY_MARK='[error]'
-      ;;
-    *)
-      REPLY_COLOR=${C_CYAN}
-      [[ -n "${C_RESET}" ]] && REPLY_MARK='›' || REPLY_MARK='[note]'
-      ;;
-  esac
-}
-_jsh_message() {
-  local state="$1" output_fd=1 color mark reset
-  [[ "${state}" != warn && "${state}" != warning && "${state}" != error && "${state}" != failed ]] || output_fd=2
-  _jsh_status_style "${state}"
-  color=${REPLY_COLOR} mark=${REPLY_MARK} reset=${C_RESET}
-  if [[ ${output_fd} -eq 2 && -z "${reset}" && "${JSH_PLAIN_OUTPUT:-0}" != 1 &&
-    "${TERM:-dumb}" != dumb && -z ${NO_COLOR+x} && "${JSH_COLOR:-auto}" != never ]] \
-    && { [[ -t 2 ]] || [[ "${JSH_COLOR:-auto}" == always ]]; }; then
-    reset=$'\033[0m'
-    [[ "${state}" == error || "${state}" == failed ]] && color=$'\033[31m' && mark='✖' \
-      || { color=$'\033[33m'; mark='▲'; }
-  fi
-  shift
-  printf '%s%s%s %b\n' "${color}" "${mark}" "${reset}" "$*" >&"${output_fd}"
-}
-die() {
-  _jsh_message error "$@" >&2
-  exit 1
-}
-_debug() { printf '%sdebug:%s %s\n' "${C_DIM}" "${C_RESET}" "$*" >&2; }
-info() { _jsh_message note "$@"; }
-success() { _jsh_message success "$@"; }
-warn() { _jsh_message warn "$@" >&2; }
-jsh_status() { _jsh_message "${3:-note}" "$1${2:+ $2}"; }
-jsh_child() { jsh_status "$@"; }
-jsh_detail() { printf '  %s%s%s\n' "${C_DIM}" "$*" "${C_RESET}"; }
-jsh_command_preview() { printf '  %s$%s %s\n' "${C_CYAN}" "${C_RESET}" "$*"; }
-cli_version() { printf 'cafe 1.0.1\n'; }
-cli_help() {
-  cat <<'EOF'
-Usage: cafe [options] [command...]
+    try:
+        while True:
+            if on_interval is not None:
+                on_interval()
+            time.sleep(WINDOWS_ACTIVITY_INTERVAL_SECONDS)
+    except KeyboardInterrupt:
+        if sys.stdout.isatty():
+            print(flush=True)
+        output.ok("Caffeine stopped")
 
-Options:
-  -t, --time DURATION  Keep awake for a duration such as 30m or 2h
-  -d, --display        Also prevent display sleep
-  -i, --idle           Prevent idle sleep
-  -s, --system         Also prevent system sleep
-  -b, --background     Run in the background
-  -r, --reason TEXT    Set the displayed inhibit reason
-      --status         Show background status
-      --stop           Stop the background instance
-  -v, --verbose        Show debug output
-  -h, --help           Show help
-      --version        Show version
-EOF
-}
 
-# Override debug with script-specific env var
-debug() { [[ "${CAFE_DEBUG:-0}" == "1" ]] && _debug "$@" || true; }
+def linux_inhibitor() -> tuple[str, str]:
+    for name in LINUX_INHIBITORS:
+        inhibitor = shutil.which(name)
+        if inhibitor is not None:
+            return name, inhibitor
+    raise RuntimeError("gnome-session-inhibit or systemd-inhibit is required on Linux")
 
-# =============================================================================
-# Utilities
-# =============================================================================
 
-# Parse duration string to seconds
-parse_duration() {
-  local input="$1"
-  local total=0
+def run_linux() -> None:
+    name, inhibitor = linux_inhibitor()
+    is_gnome = name == "gnome-session-inhibit"
+    label = "GNOME" if is_gnome else "systemd"
 
-  # If it's just a number, assume seconds
-  if [[ "${input}" =~ ^[0-9]+$ ]]; then
-    printf '%s' "${input}"
+    if sys.argv[1:] == [LINUX_CHILD_ARGUMENT]:
+        result = subprocess.run(
+            [inhibitor, "--list"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        if is_gnome:
+            registered = f"{APP_NAME}: {REASON}" in result.stdout
+        else:
+            registered = any(
+                APP_NAME in line and REASON in line for line in result.stdout.splitlines()
+            )
+        if not registered:
+            raise RuntimeError(f"{label} idle and suspend inhibitor was not registered")
+        print_validation(
+            f"{label} idle and suspend inhibitor registered",
+            f"{name} --list",
+        )
+        wait_until_stopped("idle lock, display sleep, and system sleep are inhibited")
+        return
+
+    if sys.argv[1:]:
+        raise RuntimeError(f"usage: {Path(sys.argv[0]).name}")
+
+    if is_gnome:
+        options = ["--app-id", APP_NAME, "--reason", REASON, "--inhibit", "idle:suspend"]
+    else:
+        options = [
+            f"--who={APP_NAME}",
+            f"--why={REASON}",
+            "--what=idle:sleep",
+            "--mode=block",
+        ]
+    command = [inhibitor, *options, sys.executable, str(SCRIPT), LINUX_CHILD_ARGUMENT]
+    os.execv(inhibitor, command)
+
+
+def running_pid() -> int | None:
+    try:
+        pid = int(PID_FILE.read_text().strip())
+        os.kill(pid, 0)
+    except (OSError, ValueError):
+        PID_FILE.unlink(missing_ok=True)
+        return None
+    return pid
+
+
+def run_quietly(*command: str) -> None:
+    try:
+        subprocess.run(
+            command,
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError:
+        pass
+
+
+def set_xfce_sleep(allowed: bool) -> None:
+    enabled = "true" if allowed else "false"
+    for channel, setting in (
+        ("xfce4-screensaver", "/saver/enabled"),
+        ("xfce4-screensaver", "/lock/enabled"),
+        ("xfce4-power-manager", "/xfce4-power-manager/dpms-enabled"),
+    ):
+        run_quietly("xfconf-query", "-c", channel, "-p", setting, "-s", enabled)
+    run_quietly(
+        "xfconf-query",
+        "-c",
+        "xfce4-power-manager",
+        "-p",
+        "/xfce4-power-manager/presentation-mode",
+        "-n",
+        "-t",
+        "bool",
+        "-s",
+        "false" if allowed else "true",
+    )
+    run_quietly("xset", "+dpms" if allowed else "-dpms")
+    run_quietly("xset", "s", "on" if allowed else "off")
+    if not allowed:
+        run_quietly("xfce4-screensaver-command", "-d")
+
+
+def show_xfce_status() -> None:
+    if running_pid() is None:
+        icon = "cafe-off"
+        tip = "Cafe: Inactive (Normal sleep - Click to disable sleep)"
+    else:
+        icon = "cafe-on"
+        tip = "Cafe: Active (Sleep disabled - Click to allow sleep)"
+    icon_path = Path.home() / ".local/share/icons/hicolor/scalable/status" / f"{icon}-symbolic.svg"
+    if icon_path.is_file():
+        image = f"<icon>{icon}-symbolic</icon><iconclick>{SCRIPT} --xfce-toggle</iconclick>"
+    else:
+        image = f"<img>{SCRIPT.parents[1] / 'dotfiles/.local/share/icons/hicolor/scalable/status' / (icon + '-symbolic.svg')}</img>"
+        image += f"<click>{SCRIPT} --xfce-toggle</click>"
+    print(f"{image}<tool>{tip}</tool>")
+
+
+def toggle_xfce() -> None:
+    os.environ.setdefault("DISPLAY", ":0")
+    pid = running_pid()
+    if pid is None:
+        linux_inhibitor()
+        process = subprocess.Popen(
+            [sys.executable, str(SCRIPT)],
+            cwd="/",
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        PID_FILE.write_text(str(process.pid))
+        set_xfce_sleep(allowed=False)
+    else:
+        try:
+            if os.getpgid(pid) == pid:
+                os.killpg(pid, signal.SIGTERM)
+            else:
+                os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        PID_FILE.unlink(missing_ok=True)
+        set_xfce_sleep(allowed=True)
+
+    for plugin_file in sorted((Path.home() / ".config/xfce4/panel").glob("genmon-*.rc")):
+        try:
+            if "--xfce-status" not in plugin_file.read_text():
+                continue
+        except OSError:
+            continue
+        run_quietly("xfce4-panel", f"--plugin-event={plugin_file.stem}:refresh:bool:true")
+
+
+def run_macos() -> None:
+    if sys.argv[1:] == [MACOS_CHILD_ARGUMENT]:
+        result = subprocess.run(
+            ["ps", "-p", str(os.getppid()), "-o", "comm="],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        if Path(result.stdout.strip()).name != "caffeinate":
+            raise RuntimeError("macOS caffeinate assertion owner was not started")
+        print_validation(
+            "macOS display, user-idle, and system sleep assertions started",
+            "pmset -g assertions",
+        )
+        wait_until_stopped("idle lock, display sleep, and system sleep are inhibited")
+        return
+
+    if sys.argv[1:]:
+        raise RuntimeError(f"usage: {Path(sys.argv[0]).name}")
+
+    inhibitor = shutil.which("caffeinate")
+    if inhibitor is None:
+        raise RuntimeError("caffeinate is required on macOS")
+
+    command = [
+        inhibitor,
+        "-d",
+        "-i",
+        "-s",
+        "-u",
+        sys.executable,
+        str(SCRIPT),
+        MACOS_CHILD_ARGUMENT,
+    ]
+    os.execv(inhibitor, command)
+
+
+def windows_input_types():
+    class KeyboardInput(ctypes.Structure):
+        _fields_ = [
+            ("virtual_key", wintypes.WORD),
+            ("scan_code", wintypes.WORD),
+            ("flags", wintypes.DWORD),
+            ("time", wintypes.DWORD),
+            ("extra_info", wintypes.WPARAM),
+        ]
+
+    class MouseInput(ctypes.Structure):
+        _fields_ = [
+            ("x", wintypes.LONG),
+            ("y", wintypes.LONG),
+            ("mouse_data", wintypes.DWORD),
+            ("flags", wintypes.DWORD),
+            ("time", wintypes.DWORD),
+            ("extra_info", wintypes.WPARAM),
+        ]
+
+    class HardwareInput(ctypes.Structure):
+        _fields_ = [
+            ("message", wintypes.DWORD),
+            ("parameter_low", wintypes.WORD),
+            ("parameter_high", wintypes.WORD),
+        ]
+
+    class InputValue(ctypes.Union):
+        _fields_ = [
+            ("mouse", MouseInput),
+            ("keyboard", KeyboardInput),
+            ("hardware", HardwareInput),
+        ]
+
+    class Input(ctypes.Structure):
+        _anonymous_ = ("value",)
+        _fields_ = [("type", wintypes.DWORD), ("value", InputValue)]
+
+    return KeyboardInput, Input
+
+
+def run_windows() -> None:
+    if sys.argv[1:]:
+        raise RuntimeError(f"usage: {Path(sys.argv[0]).name}")
+
+    execution_state_continuous = 0x80000000
+    execution_state_system_required = 0x00000001
+    execution_state_display_required = 0x00000002
+    input_keyboard = 1
+    virtual_key_f15 = 0x7E
+    keyeventf_keyup = 0x0002
+    keyboard_input, input_type = windows_input_types()
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    kernel32.SetThreadExecutionState.argtypes = [wintypes.DWORD]
+    kernel32.SetThreadExecutionState.restype = wintypes.DWORD
+    user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(input_type), ctypes.c_int]
+    user32.SendInput.restype = wintypes.UINT
+
+    required_state = (
+        execution_state_continuous
+        | execution_state_system_required
+        | execution_state_display_required
+    )
+    if not kernel32.SetThreadExecutionState(required_state):
+        raise ctypes.WinError(ctypes.get_last_error())
+
+    key_events = (input_type * 2)(
+        input_type(
+            type=input_keyboard,
+            keyboard=keyboard_input(virtual_key=virtual_key_f15),
+        ),
+        input_type(
+            type=input_keyboard,
+            keyboard=keyboard_input(
+                virtual_key=virtual_key_f15,
+                flags=keyeventf_keyup,
+            ),
+        ),
+    )
+
+    def report_activity() -> None:
+        sent_events = user32.SendInput(
+            len(key_events),
+            key_events,
+            ctypes.sizeof(input_type),
+        )
+        if sent_events != len(key_events):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+    input_blocked = False
+
+    def keep_reporting_activity() -> None:
+        nonlocal input_blocked
+        # SendInput is denied while the desktop is locked or an elevated window has focus.
+        try:
+            report_activity()
+        except OSError as error:
+            if not input_blocked:
+                output.notice(
+                    f"{APP_NAME}: F15 activity blocked, retrying: {error}"
+                )
+            input_blocked = True
+            return
+        if input_blocked:
+            output.ok(f"{APP_NAME}: F15 activity resumed")
+        input_blocked = False
+
+    try:
+        report_activity()
+        print_validation(
+            "Windows display and system execution state set; F15 activity sent",
+            "powercfg /requests",
+        )
+        wait_until_stopped(
+            "idle lock, display sleep, and system sleep are inhibited",
+            keep_reporting_activity,
+        )
+    finally:
+        kernel32.SetThreadExecutionState(execution_state_continuous)
+
+
+def main() -> int:
+    system = platform.system()
+    try:
+        if sys.argv[1:] == ["--xfce-status"]:
+            show_xfce_status()
+        elif sys.argv[1:] == ["--xfce-toggle"]:
+            toggle_xfce()
+        elif system == "Linux":
+            run_linux()
+        elif system == "Darwin":
+            run_macos()
+        elif system == "Windows":
+            run_windows()
+        else:
+            raise RuntimeError(f"unsupported operating system: {system}")
+    except (OSError, RuntimeError) as error:
+        output.fail(f"{SCRIPT.name}: {error}")
+        return 1
     return 0
-  fi
 
-  # Parse combined format like "1h30m"
-  local remaining="${input}"
 
-  # Hours
-  if [[ "${remaining}" =~ ([0-9]+)h(ours?|r)? ]]; then
-    total=$((total + BASH_REMATCH[1] * 3600))
-    remaining="${remaining/${BASH_REMATCH[0]}/}"
-  fi
-
-  # Minutes
-  if [[ "${remaining}" =~ ([0-9]+)m(in(utes?)?)? ]]; then
-    total=$((total + BASH_REMATCH[1] * 60))
-    remaining="${remaining/${BASH_REMATCH[0]}/}"
-  fi
-
-  # Seconds
-  if [[ "${remaining}" =~ ([0-9]+)s(ec(onds?)?)? ]]; then
-    total=$((total + BASH_REMATCH[1]))
-  fi
-
-  if [[ "${total}" -eq 0 ]]; then
-    die "Invalid duration format: ${input}\nExamples: 3600, 30m, 2h, 1h30m"
-  fi
-
-  printf '%s' "${total}"
-}
-
-# Format seconds to human-readable
-format_duration() {
-  local seconds="$1"
-  local hours=$((seconds / 3600))
-  local minutes=$(((seconds % 3600) / 60))
-  local secs=$((seconds % 60))
-
-  if [[ "${hours}" -gt 0 ]]; then
-    printf '%dh%02dm%02ds' "${hours}" "${minutes}" "${secs}"
-  elif [[ "${minutes}" -gt 0 ]]; then
-    printf '%dm%02ds' "${minutes}" "${secs}"
-  else
-    printf '%ds' "${secs}"
-  fi
-}
-
-# Check if background cafe is running
-is_running() {
-  if [[ -f "${CAFE_PID_FILE}" ]]; then
-    local pid
-    pid=$(cat "${CAFE_PID_FILE}" 2>/dev/null || true)
-    if [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null; then
-      return 0
-    fi
-    # Stale PID file
-    rm -f "${CAFE_PID_FILE}"
-  fi
-  return 1
-}
-
-# Show status
-show_status() {
-  if is_running; then
-    local pid
-    pid=$(cat "${CAFE_PID_FILE}")
-    jsh_status "Cafe" "running, PID ${pid}" ok
-
-    # Try to show remaining time on macOS
-    if [[ "$(uname -s)" == "Darwin" ]]; then
-      local start elapsed
-      if stat -f %m "${CAFE_PID_FILE}" &>/dev/null; then
-        start=$(stat -f %m "${CAFE_PID_FILE}")
-        elapsed=$(($(date +%s) - start))
-        jsh_detail "Running for $(format_duration "${elapsed}")"
-      fi
-    fi
-    return 0
-  else
-    jsh_status "Cafe" "not running" skip
-    return 1
-  fi
-}
-
-# Stop background cafe
-stop_cafe() {
-  if [[ -f "${CAFE_PID_FILE}" ]]; then
-    local pid
-    pid=$(cat "${CAFE_PID_FILE}" 2>/dev/null || true)
-    if [[ -n "${pid}" ]]; then
-      if kill -0 "${pid}" 2>/dev/null; then
-        kill "${pid}" 2>/dev/null || true
-        # Wait briefly for clean shutdown
-        sleep 0.5
-        # Force kill if still running
-        kill -9 "${pid}" 2>/dev/null || true
-        success "Stopped cafe (PID: ${pid})"
-      fi
-    fi
-    rm -f "${CAFE_PID_FILE}"
-  else
-    info "No background cafe found"
-  fi
-}
-
-# =============================================================================
-# Inhibit Implementations
-# =============================================================================
-
-# macOS caffeinate
-run_caffeinate() {
-  local duration="$1"
-  local display="$2"
-  local system="$3"
-  shift 3
-  local cmd=("$@")
-
-  local args=()
-
-  # -i: prevent idle sleep
-  args+=(-i)
-
-  # -d: prevent display sleep
-  [[ "${display}" == "true" ]] && args+=(-d)
-
-  # -s: prevent system sleep
-  [[ "${system}" == "true" ]] && args+=(-s)
-
-  # -t: timeout
-  if [[ "${duration}" -gt 0 ]]; then
-    args+=(-t "${duration}")
-  fi
-
-  # -w: wait for process (when wrapping a command)
-  if [[ ${#cmd[@]} -gt 0 ]]; then
-    debug "Running: caffeinate ${args[*]} -- ${cmd[*]}"
-    caffeinate "${args[@]}" -- "${cmd[@]}"
-  else
-    debug "Running: caffeinate ${args[*]}"
-    caffeinate "${args[@]}"
-  fi
-}
-
-# Linux systemd-inhibit
-# Returns 0 on success, 1 on failure (allows cascade to next method)
-run_systemd_inhibit() {
-  local duration="$1"
-  local display="$2"
-  local system="$3"
-  local reason="$4"
-  shift 4
-  local cmd=("$@")
-
-  # Build sleep command for when no user command is provided
-  local sleep_cmd
-  if [[ "${duration}" -gt 0 ]]; then
-    sleep_cmd="sleep ${duration}"
-  else
-    sleep_cmd="sleep infinity"
-  fi
-
-  # Build list of --what values to try (most to least restrictive)
-  # Different inhibit types have different permission requirements:
-  #   idle  - prevent screensaver (usually allowed for regular users)
-  #   sleep - prevent suspend (often requires elevated permissions)
-  local what_variants=()
-  local base_what="idle:sleep"
-  [[ "${display}" == "true" ]] && base_what="${base_what}:handle-lid-switch"
-  what_variants+=("${base_what}")
-  what_variants+=("idle") # Fallback: just idle (most permissive)
-
-  # Try each --what variant
-  local what
-  for what in "${what_variants[@]}"; do
-    # For each --what, try block mode then delay mode
-    local mode
-    for mode in block delay; do
-      local args=(
-        --what="${what}"
-        --who="${SCRIPT_NAME}"
-        --why="${reason}"
-        --mode="${mode}"
-      )
-
-      if [[ ${#cmd[@]} -gt 0 ]]; then
-        debug "Trying: systemd-inhibit --what=${what} --mode=${mode}"
-        if systemd-inhibit "${args[@]}" -- "${cmd[@]}" 2>/dev/null; then
-          return 0
-        fi
-      else
-        debug "Trying: systemd-inhibit --what=${what} --mode=${mode}"
-        # shellcheck disable=SC2086
-        if systemd-inhibit "${args[@]}" -- ${sleep_cmd} 2>/dev/null; then
-          return 0
-        fi
-      fi
-    done
-    debug "--what=${what} failed, trying simpler variant..."
-  done
-
-  # All variants failed - return failure to try next method
-  debug "systemd-inhibit failed (likely no session or permissions)"
-  return 1
-}
-
-# Linux gnome-session-inhibit
-# Returns 0 on success, 1 on failure (allows cascade to next method)
-run_gnome_inhibit() {
-  local duration="$1"
-  local display="$2"
-  local system="$3"
-  local reason="$4"
-  shift 4
-  local cmd=("$@")
-
-  local what="idle:suspend"
-  [[ "${display}" == "true" ]] && what="${what}:idle"
-
-  # gnome-session-inhibit uses space-separated args, not = format
-  local args=(
-    --app-id "${SCRIPT_NAME}"
-    --reason "${reason}"
-    --inhibit "${what}"
-  )
-
-  if [[ ${#cmd[@]} -gt 0 ]]; then
-    debug "Trying: gnome-session-inhibit ${args[*]} -- ${cmd[*]}"
-    if gnome-session-inhibit "${args[@]}" -- "${cmd[@]}" 2>/dev/null; then
-      return 0
-    fi
-  else
-    # Use --inhibit-only when no command is provided
-    if [[ "${duration}" -gt 0 ]]; then
-      # With duration, use timeout to limit the inhibit
-      debug "Trying: gnome-session-inhibit ${args[*]} -- sleep ${duration}"
-      if gnome-session-inhibit "${args[@]}" -- sleep "${duration}" 2>/dev/null; then
-        return 0
-      fi
-    else
-      # No duration, use --inhibit-ony for indefinite inhibit
-      debug "Trying: gnome-session-inhibit ${args[*]} --inhibit-only"
-      if gnome-session-inhibit "${args[@]}" --inhibit-only 2>/dev/null; then
-        return 0
-      fi
-    fi
-  fi
-
-  debug "gnome-session-inhibit failed"
-  return 1
-}
-
-# X11 xdg-screensaver fallback
-# Returns 0 on success, 1 on failure (allows cascade to next method)
-run_xdg_inhibit() {
-  local duration="$1"
-  shift 4 # Skip duration, display, system, reason
-  local cmd=("$@")
-
-  # Requires X11 display
-  if [[ -z "${DISPLAY:-}" ]]; then
-    debug "xdg-screensaver requires DISPLAY (no X11 session)"
-    return 1
-  fi
-
-  # Get a window ID (use root window if none)
-  local window_id
-  if command -v xdotool &>/dev/null; then
-    window_id=$(xdotool getactivewindow 2>/dev/null || echo "root")
-  else
-    window_id="root"
-  fi
-
-  # Test if xdg-screensaver actually works
-  if ! xdg-screensaver suspend "${window_id}" 2>/dev/null; then
-    debug "xdg-screensaver suspend failed"
-    return 1
-  fi
-
-  debug "xdg-screensaver inhibit active"
-
-  # Cleanup on exit
-  cleanup() {
-    xdg-screensaver resume "${window_id}" 2>/dev/null || true
-  }
-  trap cleanup EXIT
-
-  if [[ ${#cmd[@]} -gt 0 ]]; then
-    "${cmd[@]}"
-  else
-    if [[ "${duration}" -gt 0 ]]; then
-      sleep "${duration}"
-    else
-      sleep infinity
-    fi
-  fi
-  return 0
-}
-
-# A wrapped command can still run without inhibition, but idle waiting cannot
-# prevent sleep and must not claim success.
-run_fallback() {
-  local duration="$1"
-  shift 4 # Skip duration, display, system, reason
-  local cmd=("$@")
-
-  warn "No system inhibit method available, using fallback"
-  info "System may still sleep - consider installing systemd-inhibit"
-
-  if [[ ${#cmd[@]} -gt 0 ]]; then
-    "${cmd[@]}"
-  else
-    die "No supported system inhibit method is available"
-  fi
-}
-
-# =============================================================================
-# Cascading Inhibit Runner
-# =============================================================================
-
-# Try each inhibit method in sequence until one succeeds
-# This handles cases where a tool exists but fails (e.g., permissions)
-run_inhibit() {
-  local duration="$1"
-  local display="$2"
-  local system="$3"
-  local reason="$4"
-  shift 4
-  local cmd=("$@")
-
-  local methods=()
-  local method
-
-  # Build list of available methods based on platform
-  case "$(uname -s)" in
-    Darwin)
-      command -v caffeinate &>/dev/null && methods+=(caffeinate)
-      ;;
-    Linux)
-      command -v gnome-session-inhibit &>/dev/null && methods+=(gnome-session-inhibit)
-      command -v systemd-inhibit &>/dev/null && methods+=(systemd-inhibit)
-      command -v xdg-screensaver &>/dev/null && methods+=(xdg-screensaver)
-      ;;
-  esac
-
-  # Always have fallback as last resort
-  methods+=(fallback)
-
-  # Try each method until one succeeds
-  for method in "${methods[@]}"; do
-    debug "Trying inhibit method: ${method}"
-
-    case "${method}" in
-      caffeinate)
-        if run_caffeinate "${duration}" "${display}" "${system}" "${cmd[@]}"; then
-          return 0
-        fi
-        ;;
-      systemd-inhibit)
-        if run_systemd_inhibit "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"; then
-          return 0
-        fi
-        ;;
-      gnome-session-inhibit)
-        if run_gnome_inhibit "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"; then
-          return 0
-        fi
-        ;;
-      xdg-screensaver)
-        if run_xdg_inhibit "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"; then
-          return 0
-        fi
-        ;;
-      fallback)
-        if [[ ${#cmd[@]} -gt 0 ]]; then
-          run_fallback "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"
-        else
-          run_fallback "${duration}" "${display}" "${system}" "${reason}"
-        fi
-        return $?
-        ;;
-    esac
-
-    debug "${method} failed, trying next method..."
-  done
-
-  return 0
-}
-
-# Get the first available method name (for display purposes)
-get_primary_method() {
-  case "$(uname -s)" in
-    Darwin)
-      command -v caffeinate &>/dev/null && {
-        printf 'caffeinate'
-        return
-      }
-      ;;
-    Linux)
-      command -v gnome-session-inhibit &>/dev/null && {
-        printf 'gnome-session-inhibit'
-        return
-      }
-      command -v systemd-inhibit &>/dev/null && {
-        printf 'systemd-inhibit'
-        return
-      }
-      command -v xdg-screensaver &>/dev/null && {
-        printf 'xdg-screensaver'
-        return
-      }
-      ;;
-  esac
-  printf 'fallback'
-}
-
-# =============================================================================
-# Main
-# =============================================================================
-
-main() {
-  local duration="${CAFE_DURATION}"
-  local display=false
-  local system=false
-  local background=false
-  local reason="${CAFE_REASON}"
-  local verbose=false
-
-  # Parse arguments
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      -h | --help)
-        cli_help
-        exit 0
-        ;;
-      --version)
-        cli_version
-        exit 0
-        ;;
-      --status)
-        show_status
-        exit $?
-        ;;
-      --stop)
-        stop_cafe
-        exit 0
-        ;;
-      -t | --time)
-        [[ $# -lt 2 ]] && die "Option $1 requires an argument"
-        duration=$(parse_duration "$2")
-        shift 2
-        ;;
-      -d | --display)
-        display=true
-        shift
-        ;;
-      -i | --idle)
-        # Idle-only is the default behavior, this is a no-op for compatibility
-        shift
-        ;;
-      -s | --system)
-        system=true
-        shift
-        ;;
-      -b | --background)
-        background=true
-        shift
-        ;;
-      -r | --reason)
-        [[ $# -lt 2 ]] && die "Option $1 requires an argument"
-        reason="$2"
-        shift 2
-        ;;
-      -v | --verbose)
-        verbose=true
-        CAFE_DEBUG=1
-        export CAFE_DEBUG
-        shift
-        ;;
-      --)
-        shift
-        break
-        ;;
-      -*)
-        die "Unknown option: $1 (use --help for usage)"
-        ;;
-      *)
-        break
-        ;;
-    esac
-  done
-
-  # Remaining args are the command to wrap
-  local cmd=("$@")
-
-  # Get primary method name (for display - actual method may cascade)
-  local method
-  method=$(get_primary_method)
-  debug "Primary inhibit method: ${method} (will cascade on failure)"
-
-  # Check for existing background process
-  if [[ "${background}" == "true" ]]; then
-    if is_running; then
-      warn "Cafe is already running in background"
-      show_status
-      exit 0
-    fi
-  fi
-
-  # Show what we're doing
-  if [[ "${verbose}" == "true" || "${background}" != "true" ]]; then
-    if [[ ${#cmd[@]} -gt 0 ]]; then
-      info "Running command with sleep inhibited..."
-    elif [[ "${duration}" -gt 0 ]]; then
-      info "Keeping awake for $(format_duration "${duration}")..."
-    else
-      info "Keeping awake indefinitely (Ctrl+C to stop)..."
-    fi
-    jsh_status "Method" "${method}, automatic" plan
-    jsh_child "Display sleep" "${display}" info
-    jsh_child "System sleep" "${system}" info last
-  fi
-
-  # Background mode
-  if [[ "${background}" == "true" ]]; then
-    (
-      # Daemonize
-      cd /
-      exec >/dev/null 2>&1
-      exec </dev/null
-
-      # Run inhibit with automatic cascade on failure
-      if [[ ${#cmd[@]} -gt 0 ]]; then
-        run_inhibit "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"
-      else
-        run_inhibit "${duration}" "${display}" "${system}" "${reason}"
-      fi
-    ) &
-
-    local bg_pid=$!
-    printf '%s' "${bg_pid}" >"${CAFE_PID_FILE}"
-    success "Started in background (PID: ${bg_pid})"
-    jsh_command_preview "${SCRIPT_NAME} --stop"
-    exit 0
-  fi
-
-  # Foreground mode - use cascading inhibit
-  if [[ ${#cmd[@]} -gt 0 ]]; then
-    run_inhibit "${duration}" "${display}" "${system}" "${reason}" "${cmd[@]}"
-  else
-    run_inhibit "${duration}" "${display}" "${system}" "${reason}"
-  fi
-}
-
-# Handle interrupts gracefully
-trap 'printf "\n"; info "Stopped"; exit 130' INT TERM
-
-main "$@"
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,6 @@
+{
+  "update.mode": "default",
+  "telemetry.telemetryLevel": "off",
+  "files.insertFinalNewline": true,
+  "files.trimTrailingWhitespace": true
+}

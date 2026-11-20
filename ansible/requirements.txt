@@ -1,0 +1,3 @@
+# Ansible for host configuration, installed by scripts/ansible.sh into local/ansible/venv.
+ansible-core==2.22.0
+ansible-lint==26.11.0

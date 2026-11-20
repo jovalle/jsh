@@ -1,0 +1,16 @@
+---
+- name: User systemd configuration reloads
+  ansible.builtin.systemd_service:
+    scope: user
+    daemon_reload: true
+  changed_when: false
+  check_mode: false
+  when: not ansible_check_mode
+
+- name: SSH agent restarts
+  ansible.builtin.systemd_service:
+    name: "{{ services_ssh_agent_unit }}"
+    scope: user
+    enabled: true
+    state: restarted
+  when: not ansible_check_mode

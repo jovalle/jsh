@@ -1,0 +1,56 @@
+---
+# vscode
+patches_vscode_home: "{{ lookup('ansible.builtin.env', 'HOME') }}"
+patches_vscode_directory: >-
+  {{ patches_vscode_home ~ '/Library/Application Support/Code/User' if jsh_platform == 'darwin'
+     else (lookup('ansible.builtin.env', 'XDG_CONFIG_HOME') or patches_vscode_home ~ '/.config') ~ '/Code/User' }}
+
+# sublime
+patches_sublime_home: "{{ lookup('ansible.builtin.env', 'HOME') }}"
+patches_sublime_flatpak: "{{ patches_sublime_home }}/.var/app/com.sublimetext.three/config/sublime-text"
+patches_sublime_directory: >-
+  {{ patches_sublime_home ~ '/Library/Application Support/Sublime Text' if jsh_platform == 'darwin'
+     else patches_sublime_flatpak if patches_sublime_flatpak is directory
+     else (lookup('ansible.builtin.env', 'XDG_CONFIG_HOME') or patches_sublime_home ~ '/.config') ~ '/sublime-text' }}
+
+# helium
+patches_helium_home: "{{ lookup('ansible.builtin.env', 'HOME') }}"
+patches_helium_config: "{{ lookup('ansible.builtin.env', 'XDG_CONFIG_HOME') or patches_helium_home ~ '/.config' }}"
+patches_helium_user: "{{ lookup('ansible.builtin.pipe', 'id -un') }}"
+patches_helium_profile_root: >-
+  {{ patches_helium_home ~ '/Library/Application Support/net.imput.helium'
+     if jsh_platform == 'darwin' else patches_helium_config ~ '/helium' }}
+patches_helium_policy_path: >-
+  {{ '/Library/Managed Preferences/' ~ patches_helium_user ~ '/net.imput.helium.plist'
+     if jsh_platform == 'darwin' else '/etc/chromium/policies/managed/jsh-helium.json' }}
+patches_helium_policy_become: true
+patches_helium_toolbar_order:
+  - blockjmkbacgjkknlgpkjjiijinjdanf  # uBlock Origin
+  - jplgfhpmjnbigmhklmmbgecoobifkmpa  # Proton VPN
+  - nngceckbapebfimnlniiiahkandclblb  # Bitwarden
+patches_helium_manifest_path: >-
+  {{ '/Applications/Helium.app/Contents/Resources/net.imput.helium.manifest/Contents/Resources/'
+     ~ 'net.imput.helium.manifest' }}
+patches_helium_overlays:
+  - "{{ patches_helium_config }}/jsh/helium/policy.json"
+  - "{{ jsh_root }}/local/helium/policy.json"
+patches_helium_unpack_overlays:
+  - "{{ patches_helium_config }}/jsh/helium/unpacked.json"
+  - "{{ jsh_root }}/local/helium/unpacked.json"
+
+# waterfox
+patches_waterfox_home: "{{ lookup('ansible.builtin.env', 'HOME') }}"
+patches_waterfox_config: "{{ lookup('ansible.builtin.env', 'XDG_CONFIG_HOME') or patches_waterfox_home ~ '/.config' }}"
+patches_waterfox_state: >-
+  {{ lookup('ansible.builtin.env', 'XDG_STATE_HOME') or patches_waterfox_home ~ '/.local/state' }}
+patches_waterfox_roots: >-
+  {{ [patches_waterfox_home ~ '/Library/Application Support/Waterfox'] if jsh_platform == 'darwin'
+     else [patches_waterfox_home ~ '/.waterfox', patches_waterfox_home ~ '/.var/app/net.waterfox.waterfox/.waterfox'] }}
+patches_waterfox_policy_path: /Library/Preferences/net.waterfox.waterfox.plist
+patches_waterfox_policy_become: true
+patches_waterfox_policy_overlays:
+  - "{{ patches_waterfox_config }}/jsh/waterfox/policies.json"
+  - "{{ jsh_root }}/local/waterfox/policies.json"
+patches_waterfox_user_overlays:
+  - "{{ patches_waterfox_config }}/jsh/waterfox/user.js"
+  - "{{ jsh_root }}/local/waterfox/user.js"

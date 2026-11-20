@@ -1,0 +1,101 @@
+---
+- name: macOS symbolic hotkeys are read
+  ansible.builtin.command:
+    argv:
+      - defaults
+      - export
+      - com.apple.symbolichotkeys
+      - "-"
+  register: wox_symbolic_defaults
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: macOS symbolic hotkeys are decoded
+  ansible.builtin.command:
+    argv:
+      - plutil
+      - -extract
+      - AppleSymbolicHotKeys
+      - json
+      - -o
+      - "-"
+      - "-"
+    stdin: "{{ wox_symbolic_defaults.stdout }}"
+  register: wox_symbolic_json
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: macOS symbolic hotkey values are selected
+  ansible.builtin.set_fact:
+    wox_symbolic_current: >-
+      {{ wox_symbolic_json.stdout | from_json if wox_symbolic_json.rc == 0 else {} }}
+    wox_symbolic_spec:
+      - id: "60"
+        enabled: false
+        modifiers: 262144
+        label: previous input source Control+Space is disabled
+        plist: >-
+          <dict><key>enabled</key><false/><key>value</key><dict><key>parameters</key>
+          <array><integer>32</integer><integer>49</integer><integer>262144</integer></array>
+          <key>type</key><string>standard</string></dict></dict>
+      - id: "64"
+        enabled: true
+        modifiers: 262144
+        label: Spotlight Control+Space is enabled
+        plist: >-
+          <dict><key>enabled</key><true/><key>value</key><dict><key>parameters</key>
+          <array><integer>32</integer><integer>49</integer><integer>262144</integer></array>
+          <key>type</key><string>standard</string></dict></dict>
+
+- name: macOS symbolic hotkeys are set
+  ansible.builtin.command:
+    argv: >-
+      {{ ['/usr/bin/true'] if ansible_check_mode else
+         ['defaults', 'write', 'com.apple.symbolichotkeys', 'AppleSymbolicHotKeys',
+          '-dict-add', item.id, item.plist] }}
+  loop: "{{ wox_symbolic_spec }}"
+  loop_control:
+    label: "{{ item.label }}"
+  register: wox_symbolic_written
+  changed_when: true
+  check_mode: false
+  when: >-
+    wox_symbolic_current.get(item.id, {}).get('enabled') != item.enabled
+    or (item.enabled and
+        wox_symbolic_current.get(item.id, {}).get('value', {}).get('parameters', [0, 0, 0])[2]
+        != item.modifiers)
+
+- name: ok
+  ansible.builtin.debug:
+    msg: "{{ item.label }}"
+  loop: "{{ wox_symbolic_spec }}"
+  loop_control:
+    label: "{{ item.label }}"
+  when: >-
+    wox_symbolic_current.get(item.id, {}).get('enabled') == item.enabled
+    and (not item.enabled or
+         wox_symbolic_current.get(item.id, {}).get('value', {}).get('parameters', [0, 0, 0])[2]
+         == item.modifiers)
+
+- name: macOS symbolic hotkey change is recorded
+  ansible.builtin.set_fact:
+    wox_native_restart: >-
+      {{ wox_symbolic_written.results | default([]) | selectattr('changed') | list | length > 0 }}
+
+- name: macOS launcher shortcuts are reloaded
+  ansible.builtin.command:
+    argv:
+      - /System/Library/PrivateFrameworks/SystemAdministration.framework/Resources/activateSettings
+      - -u
+  register: wox_shortcuts_reloaded
+  changed_when: wox_shortcuts_reloaded.rc == 0
+  failed_when: false
+  when: wox_native_restart | bool and not ansible_check_mode
+
+- name: notice
+  ansible.builtin.debug:
+    msg: log out and back in so Control+Space opens Spotlight
+  when: >-
+    wox_shortcuts_reloaded.rc is defined and wox_shortcuts_reloaded.rc != 0

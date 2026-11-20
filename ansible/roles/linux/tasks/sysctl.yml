@@ -1,0 +1,60 @@
+---
+- name: Kernel settings are read
+  ansible.builtin.command:
+    argv:
+      - sysctl
+      - -n
+      - "{{ item.key }}"
+  loop: "{{ linux_sysctl_minimum }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: linux_sysctl_read
+  changed_when: false
+  check_mode: false
+
+- name: Minimum kernel settings file is current
+  ansible.builtin.copy:
+    content: >-
+      {{ lookup("ansible.builtin.template", role_path + "/templates/sysctl.j2") }}
+    dest: "{{ linux_sysctl_minimum_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+    backup: true
+  become: "{{ linux_become }}"
+
+- name: Minimum kernel settings apply
+  ansible.posix.sysctl:
+    name: "{{ item.item.key }}"
+    value: "{{ [item.item.value | int, item.stdout | trim | int] | max | string }}"
+    sysctl_file: "{{ linux_sysctl_minimum_file }}"
+    sysctl_set: true
+    reload: false
+    state: present
+  become: "{{ linux_become }}"
+  loop: "{{ linux_sysctl_read.results }}"
+  loop_control:
+    label: "{{ item.item.key }} is at least {{ item.item.value }}"
+
+- name: Exact kernel settings file is current
+  ansible.builtin.copy:
+    src: memory.conf
+    dest: "{{ linux_sysctl_exact_file }}"
+    owner: root
+    group: root
+    mode: "0644"
+    backup: true
+  become: "{{ linux_become }}"
+
+- name: Exact kernel settings apply
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_file: "{{ linux_sysctl_exact_file }}"
+    sysctl_set: true
+    reload: false
+    state: present
+  become: "{{ linux_become }}"
+  loop: "{{ linux_sysctl_exact }}"
+  loop_control:
+    label: "{{ item.key }} is {{ item.value }}"

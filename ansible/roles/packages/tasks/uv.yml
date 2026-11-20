@@ -1,0 +1,109 @@
+---
+- name: uv tools are found
+  ansible.builtin.command:
+    argv:
+      - sh
+      - -c
+      - command -v "$1"
+      - sh
+      - "{{ item.command }}"
+  loop: "{{ packages_selected.uv }}"
+  register: packages_uv
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: uv tools are listed
+  ansible.builtin.command:
+    argv:
+      - uv
+      - tool
+      - list
+  register: packages_uv_list
+  changed_when: false
+  check_mode: false
+  failed_when: false
+  when: jsh_update | bool
+
+- name: Outdated uv tools are listed
+  ansible.builtin.command:
+    argv:
+      - uv
+      - tool
+      - list
+      - --outdated
+  register: packages_uv_outdated
+  changed_when: false
+  check_mode: false
+  failed_when: false
+  when: jsh_update | bool and ansible_check_mode
+
+- name: ok
+  ansible.builtin.debug:
+    msg: "{{ item.item.command }}"
+  loop: "{{ packages_uv.results }}"
+  loop_control:
+    label: "{{ item.item.command }}"
+  when: >-
+    item.rc == 0 and
+    (not jsh_update | bool
+     or item.item.package not in
+        (packages_uv_list.stdout_lines | default([]) | map("split") | map("first") | list)
+     or (ansible_check_mode and item.item.package not in
+         (packages_uv_outdated.stdout_lines | default([]) | map("split") | map("first") | list)))
+
+# Without uv, pip installs into the user site, as the Bash setup did.
+- name: uv tools are installed
+  ansible.builtin.command:
+    argv:
+      - sh
+      - -c
+      - >-
+        if command -v uv >/dev/null 2>&1; then uv tool install "$1";
+        else python3 -m pip install --user "$1"; fi
+      - sh
+      - "{{ item.item.package }}"
+    creates: "{{ packages_home }}/.local/bin/{{ item.item.command }}"
+  loop: "{{ packages_uv.results }}"
+  loop_control:
+    label: "{{ item.item.command }}"
+  when: not jsh_update | bool and item.rc != 0
+
+- name: Missing uv tools are reported
+  ansible.builtin.command: "true"
+  loop: "{{ packages_uv.results }}"
+  loop_control:
+    label: "{{ item.item.command }}"
+  changed_when: true
+  check_mode: false
+  when: jsh_update | bool and item.rc != 0
+
+- name: Outdated uv tools are reported
+  ansible.builtin.command: "true"
+  loop: "{{ packages_uv.results }}"
+  loop_control:
+    label: "{{ item.item.command }}"
+  changed_when: true
+  check_mode: false
+  when: >-
+    jsh_update | bool and ansible_check_mode and item.rc == 0
+    and item.item.package in
+        (packages_uv_outdated.stdout_lines | default([]) | map("split") | map("first") | list)
+
+- name: uv tools are up to date
+  ansible.builtin.command:
+    argv:
+      - uv
+      - tool
+      - upgrade
+      - "{{ item.item.package }}"
+  register: packages_uv_upgrade
+  changed_when: >-
+    "Nothing to upgrade" not in (packages_uv_upgrade.stdout ~ packages_uv_upgrade.stderr)
+  loop: "{{ packages_uv.results }}"
+  loop_control:
+    label: "{{ item.item.command }}"
+  when: >-
+    jsh_update | bool and not ansible_check_mode and item.rc == 0
+    and item.item.package in
+        (packages_uv_list.stdout_lines | default([]) | map("split") | map("first") | list)

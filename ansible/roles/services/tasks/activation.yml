@@ -1,0 +1,39 @@
+---
+- name: "{{ services_unit }} is available"
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - --user
+      - cat
+      - "{{ services_unit }}"
+  register: services_unit_available
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: "{{ services_unit }} enablement is read"
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - --user
+      - is-enabled
+      - "{{ services_unit }}"
+  register: services_unit_enabled
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: services_unit_available.rc == 0
+
+- name: "{{ services_unit }} is active"
+  ansible.builtin.systemd_service:
+    name: "{{ services_unit }}"
+    scope: user
+    state: started
+    enabled: >-
+      {{ services_unit_enabled.stdout != "static" }}
+  when: services_unit_available.rc == 0
+
+- name: info
+  ansible.builtin.debug:
+    msg: "Skipping {{ services_unit }}: unit is unavailable"
+  when: services_unit_available.rc != 0

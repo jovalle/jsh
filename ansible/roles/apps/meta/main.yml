@@ -1,0 +1,17 @@
+---
+galaxy_info:
+  author: jsh
+  description: Install desktop apps, open Markdown in MacDown 3000, and add the foobar2000 SACD/DSD decoder
+  license: MIT
+  min_ansible_version: "2.22"
+  platforms:
+    - name: MacOSX
+      versions:
+        - all
+    - name: Debian
+      versions:
+        - all
+    - name: EL
+      versions:
+        - all
+dependencies: []

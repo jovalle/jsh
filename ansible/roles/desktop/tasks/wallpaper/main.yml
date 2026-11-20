@@ -1,0 +1,55 @@
+---
+- name: info
+  ansible.builtin.debug:
+    msg: "Skipping wallpaper: JSH_WALLPAPER is not set"
+  when: jsh_wallpaper | length == 0
+
+- name: info
+  ansible.builtin.debug:
+    msg: "Skipping wallpaper: no supported desktop session"
+  when: jsh_wallpaper | length > 0 and jsh_desktop not in ['darwin', 'gnome', 'xfce']
+
+- name: Wallpaper image is checked
+  ansible.builtin.stat:
+    path: "{{ desktop_wallpaper_image }}"
+    get_checksum: false
+  register: desktop_wallpaper_file
+  when: jsh_wallpaper | length > 0 and jsh_desktop in ['darwin', 'gnome', 'xfce']
+
+- name: "JSH_WALLPAPER is not a file: {{ desktop_wallpaper_image }}"
+  ansible.builtin.fail:
+    msg: "JSH_WALLPAPER is not a file: {{ desktop_wallpaper_image }}"
+  when: desktop_wallpaper_file.stat is defined and not desktop_wallpaper_file.stat.isreg | default(false)
+
+- name: Desktop wallpaper is managed
+  when: desktop_wallpaper_file.stat.isreg | default(false)
+  block:
+    - name: Wallpaper path is resolved
+      ansible.builtin.command:
+        argv:
+          - realpath
+          - "{{ desktop_wallpaper_image }}"
+      register: desktop_wallpaper_realpath
+      changed_when: false
+      check_mode: false
+
+    - name: macOS wallpaper is managed
+      ansible.builtin.include_tasks: wallpaper/darwin.yml
+      when: jsh_desktop == 'darwin'
+
+    - name: GNOME wallpaper is managed
+      ansible.builtin.include_tasks: wallpaper/gnome.yml
+      when: jsh_desktop == 'gnome'
+
+    - name: XFCE wallpaper is managed
+      ansible.builtin.include_tasks: wallpaper/xfce.yml
+      when: jsh_desktop == 'xfce'
+
+- name: Linux wallpaper is reapplied
+  ansible.builtin.command:
+    argv:
+      - "{{ jsh_root }}/ansible/roles/desktop/files/wallpaper/apply.sh"
+  environment: "{{ jsh_script_env }}"
+  changed_when: false
+  check_mode: false
+  when: desktop_wallpaper_file.stat.isreg | default(false) and jsh_desktop in ['gnome', 'xfce']

@@ -1,0 +1,86 @@
+---
+- name: Waterfox directory profiles are initialized
+  ansible.builtin.set_fact:
+    patches_waterfox_directory_profiles: []
+    patches_waterfox_install_defaults: []
+
+- name: Waterfox profile registrations are collected
+  vars:
+    patches_waterfox_fields: "{{ item.split('	') }}"
+    patches_waterfox_registered_path: >-
+      {{ patches_waterfox_registration.item.item ~ '/' ~ patches_waterfox_fields[2]
+         if patches_waterfox_fields[3] == '1' and not patches_waterfox_fields[2].startswith('/')
+         else patches_waterfox_fields[2] }}
+    patches_waterfox_canonical_path: "{{ patches_waterfox_registered_path | realpath }}"
+  ansible.builtin.set_fact:
+    patches_waterfox_directory_profiles: >-
+      {{ patches_waterfox_directory_profiles
+         + ([{'root': patches_waterfox_registration.item.item, 'name': patches_waterfox_fields[1],
+              'path': patches_waterfox_canonical_path, 'default': patches_waterfox_fields[4] | default('0', true)}]
+            if patches_waterfox_fields[0] == 'profile' else []) }}
+    patches_waterfox_install_defaults: >-
+      {{ patches_waterfox_install_defaults
+         + ([patches_waterfox_canonical_path] if patches_waterfox_fields[0] == 'install' else []) }}
+  loop: "{{ patches_waterfox_registration.stdout_lines }}"
+  when: patches_waterfox_registered_path is directory
+
+- name: Waterfox profile defaults are selected
+  ansible.builtin.set_fact:
+    patches_waterfox_profile_defaults: >-
+      {{ patches_waterfox_directory_profiles | selectattr('default', 'equalto', '1')
+         | map(attribute='path') | list }}
+    patches_waterfox_install_defaults: "{{ patches_waterfox_install_defaults | unique | list }}"
+
+- name: A lone Waterfox profile is the default
+  ansible.builtin.set_fact:
+    patches_waterfox_profile_defaults: "{{ [patches_waterfox_directory_profiles[0].path] }}"
+  when: patches_waterfox_profile_defaults | length == 0 and patches_waterfox_directory_profiles | length == 1
+
+- name: Waterfox installation defaults are selected
+  ansible.builtin.set_fact:
+    patches_waterfox_directory_defaults: >-
+      {{ patches_waterfox_profile_defaults
+         if patches_waterfox_install_defaults | length > 1
+            and patches_waterfox_profile_defaults | length == 1
+            and patches_waterfox_profile_defaults[0] in patches_waterfox_install_defaults
+         else patches_waterfox_install_defaults
+         if patches_waterfox_install_defaults | length > 0
+         else patches_waterfox_profile_defaults }}
+
+# Several installs can share one application path across updates; the profile
+# last opened by the newest build belongs to the current installation.
+- name: Waterfox installation default builds are read
+  ansible.builtin.command:
+    argv:
+      - awk
+      - -F=
+      - '$1 == "LastVersion" { n = split($2, v, "/"); print v[n]; exit }'
+      - "{{ item }}/compatibility.ini"
+  loop: "{{ patches_waterfox_directory_defaults }}"
+  register: patches_waterfox_default_builds
+  changed_when: false
+  check_mode: false
+  failed_when: false
+  when: patches_waterfox_directory_defaults | length > 1
+
+- name: Waterfox newest installation default is selected
+  vars:
+    patches_waterfox_builds: >-
+      {{ patches_waterfox_default_builds.results | selectattr('stdout', 'defined')
+         | rejectattr('stdout', 'equalto', '') | list }}
+    patches_waterfox_newest: >-
+      {{ patches_waterfox_builds | map(attribute='stdout') | max | default('') }}
+  ansible.builtin.set_fact:
+    patches_waterfox_directory_defaults: >-
+      {{ patches_waterfox_builds | selectattr('stdout', 'equalto', patches_waterfox_newest)
+         | map(attribute='item') | list }}
+  when: >-
+    patches_waterfox_directory_defaults | length > 1
+    and patches_waterfox_builds | selectattr('stdout', 'equalto', patches_waterfox_newest) | list | length == 1
+
+- name: Waterfox profiles and defaults are collected
+  ansible.builtin.set_fact:
+    patches_waterfox_profiles: "{{ patches_waterfox_profiles + patches_waterfox_directory_profiles }}"
+    patches_waterfox_defaults: >-
+      {{ patches_waterfox_directory_defaults if patches_waterfox_defaults | length == 0
+         else patches_waterfox_defaults }}

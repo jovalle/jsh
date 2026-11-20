@@ -1,0 +1,99 @@
+---
+- name: Wox user-data location is checked
+  ansible.builtin.stat:
+    path: "{{ wox_home }}/.wox/.userdata.location"
+  register: wox_location_file
+
+- name: Wox user-data location is read
+  ansible.builtin.slurp:
+    src: "{{ wox_home }}/.wox/.userdata.location"
+  register: wox_location_content
+  when: wox_location_file.stat.isreg | default(false)
+
+- name: Wox settings database is selected
+  vars:
+    wox_location_raw: >-
+      {{ wox_location_content.content | default('') | b64decode | trim }}
+    wox_location_expanded: >-
+      {{ wox_home ~ '/' ~ wox_location_raw[2:]
+         if wox_location_raw.startswith('~/') else wox_location_raw }}
+  ansible.builtin.set_fact:
+    wox_database_path: >-
+      {{ wox_database if wox_database | length > 0
+         else wox_location_expanded ~ '/wox.db' if wox_location_expanded | length > 0
+         else wox_home ~ '/.wox/wox-user/wox.db' }}
+
+- name: Wox main hotkey is read
+  ansible.builtin.command:
+    argv:
+      - sqlite3
+      - -readonly
+      - "{{ wox_database_path }}"
+      - SELECT "value" FROM wox_settings WHERE "key" = 'MainHotkey@{{ wox_platform }}'
+  register: wox_main_hotkey
+  until: wox_main_hotkey.rc == 0
+  retries: "{{ 1 if ansible_check_mode else 30 }}"
+  delay: 1
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: notice
+  ansible.builtin.debug:
+    msg: Wox did not create its settings; open Wox, then rerun make configure wox
+  when: wox_main_hotkey.rc != 0 and not ansible_check_mode
+
+- name: Wox clipboard hotkeys are counted
+  ansible.builtin.command:
+    argv:
+      - sqlite3
+      - -readonly
+      - "{{ wox_database_path }}"
+      - >-
+        SELECT count(*) FROM wox_settings, json_each(wox_settings.value)
+        WHERE wox_settings.key = 'QueryHotkeys@darwin'
+          AND lower(json_extract(json_each.value, '$.Hotkey')) = 'cmd+shift+v'
+          AND coalesce(json_extract(json_each.value, '$.Disabled'), 0) != 1
+  register: wox_clipboard_hotkeys
+  changed_when: false
+  check_mode: false
+  when: wox_platform == 'darwin' and wox_main_hotkey.rc == 0
+
+- name: Wox hotkey values are recorded
+  ansible.builtin.set_fact:
+    wox_database_ready: "{{ wox_main_hotkey.rc == 0 }}"
+    wox_current_hotkey: "{{ wox_main_hotkey.stdout }}"
+    wox_clipboard_count: >-
+      {{ wox_clipboard_hotkeys.stdout | default('0') | int }}
+
+- name: ok
+  ansible.builtin.debug:
+    msg: "Wox hotkey is {{ wox_hotkey }}"
+  when: >-
+    wox_main_hotkey.rc == 0 and wox_current_hotkey == wox_hotkey
+    and not wox_native_restart | default(false) | bool
+
+- name: ok
+  ansible.builtin.debug:
+    msg: Wox Command+Shift+V is disabled
+  when: >-
+    wox_platform == 'darwin' and wox_main_hotkey.rc == 0
+    and wox_clipboard_count == 0
+
+- name: Wox restarts for its hotkey
+  ansible.builtin.include_role:
+    name: app
+  vars:
+    app_label: Wox
+    app_process: wox|Wox
+    app_launch: "{{ wox_launch }}"
+    app_role: wox
+    app_tasks: apply.yml
+    app_pending: >-
+      {{ (ansible_check_mode and not wox_database_ready | bool)
+         or (wox_database_ready | bool
+             and (wox_current_hotkey != wox_hotkey
+              or wox_clipboard_count > 0
+              or wox_native_restart | default(false) | bool)) }}
+    app_live: true
+  when: wox_database_ready | bool or ansible_check_mode

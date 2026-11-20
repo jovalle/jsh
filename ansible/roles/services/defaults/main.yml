@@ -1,0 +1,18 @@
+---
+services_home: >-
+  {{ lookup("ansible.builtin.env", "HOME") }}
+services_user_systemd: "{{ services_home }}/.config/systemd/user"
+services_environment: "{{ services_home }}/.config/environment.d"
+services_legacy_files:
+  - src: agent.service
+    dest: "{{ services_user_systemd }}/ssh-agent.service"
+    restart: true
+  - src: ssh.conf
+    dest: "{{ services_environment }}/ssh-agent.conf"
+    restart: false
+  - src: podman.conf
+    dest: "{{ services_environment }}/podman.conf"
+    restart: false
+services_agent_units:
+  - gpg-agent.socket
+  - podman.socket

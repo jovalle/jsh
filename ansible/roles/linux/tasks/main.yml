@@ -1,0 +1,32 @@
+---
+- name: Sudo availability is checked
+  ansible.builtin.include_tasks: preflight.yml
+
+- name: Passwordless sudo is configured
+  ansible.builtin.include_tasks: sudo.yml
+
+- name: Kernel settings are configured
+  ansible.builtin.include_tasks: sysctl.yml
+
+- name: Linux system files are current
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+    backup: true
+  become: "{{ linux_become }}"
+  loop: "{{ linux_system_files }}"
+  loop_control:
+    label: "{{ item.dest }}"
+  notify: "{{ item.notify }}"
+
+- name: Linux system services are configured
+  ansible.builtin.include_tasks: services.yml
+
+- name: Linux timezone is configured
+  ansible.builtin.include_tasks: timezone.yml
+
+- name: Pending handlers run
+  ansible.builtin.meta: flush_handlers

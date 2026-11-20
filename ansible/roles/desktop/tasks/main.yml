@@ -1,0 +1,28 @@
+---
+# Each area lives in its own task folder; Linux-only areas are skipped on macOS.
+- name: Fonts are installed
+  ansible.builtin.include_tasks: fonts/main.yml
+
+- name: Desktop appearance is configured
+  ansible.builtin.include_tasks: appearance/main.yml
+  when: jsh_platform != 'darwin'
+
+- name: Application dock is configured
+  ansible.builtin.include_tasks: dock/main.yml
+  when: jsh_platform != 'darwin'
+
+- name: Displays are configured
+  ansible.builtin.include_tasks: display/main.yml
+
+- name: Keybindings are configured
+  ansible.builtin.include_tasks: keybindings/main.yml
+
+- name: Audio is configured
+  ansible.builtin.include_tasks: audio/main.yml
+  when: jsh_platform != 'darwin'
+
+- name: Wallpaper is applied
+  ansible.builtin.include_tasks: wallpaper/main.yml
+
+- name: Pending handlers run
+  ansible.builtin.meta: flush_handlers

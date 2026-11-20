@@ -1,0 +1,44 @@
+---
+- name: timedatectl is available
+  ansible.builtin.command:
+    argv:
+      - sh
+      - -c
+      - "command -v timedatectl"
+  register: linux_timedatectl
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Current timezone is read
+  ansible.builtin.command:
+    argv:
+      - timedatectl
+      - show
+      - --property=Timezone
+      - --value
+  register: linux_timezone_current
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: linux_timedatectl.rc == 0
+
+- name: info
+  ansible.builtin.debug:
+    msg: "timezone: timedatectl is unavailable"
+  when: linux_timedatectl.rc != 0
+
+- name: info
+  ansible.builtin.debug:
+    msg: "timezone: timedatectl failed"
+  when:
+    - linux_timedatectl.rc == 0
+    - linux_timezone_current.rc != 0
+
+- name: "timezone is {{ linux_timezone }}"
+  community.general.timezone:
+    name: "{{ linux_timezone }}"
+  become: "{{ linux_become }}"
+  when:
+    - linux_timedatectl.rc == 0
+    - linux_timezone_current.rc == 0

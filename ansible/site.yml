@@ -1,0 +1,209 @@
+---
+# One play configures this workstation. Each setup role is included in run order with
+# its name as the tag; the role metadata supplies its purpose and supported platforms.
+- name: Workstation
+  hosts: all
+  gather_facts: true
+  gather_subset:
+    - min
+  pre_tasks:
+    - name: One host is selected
+      ansible.builtin.fail:
+        msg: "Run one host at a time: --limit HOST (hosts in ansible/inventory.yml)"
+      when: ansible_play_hosts_all | length > 1
+      tags:
+        - always
+
+    - name: Failed roles are initialized
+      ansible.builtin.set_fact:
+        jsh_failed_roles: []
+      tags:
+        - always
+
+    - name: Detected platform
+      ansible.builtin.debug:
+        msg: "{{ jsh_platform }} {{ jsh_desktop }} {{ jsh_host }}"
+      when: jsh_debug_facts | default(false) | bool
+      tags:
+        - always
+
+  tasks:
+    - name: macos group
+      tags:
+        - macos
+      block:
+        - name: macos
+          ansible.builtin.include_role:
+            name: macos
+            apply:
+              tags:
+                - macos
+          tags:
+            - macos
+          when: jsh_platform == 'darwin'
+      rescue:
+        - name: macos failure is recorded
+          ansible.builtin.set_fact:
+            jsh_failed_roles: "{{ jsh_failed_roles + ['macos'] }}"
+
+    - name: linux group
+      tags:
+        - linux
+      block:
+        - name: linux
+          ansible.builtin.include_role:
+            name: linux
+            apply:
+              tags:
+                - linux
+          tags:
+            - linux
+          when: jsh_platform != 'darwin'
+      rescue:
+        - name: linux failure is recorded
+          ansible.builtin.set_fact:
+            jsh_failed_roles: >-
+              {{ jsh_failed_roles + ["linux"] }}
+
+    - name: packages group
+      tags:
+        - packages
+        - apps
+        - desktop
+        - wox
+        - patches
+        - agentics
+      block:
+        - name: packages
+          ansible.builtin.include_role:
+            name: packages
+            apply:
+              tags:
+                - packages
+                - apps
+                - desktop
+                - wox
+                - patches
+                - agentics
+          tags:
+            - packages
+            - apps
+            - desktop
+            - wox
+            - patches
+            - agentics
+      rescue:
+        - name: packages failure is recorded
+          ansible.builtin.set_fact:
+            jsh_failed_roles: "{{ jsh_failed_roles + ['packages'] }}"
+
+    - name: services group
+      tags:
+        - services
+      block:
+        - name: services
+          ansible.builtin.include_role:
+            name: services
+            apply:
+              tags:
+                - services
+          tags:
+            - services
+          when: jsh_platform != 'darwin'
+      rescue:
+        - name: services failure is recorded
+          ansible.builtin.set_fact:
+            jsh_failed_roles: >-
+              {{ jsh_failed_roles + ["services"] }}
+
+    - name: apps group
+      tags:
+        - apps
+      block:
+        - name: apps
+          ansible.builtin.include_role:
+            name: apps
+            apply:
+              tags:
+                - apps
+          tags:
+            - apps
+      rescue:
+        - name: apps failure is recorded
+          ansible.builtin.set_fact:
+            jsh_failed_roles: "{{ jsh_failed_roles + ['apps'] }}"
+
+    - name: desktop group
+      tags:
+        - desktop
+      block:
+        - name: desktop
+          ansible.builtin.include_role:
+            name: desktop
+            apply:
+              tags:
+                - desktop
+          tags:
+            - desktop
+      rescue:
+        - name: desktop failure is recorded
+          ansible.builtin.set_fact:
+            jsh_failed_roles: "{{ jsh_failed_roles + ['desktop'] }}"
+
+    - name: wox group
+      tags:
+        - wox
+      block:
+        - name: wox
+          ansible.builtin.include_role:
+            name: wox
+            apply:
+              tags:
+                - wox
+          tags:
+            - wox
+      rescue:
+        - name: wox failure is recorded
+          ansible.builtin.set_fact:
+            jsh_failed_roles: "{{ jsh_failed_roles + ['wox'] }}"
+
+    - name: patches group
+      tags:
+        - patches
+      block:
+        - name: patches
+          ansible.builtin.include_role:
+            name: patches
+            apply:
+              tags:
+                - patches
+          tags:
+            - patches
+      rescue:
+        - name: patches failure is recorded
+          ansible.builtin.set_fact:
+            jsh_failed_roles: "{{ jsh_failed_roles + ['patches'] }}"
+
+    - name: agentics group
+      tags:
+        - agentics
+      block:
+        - name: agentics
+          ansible.builtin.include_role:
+            name: agentics
+            apply:
+              tags:
+                - agentics
+          tags:
+            - agentics
+      rescue:
+        - name: agentics failure is recorded
+          ansible.builtin.set_fact:
+            jsh_failed_roles: "{{ jsh_failed_roles + ['agentics'] }}"
+
+    - name: Host configuration roles succeeded
+      ansible.builtin.fail:
+        msg: "Failed roles: {{ jsh_failed_roles | join(', ') }}"
+      when: jsh_failed_roles | length > 0
+      tags:
+        - always

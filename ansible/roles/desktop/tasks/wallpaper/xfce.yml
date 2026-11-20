@@ -1,0 +1,29 @@
+---
+- name: XFCE backdrop properties are listed
+  ansible.builtin.command:
+    argv:
+      - xfconf-query
+      - -c
+      - xfce4-desktop
+      - -l
+  register: desktop_wallpaper_xfce_properties
+  changed_when: false
+  check_mode: false
+
+- name: XFCE wallpaper images are set
+  community.general.xfconf:
+    channel: xfce4-desktop
+    property: "{{ item }}"
+    value:
+      - "{{ desktop_wallpaper_realpath.stdout }}"
+    value_type:
+      - string
+  loop: "{{ desktop_wallpaper_xfce_properties.stdout_lines | select('match', '.*/last-image$') }}"
+  loop_control:
+    label: "xfce4-desktop {{ item }} is {{ desktop_wallpaper_realpath.stdout }}"
+
+- name: notice
+  ansible.builtin.debug:
+    msg: XFCE has no backdrop properties yet; log in to XFCE once, then rerun
+  when: >-
+    desktop_wallpaper_xfce_properties.stdout_lines | select('match', '.*/last-image$') | list | length == 0

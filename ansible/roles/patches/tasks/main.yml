@@ -1,0 +1,13 @@
+---
+# Each app lives in its own task folder and keeps its settings inputs under files/APP/.
+- name: VS Code settings are managed
+  ansible.builtin.include_tasks: vscode/main.yml
+
+- name: Sublime Text settings are managed
+  ansible.builtin.include_tasks: sublime/main.yml
+
+- name: Helium settings are managed
+  ansible.builtin.include_tasks: helium/main.yml
+
+- name: Waterfox settings are managed
+  ansible.builtin.include_tasks: waterfox/main.yml

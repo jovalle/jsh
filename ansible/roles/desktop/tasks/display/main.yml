@@ -1,0 +1,8 @@
+---
+- name: macOS display resolutions are managed
+  ansible.builtin.include_tasks: display/darwin.yml
+  when: jsh_desktop == 'darwin'
+
+- name: X11 display shortcut is managed
+  ansible.builtin.include_tasks: display/linux.yml
+  when: jsh_desktop != 'darwin'

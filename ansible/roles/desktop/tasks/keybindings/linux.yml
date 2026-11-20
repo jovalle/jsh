@@ -1,0 +1,40 @@
+---
+- name: Launcher commands are found
+  ansible.builtin.command:
+    argv:
+      - sh
+      - -c
+      - "command -v \"$1\""
+      - sh
+      - "{{ item.command | split | first }}"
+  loop: "{{ desktop_keybindings_launchers[jsh_desktop] }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: desktop_keybindings_commands
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: Launcher shortcuts are managed
+  ansible.builtin.include_tasks: keybindings/shortcut.yml
+  loop: "{{ desktop_keybindings_commands.results }}"
+  loop_control:
+    loop_var: desktop_keybindings_launcher
+    label: "{{ desktop_keybindings_launcher.item.name }}"
+  vars:
+    desktop_keybindings_shortcut_name: "{{ desktop_keybindings_launcher.item.name }}"
+    desktop_keybindings_shortcut_gnome: "{{ desktop_keybindings_launcher.item.binding }}"
+    desktop_keybindings_shortcut_xfce: >-
+      {{ desktop_keybindings_launcher.item.binding | replace('<Control>', '<Primary>') }}
+    desktop_keybindings_shortcut_command: "{{ desktop_keybindings_launcher.item.command }}"
+    desktop_keybindings_shortcut_slug: "jsh-{{ desktop_keybindings_launcher.item.name | lower | replace(' ', '-') }}"
+  when: desktop_keybindings_launcher.rc == 0
+
+- name: info
+  ansible.builtin.debug:
+    msg: >-
+      {{ item.item.name }} shortcut: {{ item.item.command | split | first }} is not installed
+  loop: "{{ desktop_keybindings_commands.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+  when: item.rc != 0

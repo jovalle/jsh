@@ -1,0 +1,10 @@
+---
+# app_label: name shown in output and used by AppleScript to quit the app
+# app_process: exact process name for pgrep -x
+# app_launch: argv that reopens the app
+# app_role, app_tasks: the caller's role and its task file that applies the settings
+# app_pending: true when the caller's check-mode settings probe reported a change
+app_live: false
+app_launch: []
+app_pending: false
+app_uid: "{{ lookup('ansible.builtin.pipe', 'id -u') }}"

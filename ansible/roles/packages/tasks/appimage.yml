@@ -1,0 +1,130 @@
+---
+# One AppImage from a GitHub release, verified against the asset digest. Updates replace only
+# files whose recorded digest still matches, so a modified AppImage is never overwritten.
+- name: AppImage state
+  vars:
+    packages_appimage_name: "{{ packages_appimage.name }}"
+    packages_appimage_path: "{{ packages_home }}/.local/bin/{{ packages_appimage_name }}"
+    packages_appimage_record: "{{ packages_state }}/jsh/appimage/{{ packages_appimage_name }}.json"
+    packages_appimage_recorded: >-
+      {{ (packages_appimage_saved.content | b64decode | from_json).digest
+         if packages_appimage_saved.content is defined else '' }}
+    packages_appimage_digest: "{{ packages_appimage_assets[0].digest[7:] }}"
+  block:
+    - name: AppImage command is found
+      ansible.builtin.command:
+        argv:
+          - sh
+          - -c
+          - 'command -v "$1"'
+          - sh
+          - "{{ packages_appimage_name }}"
+      register: packages_appimage_command
+      changed_when: false
+      check_mode: false
+      failed_when: false
+
+    - name: AppImage file is checked
+      ansible.builtin.stat:
+        path: "{{ packages_appimage_path }}"
+        follow: false
+        checksum_algorithm: sha256
+      register: packages_appimage_file
+
+    - name: AppImage record is read
+      ansible.builtin.slurp:
+        src: "{{ packages_appimage_record }}"
+      register: packages_appimage_saved
+      failed_when: false
+
+    - name: "{{ packages_appimage_path }} is not replaced"
+      ansible.builtin.fail:
+        msg: "refusing to replace {{ packages_appimage_path }}"
+      when: not jsh_update | bool and packages_appimage_command.rc != 0 and packages_appimage_file.stat.exists
+
+    - name: "{{ packages_appimage_path }} is managed"
+      ansible.builtin.fail:
+        msg: "AppImage was modified or is no longer managed: {{ packages_appimage_path }}"
+      when: >-
+        jsh_update | bool and packages_appimage_saved.content is defined
+        and (not packages_appimage_file.stat.isreg | default(false)
+             or packages_appimage_file.stat.checksum != packages_appimage_recorded)
+
+    - name: info
+      ansible.builtin.debug:
+        msg: "would download verified {{ packages_appimage_name }} AppImage"
+      when: >-
+        ansible_check_mode and
+        ((not jsh_update | bool and packages_appimage_command.rc != 0)
+         or (jsh_update | bool and packages_appimage_saved.content is defined))
+
+    - name: AppImage download
+      when: >-
+        not ansible_check_mode and
+        ((not jsh_update | bool and packages_appimage_command.rc != 0)
+         or (jsh_update | bool and packages_appimage_saved.content is defined))
+      vars:
+        packages_appimage_arch: "{{ packages_appimage.arm if ansible_facts.architecture in ['arm64', 'aarch64']
+                           else packages_appimage.amd }}"
+      block:
+        - name: AppImage release is read
+          ansible.builtin.uri:
+            url: "{{ packages_appimage.release }}"
+            return_content: true
+          register: packages_appimage_release
+          check_mode: false
+
+        - name: AppImage asset is selected
+          ansible.builtin.set_fact:
+            packages_appimage_assets: >-
+              {{ packages_appimage_release.json.assets
+                 | selectattr('name', 'search', '(?i)-' ~ packages_appimage_arch ~ '\.appimage$') | list }}
+
+        - name: AppImage release has one verified asset
+          ansible.builtin.assert:
+            that:
+              - packages_appimage_assets | length == 1
+              - packages_appimage_assets[0].digest | default('') is match('^sha256:[0-9a-f]{64}$')
+            fail_msg: "{{ packages_appimage_name }}: expected one AppImage asset with a SHA-256 digest"
+
+        - name: AppImage directories exist
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+            mode: u+rwx
+          loop:
+            - "{{ packages_appimage_path | dirname }}"
+            - "{{ packages_appimage_record | dirname }}"
+            - "{{ packages_data }}/applications"
+
+        - name: "{{ packages_appimage_name }}"
+          ansible.builtin.get_url:
+            url: "{{ packages_appimage_assets[0].browser_download_url }}"
+            dest: "{{ packages_appimage_path }}"
+            checksum: "{{ packages_appimage_assets[0].digest }}"
+            mode: "0755"
+            force: true
+          when: packages_appimage_recorded != packages_appimage_digest
+
+        - name: "{{ packages_appimage_record }}"
+          ansible.builtin.copy:
+            content: |
+              {{ {'asset': packages_appimage_assets[0].name, 'digest': packages_appimage_digest} | to_nice_json }}
+            dest: "{{ packages_appimage_record }}"
+            mode: "0644"
+
+        - name: "{{ packages_appimage_name }} desktop entry"
+          vars:
+            # Desktop entry Exec quoting: escape backslash, quote, dollar, and backtick; double %.
+            packages_appimage_exec: >-
+              {{ packages_appimage_path | replace('\\', '\\\\') | replace('"', '\\"')
+                 | replace('$', '\\$') | replace('`', '\\`') | replace('%', '%%') }}
+          ansible.builtin.copy:
+            dest: "{{ packages_data }}/applications/jsh-{{ packages_appimage_name }}.desktop"
+            mode: "0644"
+            content: |
+              [Desktop Entry]
+              Type=Application
+              Name={{ packages_appimage_name }}
+              Exec="{{ packages_appimage_exec }}" %U
+              Terminal=false

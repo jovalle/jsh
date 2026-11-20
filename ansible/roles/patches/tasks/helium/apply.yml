@@ -1,0 +1,10 @@
+---
+- name: "{{ patches_helium_preferences }}"
+  settings:
+    path: "{{ patches_helium_preferences }}"
+    values: "{{ patches_helium_preferences_values }}"
+
+- name: "{{ patches_helium_profile_root }}/Local State"
+  settings:
+    path: "{{ patches_helium_profile_root }}/Local State"
+    values: "{{ patches_helium_state_values }}"

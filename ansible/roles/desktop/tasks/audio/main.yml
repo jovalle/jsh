@@ -1,0 +1,97 @@
+---
+- name: info
+  ansible.builtin.debug:
+    msg: "audio policy: no GNOME or XFCE session"
+  when: jsh_desktop not in ["gnome", "xfce"]
+
+- name: Audio is configured for the desktop session
+  when: jsh_desktop in ["gnome", "xfce"]
+  block:
+    - name: PulseAudio tools are found
+      ansible.builtin.command:
+        argv:
+          - sh
+          - -c
+          - "command -v pactl"
+      register: desktop_audio_pactl
+      changed_when: false
+      check_mode: false
+      failed_when: false
+      when: jsh_desktop in ["gnome", "xfce"]
+
+    - name: systemd tools are found
+      ansible.builtin.command:
+        argv:
+          - sh
+          - -c
+          - "command -v systemctl"
+      register: desktop_audio_systemctl
+      changed_when: false
+      check_mode: false
+      failed_when: false
+      when: jsh_desktop in ["gnome", "xfce"]
+
+    - name: Wave:3 udev rules are current
+      ansible.builtin.copy:
+        src: audio/70-jsh-wave3.rules
+        dest: /etc/udev/rules.d/70-jsh-wave3.rules
+        owner: root
+        group: root
+        mode: "0644"
+        backup: true
+      become: "{{ desktop_audio_become }}"
+      notify: Wave:3 udev rules reload
+      when:
+        - jsh_host == "colossus"
+        - desktop_audio_pactl.rc == 0
+
+    - name: Audio autostart directory exists
+      ansible.builtin.file:
+        path: "{{ desktop_audio_config }}/autostart"
+        state: directory
+        mode: u=rwx
+      when: jsh_host == "colossus" and desktop_audio_pactl.rc == 0
+
+    - name: Microphone startup mute is configured
+      ansible.builtin.template:
+        src: audio/microphone.desktop.j2
+        dest: "{{ desktop_audio_config }}/autostart/jsh-microphone.desktop"
+        mode: "0644"
+      when: jsh_host == "colossus" and desktop_audio_pactl.rc == 0
+
+    - name: WirePlumber audio policy source is checked
+      ansible.builtin.stat:
+        path: "{{ desktop_audio_policy_source }}"
+        get_checksum: false
+      register: desktop_audio_policy_file
+      when: desktop_audio_policy_source | length > 0
+
+    - name: WirePlumber policy directory exists
+      ansible.builtin.file:
+        path: "{{ desktop_audio_config }}/wireplumber/wireplumber.conf.d"
+        state: directory
+        mode: u=rwx
+      when: desktop_audio_policy_file.stat.isreg | default(false)
+
+    - name: WirePlumber audio policy is current
+      ansible.builtin.copy:
+        src: "{{ desktop_audio_policy_source }}"
+        dest: "{{ desktop_audio_config }}/wireplumber/wireplumber.conf.d/51-jsh-audio-policy.conf"
+        remote_src: true
+        mode: "0644"
+      notify: WirePlumber restarts
+      when: desktop_audio_policy_file.stat.isreg | default(false)
+
+    - name: Audio output shortcut is managed
+      ansible.builtin.include_tasks: keybindings/shortcut.yml
+      vars:
+        desktop_keybindings_shortcut_name: Jsh audio output
+        desktop_keybindings_shortcut_gnome: "<Control><Alt><Super>a"
+        desktop_keybindings_shortcut_xfce: "<Primary><Alt><Super>a"
+        desktop_keybindings_shortcut_command: >-
+          bash '{{ jsh_root }}/ansible/roles/desktop/files/audio/cycle.sh' cycle
+        desktop_keybindings_shortcut_slug: jsh-audio-output
+      when: desktop_audio_pactl.rc == 0
+
+- name: Pending handlers run
+  ansible.builtin.meta: flush_handlers

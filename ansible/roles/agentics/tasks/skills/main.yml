@@ -1,0 +1,61 @@
+---
+# Skill repositories track their default branch; jsh update pulls them.
+- name: Skill repositories are cloned # noqa: latest[git]
+  ansible.builtin.git:
+    repo: "{{ item.url }}"
+    dest: "{{ agentics_skills_vendor }}/{{ item.name }}"
+    depth: 1
+    update: "{{ jsh_update | bool }}"
+  loop: "{{ agentics_skills_repos }}"
+  loop_control:
+    label: "{{ item.name }}"
+  environment:
+    GIT_TERMINAL_PROMPT: "0"
+
+- name: Local skill lists are checked
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop: "{{ agentics_skills_local_lists }}"
+  register: agentics_skills_local_list_stats
+  check_mode: false
+  changed_when: false
+
+- name: Local skill list is read
+  ansible.builtin.slurp:
+    src: >-
+      {{ (agentics_skills_local_list_stats.results | selectattr("stat.exists") | map(attribute="item") | first) }}
+  when: agentics_skills_local_list_stats.results | selectattr("stat.exists") | list | length > 0
+  register: agentics_skills_local_list
+  check_mode: false
+  changed_when: false
+
+- name: Skill links are listed
+  ansible.builtin.set_fact:
+    agentics_skills_published: >-
+      {{ agentics_skills_links | links(agentics_skills_vendor, agentics_skills_home ~ "/.agents/skills") }}
+    agentics_skills_local: >-
+      {{ (agentics_skills_local_list.content | default("") | b64decode)
+         | links(agentics_skills_home, agentics_skills_home ~ "/.agents/skills") }}
+    agentics_skills_own: >-
+      {{ agentics_skills_bundled
+         | links(jsh_root ~ "/dotfiles/.agents/skills", agentics_skills_home ~ "/.agents/skills") }}
+
+- name: notice
+  ansible.builtin.debug:
+    msg: "Skill source is missing: {{ item.src }}"
+  loop: "{{ agentics_skills_published | rejectattr('src', 'directory') }}"
+  when: not ansible_check_mode
+
+- name: info
+  ansible.builtin.debug:
+    msg: "local skill {{ item.dest | basename }}: {{ item.src }} is missing"
+  loop: "{{ agentics_skills_local | rejectattr('src', 'directory') }}"
+
+- name: Skills are linked
+  ansible.builtin.include_role:
+    name: link
+  vars:
+    link_items: >-
+      {{ (agentics_skills_published if ansible_check_mode
+          else agentics_skills_published | selectattr('src', 'directory'))
+         + (agentics_skills_local | selectattr('src', 'directory')) + agentics_skills_own }}

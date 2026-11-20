@@ -1,0 +1,151 @@
+---
+- name: Legacy SSH agent files are installed
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    mode: "0644"
+  loop: >-
+    {{ services_legacy_files | rejectattr("src", "equalto", "podman.conf") }}
+  loop_control:
+    label: "{{ item.dest }}"
+  register: services_agent_written
+  notify: User systemd configuration reloads
+  when: services_native_ssh.rc != 0
+
+- name: Native SSH agent socket path is read
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - --user
+      - show
+      - ssh-agent.socket
+      - --property=Listen
+      - --value
+  register: services_socket
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: services_native_ssh.rc == 0
+
+- name: Native SSH agent service environment is read
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - --user
+      - show
+      - ssh-agent.service
+      - --property=Environment
+      - --value
+  register: services_service
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: services_native_ssh.rc == 0
+
+- name: Native SSH agent paths are selected
+  ansible.builtin.set_fact:
+    services_socket_path: >-
+      {{ services_socket.stdout.split(" ") | first | default("") }}
+    services_service_path: >-
+      {{ services_service.stdout
+         | regex_findall("(?:^| )SSH_AUTH_SOCK=([^ ]+)") | first | default("") }}
+  when: services_native_ssh.rc == 0
+
+- name: info
+  ansible.builtin.debug:
+    msg: >-
+      repairing SSH agent socket mismatch:
+      {{ services_service_path }} != {{ services_socket_path }}
+  when:
+    - services_native_ssh.rc == 0
+    - services_socket_path | length > 0
+    - services_service_path | length > 0
+    - services_socket_path != services_service_path
+
+- name: Legacy SSH agent files are checked
+  ansible.builtin.stat:
+    path: "{{ item.dest }}"
+    follow: false
+  loop: >-
+    {{ services_legacy_files | rejectattr("src", "equalto", "podman.conf") }}
+  loop_control:
+    label: "{{ item.dest }}"
+  register: services_legacy_stat
+  when: services_native_ssh.rc == 0
+
+- name: ok
+  ansible.builtin.debug:
+    msg: "{{ item.item.dest }} is absent"
+  loop: "{{ services_legacy_stat.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.dest }}"
+  when:
+    - not item.skipped | default(false)
+    - not item.stat.exists
+    - not item.stat.islnk | default(false)
+
+- name: Dangling managed SSH agent links are refused
+  ansible.builtin.fail:
+    msg: "Refusing to remove modified managed file: {{ item.item.dest }}"
+  loop: "{{ services_legacy_stat.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.dest }}"
+  when:
+    - not item.skipped | default(false)
+    - item.stat.islnk | default(false)
+    - not item.stat.exists
+
+- name: Legacy SSH agent files are read
+  ansible.builtin.slurp:
+    src: "{{ item.item.dest }}"
+  loop: "{{ services_legacy_stat.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.dest }}"
+  register: services_legacy_read
+  when:
+    - not item.skipped | default(false)
+    - item.stat.exists
+
+- name: Modified managed SSH agent files are refused
+  ansible.builtin.fail:
+    msg: "Refusing to remove modified managed file: {{ item.item.item.dest }}"
+  loop: "{{ services_legacy_read.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.item.dest }}"
+  when:
+    - not item.skipped | default(false)
+    - item.content | b64decode != lookup("ansible.builtin.file",
+                                        role_path + "/files/" + item.item.item.src,
+                                        rstrip=false)
+
+- name: Conflicting SSH agent service is disabled
+  ansible.builtin.systemd_service:
+    name: ssh-agent.service
+    scope: user
+    enabled: false
+    state: stopped
+  changed_when: false
+  check_mode: false
+  when:
+    - not ansible_check_mode
+    - services_native_ssh.rc == 0
+    - services_legacy_read.results | default([])
+      | selectattr("item.item.restart") | rejectattr("skipped", "defined") | list | length > 0
+
+- name: Legacy SSH agent files are absent
+  ansible.builtin.file:
+    path: "{{ item.item.item.dest }}"
+    state: absent
+  loop: "{{ services_legacy_read.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.item.dest }}"
+  register: services_legacy_removed
+  notify:
+    - User systemd configuration reloads
+    - SSH agent restarts
+  when: not item.skipped | default(false)
+
+- name: SSH agent unit is selected
+  ansible.builtin.set_fact:
+    services_ssh_agent_unit: >-
+      {{ "ssh-agent.socket" if services_native_ssh.rc == 0 else "ssh-agent.service" }}

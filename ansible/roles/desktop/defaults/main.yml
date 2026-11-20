@@ -1,0 +1,183 @@
+---
+desktop_home: '{{ lookup("ansible.builtin.env", "HOME") }}'
+desktop_data: '{{ lookup("ansible.builtin.env", "XDG_DATA_HOME") or (desktop_home + "/.local/share") }}'
+desktop_config: '{{ lookup("ansible.builtin.env", "XDG_CONFIG_HOME") or (desktop_home + "/.config") }}'
+desktop_avatar: '{{ lookup("ansible.builtin.env", "JSH_USER_AVATAR") or (role_path + "/files/avatar.jpg")
+  }}'
+desktop_xfce_settings:
+  - channel: xfce4-desktop
+    property: /desktop-icons/style
+    type: int
+    value: 0
+  - channel: xfce4-terminal
+    property: /font-name
+    type: string
+    value: JetBrainsMono Nerd Font, JetBrainsMono Nerd Font Mono, FiraCode Nerd Font, Hack Nerd Font,
+      MesloLGS Nerd Font, JetBrains Mono, DejaVu Sans Mono, Symbols Nerd Font, monospace 11
+  - channel: xfce4-terminal
+    property: /font-use-system
+    type: bool
+    value: false
+  - channel: xsettings
+    property: /Gtk/MonospaceFontName
+    type: string
+    value: JetBrainsMono Nerd Font 11
+  - channel: xfce4-keyboard-shortcuts
+    property: /commands/custom/<Super><Shift>s
+    type: string
+    value: xfce4-screenshooter -rc
+  - channel: xfce4-keyboard-shortcuts
+    property: /xfwm4/custom/<Super>Left
+    type: string
+    value: tile_left_key
+  - channel: xfce4-keyboard-shortcuts
+    property: /xfwm4/custom/<Super>Right
+    type: string
+    value: tile_right_key
+  - channel: xfce4-keyboard-shortcuts
+    property: /xfwm4/custom/<Super>Up
+    type: string
+    value: tile_up_key
+  - channel: xfce4-keyboard-shortcuts
+    property: /xfwm4/custom/<Super>Down
+    type: string
+    value: tile_down_key
+  - channel: xfwm4
+    property: /general/tile_on_move
+    type: bool
+    value: true
+  - channel: xfce4-appfinder
+    property: /always-center
+    type: bool
+    value: true
+  - channel: xfce4-appfinder
+    property: /enable-service
+    type: bool
+    value: true
+  - channel: xfce4-terminal
+    property: /color-foreground
+    type: string
+    value: '#D7DAE0'
+  - channel: xfce4-terminal
+    property: /color-background
+    type: string
+    value: '#0D1117'
+  - channel: xfce4-terminal
+    property: /color-cursor
+    type: string
+    value: '#D7DAE0'
+  - channel: xfce4-terminal
+    property: /color-cursor-use-default
+    type: bool
+    value: false
+  - channel: xfce4-terminal
+    property: /color-use-theme
+    type: bool
+    value: false
+desktop_xfce_screensaver_settings:
+  - channel: xfce4-session
+    property: /general/LockCommand
+    type: string
+    value: xflock4
+  - channel: xfce4-screensaver
+    property: /saver/enabled
+    type: bool
+    value: true
+    screensaver: true
+  - channel: xfce4-screensaver
+    property: /saver/mode
+    type: int
+    value: 0
+    screensaver: true
+  - channel: xfce4-screensaver
+    property: /lock/enabled
+    type: bool
+    value: true
+    screensaver: true
+  - channel: xfce4-screensaver
+    property: /lock/saver-activation/enabled
+    type: bool
+    value: true
+    screensaver: true
+  - channel: xfce4-screensaver
+    property: /lock/saver-activation/delay
+    type: int
+    value: 0
+    screensaver: true
+  - channel: xfce4-power-manager
+    property: /xfce4-power-manager/dpms-enabled
+    type: bool
+    value: true
+  - channel: xfce4-power-manager
+    property: /xfce4-power-manager/dpms-on-ac-sleep
+    type: uint
+    value: 10
+  - channel: xfce4-power-manager
+    property: /xfce4-power-manager/dpms-on-ac-off
+    type: uint
+    value: 15
+  - channel: xfce4-power-manager
+    property: /xfce4-power-manager/lock-screen-suspend-hibernate
+    type: bool
+    value: true
+  - channel: xfce4-power-manager
+    property: /xfce4-power-manager/power-button-action
+    type: uint
+    value: 1
+desktop_gnome_extensions_install:
+  - Vitals@CoreCoding.com
+desktop_gnome_extensions_enable:
+  - apps-menu@gnome-shell-extensions.gcampax.github.com
+  - window-list@gnome-shell-extensions.gcampax.github.com
+  - Vitals@CoreCoding.com
+desktop_gnome_vitals: '[''_processor_usage_'', ''_memory_usage_'', ''_system_load_1m_'', ''_storage_free_'']'
+
+# fonts
+# Linux has no font cask, so the release archive is downloaded and verified instead.
+desktop_fonts_repository: ryanoasis/nerd-fonts
+desktop_fonts_asset: JetBrainsMono.tar.xz
+desktop_fonts_files:
+  - JetBrainsMonoNerdFont-Bold.ttf
+  - JetBrainsMonoNerdFont-BoldItalic.ttf
+  - JetBrainsMonoNerdFont-Italic.ttf
+  - JetBrainsMonoNerdFont-Regular.ttf
+desktop_fonts_directory: >-
+  {{ (lookup('ansible.builtin.env', 'XDG_DATA_HOME')
+      or lookup('ansible.builtin.env', 'HOME') ~ '/.local/share') ~ '/fonts/jsh' }}
+
+# display
+desktop_display_resolution_script: "{{ jsh_root }}/ansible/roles/desktop/files/display/resolution.swift"
+
+# keybindings
+desktop_keybindings_domain: NSGlobalDomain
+desktop_keybindings_defaults_path: /usr/bin:/usr/local/bin
+desktop_keybindings_keyboard:
+  KeyRepeat: 2
+  InitialKeyRepeat: 15
+  AppleKeyboardUIMode: 3
+desktop_keybindings_menu_shortcuts: {}
+desktop_keybindings_launchers:
+  gnome:
+    - {name: Ghostty, binding: "<Super>Return", command: ghostty}
+    - {name: Helium, binding: "<Super>b", command: helium}
+  xfce:
+    - {name: Ghostty, binding: "<Super>Return", command: ghostty}
+    - {name: Helium, binding: "<Super>b", command: helium}
+
+# audio
+desktop_audio_home: >-
+  {{ lookup("ansible.builtin.env", "HOME") }}
+desktop_audio_config: >-
+  {{ lookup("ansible.builtin.env", "XDG_CONFIG_HOME") or (desktop_audio_home + "/.config") }}
+desktop_audio_policy_source: >-
+  {{ jsh_audio_policy if jsh_audio_policy | length > 0
+     else (role_path + "/files/audio/colossus.conf") if jsh_host == "colossus"
+     else "" }}
+desktop_audio_become: "{{ not ansible_check_mode }}"
+
+# wallpaper
+desktop_wallpaper_home: "{{ lookup('ansible.builtin.env', 'HOME') }}"
+desktop_wallpaper_image: >-
+  {{ (desktop_wallpaper_home ~ '/' ~ jsh_wallpaper[2:]) if jsh_wallpaper.startswith('~/')
+     else jsh_wallpaper if jsh_wallpaper.startswith('/')
+     else lookup('ansible.builtin.env', 'PWD') ~ '/' ~ jsh_wallpaper }}

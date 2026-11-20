@@ -1,0 +1,33 @@
+---
+- name: Sublime Text is found
+  ansible.builtin.command:
+    argv:
+      - sh
+      - -c
+      - command -v subl
+  register: patches_sublime_command
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: notice
+  ansible.builtin.debug:
+    msg: open Sublime Text once, then rerun make configure patches
+  when: >-
+    patches_sublime_directory is not directory
+    and (patches_sublime_command.rc == 0 or '/Applications/Sublime Text.app' is directory
+         or '/var/lib/flatpak/app/com.sublimetext.three' is directory)
+
+- name: info
+  ansible.builtin.debug:
+    msg: "Skipping Sublime Text settings: Sublime Text is not installed"
+  when: >-
+    patches_sublime_directory is not directory and patches_sublime_command.rc != 0
+    and '/Applications/Sublime Text.app' is not directory
+    and '/var/lib/flatpak/app/com.sublimetext.three' is not directory
+
+- name: "{{ patches_sublime_directory }}/Packages/User/Preferences.sublime-settings"
+  settings:
+    path: "{{ patches_sublime_directory }}/Packages/User/Preferences.sublime-settings"
+    source: "{{ role_path }}/files/sublime/preferences.json"
+  when: patches_sublime_directory is directory

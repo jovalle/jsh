@@ -1,0 +1,112 @@
+---
+- name: "{{ desktop_extension_uuid }} metadata is checked"
+  ansible.builtin.stat:
+    path: >-
+      {{ desktop_data }}/gnome-shell/extensions/{{ desktop_extension_uuid }}/metadata.json
+    get_checksum: false
+  register: desktop_extension_metadata
+
+- name: ok
+  ansible.builtin.debug:
+    msg: "{{ desktop_extension_uuid }} is installed"
+  when:
+    - desktop_extension_uuid in desktop_gnome_extensions_present | default([])
+    - not jsh_update | bool
+
+- name: info
+  ansible.builtin.debug:
+    msg: "{{ desktop_extension_uuid }} update is unchecked in preview"
+  when:
+    - desktop_extension_metadata.stat.isreg | default(false)
+    - jsh_update | bool
+    - ansible_check_mode
+
+- name: "{{ desktop_extension_uuid }} would be installed"
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/true
+  changed_when: true
+  check_mode: false
+  when:
+    - desktop_extension_uuid not in desktop_gnome_extensions_present | default([])
+    - ansible_check_mode
+
+- name: "{{ desktop_extension_uuid }} release is read"
+  ansible.builtin.uri:
+    url: >-
+      {{ "https://extensions.gnome.org/extension-info/?uuid="
+         + (desktop_extension_uuid | urlencode)
+         + "&shell_version=" + desktop_gnome_shell_version }}
+    return_content: true
+  register: desktop_extension_release
+  when:
+    - not ansible_check_mode
+    - >-
+      desktop_extension_uuid not in desktop_gnome_extensions_present | default([])
+      or (jsh_update | bool and desktop_extension_metadata.stat.isreg | default(false))
+
+- name: "{{ desktop_extension_uuid }} release is selected"
+  ansible.builtin.set_fact:
+    desktop_extension_build: >-
+      {{ desktop_extension_release.json.shell_version_map[desktop_gnome_shell_version]
+         | default({}) }}
+  when: desktop_extension_release is not skipped
+
+- name: "{{ desktop_extension_uuid }} metadata is read"
+  ansible.builtin.slurp:
+    src: "{{ desktop_extension_metadata.stat.path }}"
+  register: desktop_extension_installed
+  when:
+    - desktop_extension_release is not skipped
+    - desktop_extension_metadata.stat.isreg | default(false)
+
+- name: "{{ desktop_extension_uuid }} release archive is prepared"
+  ansible.builtin.tempfile:
+    state: file
+    suffix: .zip
+  register: desktop_extension_archive
+  vars:
+    desktop_extension_installed_version: >-
+      {{ ((desktop_extension_installed.content | default("e30="))
+          | b64decode | from_json).version | default("") | string }}
+  when:
+    - desktop_extension_release is not skipped
+    - desktop_extension_build | length > 0
+    - >-
+      desktop_extension_installed is skipped
+      or desktop_extension_installed_version != (desktop_extension_build.version | string)
+
+- name: "{{ desktop_extension_uuid }} release archive is downloaded"
+  ansible.builtin.get_url:
+    url: >-
+      {{ "https://extensions.gnome.org/download-extension/"
+         + (desktop_extension_uuid | urlencode)
+         + ".shell-extension.zip?version_tag="
+         + (desktop_extension_build.pk | string) }}
+    dest: "{{ desktop_extension_archive.path }}"
+    mode: "0600"
+  when: desktop_extension_archive is not skipped
+
+- name: "{{ desktop_extension_uuid }} is installed"
+  ansible.builtin.command:
+    argv:
+      - gnome-extensions
+      - install
+      - --force
+      - "{{ desktop_extension_archive.path }}"
+  changed_when: true
+  when: desktop_extension_archive is not skipped
+  notify: GNOME session reload is needed
+
+- name: notice
+  ansible.builtin.debug:
+    msg: "{{ desktop_extension_uuid }}: no release for this GNOME Shell version"
+  when:
+    - desktop_extension_release is not skipped
+    - desktop_extension_build | length == 0
+
+- name: "{{ desktop_extension_uuid }} temporary archive is absent"
+  ansible.builtin.file:
+    path: "{{ desktop_extension_archive.path }}"
+    state: absent
+  when: desktop_extension_archive is not skipped

@@ -1,0 +1,336 @@
+---
+- name: XFCE audio plugin is current
+  ansible.builtin.command:
+    argv:
+      - "{{ role_path }}/files/plugin.sh"
+  environment: "{{ jsh_script_env }}"
+  register: desktop_plugin
+  changed_when: desktop_plugin.stdout is reported_change
+  check_mode: false
+  notify: XFCE panel restarts
+  when: jsh_host == "colossus" and not ansible_check_mode
+
+- name: XFCE string appearance and shortcuts are set
+  community.general.xfconf:
+    channel: "{{ item.channel }}"
+    property: "{{ item.property }}"
+    value:
+      - "{{ item.value }}"
+    value_type:
+      - string
+  loop: >-
+    {{ desktop_xfce_settings | selectattr("type", "equalto", "string") }}
+  loop_control:
+    label: "{{ item.channel }}{{ item.property }} is {{ item.value }}"
+
+- name: XFCE integer appearance settings are set
+  community.general.xfconf:
+    channel: "{{ item.channel }}"
+    property: "{{ item.property }}"
+    value:
+      - "{{ item.value }}"
+    value_type:
+      - int
+  loop: >-
+    {{ desktop_xfce_settings | selectattr("type", "equalto", "int") }}
+  loop_control:
+    label: "{{ item.channel }}{{ item.property }} is {{ item.value }}"
+
+- name: XFCE boolean appearance settings are set
+  community.general.xfconf:
+    channel: "{{ item.channel }}"
+    property: "{{ item.property }}"
+    value:
+      - "{{ item.value }}"
+    value_type:
+      - bool
+  loop: >-
+    {{ desktop_xfce_settings | selectattr("type", "equalto", "bool") }}
+  loop_control:
+    label: "{{ item.channel }}{{ item.property }} is {{ item.value }}"
+
+- name: Arc-Dark theme locations are checked
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    get_checksum: false
+  loop:
+    - /usr/share/themes/Arc-Dark
+    - "{{ desktop_home }}/.themes/Arc-Dark"
+  register: desktop_arc_themes
+
+- name: XFCE Arc-Dark themes are set
+  community.general.xfconf:
+    channel: "{{ item.channel }}"
+    property: "{{ item.property }}"
+    value:
+      - Arc-Dark
+    value_type:
+      - string
+  loop:
+    - { channel: xsettings, property: /Net/ThemeName }
+    - { channel: xfwm4, property: /general/theme }
+  loop_control:
+    label: "{{ item.channel }}{{ item.property }} is Arc-Dark"
+  when: desktop_arc_themes.results | selectattr("stat.isdir", "defined") | selectattr("stat.isdir") | list | length > 0
+
+- name: XFCE icon theme locations are checked
+  ansible.builtin.stat:
+    path: "{{ item.1 }}/{{ item.0 }}"
+    get_checksum: false
+  loop: >-
+    {{ ["Papirus-Dark", "Qogir-Dark", "Arc"]
+       | product(["/usr/share/icons", desktop_home + "/.icons"]) }}
+  loop_control:
+    label: "{{ item.0 }} in {{ item.1 }}"
+  register: desktop_icon_themes
+
+- name: XFCE preferred icon theme is selected
+  ansible.builtin.set_fact:
+    desktop_icon_theme: "{{ item.item.0 }}"
+  loop: "{{ desktop_icon_themes.results }}"
+  loop_control:
+    label: "{{ item.item.0 }}"
+  when: item.stat.isdir | default(false) and desktop_icon_theme | default("") | length == 0
+
+- name: XFCE icon theme is set
+  community.general.xfconf:
+    channel: xsettings
+    property: /Net/IconThemeName
+    value:
+      - "{{ desktop_icon_theme }}"
+    value_type:
+      - string
+  when: desktop_icon_theme | default("") | length > 0
+
+- name: Distribution menu icon is checked
+  ansible.builtin.stat:
+    path: >-
+      /usr/share/icons/Papirus/24x24/apps/distributor-logo-{{ ansible_facts.distribution | lower }}.svg
+    get_checksum: false
+  register: desktop_distribution_icon
+
+- name: XFCE applications menu plugins are listed
+  ansible.builtin.command:
+    argv:
+      - xfconf-query
+      - -c
+      - xfce4-panel
+      - -lv
+  register: desktop_panel_plugins
+  changed_when: false
+  check_mode: false
+
+- name: XFCE applications menus hide custom titles
+  vars:
+    desktop_menu_property: >-
+      {{ item.0.split()[0] }}
+  community.general.xfconf:
+    channel: xfce4-panel
+    property: "{{ desktop_menu_property }}/{{ item.1 }}"
+    value:
+      - "false"
+    value_type:
+      - bool
+  loop: >-
+    {{ desktop_panel_plugins.stdout_lines
+       | select("search", " applicationsmenu$")
+       | product(["custom-menu", "show-button-title"]) }}
+  loop_control:
+    label: "{{ desktop_menu_property }}/{{ item.1 }} is false"
+
+- name: XFCE applications menus use the distribution icon
+  vars:
+    desktop_menu_property: >-
+      {{ item.split()[0] }}
+    desktop_menu_icon: >-
+      {{ "emblem-debian-white" if jsh_platform == "debian"
+         else "distributor-logo-" + (ansible_facts.distribution | lower)
+         if desktop_distribution_icon.stat.isreg | default(false) else "tux" }}
+  community.general.xfconf:
+    channel: xfce4-panel
+    property: "{{ desktop_menu_property }}/button-icon"
+    value:
+      - "{{ desktop_menu_icon }}"
+    value_type:
+      - string
+  loop: >-
+    {{ desktop_panel_plugins.stdout_lines | select("search", " applicationsmenu$") }}
+  loop_control:
+    label: "{{ desktop_menu_property }}/button-icon is {{ desktop_menu_icon }}"
+
+- name: zsh is found for XFCE Terminal
+  ansible.builtin.command:
+    argv:
+      - sh
+      - -c
+      - "PATH=/usr/local/bin:/usr/bin:/bin command -v zsh"
+  register: desktop_zsh
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: XFCE Terminal runs zsh
+  community.general.xfconf:
+    channel: xfce4-terminal
+    property: /custom-command
+    value:
+      - "{{ desktop_zsh.stdout }}"
+    value_type:
+      - string
+  when: desktop_zsh.rc == 0
+
+- name: XFCE Terminal runs a custom login shell
+  community.general.xfconf:
+    channel: xfce4-terminal
+    property: "{{ item }}"
+    value:
+      - "true"
+    value_type:
+      - bool
+  loop:
+    - /run-custom-command
+    - /command-login-shell
+  loop_control:
+    label: "xfce4-terminal{{ item }} is true"
+  when: desktop_zsh.rc == 0
+
+- name: XFCE panel plugins and layout are current
+  ansible.builtin.command:
+    argv:
+      - "{{ role_path }}/files/panel.sh"
+      - apply
+  environment: "{{ jsh_script_env }}"
+  register: desktop_panel
+  changed_when: desktop_panel.stdout is reported_change
+  check_mode: false
+  notify: XFCE panel restarts
+
+- name: XFCE autostart directory exists
+  ansible.builtin.file:
+    path: "{{ desktop_config }}/autostart"
+    state: directory
+    mode: u=rwx
+
+- name: Legacy light-locker autostart is disabled
+  ansible.builtin.copy:
+    dest: "{{ desktop_config }}/autostart/light-locker.desktop"
+    mode: "0644"
+    content: |
+      [Desktop Entry]
+      Type=Application
+      Name=Screen Locker
+      Exec=light-locker
+      Hidden=true
+
+- name: Legacy light-locker process is checked
+  ansible.builtin.command:
+    argv:
+      - pgrep
+      - -x
+      - light-locker
+  register: desktop_light_locker
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: Legacy light-locker process is stopped
+  ansible.builtin.command:
+    argv:
+      - pkill
+      - -x
+      - light-locker
+  changed_when: false
+  check_mode: false
+  when: desktop_light_locker.rc == 0 and not ansible_check_mode
+
+- name: xfce4-screensaver is found
+  ansible.builtin.command:
+    argv:
+      - sh
+      - -c
+      - "command -v xfce4-screensaver"
+  register: desktop_screensaver_command
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: XFCE screensaver and power string settings are set
+  community.general.xfconf:
+    channel: "{{ item.channel }}"
+    property: "{{ item.property }}"
+    value:
+      - "{{ item.value }}"
+    value_type:
+      - string
+  loop: >-
+    {{ desktop_xfce_screensaver_settings | selectattr("type", "equalto", "string") }}
+  loop_control:
+    label: "{{ item.channel }}{{ item.property }} is {{ item.value }}"
+  when: not item.screensaver | default(false) or desktop_screensaver_command.rc == 0
+
+- name: XFCE screensaver and power boolean settings are set
+  community.general.xfconf:
+    channel: "{{ item.channel }}"
+    property: "{{ item.property }}"
+    value:
+      - "{{ item.value }}"
+    value_type:
+      - bool
+  loop: >-
+    {{ desktop_xfce_screensaver_settings | selectattr("type", "equalto", "bool") }}
+  loop_control:
+    label: "{{ item.channel }}{{ item.property }} is {{ item.value }}"
+  when: not item.screensaver | default(false) or desktop_screensaver_command.rc == 0
+
+- name: XFCE screensaver and power integer settings are set
+  community.general.xfconf:
+    channel: "{{ item.channel }}"
+    property: "{{ item.property }}"
+    value:
+      - "{{ item.value }}"
+    value_type:
+      - int
+  loop: >-
+    {{ desktop_xfce_screensaver_settings | selectattr("type", "equalto", "int") }}
+  loop_control:
+    label: "{{ item.channel }}{{ item.property }} is {{ item.value }}"
+  when: not item.screensaver | default(false) or desktop_screensaver_command.rc == 0
+
+- name: XFCE screensaver and power unsigned integer settings are set
+  community.general.xfconf:
+    channel: "{{ item.channel }}"
+    property: "{{ item.property }}"
+    value:
+      - "{{ item.value }}"
+    value_type:
+      - uint
+  loop: >-
+    {{ desktop_xfce_screensaver_settings | selectattr("type", "equalto", "uint") }}
+  loop_control:
+    label: "{{ item.channel }}{{ item.property }} is {{ item.value }}"
+  when: not item.screensaver | default(false) or desktop_screensaver_command.rc == 0
+
+- name: XFCE screensaver process is checked
+  ansible.builtin.command:
+    argv:
+      - pgrep
+      - -f
+      - "[x]fce4-screensaver"
+  register: desktop_screensaver_running
+  changed_when: false
+  check_mode: false
+  failed_when: false
+  when: desktop_screensaver_command.rc == 0
+
+- name: XFCE screensaver process is running
+  ansible.builtin.shell: >-
+    nohup setsid xfce4-screensaver >/dev/null 2>&1 </dev/null &
+  environment:
+    DISPLAY: "{{ lookup('ansible.builtin.env', 'DISPLAY') or ':0' }}"
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when:
+    - desktop_screensaver_command.rc == 0
+    - desktop_screensaver_running.rc != 0
+    - not ansible_check_mode

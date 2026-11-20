@@ -1,154 +1,38 @@
-# inputrc - Readline configuration
-# Used by bash, python, mysql, and other readline-based programs
-
-# =============================================================================
-# General Settings
-# =============================================================================
-
-# Vi editing mode
-set editing-mode vi
-
-# Show mode in prompt (insert/command)
-set show-mode-in-prompt on
-
-# Mode indicators (cursor shape changes)
-set vi-ins-mode-string \1\e[6 q\2
-set vi-cmd-mode-string \1\e[2 q\2
-
-# Completion settings
+# Make Tab autocomplete regardless of filename case
 set completion-ignore-case on
-set completion-map-case on
+
+# List all matches in case multiple possible completions are possible
 set show-all-if-ambiguous on
-set show-all-if-unmodified on
-set menu-complete-display-prefix on
-set completion-prefix-display-length 2
 
-# Colored completion
-set colored-stats on
-set colored-completion-prefix on
-set visible-stats on
-
-# Mark symlinked directories
+# Immediately add a trailing slash when autocompleting symlinks to directories
 set mark-symlinked-directories on
 
-# Paging
+# Do not autocomplete hidden files unless the pattern explicitly begins with a dot
+set match-hidden-files off
+
+# Show all autocomplete results at once
 set page-completions off
 
-# History
-set revert-all-at-newline on
-set history-preserve-point on
+# If there are more than 200 possible completions for a word, ask to show them all
+set completion-query-items 200
 
-# Disable bell
-set bell-style none
+# Show extra file information when completing, like `ls -F` does
+set visible-stats on
 
-# =============================================================================
-# Vi Insert Mode Bindings
-# =============================================================================
+# Be more intelligent when autocompleting by also looking at the text after
+# the cursor. For example, when the current line is "cd ~/src/mozil", and
+# the cursor is on the "z", pressing Tab will not autocomplete it to "cd
+# ~/src/mozillail", but to "cd ~/src/mozilla". (This is supported by the
+# Readline used by Bash 4.)
+set skip-completed-text on
 
-set keymap vi-insert
+# Allow UTF-8 input and output, instead of showing stuff like $'\0123\0456'
+set input-meta on
+set output-meta on
+set convert-meta off
 
-# Ctrl+L clears screen
-"\C-l": clear-screen
+# Set vi style shortcuts (shell agnostic)
+set editing-mode vi
 
-# History navigation (prefix search)
-"\e[A": history-search-backward
-"\e[B": history-search-forward
-"\C-p": history-search-backward
-"\C-n": history-search-forward
-
-# Word navigation
-"\e[1;5D": backward-word
-"\e[1;5C": forward-word
-"\eb": backward-word
-"\ef": forward-word
-"\e[1;3D": backward-word
-"\e[1;3C": forward-word
-
-# Line navigation
-"\C-a": beginning-of-line
-"\C-e": end-of-line
-"\e[H": beginning-of-line
-"\e[F": end-of-line
-
-# Editing
-"\C-k": kill-line
-"\C-u": unix-line-discard
-"\C-w": unix-word-rubout
-"\C-y": yank
-"\C-d": delete-char
-
-# Home/End
-"\e[1~": beginning-of-line
-"\e[4~": end-of-line
-
-# Delete
-"\e[3~": delete-char
-
-# Backspace (handle both DEL and BS)
-"\C-?": backward-delete-char
-"\C-h": backward-delete-char
-
-# Edit in $EDITOR
-"\C-x\C-e": edit-and-execute-command
-
-# =============================================================================
-# Vi Command Mode Bindings
-# =============================================================================
-
-set keymap vi-command
-
-# Clear screen
-"\C-l": clear-screen
-
-# History navigation
-"\e[A": history-search-backward
-"\e[B": history-search-forward
-"k": history-search-backward
-"j": history-search-forward
-"\C-p": history-search-backward
-"\C-n": history-search-forward
-
-# Beginning/End of history
-"gg": beginning-of-history
-"G": end-of-history
-
-# Edit in $EDITOR (V to edit, v remains visual mode)
-"V": edit-and-execute-command
-"\C-x\C-e": edit-and-execute-command
-
-# Word navigation
-"\e[1;5D": backward-word
-"\e[1;5C": forward-word
-
-# =============================================================================
-# Emacs Mode Bindings (fallback)
-# =============================================================================
-
-set keymap emacs
-
-"\e[A": history-search-backward
-"\e[B": history-search-forward
-"\e[1;5D": backward-word
-"\e[1;5C": forward-word
-"\eb": backward-word
-"\ef": forward-word
-
-# =============================================================================
-# Application-Specific Settings
-# =============================================================================
-
-$if Bash
-  # Bash-specific: Magic space expands history
-  Space: magic-space
-$endif
-
-$if Python
-  # Python REPL settings
-  set editing-mode vi
-$endif
-
-# =============================================================================
-# Include Local Overrides
-# =============================================================================
-
-$include ~/.inputrc.local
+# Eliminate unwanted prefixed (e.g. '200~') when pasting text
+set enable-bracketed-paste off

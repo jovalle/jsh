@@ -1,0 +1,20 @@
+---
+- name: Wox application is checked
+  ansible.builtin.stat:
+    path: "{{ wox_application }}"
+  register: wox_application_stat
+
+- name: Wox macOS values are selected
+  ansible.builtin.set_fact:
+    wox_present: "{{ wox_application_stat.stat.isdir | default(false) }}"
+    wox_platform: darwin
+    wox_hotkey: cmd+space
+    wox_launch:
+      - open
+      - -a
+      - Wox
+
+- name: info
+  ansible.builtin.debug:
+    msg: "Skipping Wox: {{ wox_application }} is not installed"
+  when: not wox_present | bool

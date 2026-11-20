@@ -1,0 +1,23 @@
+---
+- name: macOS keyboard settings are set
+  community.general.osx_defaults:
+    domain: "{{ desktop_keybindings_domain }}"
+    key: "{{ item.key }}"
+    type: int
+    value: "{{ item.value }}"
+    path: "{{ desktop_keybindings_defaults_path }}"
+  loop: "{{ desktop_keybindings_keyboard | dict2items }}"
+  loop_control:
+    label: "{{ item.key }} is {{ item.value }}"
+
+- name: macOS menu shortcuts are set
+  community.general.osx_defaults:
+    domain: "{{ desktop_keybindings_domain }}"
+    key: NSUserKeyEquivalents
+    type: dict # noqa args[module] -- supported by community.general 12.5
+    dict_mode: add
+    value: "{{ {item.key: item.value} }}"
+    path: "{{ desktop_keybindings_defaults_path }}"
+  loop: "{{ desktop_keybindings_menu_shortcuts | dict2items }}"
+  loop_control:
+    label: "{{ item.key }} shortcut is {{ item.value }}"

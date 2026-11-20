@@ -1,0 +1,39 @@
+---
+# jsh settings come from the same JSH_* variables the Bash setup reads.
+jsh_root: "{{ lookup('ansible.builtin.env', 'JSH_ROOT') or (playbook_dir | dirname) }}"
+jsh_update: "{{ lookup('ansible.builtin.env', 'JSH_UPDATE') == '1' }}"
+jsh_keep_apps: "{{ lookup('ansible.builtin.env', 'JSH_KEEP_APPS') == '1' }}"
+jsh_wallpaper: "{{ lookup('ansible.builtin.env', 'JSH_WALLPAPER') }}"
+jsh_audio_policy: "{{ lookup('ansible.builtin.env', 'JSH_AUDIO_POLICY') }}"
+jsh_waterfox_profile: "{{ lookup('ansible.builtin.env', 'JSH_WATERFOX_PROFILE') }}"
+
+# Same detection as scripts/lib/common.sh: JSH_* wins, then facts.
+jsh_platform: >-
+  {{ lookup('ansible.builtin.env', 'JSH_PLATFORM')
+     or ('darwin' if ansible_facts.system == 'Darwin'
+         else 'debian' if ansible_facts.os_family == 'Debian'
+         else 'rhel' if ansible_facts.os_family == 'RedHat'
+         else 'linux') }}
+jsh_session: >-
+  {{ lookup('ansible.builtin.env', 'XDG_CURRENT_DESKTOP')
+     or lookup('ansible.builtin.env', 'DESKTOP_SESSION') }}
+jsh_desktop: >-
+  {{ lookup('ansible.builtin.env', 'JSH_DESKTOP')
+     or ('darwin' if jsh_platform == 'darwin'
+         else 'gnome' if jsh_session is search('gnome', ignorecase=true)
+         else 'xfce' if jsh_session is search('xfce', ignorecase=true)
+         else '') }}
+jsh_host: >-
+  {{ lookup('ansible.builtin.env', 'JSH_HOST')
+     or (inventory_hostname if inventory_hostname != 'localhost' else ansible_facts.hostname) }}
+
+# Environment for helper scripts that source scripts/lib/common.sh.
+jsh_script_env:
+  JSH_ROOT: "{{ jsh_root }}"
+  JSH_PLATFORM: "{{ jsh_platform }}"
+  JSH_DESKTOP: "{{ jsh_desktop }}"
+  JSH_HOST: "{{ jsh_host }}"
+  JSH_UPDATE: "{{ jsh_update | int }}"
+  JSH_KEEP_APPS: "{{ jsh_keep_apps | int }}"
+  JSH_DRY_RUN: "{{ ansible_check_mode | int }}"
+  JSH_OUTPUT: renderer

@@ -1,0 +1,35 @@
+---
+- name: Cached sudo is available
+  ansible.builtin.command:
+    argv:
+      - sudo
+      - -n
+      - "true"
+  register: linux_sudo_ready
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: linux_user != "root" and not ansible_check_mode
+
+- name: notice
+  ansible.builtin.debug:
+    msg: Linux system configuration needs sudo; run `sudo -v` first, then rerun
+  when:
+    - linux_user != "root"
+    - not ansible_check_mode
+    - linux_sudo_ready.rc != 0
+
+- name: info
+  ansible.builtin.debug:
+    msg: "Skipping Linux system configuration: sudo is unavailable"
+  when:
+    - linux_user != "root"
+    - not ansible_check_mode
+    - linux_sudo_ready.rc != 0
+
+- name: Linux system configuration stops without sudo
+  ansible.builtin.meta: end_role
+  when:
+    - linux_user != "root"
+    - not ansible_check_mode
+    - linux_sudo_ready.rc != 0

@@ -1,0 +1,5 @@
+{% for line in lookup("ansible.builtin.file", role_path + "/files/sysctl.conf").splitlines() if line.startswith("#") %}
+{{ line }}
+{% endfor %}{% for result in linux_sysctl_read.results %}
+{{ result.item.key }} = {{ [result.item.value | int, result.stdout | trim | int] | max }}
+{% endfor %}

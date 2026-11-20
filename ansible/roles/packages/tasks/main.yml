@@ -1,0 +1,29 @@
+---
+- name: Packages for this platform are selected
+  ansible.builtin.set_fact:
+    packages_selected: >-
+      {{ jsh_platform | packages_selection(jsh_desktop, ansible_run_tags, packages_common,
+                                           packages_roles, packages_extra, packages_roles_extra) }}
+
+- name: Homebrew packages are installed
+  ansible.builtin.include_tasks: brew.yml
+  when: packages_selected.keys() | intersect(['taps', 'brew', 'casks', 'mas']) | length > 0
+
+- name: Native packages are installed
+  ansible.builtin.include_tasks: native.yml
+  when: packages_selected.keys() | intersect(['apt', 'dnf']) | length > 0
+
+- name: Flatpak apps are installed
+  ansible.builtin.include_tasks: flatpak.yml
+  when: packages_selected.flatpak is defined
+
+- name: uv tools are installed
+  ansible.builtin.include_tasks: uv.yml
+  when: packages_selected.uv is defined
+
+- name: AppImages are installed
+  ansible.builtin.include_tasks: appimage.yml
+  loop: "{{ packages_selected.appimage | default([]) }}"
+  loop_control:
+    loop_var: packages_appimage
+    label: "{{ packages_appimage.name }}"

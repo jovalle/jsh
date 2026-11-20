@@ -1,0 +1,40 @@
+---
+- name: "Wox hotkey is {{ wox_hotkey }}"
+  vars:
+    wox_main_sql: >-
+      INSERT OR REPLACE INTO wox_settings ("key", "value")
+      VALUES ('MainHotkey@{{ wox_platform }}', '{{ wox_hotkey }}')
+  ansible.builtin.command:
+    argv: >-
+      {{ ['/usr/bin/true'] if ansible_check_mode else
+         ['sqlite3', wox_database_path, wox_main_sql] }}
+  changed_when: true
+  check_mode: false
+  when: wox_current_hotkey != wox_hotkey
+
+- name: ok
+  ansible.builtin.debug:
+    msg: "Wox hotkey is {{ wox_hotkey }}"
+  when: wox_current_hotkey == wox_hotkey
+
+- name: Wox Command+Shift+V is disabled
+  vars:
+    wox_clipboard_sql: >-
+      UPDATE wox_settings SET value = (
+        SELECT json_group_array(json(CASE
+          WHEN lower(json_extract(value, '$.Hotkey')) = 'cmd+shift+v'
+          THEN json_set(value, '$.Disabled', json('true')) ELSE value END))
+        FROM json_each(wox_settings.value))
+      WHERE key = 'QueryHotkeys@darwin'
+  ansible.builtin.command:
+    argv: >-
+      {{ ['/usr/bin/true'] if ansible_check_mode else
+         ['sqlite3', wox_database_path, wox_clipboard_sql] }}
+  changed_when: true
+  check_mode: false
+  when: wox_platform == 'darwin' and wox_database_ready | bool and wox_clipboard_count > 0
+
+- name: ok
+  ansible.builtin.debug:
+    msg: Wox Command+Shift+V is disabled
+  when: wox_platform == 'darwin' and wox_database_ready | bool and wox_clipboard_count == 0

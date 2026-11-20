@@ -1,0 +1,82 @@
+---
+- name: Wox process is checked
+  ansible.builtin.command:
+    argv:
+      - pgrep
+      - -u
+      - "{{ lookup('ansible.builtin.pipe', 'id -u') }}"
+      - -x
+      - wox|Wox
+  register: wox_running
+  changed_when: false
+  check_mode: false
+  failed_when: wox_running.rc not in [0, 1]
+
+- name: ok
+  ansible.builtin.debug:
+    msg: Wox is running
+  when: wox_running.rc == 0
+
+- name: Wox is launched
+  ansible.builtin.shell: >-
+    {{ wox_launch | map('quote') | join(' ') }} </dev/null >/dev/null 2>&1 &
+  changed_when: false
+  check_mode: false
+  when: wox_running.rc != 0 and not ansible_check_mode
+
+- name: Wox process has started
+  ansible.builtin.command:
+    argv:
+      - pgrep
+      - -u
+      - "{{ lookup('ansible.builtin.pipe', 'id -u') }}"
+      - -x
+      - wox|Wox
+  register: wox_started
+  until: wox_started.rc == 0
+  retries: 10
+  delay: 1
+  changed_when: false
+  check_mode: false
+  failed_when: false
+  when: wox_running.rc != 0 and not ansible_check_mode
+
+- name: Wox started
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/true
+  changed_when: true
+  check_mode: false
+  when: >-
+    wox_running.rc != 0
+    and (ansible_check_mode or wox_started.rc | default(1) == 0)
+
+- name: info
+  ansible.builtin.debug:
+    msg: Wox did not start
+  when: >-
+    wox_running.rc != 0 and not ansible_check_mode
+    and wox_started.rc | default(1) != 0
+
+- name: Wox startup directory exists
+  ansible.builtin.command:
+    argv: >-
+      {{ ['/usr/bin/true'] if ansible_check_mode else
+         ['bash', '-c', 'mkdir -p -- \"$1\" && chmod u+rwx \"$1\"', 'jsh-wox-directory',
+          (wox_agent_path if jsh_platform == 'darwin' else wox_autostart_path) | dirname] }}
+  changed_when: false
+  check_mode: false
+
+- name: Wox LaunchAgent is current
+  ansible.builtin.template:
+    src: agent.plist.j2
+    dest: "{{ wox_agent_path }}"
+    mode: "0644"
+  when: jsh_platform == 'darwin'
+
+- name: Wox autostart entry is current
+  ansible.builtin.template:
+    src: wox.desktop.j2
+    dest: "{{ wox_autostart_path }}"
+    mode: "0644"
+  when: jsh_platform != 'darwin'

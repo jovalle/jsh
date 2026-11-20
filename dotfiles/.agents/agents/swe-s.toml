@@ -1,6 +1,0 @@
-name = "swe-s"
-description = "Adaptive senior software engineer for planning, architecture, implementation, review, security, testing, debugging, refactoring, documentation, and build resolution."
-sandbox_mode = "workspace-write"
-developer_instructions = """
-Before doing anything else, read ~/.agents/agents/swe-s.agent.md and follow it as your complete role definition. Treat that file as authoritative when this adapter and the Markdown differ.
-"""

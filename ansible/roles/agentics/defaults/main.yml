@@ -1,0 +1,91 @@
+---
+agentics_home: "{{ lookup('ansible.builtin.env', 'HOME') }}"
+agentics_config: "{{ lookup('ansible.builtin.env', 'XDG_CONFIG_HOME') or agentics_home ~ '/.config' }}"
+agentics_state: "{{ lookup('ansible.builtin.env', 'XDG_STATE_HOME') or agentics_home ~ '/.local/state' }}"
+# One rules file for every installed agent; each agent's own directory shows it is installed.
+agentics_instructions:
+  - "{{ agentics_home }}/.codex/AGENTS.md"
+  - "{{ agentics_config }}/opencode/AGENTS.md"
+  - "{{ agentics_home }}/.claude/CLAUDE.md"
+  - "{{ agentics_home }}/.gemini/GEMINI.md"
+agentics_helium: "{{ agentics_home }}/Library/Application Support/net.imput.helium"
+agentics_native_hosts: "{{ agentics_home }}/.codex/chrome-native-hosts-v2.json"
+
+# skills
+agentics_skills_home: "{{ lookup('ansible.builtin.env', 'HOME') }}"
+agentics_skills_vendor: >-
+  {{ (lookup('ansible.builtin.env', 'JSH_VENDOR')
+      or (lookup('ansible.builtin.env', 'XDG_DATA_HOME') or agentics_skills_home ~ '/.local/share') ~ '/jsh/vendor')
+     ~ '/skills' }}
+# Machine-local skills: SOURCE (relative to $HOME) TAB NAME; the first list found is used.
+agentics_skills_local_lists:
+  - "{{ (lookup('ansible.builtin.env', 'XDG_CONFIG_HOME') or agentics_skills_home ~ '/.config') ~ '/jsh/skills.tsv' }}"
+  - "{{ jsh_root }}/local/skills.tsv"
+# The instructions area installs graphify and reverse-engineer-anything as real directories.
+agentics_skills_bundled:
+  - github-actions-hardening
+  - show-me-your-work
+agentics_skills_repos:
+  - {name: anthropics-skills, url: "https://github.com/anthropics/skills.git"}
+  - {name: archify, url: "https://github.com/tt-a1i/archify.git"}
+  - {name: better-icons, url: "https://github.com/better-auth/better-icons.git"}
+  - {name: chrome-agent, url: "https://github.com/sderosiaux/chrome-agent.git"}
+  - {name: cloudflare-skills, url: "https://github.com/cloudflare/skills.git"}
+  - {name: hallmark, url: "https://github.com/Nutlope/hallmark.git"}
+  - {name: humanizer, url: "https://github.com/blader/humanizer.git"}
+  - {name: impeccable, url: "https://github.com/pbakaus/impeccable.git"}
+  - {name: mattpocock-skills, url: "https://github.com/mattpocock/skills.git"}
+  - {name: openai-skills, url: "https://github.com/openai/skills.git"}
+  - {name: superpowers, url: "https://github.com/obra/superpowers.git"}
+  - {name: thesysdev-skills, url: "https://github.com/thesysdev/skills.git"}
+  - {name: ui-ux-pro-max-skill, url: "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill.git"}
+# Published skills: SOURCE (relative to the vendor folder) and NAME under ~/.agents/skills.
+agentics_skills_links:
+  - {source: anthropics-skills/skills/frontend-design, name: frontend-design}
+  - {source: anthropics-skills/skills/skill-creator, name: skill-creator}
+  - {source: archify/archify, name: archify}
+  - {source: better-icons/skills, name: better-icons}
+  - {source: chrome-agent/skills/scrape-structured-data, name: scrape-structured-data}
+  - {source: cloudflare-skills/skills/agents-sdk, name: agents-sdk}
+  - {source: cloudflare-skills/skills/basin, name: basin}
+  - {source: cloudflare-skills/skills/cf-cli, name: cf-cli}
+  - {source: cloudflare-skills/skills/cloudflare, name: cloudflare}
+  - {source: cloudflare-skills/skills/cloudflare-email-service, name: cloudflare-email-service}
+  - {source: cloudflare-skills/skills/cloudflare-one, name: cloudflare-one}
+  - {source: cloudflare-skills/skills/cloudflare-one-migrations, name: cloudflare-one-migrations}
+  - {source: cloudflare-skills/skills/durable-objects, name: durable-objects}
+  - {source: cloudflare-skills/skills/gateway-workers, name: gateway-workers}
+  - {source: cloudflare-skills/skills/k2, name: k2}
+  - {source: cloudflare-skills/skills/nextjs-on-cloudflare, name: nextjs-on-cloudflare}
+  - {source: cloudflare-skills/skills/sandbox-migrate-to-next, name: sandbox-migrate-to-next}
+  - {source: cloudflare-skills/skills/sandbox-next, name: sandbox-next}
+  - {source: cloudflare-skills/skills/sandbox-stable, name: sandbox-stable}
+  - {source: cloudflare-skills/skills/turnstile-spin, name: turnstile-spin}
+  - {source: cloudflare-skills/skills/web-perf, name: web-perf}
+  - {source: cloudflare-skills/skills/workers-best-practices, name: workers-best-practices}
+  - {source: cloudflare-skills/skills/workers-profiling, name: workers-profiling}
+  - {source: cloudflare-skills/skills/wrangler, name: wrangler}
+  - {source: hallmark/skills/hallmark, name: hallmark}
+  - {source: humanizer, name: humanizer}
+  - {source: impeccable/.agents/skills/impeccable, name: impeccable}
+  - {source: mattpocock-skills/skills/engineering/research, name: research}
+  - {source: mattpocock-skills/skills/productivity/handoff, name: handoff}
+  - {source: mattpocock-skills/skills/productivity/teach, name: teach}
+  - {source: openai-skills/skills/.curated/gh-address-comments, name: gh-address-comments}
+  - {source: openai-skills/skills/.curated/gh-fix-ci, name: gh-fix-ci}
+  - {source: superpowers/skills/brainstorming, name: brainstorming}
+  - {source: superpowers/skills/dispatching-parallel-agents, name: dispatching-parallel-agents}
+  - {source: superpowers/skills/executing-plans, name: executing-plans}
+  - {source: superpowers/skills/finishing-a-development-branch, name: finishing-a-development-branch}
+  - {source: superpowers/skills/receiving-code-review, name: receiving-code-review}
+  - {source: superpowers/skills/requesting-code-review, name: requesting-code-review}
+  - {source: superpowers/skills/subagent-driven-development, name: subagent-driven-development}
+  - {source: superpowers/skills/systematic-debugging, name: systematic-debugging}
+  - {source: superpowers/skills/test-driven-development, name: test-driven-development}
+  - {source: superpowers/skills/using-git-worktrees, name: using-git-worktrees}
+  - {source: superpowers/skills/using-superpowers, name: using-superpowers}
+  - {source: superpowers/skills/verification-before-completion, name: verification-before-completion}
+  - {source: superpowers/skills/writing-plans, name: writing-plans}
+  - {source: superpowers/skills/writing-skills, name: writing-skills}
+  - {source: thesysdev-skills/skills/openui, name: openui}
+  - {source: ui-ux-pro-max-skill/.claude/skills/ui-ux-pro-max, name: ui-ux-pro-max}

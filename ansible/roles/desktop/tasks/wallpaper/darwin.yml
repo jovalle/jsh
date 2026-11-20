@@ -1,0 +1,44 @@
+---
+- name: macOS wallpaper is read
+  ansible.builtin.command:
+    argv:
+      - osascript
+      - -e
+      - >-
+        on run argv
+          tell application "System Events"
+            repeat with itemDesktop in desktops
+              if picture of itemDesktop is not item 1 of argv then return false
+            end repeat
+          end tell
+          return true
+        end run
+      - "{{ desktop_wallpaper_realpath.stdout }}"
+  register: desktop_wallpaper_current
+  changed_when: false
+  check_mode: false
+
+- name: "wallpaper is {{ jsh_wallpaper }}"
+  vars:
+    desktop_wallpaper_set_script: |
+      on run argv
+        tell application "System Events"
+          repeat with itemDesktop in desktops
+            if picture of itemDesktop is not item 1 of argv then
+              set picture of itemDesktop to item 1 of argv
+            end if
+          end repeat
+        end tell
+      end run
+  ansible.builtin.command:
+    argv: >-
+      {{ ['/usr/bin/true'] if ansible_check_mode else
+         ['osascript', '-e', desktop_wallpaper_set_script, desktop_wallpaper_realpath.stdout] }}
+  changed_when: true
+  check_mode: false
+  when: desktop_wallpaper_current.stdout != 'true'
+
+- name: ok
+  ansible.builtin.debug:
+    msg: "wallpaper is {{ jsh_wallpaper }}"
+  when: desktop_wallpaper_current.stdout == 'true'

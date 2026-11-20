@@ -1,0 +1,76 @@
+---
+- name: notice
+  ansible.builtin.debug:
+    msg: "restart the XFCE panel to apply its settings: jsh update desktop"
+  listen: XFCE panel restarts
+  when: jsh_keep_apps | bool
+
+- name: XFCE panel restarts now
+  ansible.builtin.command:
+    argv:
+      - "{{ role_path }}/files/panel.sh"
+      - restart
+  environment: "{{ jsh_script_env }}"
+  changed_when: desktop_panel_restart.stdout is reported_change
+  check_mode: false
+  register: desktop_panel_restart
+  listen: XFCE panel restarts
+  when: not jsh_keep_apps | bool and not ansible_check_mode
+
+- name: notice
+  ansible.builtin.debug:
+    msg: Log out and back in so GNOME Shell loads extension changes
+  listen: GNOME session reload is needed
+
+- name: Font cache is refreshed
+  ansible.builtin.command:
+    argv:
+      - fc-cache
+      - "{{ desktop_fonts_directory }}"
+  changed_when: false
+  failed_when: false
+
+- name: Wave:3 udev configuration reloads
+  ansible.builtin.command:
+    argv:
+      - udevadm
+      - control
+      - --reload
+  become: true
+  changed_when: false
+  check_mode: false
+  listen: Wave:3 udev rules reload
+  when: not ansible_check_mode
+
+- name: Wave:3 USB device is retriggered
+  ansible.builtin.command:
+    argv:
+      - udevadm
+      - trigger
+      - --action=change
+      - --subsystem-match=usb
+      - --attr-match=idVendor=0fd9
+      - --attr-match=idProduct=0070
+  become: true
+  changed_when: false
+  check_mode: false
+  listen: Wave:3 udev rules reload
+  when: not ansible_check_mode
+
+- name: Wave:3 udev rules reloaded
+  ansible.builtin.command:
+    argv:
+      - udevadm
+      - settle
+  become: true
+  changed_when: true
+  listen: Wave:3 udev rules reload
+  when: not ansible_check_mode
+
+- name: WirePlumber restarted
+  ansible.builtin.systemd_service:
+    name: wireplumber.service
+    scope: user
+    state: restarted
+  listen: WirePlumber restarts
+  when: not ansible_check_mode and desktop_audio_systemctl.rc | default(1) == 0

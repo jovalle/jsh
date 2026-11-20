@@ -1,0 +1,167 @@
+---
+- name: Copilot instructions folder exists
+  ansible.builtin.file:
+    path: "{{ agentics_home }}/.copilot/instructions"
+    state: directory
+    mode: u+rwx
+  when: (agentics_home ~ '/.copilot') is directory
+
+- name: "{{ agentics_home }}/.copilot/instructions/jsh.instructions.md"
+  ansible.builtin.copy:
+    dest: "{{ agentics_home }}/.copilot/instructions/jsh.instructions.md"
+    mode: "0644"
+    content: |
+      ---
+      description: "Global rules from jsh: commit messages, naming, and secrets."
+      applyTo: "**"
+      ---
+      {{ lookup('ansible.builtin.file', role_path ~ '/files/instructions.md', rstrip=false) }}
+  when: (agentics_home ~ '/.copilot') is directory
+
+- name: Agent instructions are written
+  ansible.builtin.copy:
+    src: instructions.md
+    dest: "{{ item }}"
+    mode: "0644"
+  loop: "{{ agentics_instructions | select('regex', '.') | list }}"
+  when: item | dirname is directory
+
+- name: OpenCode and Codex are found
+  ansible.builtin.command:
+    argv:
+      - sh
+      - -c
+      - 'command -v "$1"'
+      - sh
+      - "{{ item }}"
+  loop:
+    - opencode
+    - codex
+  register: agentics_commands
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: "{{ agentics_config }}/opencode/opencode.json"
+  settings:
+    path: "{{ agentics_config }}/opencode/opencode.json"
+    values:
+      $schema: https://opencode.ai/config.json
+      autoupdate: true
+    absent:
+      - - mcp
+        - notion
+  when: agentics_commands.results[0].rc == 0 or (agentics_config ~ '/opencode') is directory
+
+- name: Codex settings are checked
+  community.general.ini_file:
+    path: "{{ agentics_home }}/.codex/config.toml"
+    section: "{{ item.section }}"
+    option: "{{ item.option }}"
+    value: "{{ item.value }}"
+    no_extra_spaces: false
+    mode: "0600"
+  loop: &codex_settings
+    - {section: null, option: check_for_update_on_startup, value: "true"}
+    - {section: desktop, option: open-link-in-target-preference, value: '"external-browser"'}
+    - {section: desktop, option: open-local-url-in-target-preference, value: '"external-browser"'}
+  loop_control:
+    label: "{{ item.option }} is {{ item.value }}"
+  check_mode: true
+  register: agentics_codex_settings
+  when: agentics_commands.results[1].rc == 0 or (agentics_home ~ '/.codex/config.toml') is file
+
+- name: Existing Codex settings are backed up
+  ansible.builtin.command:
+    argv:
+      - sh
+      - -c
+      - 'mkdir -p "$(dirname "$2")" && cp -Pp "$1" "$2"'
+      - sh
+      - "{{ agentics_home }}/.codex/config.toml"
+      - "{{ agentics_state }}/jsh/backups/{{ now(fmt='%Y%m%d-%H%M%S') }}-ansible/.codex/config.toml"
+  changed_when: false
+  check_mode: false
+  when: >-
+    not ansible_check_mode and (agentics_home ~ '/.codex/config.toml') is file
+    and agentics_codex_settings.results | default([]) | selectattr('changed') | list | length > 0
+
+- name: Codex settings
+  community.general.ini_file:
+    path: "{{ agentics_home }}/.codex/config.toml"
+    section: "{{ item.section }}"
+    option: "{{ item.option }}"
+    value: "{{ item.value }}"
+    no_extra_spaces: false
+    mode: "0600"
+  loop: *codex_settings
+  loop_control:
+    label: "{{ item.option }} is {{ item.value }}"
+  when: >-
+    not ansible_check_mode
+    and (agentics_commands.results[1].rc == 0 or (agentics_home ~ '/.codex/config.toml') is file)
+
+- name: Codex settings preview
+  ansible.builtin.command: "true"
+  loop: "{{ agentics_codex_settings.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.option }} is {{ item.item.value }}"
+  changed_when: true
+  check_mode: false
+  when: ansible_check_mode and item is changed
+
+- name: ok
+  ansible.builtin.debug:
+    msg: "{{ item.item.option }} is {{ item.item.value }}"
+  loop: "{{ agentics_codex_settings.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.option }} is {{ item.item.value }}"
+  when: ansible_check_mode and item is not changed
+
+- name: Helium native messaging
+  when: jsh_platform == 'darwin' and agentics_helium is directory and agentics_native_hosts is file
+  block:
+    - name: Native host registry is read
+      ansible.builtin.slurp:
+        src: "{{ agentics_native_hosts }}"
+      register: agentics_registry
+
+    - name: Newest native host is selected
+      ansible.builtin.set_fact:
+        agentics_host: >-
+          {{ (agentics_registry.content | b64decode | from_json).entries | default([])
+             | sort(attribute='updatedAt') | last | default({}) }}
+
+    - name: Native host names are valid
+      ansible.builtin.assert:
+        that: item is match('^[a-zA-Z0-9_.-]+$')
+        fail_msg: invalid native host name
+        quiet: true
+      loop: "{{ agentics_host.nativeHostNames | default([]) }}"
+
+    - name: Native host folder exists
+      ansible.builtin.file:
+        path: "{{ agentics_helium }}/NativeMessagingHosts"
+        state: directory
+        mode: u+rwx
+      when: agentics_host.nativeHostNames | default([]) | length > 0
+
+    - name: Native host manifests are written
+      ansible.builtin.copy:
+        dest: "{{ agentics_helium }}/NativeMessagingHosts/{{ item }}.json"
+        mode: "0644"
+        content: |
+          {{ {'allowed_origins': agentics_host.extensionIds
+                                 | map('regex_replace', '^(.*)$', 'chrome-extension://\1/') | list,
+              'description': 'ChatGPT browser native messaging host', 'name': item,
+              'path': agentics_host.paths.extensionHostPath, 'type': 'stdio'} | to_nice_json(indent=2) }}
+      loop: "{{ agentics_host.nativeHostNames | default([]) }}"
+
+- name: REA CLI, skills, and MCP server
+  ansible.builtin.command:
+    argv:
+      - "{{ role_path }}/files/rea.sh"
+  environment: "{{ jsh_script_env }}"
+  register: agentics_rea
+  changed_when: agentics_rea.stdout is reported_change
+  check_mode: false

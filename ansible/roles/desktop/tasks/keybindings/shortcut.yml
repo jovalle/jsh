@@ -1,0 +1,46 @@
+---
+- name: XFCE shortcut is set
+  community.general.xfconf:
+    channel: xfce4-keyboard-shortcuts
+    property: "/commands/custom/{{ desktop_keybindings_shortcut_xfce }}"
+    value:
+      - "{{ desktop_keybindings_shortcut_command }}"
+    value_type:
+      - string
+  when: jsh_desktop == 'xfce'
+
+- name: GNOME shortcut values are set
+  vars:
+    desktop_keybindings_shortcut_path: >-
+      /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/{{ desktop_keybindings_shortcut_slug }}/
+  community.general.dconf:
+    key: "{{ desktop_keybindings_shortcut_path }}{{ item.key }}"
+    value: "{{ item.value | to_json }}"
+  loop:
+    - {key: name, value: "{{ desktop_keybindings_shortcut_name }}"}
+    - {key: binding, value: "{{ desktop_keybindings_shortcut_gnome }}"}
+    - {key: command, value: "{{ desktop_keybindings_shortcut_command }}"}
+  loop_control:
+    label: "{{ item.key }} is {{ item.value }}"
+  when: jsh_desktop == 'gnome'
+
+- name: GNOME custom shortcut paths are read
+  community.general.dconf:
+    key: /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings
+    state: read
+  register: desktop_keybindings_custom_paths_read
+  changed_when: false
+  check_mode: false
+  when: jsh_desktop == 'gnome'
+
+- name: GNOME custom shortcut path is listed
+  vars:
+    desktop_keybindings_shortcut_path: >-
+      /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/{{ desktop_keybindings_shortcut_slug }}/
+    desktop_keybindings_custom_paths: >-
+      {{ (desktop_keybindings_custom_paths_read.value | default('@as []')
+          | regex_replace('^@as ', '') | from_yaml) | union([desktop_keybindings_shortcut_path]) }}
+  community.general.dconf:
+    key: /org/gnome/settings-daemon/plugins/media-keys/custom-keybindings
+    value: "{{ desktop_keybindings_custom_paths | to_json }}"
+  when: jsh_desktop == 'gnome'

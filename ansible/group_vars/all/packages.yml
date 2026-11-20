@@ -1,0 +1,330 @@
+---
+# Every package jsh installs, read by the packages role (see plugins/filter/packages.py).
+# Selectors: all, linux (Debian and RHEL), darwin, debian, rhel, then the desktop (xfce,
+# gnome). Each selector maps package managers to lists. A full run installs packages_common,
+# every packages_roles entry, then host_vars extras. A run that names only configuration roles
+# installs just their packages_roles entries, so keep an entry there only when that role's
+# tasks need the package.
+packages_common:
+  all:
+    taps:
+      - xguot/difi
+    brew:
+      - actionlint
+      - age
+      - ansible
+      - atuin
+      - autopep8
+      - bash
+      - bat
+      - bats-core
+      - black
+      - btop
+      - bun
+      - colima
+      - commitizen
+      - commitlint
+      - coreutils
+      - curl
+      - diffutils
+      - direnv
+      - docker
+      - docker-buildx
+      - docker-compose
+      - eslint
+      - eza
+      - fd
+      - ffmpeg
+      - fnm
+      - fzf
+      - gawk
+      - gettext
+      - gh
+      - git
+      - git-lfs
+      - gitleaks
+      - gnu-sed
+      - gnupg
+      - go
+      - go-task
+      - grc
+      - grep
+      - gum
+      - hadolint
+      - helm
+      - helmfile
+      - hugo
+      - jq
+      - just
+      - k9s
+      - kew
+      - kubernetes-cli
+      - lazygit
+      - leaf-markdown-viewer
+      - libtiff
+      - libxcrypt
+      - lima
+      - make
+      - markdownlint-cli
+      - mpv
+      - ncdu
+      - neovim
+      - netcat
+      - nmap
+      - node
+      - parallel
+      - pnpm
+      - poetry
+      - pre-commit
+      - prettier
+      - pylint
+      - readline
+      - ripgrep
+      - rsync
+      - rtk
+      - shellcheck
+      - shfmt
+      - sops
+      - speedtest-go
+      - sshpass
+      - stow
+      - summarize
+      - syncthing
+      - tmux
+      - tree
+      - unzip
+      - uv
+      - watch
+      - xguot/difi/difi
+      - xorriso
+      - xz
+      - yamllint
+      - zip
+      - zoxide
+      - zsh
+    uv:
+      - { command: just, package: rust-just }
+      - { command: tmail, package: tmail-cli }
+      - { command: check-yaml, package: pre-commit-hooks }
+  darwin:
+    taps:
+      - gromgit/fuse
+    brew:
+      - bash-completion
+      - duti
+      - gromgit/fuse/ntfs-3g-mac
+      - imagemagick
+      - mas
+      - spicetify-cli
+    casks:
+      - android-platform-tools
+      - bitwarden
+      - chatgpt
+      - citrix-workspace
+      - ghostty
+      - signal
+      - spotify
+      - tailscale-app
+      - todoist-app
+      - vorssaint
+      - zoom
+  linux:
+    flatpak:
+      - com.bitwarden.desktop
+      - com.spotify.Client
+      - com.todoist.Todoist
+    appimage:
+      - name: ghostty
+        release: https://api.github.com/repos/pkgforge-dev/ghostty-appimage/releases/latest
+        arm: aarch64
+        amd: x86_64
+  debian:
+    apt:
+      - age
+      - ansible
+      - bat
+      - btop
+      - build-essential
+      - bzip2
+      - cargo
+      - cifs-utils
+      - dconf-cli
+      - desktop-file-utils
+      - direnv
+      - dkms
+      - earlyoom
+      - eza
+      - fd-find
+      - flatpak
+      - fzf
+      - gh
+      - git-lfs
+      - gnome-keyring
+      - gnupg
+      - golang-go
+      - grc
+      - hugo
+      - jq
+      - libarchive-tools
+      - libnotify-bin
+      - make
+      - mpv
+      - ncdu
+      - net-tools
+      - netcat-openbsd
+      - nfs-common
+      - nmap
+      - nodejs
+      - ntfs-3g
+      - nvme-cli
+      - openssh-client
+      - openssh-server
+      - parallel
+      - pipewire-pulse
+      - podman
+      - python3-poetry
+      - python3-yaml
+      - ripgrep
+      - rsync
+      - sqlite3
+      - sshpass
+      - stow
+      - syncthing
+      - systemd-zram-generator
+      - tar
+      - tmux
+      - unzip
+      - wireplumber
+      - x11-xserver-utils
+      - xbindkeys
+      - xclip
+      - xdg-utils
+      - xz-utils
+      - yamllint
+      - yq
+      - zip
+      - zoxide
+  rhel:
+    dnf:
+      - bzip2
+      - cargo
+      - cifs-utils
+      - dconf
+      - desktop-file-utils
+      - dkms
+      - earlyoom
+      - eza
+      - fd-find
+      - flatpak
+      - gcc
+      - gcc-c++
+      - gnome-keyring
+      - gnupg2
+      - jq
+      - libarchive
+      - libnotify
+      - make
+      - mpv
+      - net-tools
+      - nfs-utils
+      - nodejs
+      - ntfs-3g
+      - nvme-cli
+      - openssh-clients
+      - openssh-server
+      - pipewire-pulseaudio
+      - podman
+      - python3-pyyaml
+      - readline
+      - ripgrep
+      - rsync
+      - sqlite
+      - syncthing
+      - tar
+      - tmux
+      - unzip
+      - wireplumber
+      - xbindkeys
+      - xclip
+      - xdg-utils
+      - xrandr
+      - xz
+      - yq
+      - zip
+      - zram-generator
+
+# Keys are site.yml roles, in run order; the packages block in site.yml carries the same tags.
+packages_roles:
+  apps:
+    darwin:
+      casks:
+        - foobar2000
+        - macdown-3000
+  desktop:
+    darwin:
+      brew:
+        - displayplacer
+      casks:
+        - font-jetbrains-mono-nerd-font
+    xfce:
+      apt: &xfce
+        - arc-theme
+        - fontconfig
+        - papirus-icon-theme
+        - pavucontrol
+        - xfce4-appfinder
+        - xfce4-clipman-plugin
+        - xfce4-cpugraph-plugin
+        - xfce4-docklike-plugin
+        - xfce4-fsguard-plugin
+        - xfce4-genmon-plugin
+        - xfce4-netload-plugin
+        - xfce4-pulseaudio-plugin
+        - xfce4-screensaver
+        - xfce4-systemload-plugin
+        - xfce4-taskmanager
+        - xfce4-terminal
+      dnf: *xfce
+  wox:
+    darwin:
+      casks:
+        - wox
+    debian:
+      apt:
+        - sqlite3
+    rhel:
+      dnf:
+        - sqlite
+    linux:
+      appimage:
+        - name: wox
+          release: https://api.github.com/repos/Wox-launcher/Wox/releases/latest
+          arm: arm64
+          amd: amd64
+  patches:
+    darwin:
+      casks:
+        - helium-browser
+        - sublime-text
+        - visual-studio-code
+        - waterfox
+    linux:
+      flatpak:
+        - com.sublimetext.three
+        - net.waterfox.waterfox
+      appimage:
+        - name: helium
+          release: https://api.github.com/repos/imputnet/helium-linux/releases/latest
+          arm: arm64
+          amd: x86_64
+  agentics:
+    all:
+      brew:
+        - opencode
+      uv:
+        - { command: graphify, package: graphifyy }
+    darwin:
+      casks:
+        - antigravity-cli
+        - codex
+        - copilot-cli

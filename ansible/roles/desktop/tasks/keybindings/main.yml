@@ -1,0 +1,18 @@
+---
+- name: info
+  ansible.builtin.debug:
+    msg: "Skipping keybindings: no desktop session"
+  when: jsh_desktop | length == 0
+
+- name: macOS keybindings are managed
+  ansible.builtin.include_tasks: keybindings/darwin.yml
+  when: jsh_desktop == 'darwin'
+
+- name: Linux keybindings are managed
+  ansible.builtin.include_tasks: keybindings/linux.yml
+  when: jsh_desktop in ['gnome', 'xfce']
+
+- name: info
+  ansible.builtin.debug:
+    msg: "Skipping keybindings: unsupported desktop {{ jsh_desktop }}"
+  when: jsh_desktop | length > 0 and jsh_desktop not in ['darwin', 'gnome', 'xfce']

@@ -1,0 +1,42 @@
+---
+- name: info
+  ansible.builtin.debug:
+    msg: "Skipping display shortcut: no desktop session"
+  when: jsh_desktop not in ['gnome', 'xfce']
+
+- name: info
+  ansible.builtin.debug:
+    msg: "Skipping display shortcut: Wayland session"
+  when: >-
+    jsh_desktop in ['gnome', 'xfce']
+    and lookup('ansible.builtin.env', 'XDG_SESSION_TYPE') == 'wayland'
+
+- name: xrandr is found
+  ansible.builtin.command:
+    argv:
+      - sh
+      - -c
+      - "command -v xrandr"
+  register: desktop_display_xrandr
+  changed_when: false
+  check_mode: false
+  failed_when: false
+  when: >-
+    jsh_desktop in ['gnome', 'xfce']
+    and lookup('ansible.builtin.env', 'XDG_SESSION_TYPE') != 'wayland'
+
+- name: info
+  ansible.builtin.debug:
+    msg: "Skipping display shortcut: xrandr is not installed"
+  when: desktop_display_xrandr.rc | default(1) != 0
+
+- name: Display layout shortcut is managed
+  ansible.builtin.include_tasks: keybindings/shortcut.yml
+  vars:
+    desktop_keybindings_shortcut_name: Jsh display layout
+    desktop_keybindings_shortcut_gnome: "<Control><Alt><Super>m"
+    desktop_keybindings_shortcut_xfce: "<Primary><Alt><Super>m"
+    desktop_keybindings_shortcut_command: >-
+      bash '{{ jsh_root }}/ansible/roles/desktop/files/display/toggle.sh' toggle
+    desktop_keybindings_shortcut_slug: jsh-display-layout
+  when: desktop_display_xrandr.rc | default(1) == 0

@@ -1,0 +1,8 @@
+---
+wox_home: "{{ lookup('ansible.builtin.env', 'HOME') }}"
+wox_config: "{{ lookup('ansible.builtin.env', 'XDG_CONFIG_HOME') or wox_home ~ '/.config' }}"
+wox_application: /Applications/Wox.app
+wox_agent_path: "{{ wox_home }}/Library/LaunchAgents/jsh.wox.plist"
+wox_autostart_path: "{{ wox_config }}/autostart/jsh-wox.desktop"
+wox_database: ""
+wox_native_shortcuts: true

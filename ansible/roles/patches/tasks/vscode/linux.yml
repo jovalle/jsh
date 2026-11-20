@@ -1,0 +1,73 @@
+---
+# Debian and RHEL get Microsoft's package from the update API, verified by its SHA-256.
+- name: VS Code package is checked
+  ansible.builtin.package_facts:
+    manager: auto
+
+- name: VS Code package
+  vars:
+    patches_vscode_channel: "{{ 'deb' if jsh_platform == 'debian' else 'rpm' }}"
+    patches_vscode_arch: "{{ 'arm64' if ansible_facts.architecture in ['aarch64', 'arm64'] else 'x64' }}"
+    patches_vscode_api: https://update.code.visualstudio.com/api/update
+    patches_vscode_current: "{{ (ansible_facts.packages.code | default([{}]))[0].version | default('') }}"
+  when: (patches_vscode_current == '' and not jsh_update | bool) or (patches_vscode_current != '' and jsh_update | bool)
+  block:
+    - name: VS Code install is planned
+      ansible.builtin.set_fact:
+        patches_vscode_planned: "{{ ansible_check_mode and patches_vscode_current == '' }}"
+
+    - name: info
+      ansible.builtin.debug:
+        msg: VS Code update is unchecked in preview
+      when: ansible_check_mode and jsh_update | bool and patches_vscode_current != ""
+
+    - name: VS Code private download folder exists
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: jsh-vscode.
+      register: patches_vscode_download
+      when: not ansible_check_mode
+
+    - name: VS Code release is read
+      ansible.builtin.uri:
+        url: "{{ patches_vscode_api }}/linux-{{ patches_vscode_channel }}-{{ patches_vscode_arch }}/stable/latest"
+        return_content: true
+      register: patches_vscode_release
+      check_mode: false
+      when: not ansible_check_mode
+
+    - name: VS Code package is downloaded
+      ansible.builtin.get_url:
+        url: "{{ patches_vscode_release.json.url }}"
+        dest: "{{ patches_vscode_download.path }}/vscode.{{ patches_vscode_channel }}"
+        checksum: "sha256:{{ patches_vscode_release.json.sha256hash }}"
+        mode: "0600"
+      when: >-
+        not ansible_check_mode
+        and patches_vscode_current is not search('^' ~ patches_vscode_release.json.productVersion ~ '$')
+      changed_when: false
+
+    - name: VS Code
+      ansible.builtin.apt:
+        deb: "{{ patches_vscode_download.path }}/vscode.deb"
+      become: true
+      when: >-
+        not ansible_check_mode and patches_vscode_channel == 'deb'
+        and patches_vscode_current != patches_vscode_release.json.productVersion
+
+    - name: VS Code
+      ansible.builtin.dnf:
+        name: "{{ patches_vscode_download.path }}/vscode.rpm"
+        state: present
+        disable_gpg_check: true # local package; verified by its SHA-256 above
+      become: true
+      when: >-
+        not ansible_check_mode and patches_vscode_channel == 'rpm'
+        and patches_vscode_current != patches_vscode_release.json.productVersion
+
+    - name: VS Code private download folder is removed
+      ansible.builtin.file:
+        path: "{{ patches_vscode_download.path }}"
+        state: absent
+      changed_when: false
+      when: not ansible_check_mode

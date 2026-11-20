@@ -1,0 +1,2 @@
+# Managed by jsh
+EARLYOOM_ARGS="-m 4 -s 15 -r 60 --avoid '(^|/)(init|systemd|Xorg|Xwayland|xfce4-session|gnome-shell|sshd)$' --prefer '(^|/)(code|waterfox|electron|zoom)$'"

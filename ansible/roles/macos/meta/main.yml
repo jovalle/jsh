@@ -1,0 +1,11 @@
+---
+galaxy_info:
+  author: jsh
+  description: Apply managed macOS preferences and restart the affected system applications
+  license: MIT
+  min_ansible_version: "2.22"
+  platforms:
+    - name: MacOSX
+      versions:
+        - all
+dependencies: []
