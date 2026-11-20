@@ -1,32 +1,149 @@
-# Pre-commit Configuration for jsh
-default_install_hook_types: [pre-commit, pre-push, commit-msg]
+---
+# Pre-commit hooks for code quality
+# Install: brew install pre-commit
+# Setup: pre-commit install
+# Run: pre-commit run --all-files
+
+exclude: ^archive/
 
 repos:
-  # ShellCheck - Shell script linting
-  - repo: https://github.com/shellcheck-py/shellcheck-py
-    rev: v0.10.0.1
+  - repo: local
     hooks:
+      - id: trailing-whitespace
+        name: trim trailing whitespace
+        entry: trailing-whitespace-fixer
+        language: system
+        types:
+          - text
+        exclude: '\.md$'
+      - id: end-of-file-fixer
+        name: fix end of files
+        entry: end-of-file-fixer
+        language: system
+        types:
+          - text
+        stages:
+          - pre-commit
+          - pre-push
+          - manual
+      - id: check-yaml
+        name: check yaml
+        entry: check-yaml
+        language: system
+        types:
+          - yaml
+        args:
+          - --allow-multiple-documents
+      - id: check-json
+        name: check json
+        entry: check-json
+        language: system
+        types:
+          - json
+        exclude: '^\.vscode/extensions\.json$'
+      - id: check-added-large-files
+        name: check for added large files
+        entry: check-added-large-files
+        language: system
+        stages:
+          - pre-commit
+          - pre-push
+          - manual
+        args:
+          - --maxkb=1000
+      - id: check-case-conflict
+        name: check for case conflicts
+        entry: check-case-conflict
+        language: system
+      - id: check-merge-conflict
+        name: check for merge conflicts
+        entry: check-merge-conflict
+        language: system
+        types:
+          - text
+      - id: check-executables-have-shebangs
+        name: check that executables have shebangs
+        entry: check-executables-have-shebangs
+        language: system
+        types:
+          - text
+          - executable
+        stages:
+          - pre-commit
+          - pre-push
+          - manual
+      - id: check-shebang-scripts-are-executable
+        name: check that scripts with shebangs are executable
+        entry: check-shebang-scripts-are-executable
+        language: system
+        types:
+          - text
+        stages:
+          - pre-commit
+          - pre-push
+          - manual
+      - id: mixed-line-ending
+        name: mixed line ending
+        entry: mixed-line-ending
+        language: system
+        types:
+          - text
+        args:
+          - --fix=lf
+
       - id: shellcheck
-        args: ["--severity=warning"]
-        files: \.(sh|bash)$|^j\.sh$|^bin/[^.]+$
+        name: shellcheck
+        entry: shellcheck
+        language: system
+        args:
+          - -x
+          - --severity=warning
+        types:
+          - shell
+        exclude: '(^|/)(\.zshrc|.*\.zsh)$'
 
-  # Conventional commits
-  - repo: https://github.com/compilerla/conventional-pre-commit
-    rev: v4.0.0
-    hooks:
-      - id: conventional-pre-commit
-        stages: [commit-msg]
-        args: [feat, fix, refactor, docs, test, chore, perf, ci, build, style]
+      - id: yamllint
+        name: yamllint
+        entry: yamllint
+        language: system
+        args:
+          - --config-file=.yamllint
+        types:
+          - yaml
 
-  # Gitleaks - Secret scanning
+      - id: markdownlint
+        name: markdownlint
+        entry: markdownlint
+        language: system
+        args:
+          - --config=.markdownlint.json
+          - --fix
+        types:
+          - markdown
+        exclude: '^dotfiles/\.agents/skills/'
+
+      - id: prettier
+        name: prettier
+        entry: prettier --write --ignore-unknown
+        language: system
+        types_or:
+          - javascript
+          - json
+          - markdown
+        exclude: 'package-lock\.json|^dotfiles/\.agents/skills/'
+
+      - id: commitlint
+        name: commitlint
+        entry: commitlint --edit
+        language: system
+        always_run: true
+        stages:
+          - commit-msg
+
   - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.30.1
+    rev: v8.30.0
     hooks:
       - id: gitleaks
-        args:
-          - --config
-          - .gitleaks.toml
-          - --ignore-gitleaks-allow
-          - --max-decode-depth=3
-          - --max-archive-depth=2
-        stages: [pre-commit]
+        always_run: true
+        stages:
+          - pre-commit

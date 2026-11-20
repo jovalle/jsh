@@ -1,0 +1,13 @@
+# ShellCheck configuration
+
+# Enable all checks by default
+enable=all
+
+# Follow sourced files without -x, as `make lint` does, so editors resolve them too.
+external-sources=true
+
+# External sources (optional, uncomment if needed)
+# source-path=SCRIPTDIR
+
+# Shell dialect
+# Dialect follows each file's shebang.
