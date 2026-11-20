@@ -61,8 +61,7 @@ def write_group_sources(checkout, groups):
         meta = checkout / f"ansible/roles/{name}/meta/main.yml"
         meta.parent.mkdir(parents=True, exist_ok=True)
         platforms = "".join(
-            f"    - name: {item}\n      versions: [all]\n"
-            for item in platform_names[platform]
+            f"    - name: {item}\n      versions: [all]\n" for item in platform_names[platform]
         )
         meta.write_text(
             "---\ngalaxy_info:\n"
@@ -114,7 +113,7 @@ class ShellChecks(unittest.TestCase):
         (checkout / "scripts/ansible.sh").write_text("exit 0\n")
         playbook = checkout / "local/ansible/venv/bin/ansible-playbook"
         playbook.parent.mkdir(parents=True)
-        body = '''#!/usr/bin/env bash
+        body = """#!/usr/bin/env bash
 set -u
 export JSH_OUTPUT=renderer
 playbook_args=("__DOLLAR__@")
@@ -172,14 +171,15 @@ for group; do
   printf "\036stepclose\n"
 done
 exit "__DOLLAR__status"
-'''.replace("__DOLLAR__", chr(36))
+""".replace("__DOLLAR__", chr(36))
         playbook.write_text(body)
         playbook.chmod(0o755)
 
     def test_no_current_output_helper_remains(self):
         files = sorted((ROOT / "scripts").rglob("*.sh"))
-        offenders = [str(file.relative_to(ROOT)) for file in files
-                     if "jsh::current" in file.read_text()]
+        offenders = [
+            str(file.relative_to(ROOT)) for file in files if "jsh::current" in file.read_text()
+        ]
         self.assertEqual(offenders, [])
 
     def run_shell(self, shell, code, **env):
@@ -256,8 +256,9 @@ exit "__DOLLAR__status"
     def run_on_terminal(self, code, env):
         """Run CODE in Bash with stdout and stderr on a pseudo-terminal; return what it drew."""
         master, slave = pty.openpty()
-        process = subprocess.Popen(["bash", "-c", code], env=env, stdin=subprocess.DEVNULL,
-                                   stdout=slave, stderr=slave)
+        process = subprocess.Popen(
+            ["bash", "-c", code], env=env, stdin=subprocess.DEVNULL, stdout=slave, stderr=slave
+        )
         os.close(slave)
         output = bytearray()
         while True:
@@ -530,9 +531,17 @@ exit "__DOLLAR__status"
 
         def run(function, destination):
             result = subprocess.run(
-                ["bash", "-c", ". \"$JSH_ROOT/scripts/lib/common.sh\"; jsh::" + function
-                 + " \"$1\" \"$2\"", "test", str(source), str(destination)],
-                env=self.env | {"JSH_DRY_RUN": "1"}, capture_output=True, text=True,
+                [
+                    "bash",
+                    "-c",
+                    '. "$JSH_ROOT/scripts/lib/common.sh"; jsh::' + function + ' "$1" "$2"',
+                    "test",
+                    str(source),
+                    str(destination),
+                ],
+                env=self.env | {"JSH_DRY_RUN": "1"},
+                capture_output=True,
+                text=True,
                 timeout=10,
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -552,9 +561,16 @@ exit "__DOLLAR__status"
 
     def test_download_keeps_the_callers_step(self):
         result = subprocess.run(
-            ["bash", "-c", ". \"$JSH_ROOT/scripts/lib/common.sh\"; "
-             "jsh::step check assets; jsh::download https://example.invalid/file \"$HOME/file\""],
-            env=self.env | {"JSH_DRY_RUN": "1"}, capture_output=True, text=True, timeout=10,
+            [
+                "bash",
+                "-c",
+                '. "$JSH_ROOT/scripts/lib/common.sh"; '
+                'jsh::step check assets; jsh::download https://example.invalid/file "$HOME/file"',
+            ],
+            env=self.env | {"JSH_DRY_RUN": "1"},
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("Checking assets...", result.stdout)
@@ -565,8 +581,12 @@ exit "__DOLLAR__status"
         checkout = self.home / "checkout with spaces"
         for name in ("scripts/lib", "lib/shell", "bin", "dotfiles"):
             (checkout / name).mkdir(parents=True)
-        for name in ("scripts/lib/common.sh", "lib/shell/output.sh", "lib/output.py",
-                     "lib/verbs.tsv"):
+        for name in (
+            "scripts/lib/common.sh",
+            "lib/shell/output.sh",
+            "lib/output.py",
+            "lib/verbs.tsv",
+        ):
             shutil.copy2(ROOT / name, checkout / name)
         copy_group_sources(checkout)
         # Keep real link/backup logic; avoid package installation and downloads.
@@ -605,8 +625,13 @@ exit "__DOLLAR__status"
         checkout = self.home / "checkout"
         for name in ("scripts/lib", "lib/shell", "bin", "dotfiles"):
             (checkout / name).mkdir(parents=True)
-        for name in ("scripts/lib/common.sh", "lib/shell/output.sh", "lib/output.py",
-                     "lib/verbs.tsv", "install.sh"):
+        for name in (
+            "scripts/lib/common.sh",
+            "lib/shell/output.sh",
+            "lib/output.py",
+            "lib/verbs.tsv",
+            "install.sh",
+        ):
             shutil.copy2(ROOT / name, checkout / name)
         copy_group_sources(checkout)
         for name in ("packages.sh", "shell.sh"):
@@ -615,8 +640,10 @@ exit "__DOLLAR__status"
         shutil.copytree(ROOT / "dotfiles/.config/ghostty", checkout / "dotfiles/.config/ghostty")
         if os.uname().sysname == "Darwin":
             # jsh::link uses GNU mv -T for Linux platforms; BSD mv spells it -h.
-            self.tool("mv", 'if [ "$1" = -fT ]; then shift; exec /bin/mv -fh "$@"; fi\n'
-                            'exec /bin/mv "$@"')
+            self.tool(
+                "mv",
+                'if [ "$1" = -fT ]; then shift; exec /bin/mv -fh "$@"; fi\n' 'exec /bin/mv "$@"',
+            )
         for platform in ("debian", "rhel", "darwin"):
             with self.subTest(platform=platform):
                 home = self.home / f"home-{platform}"
@@ -624,25 +651,36 @@ exit "__DOLLAR__status"
                 result = subprocess.run(
                     ["/bin/bash", str(checkout / "install.sh")],
                     env=self.env | {"HOME": str(home), "JSH_PLATFORM": platform},
-                    cwd=home, capture_output=True, text=True, timeout=30,
+                    cwd=home,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
                 )
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 ghostty = home / ".config/ghostty"
-                self.assertEqual((ghostty / "config").readlink(),
-                                 checkout / "dotfiles/.config/ghostty/config")
+                self.assertEqual(
+                    (ghostty / "config").readlink(), checkout / "dotfiles/.config/ghostty/config"
+                )
                 linux = ghostty / "linux.conf"
                 if platform == "darwin":
                     self.assertFalse(linux.is_symlink() or linux.exists())
                 else:
-                    self.assertEqual(linux.readlink(),
-                                     checkout / "dotfiles/.config/ghostty/linux.conf")
+                    self.assertEqual(
+                        linux.readlink(), checkout / "dotfiles/.config/ghostty/linux.conf"
+                    )
 
     def installer_scope_fixture(self):
         checkout = self.home / "checkout"
         for name in ("scripts/lib", "lib/shell", "bin", "dotfiles"):
             (checkout / name).mkdir(parents=True)
-        for name in ("scripts/lib/common.sh", "lib/shell/output.sh", "lib/output.py",
-                     "lib/verbs.tsv", "install.sh", "scripts/configure.sh"):
+        for name in (
+            "scripts/lib/common.sh",
+            "lib/shell/output.sh",
+            "lib/output.py",
+            "lib/verbs.tsv",
+            "install.sh",
+            "scripts/configure.sh",
+        ):
             shutil.copy2(ROOT / name, checkout / name)
         copy_group_sources(checkout)
         (checkout / "scripts/packages.sh").write_text("printf 'BREW_UPDATE\\n'\n")
@@ -663,14 +701,17 @@ exit "__DOLLAR__status"
             source = (checkout / "install.sh").read_text()
             source = source.replace(
                 "jsh::step detect platform\n",
-                "jsh::step detect platform\n: >\"$HOME/interrupt-ready\"\nsleep 30 >/dev/null 2>&1 & wait $!\n",
+                'jsh::step detect platform\n: >"$HOME/interrupt-ready"\nsleep 30 >/dev/null 2>&1 & wait $!\n',
             )
             (checkout / "install.sh").write_text(source)
         self.tool("python3", "exit 1")
         process = subprocess.Popen(
             ["bash", str(checkout / "install.sh")],
-            env=self.env | {"NO_COLOR": "1"}, cwd=self.home,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            env=self.env | {"NO_COLOR": "1"},
+            cwd=self.home,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
             start_new_session=True,
         )
         ready = self.home / "interrupt-ready"
@@ -695,9 +736,9 @@ exit "__DOLLAR__status"
 
     def test_plain_installer_interrupt_reports_child_step(self):
         output = self.run_interrupted_plain_installer(
-            ". \"$JSH_ROOT/scripts/lib/common.sh\"\n"
+            '. "$JSH_ROOT/scripts/lib/common.sh"\n'
             "jsh::step check packages\n"
-            ": >\"$HOME/interrupt-ready\"\n"
+            ': >"$HOME/interrupt-ready"\n'
             "sleep 30 >/dev/null 2>&1 & wait $!\n"
         )
         self.assertIn("✕ Stopped checking packages", output)
@@ -706,23 +747,34 @@ exit "__DOLLAR__status"
 
     def test_installer_detects_platform_and_skips_other_platform_groups(self):
         checkout = self.installer_scope_fixture()
-        write_group_sources(checkout, [
-            ("macos", "darwin", "Mac settings"),
-            ("linux", "linux", "Linux settings"),
-            ("dev", "all", "Developer tools"),
-        ])
-        self.tool("id", "if [ \"$1\" = -Gn ]; then echo \"staff admin\"; else exec /usr/bin/id \"$@\"; fi")
+        write_group_sources(
+            checkout,
+            [
+                ("macos", "darwin", "Mac settings"),
+                ("linux", "linux", "Linux settings"),
+                ("dev", "all", "Developer tools"),
+            ],
+        )
+        self.tool(
+            "id", 'if [ "$1" = -Gn ]; then echo "staff admin"; else exec /usr/bin/id "$@"; fi'
+        )
         result = subprocess.run(
             ["bash", str(checkout / "install.sh")],
-            env=self.env | {"JSH_PLATFORM": "darwin"}, cwd=self.home,
-            capture_output=True, text=True, timeout=20,
+            env=self.env | {"JSH_PLATFORM": "darwin"},
+            cwd=self.home,
+            capture_output=True,
+            text=True,
+            timeout=20,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("Detected macOS", result.stdout)
         result = subprocess.run(
             ["bash", str(checkout / "scripts/configure.sh")],
-            env=self.env | {"JSH_PLATFORM": "darwin"}, cwd=self.home,
-            capture_output=True, text=True, timeout=20,
+            env=self.env | {"JSH_PLATFORM": "darwin"},
+            cwd=self.home,
+            capture_output=True,
+            text=True,
+            timeout=20,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("› linux  Linux settings", result.stdout)
@@ -732,8 +784,11 @@ exit "__DOLLAR__status"
         checkout = self.configure_fixture()
         result = subprocess.run(
             ["bash", str(checkout / "scripts/configure.sh"), "patches"],
-            env=self.env | {"JSH_PLATFORM": "darwin"}, cwd=self.home,
-            capture_output=True, text=True, timeout=20,
+            env=self.env | {"JSH_PLATFORM": "darwin"},
+            cwd=self.home,
+            capture_output=True,
+            text=True,
+            timeout=20,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("› patches  Apply managed settings", result.stdout)
@@ -744,8 +799,11 @@ exit "__DOLLAR__status"
         self.tool("python3", "exit 1")
         result = subprocess.run(
             ["bash", str(checkout / "install.sh"), "--dry-run"],
-            env=self.env | {"JSH_PLATFORM": "darwin"}, cwd=self.home,
-            capture_output=True, text=True, timeout=20,
+            env=self.env | {"JSH_PLATFORM": "darwin"},
+            cwd=self.home,
+            capture_output=True,
+            text=True,
+            timeout=20,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("Detecting platform...", result.stdout)
@@ -754,8 +812,11 @@ exit "__DOLLAR__status"
         (self.home / ".jsh").symlink_to(checkout)
         result = subprocess.run(
             ["bash", str(checkout / "scripts/configure.sh"), "--dry-run", "linux", "services"],
-            env=self.env | {"JSH_PLATFORM": "darwin"}, cwd=self.home,
-            capture_output=True, text=True, timeout=20,
+            env=self.env | {"JSH_PLATFORM": "darwin"},
+            cwd=self.home,
+            capture_output=True,
+            text=True,
+            timeout=20,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("Skipping Linux configuration on macOS", result.stdout)
@@ -765,11 +826,14 @@ exit "__DOLLAR__status"
 
     def test_configure_without_admin_skips_setup_roles(self):
         checkout = self.configure_fixture()
-        self.tool("id", "if [ \"$1\" = -Gn ]; then echo staff; else exec /usr/bin/id \"$@\"; fi")
+        self.tool("id", 'if [ "$1" = -Gn ]; then echo staff; else exec /usr/bin/id "$@"; fi')
         result = subprocess.run(
             ["bash", str(checkout / "scripts/configure.sh"), "--dry-run"],
-            env=self.env | {"JSH_PLATFORM": "darwin"}, cwd=self.home,
-            capture_output=True, text=True, timeout=20,
+            env=self.env | {"JSH_PLATFORM": "darwin"},
+            cwd=self.home,
+            capture_output=True,
+            text=True,
+            timeout=20,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("› configure  Apps, agents, and system settings", result.stdout)
@@ -778,12 +842,15 @@ exit "__DOLLAR__status"
 
     def test_configure_without_cached_sudo_records_action_needed(self):
         checkout = self.configure_fixture()
-        self.tool("id", "if [ \"$1\" = -Gn ]; then echo staff sudo; else exec /usr/bin/id \"$@\"; fi")
+        self.tool("id", 'if [ "$1" = -Gn ]; then echo staff sudo; else exec /usr/bin/id "$@"; fi')
         self.tool("sudo", "exit 1")
         result = subprocess.run(
             ["bash", str(checkout / "scripts/configure.sh"), "--dry-run"],
-            env=self.env | {"JSH_PLATFORM": "debian"}, cwd=self.home,
-            capture_output=True, text=True, timeout=20,
+            env=self.env | {"JSH_PLATFORM": "debian"},
+            cwd=self.home,
+            capture_output=True,
+            text=True,
+            timeout=20,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("Skipping setup roles: needs admin rights", result.stdout)
@@ -798,19 +865,29 @@ exit "__DOLLAR__status"
         (checkout / "dotfiles/.testrc").write_text("x\n")
         (self.home / ".testrc").symlink_to(checkout / "dotfiles/.testrc")
         (self.home / ".jsh").symlink_to(checkout)
-        display = self.run_on_terminal(f'cd "$HOME" && bash "{checkout}/install.sh" --update',
-                                       self.env | {"NO_COLOR": "1", "JSH_PLATFORM": "darwin"})
+        display = self.run_on_terminal(
+            f'cd "$HOME" && bash "{checkout}/install.sh" --update',
+            self.env | {"NO_COLOR": "1", "JSH_PLATFORM": "darwin"},
+        )
         # A clear erases the line, so only text after the last one stays visible.
         lines = [line.split("\r\x1b[K")[-1] for line in display.split("\r\n")]
         self.assertIn("› links  Dotfiles and commands", lines, display)
         self.assertIn("✓ ~/.testrc linked", lines, display)
         self.assertNotIn("✓ links  Dotfiles and commands", lines, display)
         self.assertTrue(any(line.startswith("Ready  ") for line in lines), display)
-        self.assertEqual([line for line in lines if "Linking dotfiles..." in line
-                          or "Linking commands..." in line], [], display)
+        self.assertEqual(
+            [
+                line
+                for line in lines
+                if "Linking dotfiles..." in line or "Linking commands..." in line
+            ],
+            [],
+            display,
+        )
         display = self.run_on_terminal(
             f'cd "$HOME" && bash "{checkout}/scripts/configure.sh" --update apps',
-            self.env | {"NO_COLOR": "1", "JSH_PLATFORM": "darwin"})
+            self.env | {"NO_COLOR": "1", "JSH_PLATFORM": "darwin"},
+        )
         lines = [line.split("\r\x1b[K")[-1] for line in display.split("\r\n")]
         self.assertIn("› maintenance", lines, display)
         self.assertTrue(any(line.startswith("› apps") for line in lines), display)
@@ -821,8 +898,12 @@ exit "__DOLLAR__status"
         (self.home / ".jsh").symlink_to(checkout)
         env = self.env | {"JSH_PLATFORM": "darwin"}
         result = subprocess.run(
-            ["bash", str(checkout / "install.sh"), "--update"], env=env,
-            cwd=self.home, capture_output=True, text=True, timeout=20,
+            ["bash", str(checkout / "install.sh"), "--update"],
+            env=env,
+            cwd=self.home,
+            capture_output=True,
+            text=True,
+            timeout=20,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertRegex(result.stdout, r"=   :-=-:.*Update.*-:")
@@ -840,11 +921,16 @@ exit "__DOLLAR__status"
         checkout = self.installer_scope_fixture()
         (checkout / "scripts/packages.sh").write_text("sleep 0.5\n")
         (self.home / ".jsh").symlink_to(checkout)
+
         def run(*command):
             master, slave = pty.openpty()
             process = subprocess.Popen(
                 ["bash", *command],
-                env=self.env, cwd=self.home, stdin=subprocess.DEVNULL, stdout=slave, stderr=slave,
+                env=self.env,
+                cwd=self.home,
+                stdin=subprocess.DEVNULL,
+                stdout=slave,
+                stderr=slave,
             )
             os.close(slave)
             output = bytearray()
@@ -859,8 +945,11 @@ exit "__DOLLAR__status"
             os.close(master)
             self.assertEqual(process.wait(timeout=10), 0, output)
             return output
-        for command, components in (((str(checkout / "install.sh"),), ("core", "shell", "links")),
-                                    ((str(checkout / "scripts/configure.sh"), "wox"), ("wox",))):
+
+        for command, components in (
+            ((str(checkout / "install.sh"),), ("core", "shell", "links")),
+            ((str(checkout / "scripts/configure.sh"), "wox"), ("wox",)),
+        ):
             output = run(*command)
             display = re.sub(r"\x1b\[[0-9;?]*[ -/]*[@-~]", "", output.decode(errors="replace"))
             for component in components:
@@ -873,8 +962,12 @@ exit "__DOLLAR__status"
         checkout = self.installer_scope_fixture()
         env = self.env | {"JSH_PLATFORM": "debian", "JSH_DESKTOP": "xfce"}
         result = subprocess.run(
-            ["bash", str(checkout / "install.sh"), "--dry-run"], env=env,
-            cwd=self.home, capture_output=True, text=True, timeout=20,
+            ["bash", str(checkout / "install.sh"), "--dry-run"],
+            env=env,
+            cwd=self.home,
+            capture_output=True,
+            text=True,
+            timeout=20,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertRegex(result.stdout, r"=   :-=-:.*Preview.*-:")
@@ -886,13 +979,35 @@ exit "__DOLLAR__status"
         self.assertNotIn("Scope:", result.stdout)
 
     def test_make_list_rejects_groups(self):
-        roles = subprocess.run(["make", "--no-print-directory", "-C", str(ROOT), "list", "roles"],
-                               env=self.env, capture_output=True, text=True, timeout=30)
+        roles = subprocess.run(
+            ["make", "--no-print-directory", "-C", str(ROOT), "list", "roles"],
+            env=self.env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
         self.assertEqual(roles.returncode, 0, roles.stdout + roles.stderr)
-        self.assertEqual(roles.stdout.split(), ["macos", "linux", "packages", "services", "apps",
-                                                "desktop", "wox", "patches", "agentics"])
-        groups = subprocess.run(["make", "--no-print-directory", "-C", str(ROOT), "list", "groups"],
-                                env=self.env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(
+            roles.stdout.split(),
+            [
+                "macos",
+                "linux",
+                "packages",
+                "services",
+                "apps",
+                "desktop",
+                "wox",
+                "patches",
+                "agentics",
+            ],
+        )
+        groups = subprocess.run(
+            ["make", "--no-print-directory", "-C", str(ROOT), "list", "groups"],
+            env=self.env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
         self.assertEqual(groups.returncode, 2, groups.stdout + groups.stderr)
         self.assertIn("make list: only roles", groups.stderr)
 
@@ -903,15 +1018,20 @@ exit "__DOLLAR__status"
                 with self.subTest(script=script, argument=argument):
                     result = subprocess.run(
                         ["bash", str(checkout / script), argument],
-                        env=self.env, cwd=self.home,
-                        capture_output=True, text=True, timeout=20,
+                        env=self.env,
+                        cwd=self.home,
+                        capture_output=True,
+                        text=True,
+                        timeout=20,
                     )
                     self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
                     if argument.startswith("-"):
                         self.assertIn("unknown option or role", result.stderr)
                     elif script == "install.sh":
-                        self.assertIn(f"install.sh takes no roles; run make configure {argument}",
-                                      result.stderr)
+                        self.assertIn(
+                            f"install.sh takes no roles; run make configure {argument}",
+                            result.stderr,
+                        )
                     else:
                         self.assertIn(f"unknown option or role: {argument}", result.stderr)
                         self.assertIn("rerun with names from make list roles", result.stderr)
@@ -920,19 +1040,31 @@ exit "__DOLLAR__status"
 
     def test_installer_lists_roles_and_runs_them_in_file_order(self):
         checkout = self.installer_scope_fixture()
-        write_group_sources(checkout, [
-            ("macos", "darwin", "Mac settings"),
-            ("linux", "linux", "Linux settings"),
-            ("dev", "all", "Developer tools"),
-        ])
+        write_group_sources(
+            checkout,
+            [
+                ("macos", "darwin", "Mac settings"),
+                ("linux", "linux", "Linux settings"),
+                ("dev", "all", "Developer tools"),
+            ],
+        )
         for name in ("macos", "linux", "dev"):
             (checkout / f"scripts/{name}.sh").write_text(f'printf "%s\\n" {name} >> "$HOME/ran"\n')
-        self.tool("id", 'if [ "$1" = -Gn ]; then echo "staff admin"; else exec /usr/bin/id "$@"; fi')
+        self.tool(
+            "id", 'if [ "$1" = -Gn ]; then echo "staff admin"; else exec /usr/bin/id "$@"; fi'
+        )
         (self.home / ".jsh").symlink_to(checkout)
+
         def run(*args):
-            return subprocess.run(["/bin/bash", str(checkout / "scripts/configure.sh"), *args],
-                                  env=self.env | {"JSH_PLATFORM": "darwin"}, cwd=self.home,
-                                  capture_output=True, text=True, timeout=20)
+            return subprocess.run(
+                ["/bin/bash", str(checkout / "scripts/configure.sh"), *args],
+                env=self.env | {"JSH_PLATFORM": "darwin"},
+                cwd=self.home,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+
         self.assertEqual(run("--list").stdout, "macos\nlinux\ndev\n")
         self.assertRegex(run("--help").stdout, r"\n  dev +Developer tools\n")
         result = run()
@@ -947,12 +1079,18 @@ exit "__DOLLAR__status"
     def test_installer_rejects_malformed_group_sources(self):
         checkout = self.installer_scope_fixture()
         cases = (
-            ("site", "---\n- hosts: localhost\n  tasks:\n"
-             "    - name: dev\n      ansible.builtin.include_role:\n"
-             "        apply: {tags: [dev]}\n",
-             "site.yml line 5"),
-            ("metadata", "---\ngalaxy_info:\n  description: Tools\n",
-             "ansible/roles/dev/meta/main.yml"),
+            (
+                "site",
+                "---\n- hosts: localhost\n  tasks:\n"
+                "    - name: dev\n      ansible.builtin.include_role:\n"
+                "        apply: {tags: [dev]}\n",
+                "site.yml line 5",
+            ),
+            (
+                "metadata",
+                "---\ngalaxy_info:\n  description: Tools\n",
+                "ansible/roles/dev/meta/main.yml",
+            ),
         )
         for source, contents, error in cases:
             with self.subTest(source=source):
@@ -961,19 +1099,32 @@ exit "__DOLLAR__status"
                     (checkout / "ansible/site.yml").write_text(contents)
                 else:
                     (checkout / "ansible/roles/dev/meta/main.yml").write_text(contents)
-                result = subprocess.run(["/bin/bash", str(checkout / "scripts/configure.sh"),
-                                         "--list"],
-                                        env=self.env, cwd=self.home, capture_output=True,
-                                        text=True, timeout=20)
+                result = subprocess.run(
+                    ["/bin/bash", str(checkout / "scripts/configure.sh"), "--list"],
+                    env=self.env,
+                    cwd=self.home,
+                    capture_output=True,
+                    text=True,
+                    timeout=20,
+                )
                 self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
                 self.assertIn(error, result.stderr)
 
     def test_piped_install_defers_role_names_to_the_checkout(self):
         self.tool("git", "exit 0")
         script = (ROOT / "install.sh").read_text()
+
         def piped(*args):
-            return subprocess.run(["/bin/bash", "-s", "--", *args], input=script, env=self.env,
-                                  cwd=self.home, capture_output=True, text=True, timeout=20)
+            return subprocess.run(
+                ["/bin/bash", "-s", "--", *args],
+                input=script,
+                env=self.env,
+                cwd=self.home,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+
         preview = piped("--dry-run")
         self.assertEqual(preview.returncode, 0, preview.stdout + preview.stderr)
         self.assertIn("would clone", preview.stdout)
@@ -994,12 +1145,17 @@ exit "__DOLLAR__status"
         launcher.write_text('#!/bin/sh\ntouch "$HOME/nested-runtime"\n')
         launcher.chmod(0o755)
         python = shlex.quote(shutil.which("python3"))
-        self.tool("python3", f"""case "$1" in
+        self.tool(
+            "python3",
+            f"""case "$1" in
   */lib/output.py) touch "$HOME/renderer-started" ;;
 esac
 exec {python} "$@"
-""")
-        self.tool("mkdir", """target=
+""",
+        )
+        self.tool(
+            "mkdir",
+            """target=
 for argument in "$@"; do target=$argument; done
 /bin/mkdir "$@" || exit
 case $target in
@@ -1010,19 +1166,20 @@ case $target in
     fi
     ;;
 esac
-""")
+""",
+        )
         for rc in (".bashrc.local", ".jshrc"):
-            (self.home / rc).write_text('JSH_TEST_LOADS=$((${JSH_TEST_LOADS:-0} + 1))\n')
+            (self.home / rc).write_text("JSH_TEST_LOADS=$((${JSH_TEST_LOADS:-0} + 1))\n")
         for shell in SHELLS:
             with self.subTest(shell=shell):
                 for marker in ("renderer-started", "renderer-alive-at-handoff"):
                     (self.home / marker).unlink(missing_ok=True)
                 output = self.run_terminal(
                     shell,
-                    f'''before=$$
+                    f"""before=$$
 bash {shlex.quote(str(checkout / "install.sh"))}
 printf '\\nRELOAD_RESULT:%s:%s\\n' "$([[ $$ == "$before" ]] && printf same)" "$JSH_TEST_LOADS"
-''',
+""",
                     JSH_LOAD_CONFIG="1",
                 )
                 self.assertIn("RELOAD_RESULT:same:2", output)
@@ -1041,8 +1198,10 @@ printf '\\nRELOAD_RESULT:%s:%s\\n' "$([[ $$ == "$before" ]] && printf same)" "$J
         )
         launcher.chmod(0o755)
         output = self.run_terminal(
-            "/bin/bash", f'bash {shlex.quote(str(checkout / "install.sh"))}',
-            JSH_RUNTIME_DIR="", JSH_LOAD_CONFIG="0",
+            "/bin/bash",
+            f'bash {shlex.quote(str(checkout / "install.sh"))}',
+            JSH_RUNTIME_DIR="",
+            JSH_LOAD_CONFIG="0",
         )
         self.assertIn("Opening the jsh runtime...", output)
         self.assertTrue((self.home / "opened-runtime").exists())
@@ -1056,18 +1215,28 @@ printf '\\nRELOAD_RESULT:%s:%s\\n' "$([[ $$ == "$before" ]] && printf same)" "$J
                 (checkout / "scripts/apps.sh").write_text("exit 7\n")
                 result = subprocess.run(
                     ["bash", str(checkout / args[0]), *args[1:]],
-                    env=self.env | {"JSH_RELOAD_PID": "12345"}, cwd=self.home,
-                    capture_output=True, text=True, timeout=20,
+                    env=self.env | {"JSH_RELOAD_PID": "12345"},
+                    cwd=self.home,
+                    capture_output=True,
+                    text=True,
+                    timeout=20,
                 )
-                self.assertEqual(result.returncode, 0 if args[1] == "--dry-run" else 1,
-                                 result.stdout + result.stderr)
+                self.assertEqual(
+                    result.returncode,
+                    0 if args[1] == "--dry-run" else 1,
+                    result.stdout + result.stderr,
+                )
                 self.assertFalse((self.home / "runtime/reload-12345").exists())
 
     def test_installer_offers_reload_for_runtime_without_reload_hook(self):
         checkout = self.installer_scope_fixture()
         result = subprocess.run(
             ["bash", str(checkout / "install.sh")],
-            env=self.env, cwd=self.home, capture_output=True, text=True, timeout=20,
+            env=self.env,
+            cwd=self.home,
+            capture_output=True,
+            text=True,
+            timeout=20,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('Run "jsh reload" to refresh the current runtime', result.stdout)
@@ -1081,7 +1250,11 @@ printf '\\nRELOAD_RESULT:%s:%s\\n' "$([[ $$ == "$before" ]] && printf same)" "$J
         (checkout / "scripts/patches.sh").write_text("exit 1\n")
         result = subprocess.run(
             ["bash", str(checkout / "scripts/configure.sh"), "apps", "wox", "patches"],
-            env=self.env, cwd=self.home, capture_output=True, text=True, timeout=20,
+            env=self.env,
+            cwd=self.home,
+            capture_output=True,
+            text=True,
+            timeout=20,
         )
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         output = result.stdout + result.stderr
@@ -1103,7 +1276,11 @@ false
 """)
         result = subprocess.run(
             ["bash", str(checkout / "scripts/configure.sh"), "apps"],
-            env=self.env, cwd=self.home, capture_output=True, text=True, timeout=20,
+            env=self.env,
+            cwd=self.home,
+            capture_output=True,
+            text=True,
+            timeout=20,
         )
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertEqual(result.stdout.splitlines().count("✕ apps failed (1)"), 1, result.stdout)
@@ -1111,24 +1288,29 @@ false
 
     def test_configure_continues_to_the_last_group_after_earlier_failure(self):
         checkout = self.configure_fixture()
-        write_group_sources(checkout, [("a", "all", "First"),
-                                       ("b", "all", "Second")])
+        write_group_sources(checkout, [("a", "all", "First"), ("b", "all", "Second")])
         (checkout / "scripts/a.sh").write_text("exit 1\n")
         (checkout / "scripts/b.sh").write_text(
             '. "$JSH_ROOT/scripts/lib/common.sh"\n'
-            'jsh::step check thing\n'
+            "jsh::step check thing\n"
             'jsh::ok "thing is current"\n'
         )
         result = subprocess.run(
             ["bash", str(checkout / "scripts/configure.sh"), "a", "b"],
-            env=self.env, cwd=self.home, capture_output=True, text=True, timeout=20,
+            env=self.env,
+            cwd=self.home,
+            capture_output=True,
+            text=True,
+            timeout=20,
         )
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("✕ a failed (1)", result.stdout)
         self.assertIn("› b  Second", result.stdout)
         self.assertIn("✓ thing is current", result.stdout)
-        self.assertLess(result.stdout.index("✓ thing is current"),
-                        result.stdout.index("✕ host configuration failed (2)"))
+        self.assertLess(
+            result.stdout.index("✓ thing is current"),
+            result.stdout.index("✕ host configuration failed (2)"),
+        )
         self.assertNotIn("✕ Stopped checking thing", result.stdout)
 
     def test_installer_preview_labels_changes_without_modifying_home(self):
@@ -1136,8 +1318,11 @@ false
         (checkout / "dotfiles/.zshrc").write_text("fixture\n")
         result = subprocess.run(
             ["bash", str(checkout / "install.sh"), "--dry-run"],
-            env=self.env, cwd=self.home,
-            capture_output=True, text=True, timeout=20,
+            env=self.env,
+            cwd=self.home,
+            capture_output=True,
+            text=True,
+            timeout=20,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("! ~/.zshrc is missing  would add", result.stdout)
@@ -1151,10 +1336,18 @@ false
             '. "$JSH_ROOT/scripts/lib/common.sh"\n'
             'if read -r line; then echo "read:$line"; else echo stdin-closed; fi\n'
             'jsh::task "Configuring apps" bash -c "echo raw-config-output"\n'
-            'jsh::changed "apps settings"\n')
-        result = subprocess.run(["bash", str(checkout / "scripts/configure.sh"), "apps"], env=self.env,
-                                cwd=self.home, input="typed\n", stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, text=True, timeout=20)
+            'jsh::changed "apps settings"\n'
+        )
+        result = subprocess.run(
+            ["bash", str(checkout / "scripts/configure.sh"), "apps"],
+            env=self.env,
+            cwd=self.home,
+            input="typed\n",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=20,
+        )
         self.assertEqual(result.returncode, 0, result.stdout)
         out = result.stdout
         self.assertIn("stdin-closed", out)
@@ -1165,17 +1358,21 @@ false
 
     def test_configure_failure_keeps_diagnostics_and_continues(self):
         checkout = self.configure_fixture()
-        (checkout / "scripts/apps.sh").write_text('''
+        (checkout / "scripts/apps.sh").write_text("""
 . "$JSH_ROOT/scripts/lib/common.sh"
 jsh::task "Updating Git" bash -c 'echo useful-error; exit 7' || exit $?
-''')
-        (checkout / "scripts/wox.sh").write_text('''
+""")
+        (checkout / "scripts/wox.sh").write_text("""
 . "$JSH_ROOT/scripts/lib/common.sh"
 jsh::changed "Ghostty settings"
-''')
+""")
         result = subprocess.run(
             ["bash", str(checkout / "scripts/configure.sh"), "--update", "apps", "wox"],
-            env=self.env, cwd=self.home, capture_output=True, text=True, timeout=20,
+            env=self.env,
+            cwd=self.home,
+            capture_output=True,
+            text=True,
+            timeout=20,
         )
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertEqual(result.stderr, "")
@@ -1183,8 +1380,12 @@ jsh::changed "Ghostty settings"
         self.assertIn("Log:", result.stdout)
         self.assertIn("Ghostty settings", result.stdout)
         self.assertIn("Finished with errors", result.stdout)
-        self.assertTrue(any(b"useful-error" in path.read_bytes() for path in
-                            (self.home / ".local/state/jsh/logs").iterdir()))
+        self.assertTrue(
+            any(
+                b"useful-error" in path.read_bytes()
+                for path in (self.home / ".local/state/jsh/logs").iterdir()
+            )
+        )
 
     def test_installer_reports_bootstrap_failures(self):
         for script in ("packages", "shell"):
@@ -1192,16 +1393,28 @@ jsh::changed "Ghostty settings"
                 checkout = self.home / script
                 for name in ("scripts/lib", "lib/shell", "bin", "dotfiles"):
                     (checkout / name).mkdir(parents=True)
-                for name in ("scripts/lib/common.sh", "lib/shell/output.sh", "lib/output.py",
-                             "lib/verbs.tsv", "install.sh"):
+                for name in (
+                    "scripts/lib/common.sh",
+                    "lib/shell/output.sh",
+                    "lib/output.py",
+                    "lib/verbs.tsv",
+                    "install.sh",
+                ):
                     shutil.copy2(ROOT / name, checkout / name)
                 copy_group_sources(checkout)
-                (checkout / "scripts/packages.sh").write_text("exit 3\n" if script == "packages" else "exit 0\n")
-                (checkout / "scripts/shell.sh").write_text("exit 3\n" if script == "shell" else "exit 0\n")
+                (checkout / "scripts/packages.sh").write_text(
+                    "exit 3\n" if script == "packages" else "exit 0\n"
+                )
+                (checkout / "scripts/shell.sh").write_text(
+                    "exit 3\n" if script == "shell" else "exit 0\n"
+                )
                 result = subprocess.run(
                     ["bash", str(checkout / "install.sh")],
-                    env=self.env | {"HOME": str(checkout)}, cwd=checkout,
-                    capture_output=True, text=True, timeout=20,
+                    env=self.env | {"HOME": str(checkout)},
+                    cwd=checkout,
+                    capture_output=True,
+                    text=True,
+                    timeout=20,
                 )
                 self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
                 name = "core" if script == "packages" else "shell"
@@ -1211,10 +1424,17 @@ jsh::changed "Ghostty settings"
 
     def test_shell_preview_update_checks_remote_head(self):
         vendor = self.home / "shell-preview"
-        for name in ("fzf", "fzf-tab", "zsh-completions", "zsh-autosuggestions",
-                     "zsh-syntax-highlighting"):
+        for name in (
+            "fzf",
+            "fzf-tab",
+            "zsh-completions",
+            "zsh-autosuggestions",
+            "zsh-syntax-highlighting",
+        ):
             (vendor / name / ".git").mkdir(parents=True)
-        self.tool("git", """case " $* " in
+        self.tool(
+            "git",
+            """case " $* " in
   *" rev-parse "*) printf "abc1234000000000000000000000000000000000\n" ;;
   *" ls-remote "*)
     case "${JSH_REMOTE_STATE:-equal}" in
@@ -1223,13 +1443,17 @@ jsh::changed "Ghostty settings"
       fail) exit 1 ;;
     esac
     ;;
-esac""")
+esac""",
+        )
 
         def run(remote):
             result = subprocess.run(
                 ["bash", str(ROOT / "scripts/shell.sh"), "--dry-run", "--update"],
                 env=self.env | {"JSH_VENDOR": str(vendor), "JSH_REMOTE_STATE": remote},
-                cwd=self.home, capture_output=True, text=True, timeout=20,
+                cwd=self.home,
+                capture_output=True,
+                text=True,
+                timeout=20,
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             return result.stdout
@@ -1240,8 +1464,13 @@ esac""")
 
     def test_shell_reports_fzf_version_state(self):
         vendor = self.home / "fzf-fixture"
-        for name in ("fzf", "fzf-tab", "zsh-completions", "zsh-autosuggestions",
-                     "zsh-syntax-highlighting"):
+        for name in (
+            "fzf",
+            "fzf-tab",
+            "zsh-completions",
+            "zsh-autosuggestions",
+            "zsh-syntax-highlighting",
+        ):
             (vendor / name / ".git").mkdir(parents=True)
         installer = vendor / "fzf/install"
         installer.write_text("#!/bin/sh\nversion=0.60.0\nexit 0\n")
@@ -1257,8 +1486,11 @@ esac""")
                 binary.chmod(0o755)
             result = subprocess.run(
                 ["bash", str(ROOT / "scripts/shell.sh")],
-                env=self.env | {"JSH_VENDOR": str(vendor)}, cwd=self.home,
-                capture_output=True, text=True, timeout=20,
+                env=self.env | {"JSH_VENDOR": str(vendor)},
+                cwd=self.home,
+                capture_output=True,
+                text=True,
+                timeout=20,
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             return result.stdout
@@ -1276,19 +1508,36 @@ esac""")
         checkout = self.home / "checkout"
         for name in ("scripts/lib", "lib/shell"):
             (checkout / name).mkdir(parents=True)
-        for name in ("scripts/lib/common.sh", "lib/shell/output.sh", "lib/output.py",
-                     "lib/verbs.tsv", "scripts/shell.sh"):
+        for name in (
+            "scripts/lib/common.sh",
+            "lib/shell/output.sh",
+            "lib/output.py",
+            "lib/verbs.tsv",
+            "scripts/shell.sh",
+        ):
             shutil.copy2(ROOT / name, checkout / name)
-        for name in ("fzf", "fzf-tab", "zsh-completions", "zsh-autosuggestions", "zsh-syntax-highlighting"):
+        for name in (
+            "fzf",
+            "fzf-tab",
+            "zsh-completions",
+            "zsh-autosuggestions",
+            "zsh-syntax-highlighting",
+        ):
             (self.home / "vendor" / name / ".git").mkdir(parents=True)
-        self.tool("git", '''case " $* " in
+        self.tool(
+            "git",
+            """case " $* " in
   *" pull "*) printf '%s\\n' "$*" >> "$HOME/git-calls" ;;
   *" rev-parse "*) printf 'unchanged\\n' ;;
-esac''')
+esac""",
+        )
         result = subprocess.run(
             ["bash", str(checkout / "scripts/shell.sh"), "--update"],
-            env=self.env | {"JSH_ROOT": str(checkout)}, cwd=self.home,
-            capture_output=True, text=True, timeout=20,
+            env=self.env | {"JSH_ROOT": str(checkout)},
+            cwd=self.home,
+            capture_output=True,
+            text=True,
+            timeout=20,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("✓ fzf is up to date", result.stdout)
@@ -1298,21 +1547,37 @@ esac''')
 
     def test_git_get_uses_matching_profile_key(self):
         profiles = self.home / "profiles.json"
-        profiles.write_text('{"profiles": {"work": {"user": "skulltrail", "ssh_key": "key with space"}}}')
-        self.tool("git", '''printf '%s|%s\\n' "$GIT_SSH_COMMAND" "$*" >> "$HOME/git-calls"
+        profiles.write_text(
+            '{"profiles": {"work": {"user": "skulltrail", "ssh_key": "key with space"}}}'
+        )
+        self.tool(
+            "git",
+            """printf '%s|%s\\n' "$GIT_SSH_COMMAND" "$*" >> "$HOME/git-calls"
 case "$*" in
   *git@github.com:skulltrail/skulltrail.git*) exit 0 ;;
   *) exit 1 ;;
-esac''')
+esac""",
+        )
         result = subprocess.run(
             [str(ROOT / "bin/git"), "get", "skulltrail/skulltrail"],
-            env=self.env | {"JSH_GIT_PROFILES": str(profiles)}, cwd=self.home,
-            capture_output=True, text=True, timeout=10,
+            env=self.env | {"JSH_GIT_PROFILES": str(profiles)},
+            cwd=self.home,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         calls = (self.home / "git-calls").read_text().splitlines()
         self.assertEqual(len(calls), 2)
-        self.assertTrue(all("ssh -F /dev/null -i " in call and "key\\ with\\ space" in call and "IdentitiesOnly=yes" in call for call in calls), calls)
+        self.assertTrue(
+            all(
+                "ssh -F /dev/null -i " in call
+                and "key\\ with\\ space" in call
+                and "IdentitiesOnly=yes" in call
+                for call in calls
+            ),
+            calls,
+        )
         self.assertIn("clone -c core.sshCommand=", calls[1])
         self.assertTrue(all("git@github.com:skulltrail/skulltrail.git" in call for call in calls))
 
@@ -1320,41 +1585,73 @@ esac''')
         self.tool("git", '''printf '%s\\n' "$*" >> "$HOME/git-calls"''')
         result = subprocess.run(
             ["/bin/bash", str(ROOT / "bin/git"), "get", "other/project"],
-            env=self.env | {"JSH_GIT_PROFILES": str(self.home / "missing.json")}, cwd=self.home,
-            capture_output=True, text=True, timeout=10,
+            env=self.env | {"JSH_GIT_PROFILES": str(self.home / "missing.json")},
+            cwd=self.home,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         calls = (self.home / "git-calls").read_text().splitlines()
-        self.assertTrue(all("https://github.com/other/project.git" in call for call in calls), calls)
+        self.assertTrue(
+            all("https://github.com/other/project.git" in call for call in calls), calls
+        )
         self.assertNotIn("core.sshCommand", calls[-1])
 
     def test_git_profile_isolates_selected_ssh_key(self):
         profiles = self.home / "profiles.json"
-        profiles.write_text('{"profiles":{"anon":{"name":"Anon","email":"anon@example.org","ssh_key":"key with space"}}}')
+        profiles.write_text(
+            '{"profiles":{"anon":{"name":"Anon","email":"anon@example.org","ssh_key":"key with space"}}}'
+        )
         repo = self.home / "repo"
         subprocess.run(["git", "init", "-q", str(repo)], env=self.env, check=True)
         result = subprocess.run(
             [str(ROOT / "bin/git"), "profile", "anon"],
-            env=self.env | {"JSH_GIT_PROFILES": str(profiles)}, cwd=repo,
-            capture_output=True, text=True, timeout=10,
+            env=self.env | {"JSH_GIT_PROFILES": str(profiles)},
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        command = subprocess.check_output(["git", "config", "core.sshCommand"], env=self.env, cwd=repo, text=True)
-        self.assertEqual(shlex.split(command), ["ssh", "-F", "/dev/null", "-i", "~/.ssh/key with space", "-o", "IdentitiesOnly=yes"])
+        command = subprocess.check_output(
+            ["git", "config", "core.sshCommand"], env=self.env, cwd=repo, text=True
+        )
+        self.assertEqual(
+            shlex.split(command),
+            ["ssh", "-F", "/dev/null", "-i", "~/.ssh/key with space", "-o", "IdentitiesOnly=yes"],
+        )
 
     def test_git_profiles_lists_and_marks_matching_identity(self):
         profiles = self.home / "profiles.json"
-        profiles.write_text('{"profiles":{"anon":{"name":"Anon","email":"anon@example.org","user":"skulltrail"},"work":{"name":"Work","email":"work@example.org","user":"work"}}}')
+        profiles.write_text(
+            '{"profiles":{"anon":{"name":"Anon","email":"anon@example.org","user":"skulltrail"},"work":{"name":"Work","email":"work@example.org","user":"work"}}}'
+        )
         subprocess.run(["git", "init", "-q", str(self.home / "repo")], env=self.env, check=True)
         repo = self.home / "repo"
-        subprocess.run(["git", "config", "user.email", "anon@example.org"], env=self.env, cwd=repo, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "anon@example.org"], env=self.env, cwd=repo, check=True
+        )
+
         def listing():
-            return subprocess.run([str(ROOT / "bin/git"), "profiles"], env=self.env | {"JSH_GIT_PROFILES": str(profiles)}, cwd=repo, capture_output=True, text=True)
+            return subprocess.run(
+                [str(ROOT / "bin/git"), "profiles"],
+                env=self.env | {"JSH_GIT_PROFILES": str(profiles)},
+                cwd=repo,
+                capture_output=True,
+                text=True,
+            )
+
         result = listing()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertRegex(result.stdout, r"(?m)^\*\s+anon\s+")
         self.assertRegex(result.stdout, r"(?m)^\s+work\s+")
-        subprocess.run(["git", "config", "user.email", "unmatched@example.org"], env=self.env, cwd=repo, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "unmatched@example.org"],
+            env=self.env,
+            cwd=repo,
+            check=True,
+        )
         self.assertNotIn("*", listing().stdout)
 
     def test_gh_status_uses_selected_profile(self):
@@ -1362,16 +1659,28 @@ esac''')
         if not zsh or not jq:
             self.skipTest("zsh and jq required")
         profiles = self.home / "profiles.json"
-        profiles.write_text('{"profiles":{"anon":{"email":"anon@example.org","user":"skulltrail"}}}')
+        profiles.write_text(
+            '{"profiles":{"anon":{"email":"anon@example.org","user":"skulltrail"}}}'
+        )
         self.tool("git", 'case "$1" in rev-parse) exit 0;; config) echo anon@example.org;; esac')
-        self.tool("gh", 'if [ "$1" = auth ] && [ "$2" = token ]; then printf token-%s "$6"; else printf "%s:%s\\n" "${GH_TOKEN-unset}" "$*"; fi')
+        self.tool(
+            "gh",
+            'if [ "$1" = auth ] && [ "$2" = token ]; then printf token-%s "$6"; else printf "%s:%s\\n" "${GH_TOKEN-unset}" "$*"; fi',
+        )
         self.tool("jq", f'exec "{jq}" "$@"')
         rc = (ROOT / "dotfiles/.zshrc").read_text()
-        function = rc[rc.index("gh() {\n"):rc.index("\n# Interactive shell start:")]
+        function = rc[rc.index("gh() {\n") : rc.index("\n# Interactive shell start:")]
         script = self.home / "function.zsh"
         script.write_text(function)
+
         def call(args):
-            return subprocess.run([zsh, "-f", "-c", f'source "$1"; shift; gh "$@"', "test", str(script), *args], env=self.env | {"JSH_GIT_PROFILES": str(profiles)}, capture_output=True, text=True)
+            return subprocess.run(
+                [zsh, "-f", "-c", f'source "$1"; shift; gh "$@"', "test", str(script), *args],
+                env=self.env | {"JSH_GIT_PROFILES": str(profiles)},
+                capture_output=True,
+                text=True,
+            )
+
         self.assertEqual(call(["auth", "status"]).stdout, "token-skulltrail:auth status\n")
         self.assertEqual(call(["auth", "login"]).stdout, "unset:auth login\n")
         self.assertEqual(call(["workflow", "list"]).stdout, "token-skulltrail:workflow list\n")
@@ -1385,7 +1694,10 @@ esac''')
         env = self.env | {"JSH_GIT_PROFILES": str(profiles)}
         result = subprocess.run(
             [str(ROOT / "bin/git"), "__complete", "profile"],
-            env=env, capture_output=True, text=True, timeout=10,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "work\n", ""))
         missing = self.home / "missing/profiles.json"
@@ -1393,7 +1705,9 @@ esac''')
             result = subprocess.run(
                 [str(ROOT / "bin/git"), "__complete", kind],
                 env=self.env | {"JSH_GIT_PROFILES": str(path)},
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
         self.assertFalse(missing.parent.exists())
@@ -1404,15 +1718,25 @@ esac''')
         subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], env=self.env, check=True)
 
         def git(*args):
-            return subprocess.run(["git", "-C", str(repo), *args], env=self.env,
-                                  capture_output=True, text=True, timeout=20)
+            return subprocess.run(
+                ["git", "-C", str(repo), *args],
+                env=self.env,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
 
-        for key, value in (("user.email", "anon@example.org"), ("user.name", "Anon"),
-                           ("core.hooksPath", str(ROOT / "lib/git/hooks"))):
+        for key, value in (
+            ("user.email", "anon@example.org"),
+            ("user.name", "Anon"),
+            ("core.hooksPath", str(ROOT / "lib/git/hooks")),
+        ):
             git("config", key, value)
         git("remote", "add", "origin", str(remote))
-        for name, body in (("pre-commit", 'echo pre-commit >> "$HOME/ran"'),
-                           ("pre-push", 'cat > "$HOME/pushed"')):
+        for name, body in (
+            ("pre-commit", 'echo pre-commit >> "$HOME/ran"'),
+            ("pre-push", 'cat > "$HOME/pushed"'),
+        ):
             hook = repo / ".git/hooks" / name
             hook.write_text(f"#!/bin/sh\n{body}\n")
             hook.chmod(0o755)
@@ -1434,17 +1758,27 @@ esac''')
         subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], env=self.env, check=True)
 
         def git(*args):
-            return subprocess.run(["git", "-C", str(repo), *args], env=self.env,
-                                  capture_output=True, text=True, timeout=20)
+            return subprocess.run(
+                ["git", "-C", str(repo), *args],
+                env=self.env,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
 
-        for key, value in (("user.email", "anon@example.org"), ("user.name", "Anon"),
-                           ("core.hooksPath", str(ROOT / "lib/git/hooks"))):
+        for key, value in (
+            ("user.email", "anon@example.org"),
+            ("user.name", "Anon"),
+            ("core.hooksPath", str(ROOT / "lib/git/hooks")),
+        ):
             git("config", key, value)
         git("remote", "add", "origin", str(remote))
         for place, label in ((".githooks", "tracked"), (".git/hooks", "installed")):
             (repo / place).mkdir(exist_ok=True)
-            for name, body in (("pre-commit", f'echo {label} >> "$HOME/ran"'),
-                               ("pre-push", f'cat > "$HOME/pushed-{label}"')):
+            for name, body in (
+                ("pre-commit", f'echo {label} >> "$HOME/ran"'),
+                ("pre-push", f'cat > "$HOME/pushed-{label}"'),
+            ):
                 hook = repo / place / name
                 hook.write_text(f"#!/bin/sh\n{body}\n")
                 hook.chmod(0o755)
@@ -1548,8 +1882,17 @@ esac''')
   "completion zsh") echo '_kubectl() { :; }; compdef _kubectl kubectl' ;;
 esac""",
         )
-        self.tool("task", "[ \"$*\" != '--completion bash' ] || echo '_task_fixture() { :; }; complete -F _task_fixture task'")
-        for plugin in ("fzf", "fzf-tab", "zsh-autosuggestions", "zsh-completions", "zsh-syntax-highlighting"):
+        self.tool(
+            "task",
+            "[ \"$*\" != '--completion bash' ] || echo '_task_fixture() { :; }; complete -F _task_fixture task'",
+        )
+        for plugin in (
+            "fzf",
+            "fzf-tab",
+            "zsh-autosuggestions",
+            "zsh-completions",
+            "zsh-syntax-highlighting",
+        ):
             (self.home / "vendor" / plugin).mkdir()
         self.each_shell(
             """
@@ -1608,8 +1951,7 @@ esac""",
   *namespaces*) printf '%s\\n' default kube-system ;;
 esac""",
         )
-        self.each_shell(
-            """
+        self.each_shell("""
             PATH=$HOME/tools:$PATH
             if [[ -n ${ZSH_VERSION:-} ]]; then
                 [[ $_comps[kubectx] == _jsh_kubectx ]] || exit 1
@@ -1650,8 +1992,7 @@ esac""",
                 [[ ${COMPREPLY[*]} == '- -c --current -h --help' ]] || exit 10
                 command mv -f "$HOME/kubectl.good" "$HOME/tools/kubectl"
             fi
-        """
-        )
+        """)
 
     def test_kubens_reports_unknown_namespace_for_equals_argument(self):
         self.tool(
@@ -1700,8 +2041,7 @@ esac"""
         self.assertEqual((hook.returncode, hook.stdout, hook.stderr), (0, "", ""))
         self.tool("kubectl", stub)
         (self.home / "calls").unlink()
-        self.each_shell(
-            """
+        self.each_shell("""
             PATH=$HOME/tools:$PATH
             if [[ -n ${ZSH_VERSION:-} ]]; then
                 [[ $_comps[nukem] == _jsh_nukem ]] || exit 1
@@ -1716,8 +2056,7 @@ esac"""
                 COMP_WORDS=(nukem --d); COMP_CWORD=1; _jsh_nukem_complete
                 [[ ${COMPREPLY[*]} == --dry-run ]] || exit 5
             fi
-        """
-        )
+        """)
 
     def test_sessionless_redirect_disables_tty_color(self):
         code = r"""
@@ -1737,23 +2076,24 @@ esac"""
         )
 
     def test_sessionless_color_always_forces_pipe_color(self):
-        code = ". \"$JSH_ROOT/lib/shell/output.sh\"; jsh::ok x"
+        code = '. "$JSH_ROOT/lib/shell/output.sh"; jsh::ok x'
         result = subprocess.run(
             ["bash", "-c", code],
             env=self.env | {"JSH_COLOR": "always"},
-            capture_output=True, timeout=10,
+            capture_output=True,
+            timeout=10,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(result.stdout, b"\x1b[32m\xe2\x9c\x93\x1b[0m x\n")
         self.assertEqual(result.stderr, b"")
 
     def test_sessionless_direct_tty_uses_color(self):
-        code = ". \"$JSH_ROOT/lib/shell/output.sh\"; jsh::ok x"
+        code = '. "$JSH_ROOT/lib/shell/output.sh"; jsh::ok x'
         display = self.run_on_terminal(code, self.env)
         self.assertEqual(display, "\x1b[32m✓\x1b[0m x\r\n")
 
     def test_sessionless_direct_tty_honors_color_disablers(self):
-        code = ". \"$JSH_ROOT/lib/shell/output.sh\"; jsh::ok x"
+        code = '. "$JSH_ROOT/lib/shell/output.sh"; jsh::ok x'
         cases = (
             ("JSH_COLOR=never", {"JSH_COLOR": "never"}),
             ("NO_COLOR", {"NO_COLOR": "1"}),
@@ -1795,7 +2135,10 @@ esac"""
         result = subprocess.run(
             ["bash", "-c", code],
             env=self.env | {"NO_COLOR": "1"},
-            cwd=self.home, capture_output=True, text=True, timeout=10,
+            cwd=self.home,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertRegex(
@@ -1814,7 +2157,9 @@ esac"""
                 result = subprocess.run(
                     [str(ROOT / "bin" / name), *arguments],
                     env=self.env | {"NO_COLOR": "1"},
-                    capture_output=True, text=True, timeout=10,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
                 )
                 self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
                 self.assertEqual(result.stderr[:2], "✕ ", result.stderr)
@@ -1823,7 +2168,9 @@ esac"""
         result = subprocess.run(
             [str(ROOT / "bin/jsh"), "setup"],
             env=self.env | {"NO_COLOR": "1"},
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
         self.assertEqual(
@@ -1835,28 +2182,34 @@ esac"""
         result = subprocess.run(
             [str(ROOT / "bin/proxy"), "--verbose", "--url", "http://localhost:8080", "true"],
             env=self.env | {"NO_COLOR": "1"},
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(result.stdout.splitlines()[0], "Proxy Configuration", result.stdout)
 
     def test_interactive_handoffs_do_not_start_a_renderer(self):
-        self.tool("python3", "printf python >> \"$HOME/python-calls\"; exit 1")
-        self.tool("child-shell", "printf proxy >> \"$HOME/handoffs\"")
+        self.tool("python3", 'printf python >> "$HOME/python-calls"; exit 1')
+        self.tool("child-shell", 'printf proxy >> "$HOME/handoffs"')
         proxy = subprocess.run(
             [str(ROOT / "bin/proxy"), "--url", "http://localhost:8080", "--shell"],
             env=self.env | {"NO_COLOR": "1", "SHELL": str(self.tools / "child-shell")},
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         self.assertEqual(proxy.returncode, 0, proxy.stdout + proxy.stderr)
         self.assertIn("Starting shell with proxy configured...", proxy.stdout)
         self.assertNotIn("\r", proxy.stdout + proxy.stderr)
 
-        self.tool("ssh", "printf ssh >> \"$HOME/handoffs\"")
+        self.tool("ssh", 'printf ssh >> "$HOME/handoffs"')
         raw = subprocess.run(
             [str(ROOT / "bin/jssh"), "--raw", "example"],
             env=self.env | {"NO_COLOR": "1"},
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         self.assertEqual(raw.returncode, 0, raw.stdout + raw.stderr)
         self.assertEqual((self.home / "handoffs").read_text(), "proxyssh")
@@ -1874,28 +2227,40 @@ esac"""
                 result = subprocess.run(
                     ["bash", str(checkout / "bin" / name), "--help"],
                     env=self.env | {"JSH_ROOT": str(checkout)},
-                    capture_output=True, text=True, timeout=10,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stderr, "")
 
     def test_confirm_needs_a_terminal_or_yes(self):
         code = '. "$JSH_ROOT/lib/shell/output.sh"; jsh::confirm "Delete?"'
-        refused = subprocess.run(["bash", "-c", code], env=self.env, stdin=subprocess.DEVNULL,
-                                 capture_output=True, text=True, timeout=10)
+        refused = subprocess.run(
+            ["bash", "-c", code],
+            env=self.env,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
         self.assertEqual(refused.returncode, 1)
         self.assertIn("Use --yes to apply changes without a terminal.", refused.stderr)
-        accepted = subprocess.run(["bash", "-c", code], env=self.env | {"JSH_ASSUME_YES": "1"},
-                                  stdin=subprocess.DEVNULL, capture_output=True, text=True,
-                                  timeout=10)
+        accepted = subprocess.run(
+            ["bash", "-c", code],
+            env=self.env | {"JSH_ASSUME_YES": "1"},
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
         self.assertEqual(accepted.returncode, 0, accepted.stderr)
 
     def test_bash_completes_jssh_hosts_and_proxy_presets(self):
         (self.home / ".ssh").mkdir()
         (self.home / ".ssh/config").write_text("Host alpha beta *.wild\n")
         self.tool("cuprobe", "true")
-        self.each_shell(
-            """
+        self.each_shell("""
             if [[ -n ${ZSH_VERSION:-} ]]; then
                 [[ $_comps[jssh] == _jsh_jssh ]] || exit 1
                 [[ $_comps[proxy] == _jsh_proxy ]] || exit 2
@@ -1927,8 +2292,7 @@ esac"""
                 COMP_WORDS=(proxy ''); COMP_CWORD=1; _jsh_proxy_complete
                 [[ " ${COMPREPLY[*]} " == *" --preset "* && " ${COMPREPLY[*]} " == *" cuprobe "* ]] || exit 12
             fi
-        """
-        )
+        """)
 
     def test_bash_initializes_installed_hooks_once(self):
         for name in ("direnv", "atuin", "zoxide"):
@@ -2214,18 +2578,22 @@ printf '\\nSTATUS:%s\\n' "$?"
             file.write("\n# cache invalidation fixture\n")
         self.assertNotEqual(first, payload())
 
-
     def test_brew_reports_each_package_in_preview_and_current_state(self):
-        self.tool("brew", """case "$*" in
+        self.tool(
+            "brew",
+            """case "$*" in
   "list --formula -1") [ "${JSH_TEST_INSTALLED:-0}" != 1 ] || printf "jq\n" ;;
   list*) exit 1 ;;
-esac""")
+esac""",
+        )
 
         def run(installed):
             return subprocess.run(
                 ["bash", str(ROOT / "scripts/packages.sh"), "--dry-run", "core"],
                 env=self.env | {"JSH_PLATFORM": "darwin", "JSH_TEST_INSTALLED": installed},
-                capture_output=True, text=True, timeout=20,
+                capture_output=True,
+                text=True,
+                timeout=20,
             )
 
         current = run("1")
@@ -2236,7 +2604,9 @@ esac""")
         self.assertIn("! jq is not installed  would add", missing.stdout)
 
     def test_brew_resolves_unlisted_alias_before_reporting_package(self):
-        self.tool("brew", """printf "%s\n" "$*" >> "$HOME/brew-calls"
+        self.tool(
+            "brew",
+            """printf "%s\n" "$*" >> "$HOME/brew-calls"
 case "$*" in
   "list --formula -1") printf "python@3.12\n" ;;
   "list --versions python")
@@ -2244,13 +2614,16 @@ case "$*" in
     printf "python 3.14\n"
     ;;
   list*) exit 1 ;;
-esac""")
+esac""",
+        )
 
         def run(resolves):
             result = subprocess.run(
                 ["bash", str(ROOT / "scripts/packages.sh"), "--dry-run", "core"],
                 env=self.env | {"JSH_PLATFORM": "darwin", "JSH_ALIAS_RESOLVES": resolves},
-                capture_output=True, text=True, timeout=20,
+                capture_output=True,
+                text=True,
+                timeout=20,
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             return result.stdout
@@ -2261,36 +2634,46 @@ esac""")
         resolved = run("1")
         self.assertIn("✓ python is installed", resolved)
         self.assertNotIn("! python is not installed", resolved)
-        self.assertEqual((self.home / "brew-calls").read_text().count(
-            "list --versions python\n"), 2)
+        self.assertEqual(
+            (self.home / "brew-calls").read_text().count("list --versions python\n"), 2
+        )
 
     def test_brew_early_returns_do_not_open_empty_steps(self):
         state = self.home / "package-state"
         (state / "brew").mkdir(parents=True)
         (state / "brew/formulae").touch()
-        code = (". \"$JSH_ROOT/scripts/lib/common.sh\"; "
-                ". \"$JSH_ROOT/scripts/lib/packages.sh\"; jsh::brew formulae jq")
+        code = (
+            '. "$JSH_ROOT/scripts/lib/common.sh"; '
+            '. "$JSH_ROOT/scripts/lib/packages.sh"; jsh::brew formulae jq'
+        )
         for environment in ({"JSH_PACKAGE_STATE": str(state)}, {"JSH_BREW_DEFER": "1"}):
             with self.subTest(environment=environment):
                 result = subprocess.run(
                     ["bash", "-c", code],
                     env=self.env | {"JSH_DRY_RUN": "1", "JSH_UPDATE": "1"} | environment,
-                    capture_output=True, text=True, timeout=10,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
                 )
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertNotIn("Homebrew formulae", result.stdout)
 
     def test_brew_casks_report_platform_skip_without_opening_a_step(self):
         result = subprocess.run(
-            ["bash", "-c", ". \"$JSH_ROOT/scripts/lib/common.sh\"; "
-             ". \"$JSH_ROOT/scripts/lib/packages.sh\"; jsh::brew casks example"],
+            [
+                "bash",
+                "-c",
+                '. "$JSH_ROOT/scripts/lib/common.sh"; '
+                '. "$JSH_ROOT/scripts/lib/packages.sh"; jsh::brew casks example',
+            ],
             env=self.env | {"JSH_DRY_RUN": "1", "JSH_PLATFORM": "linux"},
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("Skipping Homebrew casks: macOS only", result.stdout)
         self.assertNotIn("Checking Homebrew casks...", result.stdout)
-
 
     def test_configure_runs_global_brew_updates_in_package_step(self):
         checkout = self.configure_fixture()
@@ -2300,16 +2683,23 @@ esac""")
         if not jq:
             self.skipTest("jq is required for Homebrew metadata")
         (self.tools / "jq").symlink_to(jq)
-        self.tool("brew", '''case "$1" in
+        self.tool(
+            "brew",
+            """case "$1" in
   update) exit 0 ;;
   info) printf '%s\\n' '{"formulae":[{"full_name":"retired-formula","deprecated":true}],"casks":[{"token":"retired-cask","deprecated":true}]}' ;;
   outdated) case "$2" in --formula) echo unrelated-formula ;; --cask) echo chatgpt ;; esac ;;
   upgrade) printf '%s\\n' "$*" >> "$HOME/actions"; printf 'UPGRADED %s\\n' "$*" ;;
-esac''')
+esac""",
+        )
         result = subprocess.run(
             ["bash", str(checkout / "scripts/configure.sh"), "--update", "wox"],
-            env=self.env | {"JSH_PLATFORM": "darwin"}, cwd=self.home,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=30,
+            env=self.env | {"JSH_PLATFORM": "darwin"},
+            cwd=self.home,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=30,
         )
         out = result.stdout
         self.assertEqual(result.returncode, 0, out)
@@ -2324,11 +2714,14 @@ esac''')
 
     def test_brew_update_includes_unlisted_packages_and_removes_deprecated(self):
         if os.uname().sysname == "Darwin":
-            self.tool("stat", '''if [ "$1" = -c ] && [ "$2" = %a ]; then
+            self.tool(
+                "stat",
+                '''if [ "$1" = -c ] && [ "$2" = %a ]; then
   shift 2
   exec /usr/bin/stat -f %Lp "$@"
 fi
-exec /usr/bin/stat "$@"''')
+exec /usr/bin/stat "$@"''',
+            )
         self.tool(
             "brew",
             """case "$1" in
@@ -2344,11 +2737,17 @@ esac""",
         trust_dir = config / "homebrew"
         trust_dir.mkdir(parents=True)
         trust_dir.chmod(0o775)
-        env = self.env | {"JSH_PLATFORM": "linux", "XDG_STATE_HOME": str(self.home / "state"),
-                          "XDG_CONFIG_HOME": str(config)}
+        env = self.env | {
+            "JSH_PLATFORM": "linux",
+            "XDG_STATE_HOME": str(self.home / "state"),
+            "XDG_CONFIG_HOME": str(config),
+        }
         preview = subprocess.run(
             ["bash", str(ROOT / "scripts/packages.sh"), "--dry-run", "--update", "maintenance"],
-            env=env, capture_output=True, text=True, timeout=30,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         self.assertEqual(preview.returncode, 0, preview.stdout + preview.stderr)
         self.assertFalse((self.home / "actions").exists())
@@ -2357,7 +2756,10 @@ esac""",
         self.assertIn("! libclc is outdated  would change", preview.stdout)
         result = subprocess.run(
             ["bash", str(ROOT / "scripts/packages.sh"), "--update", "maintenance"],
-            env=env, capture_output=True, text=True, timeout=30,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         actions = (self.home / "actions").read_text()
@@ -2369,21 +2771,34 @@ esac""",
         self.assertNotIn("Keeping icu4c@76", result.stderr)
         self.assertEqual(trust_dir.stat().st_mode & 0o022, 0)
         self.assertIn("libclc", actions)
-        self.assertNotIn("gemini-cli", next(line for line in actions.splitlines() if line.startswith("upgrade")))
+        self.assertNotIn(
+            "gemini-cli", next(line for line in actions.splitlines() if line.startswith("upgrade"))
+        )
 
     def test_packages_reject_nonbootstrap_groups(self):
         checkout = self.home / "packages"
         for name in ("scripts/lib", "lib/shell"):
             (checkout / name).mkdir(parents=True)
-        for name in ("scripts/packages.sh", "scripts/lib/common.sh", "lib/shell/output.sh",
-                     "lib/output.py", "lib/verbs.tsv"):
+        for name in (
+            "scripts/packages.sh",
+            "scripts/lib/common.sh",
+            "lib/shell/output.sh",
+            "lib/output.py",
+            "lib/verbs.tsv",
+        ):
             shutil.copy2(ROOT / name, checkout / name)
         if (ROOT / "scripts/lib/packages.sh").exists():
             shutil.copy2(ROOT / "scripts/lib/packages.sh", checkout / "scripts/lib/packages.sh")
+
         def run(group):
-            return subprocess.run(["bash", str(checkout / "scripts/packages.sh"), "--dry-run", group],
-                                  env=self.env | {"JSH_ROOT": str(checkout)},
-                                  capture_output=True, text=True, timeout=20)
+            return subprocess.run(
+                ["bash", str(checkout / "scripts/packages.sh"), "--dry-run", group],
+                env=self.env | {"JSH_ROOT": str(checkout)},
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+
         extra = run("extra")
         self.assertEqual(extra.returncode, 2, extra.stdout + extra.stderr)
         self.assertIn("unknown package group: extra", extra.stdout)
@@ -2395,51 +2810,82 @@ esac""",
         for name in ("pactl", "xrandr", "flock"):
             self.tool(name, "exit 0")
         cases = (
-            ("ansible/roles/desktop/files/audio/cycle.sh", "would cycle the default audio output\n"),
-            ("ansible/roles/desktop/files/display/toggle.sh",
-             "would toggle the ultrawide display split\n"),
+            (
+                "ansible/roles/desktop/files/audio/cycle.sh",
+                "would cycle the default audio output\n",
+            ),
+            (
+                "ansible/roles/desktop/files/display/toggle.sh",
+                "would toggle the ultrawide display split\n",
+            ),
         )
         for relative, expected in cases:
             with self.subTest(script=relative):
                 result = subprocess.run(
                     [shutil.which("bash"), str(ROOT / relative), "--dry-run"],
                     env=self.env | {"NO_COLOR": "1", "JSH_DESKTOP": ""},
-                    capture_output=True, text=True, timeout=10,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
                 )
-                self.assertEqual((result.returncode, result.stdout, result.stderr),
-                                 (0, expected, ""))
+                self.assertEqual(
+                    (result.returncode, result.stdout, result.stderr), (0, expected, "")
+                )
 
     def test_setup_scripts_reject_unknown_options(self):
         for name in ("ansible.sh", "shell.sh"):
             with self.subTest(script=name):
-                result = subprocess.run(["bash", str(ROOT / "scripts" / name), "--dry-run", "--bogus"],
-                                        env=self.env, cwd=self.home, capture_output=True,
-                                        text=True, timeout=20)
+                result = subprocess.run(
+                    ["bash", str(ROOT / "scripts" / name), "--dry-run", "--bogus"],
+                    env=self.env,
+                    cwd=self.home,
+                    capture_output=True,
+                    text=True,
+                    timeout=20,
+                )
                 self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
                 self.assertIn("unknown option: --bogus", result.stderr)
 
     def test_setup_script_help_names_the_script(self):
-        result = subprocess.run(["bash", str(ROOT / "scripts/shell.sh"), "--help"],
-                                env=self.env, capture_output=True, text=True, timeout=10)
+        result = subprocess.run(
+            ["bash", str(ROOT / "scripts/shell.sh"), "--help"],
+            env=self.env,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.splitlines()[0],
-                         "Install shell plugins and their matching fzf binary.")
+        self.assertEqual(
+            result.stdout.splitlines()[0], "Install shell plugins and their matching fzf binary."
+        )
 
     def test_standalone_script_opens_one_session_with_its_group_header(self):
         child = self.home / "child.sh"
-        child.write_text('. "$JSH_ROOT/scripts/lib/common.sh"\nprintf "%s\n" "$JSH_OUTPUT" > "$HOME/child-output"\njsh::ok b\n')
+        child.write_text(
+            '. "$JSH_ROOT/scripts/lib/common.sh"\nprintf "%s\n" "$JSH_OUTPUT" > "$HOME/child-output"\njsh::ok b\n'
+        )
         parent = self.home / "parent.sh"
-        parent.write_text('set -e\n. "$JSH_ROOT/scripts/lib/common.sh"\njsh::step check things\njsh::ok a\nbash "$HOME/child.sh"\n')
+        parent.write_text(
+            'set -e\n. "$JSH_ROOT/scripts/lib/common.sh"\njsh::step check things\njsh::ok a\nbash "$HOME/child.sh"\n'
+        )
         real_python = shutil.which("python3")
         assert real_python is not None
-        self.tool("python3", f'''
+        self.tool(
+            "python3",
+            f"""
 if [ "$1" = "{ROOT}/lib/output.py" ] && [ "$2" = render ]; then
   printf 'render\n' >> "$HOME/renderers"
 fi
 exec "{real_python}" "$@"
-''')
-        result = subprocess.run(["bash", str(parent)], env=self.env | {"NO_COLOR": "1"},
-                                capture_output=True, text=True, timeout=10)
+""",
+        )
+        result = subprocess.run(
+            ["bash", str(parent)],
+            env=self.env | {"NO_COLOR": "1"},
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(result.stderr, "")
         self.assertEqual(result.stdout.count("› parent"), 1, result.stdout)
@@ -2452,19 +2898,19 @@ exec "{real_python}" "$@"
     def test_detach_closes_session_descriptors_and_clears_environment(self):
         self.tool(
             "detached",
-            "printf \"%s:%s:%s:%s\\n\" \"${JSH_OUTPUT+x}\" \"${JSH_REPORT+x}\" "
-            "\"${JSH_SESSION_START+x}\" \"${JSH_PACKAGE_STATE+x}\" "
-            "> \"$HOME/detach-env\"; sleep 6",
+            'printf "%s:%s:%s:%s\\n" "${JSH_OUTPUT+x}" "${JSH_REPORT+x}" '
+            '"${JSH_SESSION_START+x}" "${JSH_PACKAGE_STATE+x}" '
+            '> "$HOME/detach-env"; sleep 6',
         )
         script = self.home / "detach.sh"
-        script.write_text(
-            ". \"$JSH_ROOT/scripts/lib/common.sh\"\n"
-            "jsh::detach detached\n"
-        )
+        script.write_text('. "$JSH_ROOT/scripts/lib/common.sh"\n' "jsh::detach detached\n")
         started = time.monotonic()
         process = subprocess.Popen(
-            ["bash", str(script)], env=self.env | {"JSH_PACKAGE_STATE": "inherited"},
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            ["bash", str(script)],
+            env=self.env | {"JSH_PACKAGE_STATE": "inherited"},
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
         )
         output, _ = process.communicate(timeout=2)
         self.assertLess(time.monotonic() - started, 2, output)
@@ -2480,9 +2926,9 @@ exec "{real_python}" "$@"
                 script = self.home / f"daemon-{failing}.sh"
                 script.write_text(
                     'set -e\n. "$JSH_ROOT/scripts/lib/common.sh"\n'
-                    'jsh::step start vm\nsleep 30 &\n'
+                    "jsh::step start vm\nsleep 30 &\n"
                     f'printf "%s\n" "$!" > "$HOME/daemon-{failing}.pid"\n'
-                    'jsh::ok started\n' + ('false\n' if failing else '')
+                    "jsh::ok started\n" + ("false\n" if failing else "")
                 )
                 output = self.home / f"daemon-{failing}.output"
                 started = time.monotonic()
@@ -2491,8 +2937,11 @@ exec "{real_python}" "$@"
                 try:
                     with output.open("w+") as stream:
                         process = subprocess.Popen(
-                            ["bash", str(script)], env=self.env | {"NO_COLOR": "1"},
-                            stdout=stream, stderr=stream, text=True,
+                            ["bash", str(script)],
+                            env=self.env | {"NO_COLOR": "1"},
+                            stdout=stream,
+                            stderr=stream,
+                            text=True,
                         )
                         self.assertEqual(process.wait(timeout=5), 1 if failing else 0)
                         elapsed = time.monotonic() - started
@@ -2522,9 +2971,16 @@ exec "{real_python}" "$@"
 
     def test_non_interrupt_failure_reports_session_owner(self):
         script = self.home / "failure.sh"
-        script.write_text('set -e\n. "$JSH_ROOT/scripts/lib/common.sh"\njsh::step check links\njsh::ok x\nfalse\n')
-        result = subprocess.run(["bash", str(script)], env=self.env | {"NO_COLOR": "1"},
-                                capture_output=True, text=True, timeout=10)
+        script.write_text(
+            'set -e\n. "$JSH_ROOT/scripts/lib/common.sh"\njsh::step check links\njsh::ok x\nfalse\n'
+        )
+        result = subprocess.run(
+            ["bash", str(script)],
+            env=self.env | {"NO_COLOR": "1"},
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("✓ x\n✕ failure failed (1)\n", result.stdout)
         self.assertNotIn("✕ failure\n", result.stdout)
@@ -2535,17 +2991,20 @@ exec "{real_python}" "$@"
         script = self.home / "vscode.sh"
         script.write_text(
             'set -e\n. "$JSH_ROOT/scripts/lib/common.sh"\n'
-            'jsh::step check links\n'
-            'jsh::ok x\n'
-            'false\n'
+            "jsh::step check links\n"
+            "jsh::ok x\n"
+            "false\n"
         )
         for mode in ("renderer", "plain"):
             if mode == "plain":
                 self.tool("python3", "exit 1")
             with self.subTest(mode=mode):
                 result = subprocess.run(
-                    ["bash", str(script)], env=self.env | {"NO_COLOR": "1"},
-                    capture_output=True, text=True, timeout=10,
+                    ["bash", str(script)],
+                    env=self.env | {"NO_COLOR": "1"},
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
                 )
                 self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
                 self.assertIn("✓ x\n✕ vscode failed (1)\n", result.stdout)
@@ -2557,11 +3016,15 @@ exec "{real_python}" "$@"
         self.tool("task-fail", "printf 'task problem\\n'; exit 7")
         script = self.home / "task-failure.sh"
         script.write_text(
-            '. "$JSH_ROOT/scripts/lib/common.sh"\n'
-            'jsh::task "Configuring tool" task-fail\n'
+            '. "$JSH_ROOT/scripts/lib/common.sh"\n' 'jsh::task "Configuring tool" task-fail\n'
         )
-        result = subprocess.run(["bash", str(script)], env=self.env | {"NO_COLOR": "1"},
-                                capture_output=True, text=True, timeout=10)
+        result = subprocess.run(
+            ["bash", str(script)],
+            env=self.env | {"NO_COLOR": "1"},
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
         self.assertEqual(result.returncode, 7, result.stdout + result.stderr)
         self.assertEqual(result.stderr, "")
         self.assertIn("Finished with errors  Everything is current  1 failed", result.stdout)
@@ -2570,10 +3033,17 @@ exec "{real_python}" "$@"
 
     def test_missing_or_stub_python_falls_back_to_plain(self):
         script = self.home / "fallback.sh"
-        script.write_text('set -e\n. "$JSH_ROOT/scripts/lib/common.sh"\njsh::step check things\njsh::ok a\n')
+        script.write_text(
+            'set -e\n. "$JSH_ROOT/scripts/lib/common.sh"\njsh::step check things\njsh::ok a\n'
+        )
         self.tool("python3", "printf 'invoked\\n' >> \"$HOME/python-calls\"; exit 1")
-        result = subprocess.run(["bash", str(script)], env=self.env | {"NO_COLOR": "1"},
-                                capture_output=True, text=True, timeout=10)
+        result = subprocess.run(
+            ["bash", str(script)],
+            env=self.env | {"NO_COLOR": "1"},
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("Checking things...\n✓ a\n", result.stdout)
         self.assertIn("Ready  Everything is current", result.stdout)
@@ -2581,32 +3051,43 @@ exec "{real_python}" "$@"
         self.assertEqual((self.home / "python-calls").read_text(), "invoked\n")
 
         script.write_text('set -e\n. "$JSH_ROOT/scripts/lib/common.sh"\nfalse\n')
-        failed = subprocess.run(["bash", str(script)], env=self.env | {"NO_COLOR": "1"},
-                                capture_output=True, text=True, timeout=10)
+        failed = subprocess.run(
+            ["bash", str(script)],
+            env=self.env | {"NO_COLOR": "1"},
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
         self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
         self.assertIn("Finished with errors", failed.stdout)
 
         (self.home / "python-calls").unlink()
         self.tool("python3", "printf 'invoked\\n' >> \"$HOME/python-calls\"; exit 0")
-        self.tool("xcode-select", 'exit 2')
+        self.tool("xcode-select", "exit 2")
         stub = self.home / "stub.sh"
-        stub.write_text('''set -e
+        stub.write_text("""set -e
 command() {
   if [[ $1 == -v && $2 == python3 ]]; then printf '/usr/bin/python3\n'; else builtin command "$@"; fi
 }
 . "$JSH_ROOT/scripts/lib/common.sh"
 jsh::step check things
 jsh::ok a
-''')
-        result = subprocess.run(["bash", str(stub)],
-                                env=self.env | {"NO_COLOR": "1", "JSH_PLATFORM": "darwin"},
-                                capture_output=True, text=True, timeout=10)
+""")
+        result = subprocess.run(
+            ["bash", str(stub)],
+            env=self.env | {"NO_COLOR": "1", "JSH_PLATFORM": "darwin"},
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("Checking things...\n✓ a\n", result.stdout)
         self.assertFalse((self.home / "python-calls").exists())
 
     def test_task_shows_latest_output_on_one_transient_line(self):
-        self.tool("task-mock", r'''printf 'bottle finished\n'
+        self.tool(
+            "task-mock",
+            r"""printf 'bottle finished\n'
 printf 'café 完了\n'
 sleep 0.2
 printf 'download 10%%\rdownload 90%%\r'
@@ -2614,13 +3095,17 @@ sleep 0.2
 printf 'download complete\n\n'
 sleep 0.2
 printf 'last output without newline'
-''')
-        code = ('. "$JSH_ROOT/scripts/lib/common.sh"; '
-                'jsh::step update packages; '
-                'jsh::task "Homebrew upgrade: eslint" task-mock')
+""",
+        )
+        code = (
+            '. "$JSH_ROOT/scripts/lib/common.sh"; '
+            "jsh::step update packages; "
+            'jsh::task "Homebrew upgrade: eslint" task-mock'
+        )
         env = self.env | {"NO_COLOR": "1"}
-        result = subprocess.run(["bash", "-c", code], env=env, capture_output=True,
-                                text=True, timeout=10)
+        result = subprocess.run(
+            ["bash", "-c", code], env=env, capture_output=True, text=True, timeout=10
+        )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(result.stderr, "")
         self.assertNotIn("bottle finished", result.stdout)
@@ -2630,18 +3115,25 @@ printf 'last output without newline'
         display = self.run_on_terminal(code, env)
         frames = display.split("\r\x1b[K")
         self.assertNotIn("download 10%", display)
-        self.assertTrue(any("Homebrew upgrade: eslint  last output without newline" in frame
-                            for frame in frames), display)
+        self.assertTrue(
+            any(
+                "Homebrew upgrade: eslint  last output without newline" in frame for frame in frames
+            ),
+            display,
+        )
 
     def test_status_line_names_the_step_until_the_next_output(self):
-        code = ('. "$JSH_ROOT/scripts/lib/common.sh"\n'
-                'jsh::step check settings\n'
-                'jsh::status policy\n'
-                'sleep 0.2\n'
-                'jsh::changed "app settings"\n')
+        code = (
+            '. "$JSH_ROOT/scripts/lib/common.sh"\n'
+            "jsh::step check settings\n"
+            "jsh::status policy\n"
+            "sleep 0.2\n"
+            'jsh::changed "app settings"\n'
+        )
         env = self.env | {"NO_COLOR": "1"}
-        result = subprocess.run(["bash", "-c", code], env=env, capture_output=True, text=True,
-                                timeout=10)
+        result = subprocess.run(
+            ["bash", "-c", code], env=env, capture_output=True, text=True, timeout=10
+        )
         self.assertEqual((result.returncode, result.stderr), (0, ""))
         self.assertIn("Checking settings...\n~ app settings\n", result.stdout)
         display = self.run_on_terminal(code, env)
@@ -2651,33 +3143,48 @@ printf 'last output without newline'
         self.assertIn("~ app settings", lines)
 
     def test_app_settings_parse_large_json_quickly_and_still_accept_jsonc(self):
-        (self.home / "large.json").write_text(json.dumps(
-            {f"key{index}": {"value": f"text {index}"} for index in range(10000)}))
+        (self.home / "large.json").write_text(
+            json.dumps({f"key{index}": {"value": f"text {index}"} for index in range(10000)})
+        )
         (self.home / "settings.jsonc").write_text('{\n  // comment\n  "url": "a//b",\n}\n')
         (self.home / "list.json").write_text("[1]\n")
-        code = ('. "$JSH_ROOT/ansible/helpers/apps.sh"\n'
-                'app::jsonc "$HOME/large.json" | jq -r .key9999.value\n'
-                'app::jsonc "$HOME/settings.jsonc" | jq -c .\n'
-                'app::jsonc "$HOME/list.json" || echo rejected\n')
-        result = subprocess.run(["bash", "-c", code],
-                                env=self.env | {"JSH_OUTPUT": "plain"},
-                                capture_output=True, text=True, timeout=5)
+        code = (
+            '. "$JSH_ROOT/ansible/helpers/apps.sh"\n'
+            'app::jsonc "$HOME/large.json" | jq -r .key9999.value\n'
+            'app::jsonc "$HOME/settings.jsonc" | jq -c .\n'
+            'app::jsonc "$HOME/list.json" || echo rejected\n'
+        )
+        result = subprocess.run(
+            ["bash", "-c", code],
+            env=self.env | {"JSH_OUTPUT": "plain"},
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
         self.assertEqual(result.stdout, 'text 9999\n{"url":"a//b"}\nrejected\n', result.stderr)
         self.assertIn("settings must be an object", result.stderr)
 
     def test_brew_batch_retry_records_only_final_package_failures(self):
-        self.tool("brew", """case "$*" in
+        self.tool(
+            "brew",
+            """case "$*" in
   "list --formula -1") exit 0 ;;
   "list --versions"*) exit 1 ;;
   "install --formula one two") exit 7 ;;
   "install --formula two") [ "${JSH_RETRY_TWO:-ok}" = ok ] || exit 9 ;;
-esac""")
-        code = (". \"$JSH_ROOT/scripts/lib/common.sh\"; "
-                ". \"$JSH_ROOT/scripts/lib/packages.sh\"; "
-                "jsh::group packages; jsh::brew formulae one two")
+esac""",
+        )
+        code = (
+            '. "$JSH_ROOT/scripts/lib/common.sh"; '
+            '. "$JSH_ROOT/scripts/lib/packages.sh"; '
+            "jsh::group packages; jsh::brew formulae one two"
+        )
         succeeded = subprocess.run(
-            ["bash", "-c", code], env=self.env | {"NO_COLOR": "1"},
-            capture_output=True, text=True, timeout=10,
+            ["bash", "-c", code],
+            env=self.env | {"NO_COLOR": "1"},
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         self.assertEqual(succeeded.returncode, 0, succeeded.stdout + succeeded.stderr)
         self.assertIn("› packages", succeeded.stdout)
@@ -2687,16 +3194,19 @@ esac""")
         failed = subprocess.run(
             ["bash", "-c", code],
             env=self.env | {"NO_COLOR": "1", "JSH_RETRY_TWO": "fail"},
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         self.assertEqual(failed.returncode, 1, failed.stdout + failed.stderr)
-        self.assertEqual(failed.stdout.count("Homebrew install: two failed (9)"), 2,
-                         failed.stdout)
+        self.assertEqual(failed.stdout.count("Homebrew install: two failed (9)"), 2, failed.stdout)
         self.assertNotIn("Homebrew install: one two failed", failed.stdout)
         self.assertIn("1 failed", failed.stdout)
 
     def test_brew_caveats_become_notices_without_completion_paths(self):
-        self.tool("brew-batch", r'''cat <<'EOF'
+        self.tool(
+            "brew-batch",
+            r"""cat <<'EOF'
 ==> Pouring tool--1.0.bottle.tar.gz
 ==> Caveats
 zsh completions have been installed to:
@@ -2706,22 +3216,34 @@ Bash completion has been installed to:
 ==> tool
 Run tool init
   before first use.
-EOF''')
-        self.tool("brew-single", r'''cat <<'EOF'
+EOF""",
+        )
+        self.tool(
+            "brew-single",
+            r"""cat <<'EOF'
 ==> Caveats
 foo needs a restart.
 ==> Moving App 'Foo.app' to '/Applications/Foo.app'
-EOF''')
+EOF""",
+        )
         result = subprocess.run(
-            ["bash", "-c", '. "$JSH_ROOT/scripts/lib/common.sh"; . "$JSH_ROOT/scripts/lib/packages.sh"\n'
-             'jsh::task install brew-batch; jsh::brew_caveats gh git user/tap/tool\n'
-             'jsh::task upgrade brew-single; jsh::brew_caveats foo'],
-            env=self.env | {"NO_COLOR": "1"}, capture_output=True, text=True, timeout=10,
+            [
+                "bash",
+                "-c",
+                '. "$JSH_ROOT/scripts/lib/common.sh"; . "$JSH_ROOT/scripts/lib/packages.sh"\n'
+                "jsh::task install brew-batch; jsh::brew_caveats gh git user/tap/tool\n"
+                "jsh::task upgrade brew-single; jsh::brew_caveats foo",
+            ],
+            env=self.env | {"NO_COLOR": "1"},
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr, "")
-        self.assertEqual(result.stdout.count("tool: Run tool init before first use."), 2,
-                         result.stdout)
+        self.assertEqual(
+            result.stdout.count("tool: Run tool init before first use."), 2, result.stdout
+        )
         self.assertEqual(result.stdout.count("foo: foo needs a restart."), 2, result.stdout)
         self.assertIn("! tool: Run tool init before first use.", result.stdout)
         self.assertIn("! foo: foo needs a restart.", result.stdout)
@@ -2735,23 +3257,23 @@ EOF''')
         self.tool("uname", "echo Linux")
         self.tool(
             "pgrep",
-            "if [ ! -f \"$HOME/pgrep-initial\" ]; then\n"
-            "  : >\"$HOME/pgrep-initial\"; echo 999999; exit 0\n"
+            'if [ ! -f "$HOME/pgrep-initial" ]; then\n'
+            '  : >"$HOME/pgrep-initial"; echo 999999; exit 0\n'
             "fi\n"
-            "if [ \"${JSH_TEST_RESTART_VISIBLE:-0}\" = 1 ] && "
-            "[ -f \"$HOME/launcher-pid\" ]; then\n"
-            "  pid=$(cat \"$HOME/launcher-pid\")\n"
-            "  kill -0 \"$pid\" 2>/dev/null && exit 0\n"
+            'if [ "${JSH_TEST_RESTART_VISIBLE:-0}" = 1 ] && '
+            '[ -f "$HOME/launcher-pid" ]; then\n'
+            '  pid=$(cat "$HOME/launcher-pid")\n'
+            '  kill -0 "$pid" 2>/dev/null && exit 0\n'
             "fi\nexit 1",
         )
         self.tool(
             "long-launch",
-            "printf \"%s\\n\" \"$$\" >\"$HOME/launcher-pid\"\nexec sleep 30",
+            'printf "%s\\n" "$$" >"$HOME/launcher-pid"\nexec sleep 30',
         )
         harness = self.home / "app-reopen.sh"
         harness.write_text(
             "#!/usr/bin/env bash\nset -euo pipefail\n"
-            ". \"$JSH_ROOT/ansible/helpers/apps.sh\"\n"
+            '. "$JSH_ROOT/ansible/helpers/apps.sh"\n'
             "APP_LAUNCH=(long-launch)\n"
             "apply_settings() { :; }\n"
             "app::with_closed TestApp test-app apply_settings\n"
@@ -2761,7 +3283,10 @@ EOF''')
             result = subprocess.run(
                 ["bash", str(harness)],
                 env=self.env | {"JSH_TEST_RESTART_VISIBLE": "1" if restart_visible else "0"},
-                cwd=self.home, capture_output=True, text=True, timeout=10,
+                cwd=self.home,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
         finally:
             pid_file = self.home / "launcher-pid"
@@ -2790,19 +3315,19 @@ EOF''')
         jq = shutil.which("jq")
         if not jq:
             self.skipTest("jq required")
-        self.tool("jq", f"exec {shlex.quote(jq)} \"$@\"")
+        self.tool("jq", f'exec {shlex.quote(jq)} "$@"')
         self.tool("node", "exit 0")
         self.tool(
             "rea",
-            "case \"$1\" in\n"
+            'case "$1" in\n'
             "  --version) echo 1.0 ;;\n"
-            "  setup) echo \"{\\\"plannedActions\\\":[{},{}]}\" ;;\n"
+            '  setup) echo "{\\"plannedActions\\":[{},{}]}" ;;\n'
             "esac",
         )
         self.tool(
             "graphify",
-            "case \"$1\" in\n"
-            "  --version) echo \"graphify 2.0\" ;;\n"
+            'case "$1" in\n'
+            '  --version) echo "graphify 2.0" ;;\n'
             "  install) exit 0 ;;\n"
             "esac",
         )
@@ -2812,8 +3337,11 @@ EOF''')
         (skill / ".graphify_version").write_text("1.0")
         result = subprocess.run(
             ["bash", str(ROOT / "ansible/roles/agentics/files/rea.sh")],
-            env=self.env | {"JSH_PHASE": "update"}, cwd=self.home,
-            capture_output=True, text=True, timeout=20,
+            env=self.env | {"JSH_PHASE": "update"},
+            cwd=self.home,
+            capture_output=True,
+            text=True,
+            timeout=20,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("! graphify skill is 1.0", result.stdout)
@@ -2828,7 +3356,11 @@ EOF''')
         self.tool("node", "exit 0")
         result = subprocess.run(
             [bash, str(ROOT / "ansible/roles/agentics/files/rea.sh"), "--dry-run"],
-            env=self.env, cwd=self.home, capture_output=True, text=True, timeout=20,
+            env=self.env,
+            cwd=self.home,
+            capture_output=True,
+            text=True,
+            timeout=20,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("! graphify skill is missing", result.stdout)
@@ -2837,14 +3369,18 @@ EOF''')
         self.tool("node", "exit 0")
         self.tool(
             "graphify",
-            "case \"$1\" in\n"
-            "  --version) echo \"graphify 2.0\" ;;\n"
+            'case "$1" in\n'
+            '  --version) echo "graphify 2.0" ;;\n'
             "  install) exit 0 ;;\n"
             "esac",
         )
         result = subprocess.run(
             ["bash", str(ROOT / "ansible/roles/agentics/files/rea.sh"), "--dry-run"],
-            env=self.env, cwd=self.home, capture_output=True, text=True, timeout=20,
+            env=self.env,
+            cwd=self.home,
+            capture_output=True,
+            text=True,
+            timeout=20,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("! graphify skill is missing", result.stdout)
@@ -2853,10 +3389,13 @@ EOF''')
 
     def test_rea_update_keeps_npm_output_in_the_log(self):
         self.tool("node", "exit 0")
-        self.tool("rea", '''case "$1" in
+        self.tool(
+            "rea",
+            """case "$1" in
   --version) printf '1.0\\n' ;;
   setup) printf '{"plannedActions":[]}\\n' ;;
-esac''')
+esac""",
+        )
         self.tool("graphify", "printf 'graphify 1.0\\n'")
         self.tool("jq", "printf '0\\n'")
         self.tool("npm", "printf 'up to date\\n'")
@@ -2866,7 +3405,10 @@ esac''')
         result = subprocess.run(
             ["bash", str(ROOT / "ansible/roles/agentics/files/rea.sh")],
             env=self.env | {"JSH_PHASE": "update"},
-            cwd=self.home, capture_output=True, text=True, timeout=20,
+            cwd=self.home,
+            capture_output=True,
+            text=True,
+            timeout=20,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertNotIn("up to date", result.stdout + result.stderr)
@@ -2883,8 +3425,11 @@ jsh::task "failing task" progress-fail
                 if terminal:
                     master, slave = pty.openpty()
                     process = subprocess.Popen(
-                        ["bash", "-c", code], env=self.env | {"NO_COLOR": "1"},
-                        stdin=subprocess.DEVNULL, stdout=slave, stderr=slave,
+                        ["bash", "-c", code],
+                        env=self.env | {"NO_COLOR": "1"},
+                        stdin=subprocess.DEVNULL,
+                        stdout=slave,
+                        stderr=slave,
                     )
                     os.close(slave)
                     output = bytearray()
@@ -2900,9 +3445,13 @@ jsh::task "failing task" progress-fail
                     display = output.decode(errors="replace")
                     status = process.wait(timeout=10)
                 else:
-                    result = subprocess.run(["bash", "-c", code],
-                                            env=self.env | {"NO_COLOR": "1"},
-                                            capture_output=True, text=True, timeout=10)
+                    result = subprocess.run(
+                        ["bash", "-c", code],
+                        env=self.env | {"NO_COLOR": "1"},
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                    )
                     display = result.stdout
                     status = result.returncode
                     self.assertEqual(result.stderr, "")
@@ -2917,15 +3466,21 @@ jsh::task "failing task" progress-fail
 
     def test_task_stops_child_on_interrupt(self):
         script = self.home / "interrupt.sh"
-        script.write_text('. "$JSH_ROOT/scripts/lib/common.sh"\n'
-                          'jsh::task "test operation" bash -c \'echo $$ > "$HOME/child"; exec sleep 20\'\n')
+        script.write_text(
+            '. "$JSH_ROOT/scripts/lib/common.sh"\n'
+            'jsh::task "test operation" bash -c \'echo $$ > "$HOME/child"; exec sleep 20\'\n'
+        )
         for signum, status in ((signal.SIGINT, 130), (signal.SIGTERM, 143)):
             with self.subTest(signal=signum.name):
                 child = self.home / "child"
                 child.unlink(missing_ok=True)
-                process = subprocess.Popen(["bash", str(script)], env=self.env,
-                                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                                           stderr=subprocess.DEVNULL)
+                process = subprocess.Popen(
+                    ["bash", str(script)],
+                    env=self.env,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
                 deadline = time.monotonic() + 10
                 while not child.exists() and time.monotonic() < deadline:
                     time.sleep(0.05)
@@ -2941,8 +3496,13 @@ jsh::task "failing task" progress-fail
         (runtime / "scripts/lib").mkdir(parents=True)
         (runtime / "ansible/helpers").mkdir(parents=True)
         (runtime / "lib/shell").mkdir(parents=True)
-        for name in ("scripts/lib/common.sh", "ansible/helpers/desktop.sh",
-                     "lib/shell/output.sh", "lib/output.py", "lib/verbs.tsv"):
+        for name in (
+            "scripts/lib/common.sh",
+            "ansible/helpers/desktop.sh",
+            "lib/shell/output.sh",
+            "lib/output.py",
+            "lib/verbs.tsv",
+        ):
             target = runtime / name
             shutil.copy2(ROOT / name, target)
         source = (ROOT / "ansible/roles/desktop/files/plugin.sh").read_text()
@@ -2960,8 +3520,10 @@ jsh::task "failing task" progress-fail
         stock = self.home / "pulseaudio.desktop"
         target = self.home / "jsh-pulseaudio.desktop"
         stock.write_text("[Desktop Entry]\nX-XFCE-Module=pulseaudio-plugin\n")
-        current = ("[Desktop Entry]\nX-XFCE-Module=jsh-pulseaudio\n\n"
-                   "X-Jsh-Fingerprint=fixture\nX-Jsh-Version=1.2.3\n")
+        current = (
+            "[Desktop Entry]\nX-XFCE-Module=jsh-pulseaudio\n\n"
+            "X-Jsh-Fingerprint=fixture\nX-Jsh-Version=1.2.3\n"
+        )
         target.write_text(current)
         library = self.home / "lib/xfce4/panel/plugins/libjsh-pulseaudio.so"
         library.parent.mkdir(parents=True)
@@ -2969,8 +3531,8 @@ jsh::task "failing task" progress-fail
         self.tool("uname", "echo Linux")
         self.tool("apt-get", "exit 0")
         self.tool("meson", "exit 0")
-        self.tool("pkg-config", "printf \"%s\\n\" \"$HOME/lib\"")
-        self.tool("sha256sum", "printf \"fixture  -\\n\"")
+        self.tool("pkg-config", 'printf "%s\\n" "$HOME/lib"')
+        self.tool("sha256sum", 'printf "fixture  -\\n"')
         env = self.env | {
             "JSH_ROOT": str(runtime),
             "JSH_DRY_RUN": "1",
@@ -2982,8 +3544,12 @@ jsh::task "failing task" progress-fail
 
         def run():
             result = subprocess.run(
-                ["bash", str(script)], env=env, cwd=self.home,
-                capture_output=True, text=True, timeout=10,
+                ["bash", str(script)],
+                env=env,
+                cwd=self.home,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             return result.stdout + result.stderr
@@ -2993,46 +3559,56 @@ jsh::task "failing task" progress-fail
         target.write_text(current + "X-Local-Drift=true\n")
         display = run()
         self.assertIn(
-            "! XFCE Wave:3 audio plugin is out of date  would change", display,
+            "! XFCE Wave:3 audio plugin is out of date  would change",
+            display,
         )
         self.assertNotIn("update is unchecked in preview", display)
 
     def test_desktop_panel_reapply_reports_each_setting_once(self):
         source = (ROOT / "ansible/roles/desktop/files/panel.sh").read_text()
-        functions = source[source.index("xfconf_set() {"):
-                           source.index("case ${1:-apply} in")]
+        functions = source[source.index("xfconf_set() {") : source.index("case ${1:-apply} in")]
         harness = self.home / "panel-reapply.sh"
         harness.write_text(
             "#!/usr/bin/env bash\nset -euo pipefail\n"
-            ". \"$JSH_ROOT/scripts/lib/common.sh\"\n"
+            '. "$JSH_ROOT/scripts/lib/common.sh"\n'
             "SCRIPT_DIR=$JSH_ROOT/scripts\n"
-            "panel_files_changed=0\npanel_quiet=0\n" + functions +
-            "apply_panel() { xfconf_set xfce4-panel /test string wanted; }\n"
-            "jsh::step check \"XFCE panel\"\n"
+            "panel_files_changed=0\npanel_quiet=0\n"
+            + functions
+            + "apply_panel() { xfconf_set xfce4-panel /test string wanted; }\n"
+            'jsh::step check "XFCE panel"\n'
             "apply_panel\nrestart_panel\n"
         )
-        self.tool("xfconf-query", "state=\"$HOME/xfconf-state\"\n"
-                  "case \" $* \" in\n"
-                  "  *\" -lv \"*) if [ -f \"$state\" ]; then "
-                  "printf \"/test %s\\n\" \"$(cat \"$state\")\"; else "
-                  "printf \"/test old\\n\"; fi ;;\n"
-                  "  *\" -s \"*) for argument in \"$@\"; do value=$argument; done; "
-                  "printf \"%s\\n\" \"$value\" > \"$state\" ;;\n"
-                  "  *) if [ -f \"$state\" ]; then cat \"$state\"; else "
-                  "printf \"old\\n\"; fi ;;\n"
-                  "esac")
-        self.tool("xfce4-panel", "if [ \"$1\" = --quit ]; then "
-                  "touch \"$HOME/panel-stopped\"; else "
-                  "rm -f \"$HOME/panel-stopped\"; fi")
-        self.tool("pgrep", "[ ! -f \"$HOME/panel-stopped\" ]")
-        self.tool("timeout", "shift; \"$@\"")
+        self.tool(
+            "xfconf-query",
+            'state="$HOME/xfconf-state"\n'
+            'case " $* " in\n'
+            '  *" -lv "*) if [ -f "$state" ]; then '
+            'printf "/test %s\\n" "$(cat "$state")"; else '
+            'printf "/test old\\n"; fi ;;\n'
+            '  *" -s "*) for argument in "$@"; do value=$argument; done; '
+            'printf "%s\\n" "$value" > "$state" ;;\n'
+            '  *) if [ -f "$state" ]; then cat "$state"; else '
+            'printf "old\\n"; fi ;;\n'
+            "esac",
+        )
+        self.tool(
+            "xfce4-panel",
+            'if [ "$1" = --quit ]; then '
+            'touch "$HOME/panel-stopped"; else '
+            'rm -f "$HOME/panel-stopped"; fi',
+        )
+        self.tool("pgrep", '[ ! -f "$HOME/panel-stopped" ]')
+        self.tool("timeout", 'shift; "$@"')
         result = subprocess.run(
-            ["bash", str(harness)], env=self.env | {"JSH_DESKTOP": "xfce"},
-            cwd=self.home, capture_output=True, text=True, timeout=10,
+            ["bash", str(harness)],
+            env=self.env | {"JSH_DESKTOP": "xfce"},
+            cwd=self.home,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        setting_lines = [line for line in result.stdout.splitlines()
-                         if "xfce4-panel/test" in line]
+        setting_lines = [line for line in result.stdout.splitlines() if "xfce4-panel/test" in line]
         self.assertEqual(
             setting_lines,
             ["! xfce4-panel/test is not wanted", "~ xfce4-panel/test set wanted"],
@@ -3056,13 +3632,19 @@ jsh::task "failing task" progress-fail
         self.tool("xfconf-query", "exit 0")
         result = subprocess.run(
             ["bash", str(ROOT / "ansible/roles/desktop/files/dock/pins.sh"), "--dry-run"],
-            env=self.env | {"JSH_DESKTOP": "xfce"}, cwd=self.home,
-            capture_output=True, text=True, timeout=10,
+            env=self.env | {"JSH_DESKTOP": "xfce"},
+            cwd=self.home,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         display = result.stdout + result.stderr
-        dock_lines = [line.rstrip() for line in display.splitlines()
-                      if "dock pins" in line and "preview" in line]
+        dock_lines = [
+            line.rstrip()
+            for line in display.splitlines()
+            if "dock pins" in line and "preview" in line
+        ]
         self.assertEqual(
             dock_lines,
             ["XFCE dock pins are unchecked in preview: Ghostty, Waterfox, VS Code, Spotify"],
@@ -3070,14 +3652,14 @@ jsh::task "failing task" progress-fail
         for hidden in (*desktop_ids, str(applications)):
             self.assertNotIn(hidden, display)
 
-
-
     def test_interactive_shell_discards_inherited_output_session(self):
         for shell in SHELLS:
             with self.subTest(shell=shell):
                 output = self.run_shell(
-                    shell, "jsh::fail x 2>&1",
-                    JSH_OUTPUT="renderer", JSH_REPORT=str(self.home / "inherited-report"),
+                    shell,
+                    "jsh::fail x 2>&1",
+                    JSH_OUTPUT="renderer",
+                    JSH_REPORT=str(self.home / "inherited-report"),
                     JSH_SESSION_START="1",
                 )
                 self.assertIn("✕ x", output)
@@ -3086,15 +3668,19 @@ jsh::task "failing task" progress-fail
 
 class OutputChecks(unittest.TestCase):
     def test_cafe_reports_errors_with_shared_symbols(self):
-        code = ("import platform, runpy, sys; "
-                "from unittest import mock; "
-                "sys.argv = [sys.argv[1]]; "
-                "patch = mock.patch.object(platform, \"system\", return_value=\"Plan 9\"); "
-                "patch.start(); runpy.run_path(sys.argv[0], run_name=\"__main__\")")
+        code = (
+            "import platform, runpy, sys; "
+            "from unittest import mock; "
+            "sys.argv = [sys.argv[1]]; "
+            'patch = mock.patch.object(platform, "system", return_value="Plan 9"); '
+            'patch.start(); runpy.run_path(sys.argv[0], run_name="__main__")'
+        )
         result = subprocess.run(
             ["python3", "-c", code, str(ROOT / "bin/cafe")],
             env=os.environ | {"NO_COLOR": "1", "TERM": "dumb"},
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertEqual(result.stdout, "")
@@ -3111,16 +3697,18 @@ class OutputChecks(unittest.TestCase):
             def isatty(self):
                 return True
 
-        loader = importlib.machinery.SourceFileLoader(
-            "jsh_cafe_interrupt", str(ROOT / "bin/cafe"))
+        loader = importlib.machinery.SourceFileLoader("jsh_cafe_interrupt", str(ROOT / "bin/cafe"))
         spec = importlib.util.spec_from_loader("jsh_cafe_interrupt", loader)
         cafe = importlib.util.module_from_spec(spec)
         loader.exec_module(cafe)
         terminal = Terminal()
-        with mock.patch.object(cafe.output, "info"), \
-                mock.patch.object(cafe.output, "ok") as stopped, \
-                mock.patch.object(cafe.time, "sleep", side_effect=KeyboardInterrupt), \
-                contextlib.redirect_stdout(terminal):
+        with mock.patch.object(cafe.output, "info"), mock.patch.object(
+            cafe.output, "ok"
+        ) as stopped, mock.patch.object(
+            cafe.time, "sleep", side_effect=KeyboardInterrupt
+        ), contextlib.redirect_stdout(
+            terminal
+        ):
             cafe.wait_until_stopped("testing")
         self.assertEqual(terminal.getvalue(), "\n")
         stopped.assert_called_once_with("Caffeine stopped")
@@ -3145,37 +3733,41 @@ class OutputChecks(unittest.TestCase):
         cafe.SCRIPT = Path("/mock/jsh/bin/cafe")
         microphone.SCRIPT = Path("/mock/jsh") / mic_check
         display = io.StringIO()
-        with mock.patch.object(cafe, "running_pid",
-                               side_effect=[None, None, 123]), \
-                mock.patch.object(cafe.Path, "is_file",
-                                  side_effect=[False, True, False]), \
-                mock.patch.object(microphone, "status",
-                                  side_effect=["muted", "live", "unavailable"]), \
-                contextlib.redirect_stdout(display):
+        with mock.patch.object(
+            cafe, "running_pid", side_effect=[None, None, 123]
+        ), mock.patch.object(
+            cafe.Path, "is_file", side_effect=[False, True, False]
+        ), mock.patch.object(
+            microphone, "status", side_effect=["muted", "live", "unavailable"]
+        ), contextlib.redirect_stdout(
+            display
+        ):
             cafe.show_xfce_status()
             cafe.show_xfce_status()
             cafe.show_xfce_status()
             microphone.panel()
             microphone.panel()
             microphone.panel()
-        self.assertEqual(display.getvalue(),
-                         "<img>/mock/jsh/dotfiles/.local/share/icons/hicolor/scalable/status/"
-                         "cafe-off-symbolic.svg</img><click>/mock/jsh/bin/cafe --xfce-toggle"
-                         "</click><tool>Cafe: Inactive (Normal sleep - Click to disable sleep)"
-                         "</tool>\n"
-                         "<icon>cafe-off-symbolic</icon><iconclick>/mock/jsh/bin/cafe "
-                         "--xfce-toggle</iconclick><tool>Cafe: Inactive (Normal sleep - Click "
-                         "to disable sleep)</tool>\n"
-                         "<img>/mock/jsh/dotfiles/.local/share/icons/hicolor/scalable/status/"
-                         "cafe-on-symbolic.svg</img><click>/mock/jsh/bin/cafe --xfce-toggle"
-                         "</click><tool>Cafe: Active (Sleep disabled - Click to allow sleep)"
-                         "</tool>\n"
-                         "<img>/mock/jsh/ansible/roles/desktop/files/audio/microphone-muted.svg</img><tool>"
-                         "Elgato Wave:3: Muted</tool>\n"
-                         "<img>/mock/jsh/ansible/roles/desktop/files/audio/microphone-live.svg</img><tool>"
-                         "Elgato Wave:3: Live</tool>\n"
-                         "<img>/mock/jsh/ansible/roles/desktop/files/audio/microphone-unavailable.svg</img>"
-                         "<tool>Elgato Wave:3: Unavailable</tool>\n")
+        self.assertEqual(
+            display.getvalue(),
+            "<img>/mock/jsh/dotfiles/.local/share/icons/hicolor/scalable/status/"
+            "cafe-off-symbolic.svg</img><click>/mock/jsh/bin/cafe --xfce-toggle"
+            "</click><tool>Cafe: Inactive (Normal sleep - Click to disable sleep)"
+            "</tool>\n"
+            "<icon>cafe-off-symbolic</icon><iconclick>/mock/jsh/bin/cafe "
+            "--xfce-toggle</iconclick><tool>Cafe: Inactive (Normal sleep - Click "
+            "to disable sleep)</tool>\n"
+            "<img>/mock/jsh/dotfiles/.local/share/icons/hicolor/scalable/status/"
+            "cafe-on-symbolic.svg</img><click>/mock/jsh/bin/cafe --xfce-toggle"
+            "</click><tool>Cafe: Active (Sleep disabled - Click to allow sleep)"
+            "</tool>\n"
+            "<img>/mock/jsh/ansible/roles/desktop/files/audio/microphone-muted.svg</img><tool>"
+            "Elgato Wave:3: Muted</tool>\n"
+            "<img>/mock/jsh/ansible/roles/desktop/files/audio/microphone-live.svg</img><tool>"
+            "Elgato Wave:3: Live</tool>\n"
+            "<img>/mock/jsh/ansible/roles/desktop/files/audio/microphone-unavailable.svg</img>"
+            "<tool>Elgato Wave:3: Unavailable</tool>\n",
+        )
 
     def test_python_sessionless_items_match_bash(self):
         import contextlib
@@ -3183,14 +3775,14 @@ class OutputChecks(unittest.TestCase):
         import io
         from unittest import mock
 
-        spec = importlib.util.spec_from_file_location("jsh_python_output",
-                                                       ROOT / "lib/output.py")
+        spec = importlib.util.spec_from_file_location("jsh_python_output", ROOT / "lib/output.py")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         stdout = io.StringIO()
         stderr = io.StringIO()
-        with mock.patch.dict(os.environ, {"NO_COLOR": "1", "TERM": "xterm"}), \
-                contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+        with mock.patch.dict(
+            os.environ, {"NO_COLOR": "1", "TERM": "xterm"}
+        ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             module.ok("current")
             module.drift("drifted")
             module.added("added now", "missing before")
@@ -3200,16 +3792,19 @@ class OutputChecks(unittest.TestCase):
             module.info("context")
             module.notice("take action")
             module.skipped("optional work")
-        code = (". \"$JSH_ROOT/lib/shell/output.sh\"; "
-                "jsh::ok current; jsh::drift drifted; "
-                "jsh::added \"added now\" \"missing before\"; "
-                "jsh::changed \"changed now\" \"old before\"; "
-                "jsh::removed \"removed now\" \"present before\"; "
-                "jsh::fail failed; jsh::info context; "
-                "jsh::notice \"take action\"; jsh::skipped \"optional work\"")
+        code = (
+            '. "$JSH_ROOT/lib/shell/output.sh"; '
+            "jsh::ok current; jsh::drift drifted; "
+            'jsh::added "added now" "missing before"; '
+            'jsh::changed "changed now" "old before"; '
+            'jsh::removed "removed now" "present before"; '
+            "jsh::fail failed; jsh::info context; "
+            'jsh::notice "take action"; jsh::skipped "optional work"'
+        )
         bash = self.run_output_shell("/bin/bash", code)
-        self.assertEqual((stdout.getvalue().encode(), stderr.getvalue().encode()),
-                         (bash.stdout, bash.stderr))
+        self.assertEqual(
+            (stdout.getvalue().encode(), stderr.getvalue().encode()), (bash.stdout, bash.stderr)
+        )
 
     def test_python_steps_fall_back_without_verbs_table(self):
         with tempfile.TemporaryDirectory(prefix="jsh-output-no-verbs-") as directory:
@@ -3228,10 +3823,14 @@ with output.session():
             result = subprocess.run(
                 ["python3", "-c", code, str(runtime / "output.py")],
                 env=os.environ | {"NO_COLOR": "1", "TERM": "dumb"},
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
-        self.assertEqual((result.returncode, result.stdout, result.stderr),
-                         (0, "check outside...\ncheck inside...\n✓ current\n", ""))
+        self.assertEqual(
+            (result.returncode, result.stdout, result.stderr),
+            (0, "check outside...\ncheck inside...\n✓ current\n", ""),
+        )
 
     def test_python_steps_fall_back_with_malformed_verbs_table(self):
         import contextlib
@@ -3244,20 +3843,21 @@ with output.session():
             shutil.copy2(ROOT / "lib/output.py", runtime / "output.py")
             (runtime / "verbs.tsv").write_text("malformed\n")
             spec = importlib.util.spec_from_file_location(
-                "jsh_output_bad_verbs", runtime / "output.py")
+                "jsh_output_bad_verbs", runtime / "output.py"
+            )
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
             with self.assertRaisesRegex(ValueError, "expected verb, ing, and past"):
                 module.verbs()
             stdout = io.StringIO()
-            with mock.patch.dict(os.environ, {"NO_COLOR": "1", "TERM": "dumb"}), \
-                    contextlib.redirect_stdout(stdout):
+            with mock.patch.dict(
+                os.environ, {"NO_COLOR": "1", "TERM": "dumb"}
+            ), contextlib.redirect_stdout(stdout):
                 module.step("check", "outside")
                 with module.session():
                     module.step("check", "inside")
                     module.ok("current")
-        self.assertEqual(stdout.getvalue(),
-                         "check outside...\ncheck inside...\n✓ current\n")
+        self.assertEqual(stdout.getvalue(), "check outside...\ncheck inside...\n✓ current\n")
 
     def test_python_session_streams_items_and_closes_groups(self):
         import contextlib
@@ -3265,25 +3865,30 @@ with output.session():
         import io
         from unittest import mock
 
-        spec = importlib.util.spec_from_file_location("jsh_python_session",
-                                                       ROOT / "lib/output.py")
+        spec = importlib.util.spec_from_file_location("jsh_python_session", ROOT / "lib/output.py")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         stdout = io.StringIO()
         stderr = io.StringIO()
-        with mock.patch.dict(os.environ, {"NO_COLOR": "1", "TERM": "dumb"}), \
-                contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr), \
-                module.session():
+        with mock.patch.dict(
+            os.environ, {"NO_COLOR": "1", "TERM": "dumb"}
+        ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr), module.session():
             module.group("tools", "Install tools")
             module.step("check", "packages")
             module.ok("jq is installed")
             module.drift("rg is not installed")
             module.skipped("optional package")
-        self.assertEqual(stdout.getvalue().splitlines(), [
-            "", "› tools  Install tools", "Checking packages...",
-            "✓ jq is installed", "! rg is not installed",
-            "Skipping optional package",
-        ])
+        self.assertEqual(
+            stdout.getvalue().splitlines(),
+            [
+                "",
+                "› tools  Install tools",
+                "Checking packages...",
+                "✓ jq is installed",
+                "! rg is not installed",
+                "Skipping optional package",
+            ],
+        )
         self.assertEqual(stderr.getvalue(), "")
 
     def test_python_sessionless_color_follows_each_destination(self):
@@ -3299,15 +3904,14 @@ with output.session():
             def isatty(self):
                 return self.tty
 
-        spec = importlib.util.spec_from_file_location("jsh_python_color",
-                                                       ROOT / "lib/output.py")
+        spec = importlib.util.spec_from_file_location("jsh_python_color", ROOT / "lib/output.py")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         stdout = Stream(True)
         stderr = Stream(False)
-        with mock.patch.object(module.sys, "stdout", stdout), \
-                mock.patch.object(module.sys, "stderr", stderr), \
-                mock.patch.dict(os.environ, {"TERM": "xterm"}, clear=True):
+        with mock.patch.object(module.sys, "stdout", stdout), mock.patch.object(
+            module.sys, "stderr", stderr
+        ), mock.patch.dict(os.environ, {"TERM": "xterm"}, clear=True):
             module.ok("current")
             module.fail("failed")
             os.environ["JSH_COLOR"] = "always"
@@ -3315,8 +3919,7 @@ with output.session():
             os.environ["TERM"] = "dumb"
             module.drift("drifted")
         self.assertEqual(stdout.getvalue(), "\x1b[32m✓\x1b[0m current\n")
-        self.assertEqual(stderr.getvalue(),
-                         "✕ failed\n\x1b[33m!\x1b[0m action\n! drifted\n")
+        self.assertEqual(stderr.getvalue(), "✕ failed\n\x1b[33m!\x1b[0m action\n! drifted\n")
 
     def test_importing_python_output_has_no_runtime_side_effects(self):
         import contextlib
@@ -3324,26 +3927,30 @@ with output.session():
         import io
         from unittest import mock
 
-        spec = importlib.util.spec_from_file_location("jsh_output_import",
-                                                       ROOT / "lib/output.py")
+        spec = importlib.util.spec_from_file_location("jsh_output_import", ROOT / "lib/output.py")
         module = importlib.util.module_from_spec(spec)
         stdout = io.StringIO()
         stderr = io.StringIO()
-        with mock.patch.object(Path, "open", side_effect=AssertionError("verbs read")), \
-                mock.patch("threading.Thread.start",
-                           side_effect=AssertionError("thread started")), \
-                contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+        with mock.patch.object(Path, "open", side_effect=AssertionError("verbs read")), mock.patch(
+            "threading.Thread.start", side_effect=AssertionError("thread started")
+        ), contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             spec.loader.exec_module(module)
         self.assertEqual((stdout.getvalue(), stderr.getvalue()), ("", ""))
 
     def render_terminal(self, events: list[tuple], **environment: str) -> str:
         master, slave = pty.openpty()
-        env = {name: value for name, value in os.environ.items()
-               if name != "LANG" and not name.startswith("LC_")}
+        env = {
+            name: value
+            for name, value in os.environ.items()
+            if name != "LANG" and not name.startswith("LC_")
+        }
         env.update({"NO_COLOR": "1", "TERM": "xterm-256color"} | environment)
         process = subprocess.Popen(
             ["python3", str(ROOT / "lib/output.py"), "render"],
-            stdin=subprocess.PIPE, stdout=slave, stderr=subprocess.PIPE, env=env,
+            stdin=subprocess.PIPE,
+            stdout=slave,
+            stderr=subprocess.PIPE,
+            env=env,
         )
         os.close(slave)
         output = bytearray()
@@ -3380,8 +3987,14 @@ with output.session():
                 if event[0] == "raw":
                     line = str(event[1])
                 else:
-                    fields = (str(field).replace("\t", " ").replace("\r", " ")
-                              .replace("\n", " ").replace("\x1e", "") for field in event)
+                    fields = (
+                        str(field)
+                        .replace("\t", " ")
+                        .replace("\r", " ")
+                        .replace("\n", " ")
+                        .replace("\x1e", "")
+                        for field in event
+                    )
                     line = "\x1e" + "\t".join(fields)
                 process.stdin.write((line + "\n").encode())
                 process.stdin.flush()
@@ -3414,13 +4027,22 @@ with output.session():
             if event[0] == "raw":
                 lines.append(event[1])
             else:
-                fields = (str(field).replace("\t", " ").replace("\r", " ")
-                          .replace("\n", " ").replace("\x1e", "") for field in event)
+                fields = (
+                    str(field)
+                    .replace("\t", " ")
+                    .replace("\r", " ")
+                    .replace("\n", " ")
+                    .replace("\x1e", "")
+                    for field in event
+                )
                 lines.append("\x1e" + "\t".join(fields))
         result = subprocess.run(
             ["python3", str(ROOT / "lib/output.py"), "render", *args],
-            input="\n".join(lines) + "\n", env=os.environ | {"NO_COLOR": "1"},
-            capture_output=True, text=True, timeout=10,
+            input="\n".join(lines) + "\n",
+            env=os.environ | {"NO_COLOR": "1"},
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         return result.stdout
@@ -3435,39 +4057,63 @@ with output.session():
         ]
         with tempfile.TemporaryDirectory(prefix="jsh-report-") as directory:
             out = self.render(events, "--report", directory)
-        self.assertEqual(out.splitlines(), [
-            "", "› macos  Apply managed macOS preferences",
-            "Checking macOS settings...", "✓ A is false", "✓ B is false", "",
-            "Ready  Everything is current  0m 00s",
-        ])
+        self.assertEqual(
+            out.splitlines(),
+            [
+                "",
+                "› macos  Apply managed macOS preferences",
+                "Checking macOS settings...",
+                "✓ A is false",
+                "✓ B is false",
+                "",
+                "Ready  Everything is current  0m 00s",
+            ],
+        )
 
-        code = (". \"$JSH_ROOT/lib/shell/output.sh\"; "
-                "jsh::group macos \"Apply managed macOS preferences\"; "
-                "jsh::step check \"macOS settings\"; "
-                "jsh::ok \"A is false\"; jsh::ok \"B is false\"; "
-                "jsh::event end 0")
+        code = (
+            '. "$JSH_ROOT/lib/shell/output.sh"; '
+            'jsh::group macos "Apply managed macOS preferences"; '
+            'jsh::step check "macOS settings"; '
+            'jsh::ok "A is false"; jsh::ok "B is false"; '
+            "jsh::event end 0"
+        )
         with tempfile.TemporaryDirectory(prefix="jsh-report-") as directory:
             plain = self.run_output_shell(
-                "/bin/bash", code, JSH_OUTPUT="plain", JSH_REPORT=directory,
+                "/bin/bash",
+                code,
+                JSH_OUTPUT="plain",
+                JSH_REPORT=directory,
             ).stdout.decode()
         self.assertEqual(plain.splitlines(), out.splitlines()[:5])
 
     def test_group_close_prints_no_result_after_failures_and_skips(self):
-        out = self.render([
-            ("group", "broken", "Failure group"),
-            ("item", "fail", "work failed"),
-            ("group", "skipped", "Skip group"),
-            ("item", "skip", "Skipping unavailable work"),
-            ("group", "mixed", "Mixed group"),
-            ("item", "ok", "work is current"),
-            ("item", "skip", "Skipping optional work"),
-            ("end", "0"),
-        ])
-        self.assertEqual(out.splitlines(), [
-            "", "› broken  Failure group", "✕ work failed",
-            "", "› skipped  Skip group", "Skipping unavailable work", "",
-            "› mixed  Mixed group", "✓ work is current", "Skipping optional work",
-        ])
+        out = self.render(
+            [
+                ("group", "broken", "Failure group"),
+                ("item", "fail", "work failed"),
+                ("group", "skipped", "Skip group"),
+                ("item", "skip", "Skipping unavailable work"),
+                ("group", "mixed", "Mixed group"),
+                ("item", "ok", "work is current"),
+                ("item", "skip", "Skipping optional work"),
+                ("end", "0"),
+            ]
+        )
+        self.assertEqual(
+            out.splitlines(),
+            [
+                "",
+                "› broken  Failure group",
+                "✕ work failed",
+                "",
+                "› skipped  Skip group",
+                "Skipping unavailable work",
+                "",
+                "› mixed  Mixed group",
+                "✓ work is current",
+                "Skipping optional work",
+            ],
+        )
         code = (
             '. "$JSH_ROOT/lib/shell/output.sh"; '
             'jsh::group broken "Failure group"; jsh::fail "work failed"; '
@@ -3478,7 +4124,10 @@ with output.session():
         )
         with tempfile.TemporaryDirectory(prefix="jsh-report-") as directory:
             plain = self.run_output_shell(
-                "/bin/bash", code, JSH_OUTPUT="plain", JSH_REPORT=directory,
+                "/bin/bash",
+                code,
+                JSH_OUTPUT="plain",
+                JSH_REPORT=directory,
             ).stdout.decode()
         self.assertEqual(plain, out)
 
@@ -3486,37 +4135,56 @@ with output.session():
         code = (
             '. "$JSH_ROOT/lib/shell/output.sh"; '
             'jsh::group skipped "Skip group"; '
-            'bash -c ". \"$JSH_ROOT/lib/shell/output.sh\"; jsh::skipped child"; '
+            'bash -c ". "$JSH_ROOT/lib/shell/output.sh"; jsh::skipped child"; '
             'jsh::group failed "Failure group"; '
-            'bash -c ". \"$JSH_ROOT/lib/shell/output.sh\"; jsh::fail child"; '
-            'jsh::event end 0'
+            'bash -c ". "$JSH_ROOT/lib/shell/output.sh"; jsh::fail child"; '
+            "jsh::event end 0"
         )
         with tempfile.TemporaryDirectory(prefix="jsh-report-") as directory:
             out = self.run_output_shell(
-                "/bin/bash", code, JSH_OUTPUT="plain", JSH_REPORT=directory,
+                "/bin/bash",
+                code,
+                JSH_OUTPUT="plain",
+                JSH_REPORT=directory,
             ).stdout.decode()
-        self.assertEqual(out.splitlines(), [
-            "", "› skipped  Skip group", "Skipping child",
-            "", "› failed  Failure group", "✕ child",
-        ])
+        self.assertEqual(
+            out.splitlines(),
+            [
+                "",
+                "› skipped  Skip group",
+                "Skipping child",
+                "",
+                "› failed  Failure group",
+                "✕ child",
+            ],
+        )
 
     def test_terminal_streams_items_above_the_spinner(self):
-        display = self.render_terminal([
-            ("group", "macos", "Apply managed macOS preferences"),
-            ("step", "check", "macOS settings"),
-            ("wait", "Checking macOS settings..."),
-            ("item", "ok", "A is false"),
-            ("wait", "✓ A is false"),
-            ("end", "0"),
-        ], LANG="en_US.UTF-8", LC_ALL="en_US.UTF-8")
+        display = self.render_terminal(
+            [
+                ("group", "macos", "Apply managed macOS preferences"),
+                ("step", "check", "macOS settings"),
+                ("wait", "Checking macOS settings..."),
+                ("item", "ok", "A is false"),
+                ("wait", "✓ A is false"),
+                ("end", "0"),
+            ],
+            LANG="en_US.UTF-8",
+            LC_ALL="en_US.UTF-8",
+        )
         self.assertIn("Checking macOS settings...", display)
         lines = [line.split("\r\x1b[K")[-1] for line in display.split("\r\n")]
         permanent = [line for line in lines if line]
-        self.assertEqual(permanent, [
-            "› macos  Apply managed macOS preferences", "✓ A is false",
-        ])
+        self.assertEqual(
+            permanent,
+            [
+                "› macos  Apply managed macOS preferences",
+                "✓ A is false",
+            ],
+        )
         self.assertFalse(
-            any("Checking macOS settings" in line for line in permanent), permanent,
+            any("Checking macOS settings" in line for line in permanent),
+            permanent,
         )
         self.assertNotIn("Checked macOS settings", permanent)
 
@@ -3530,21 +4198,26 @@ with output.session():
         with tempfile.TemporaryDirectory(prefix="jsh-report-") as directory:
             rendered = self.render(events, "--report", directory)
         expected = [
-            "", "› b  Second", "Checking thing...",
+            "",
+            "› b  Second",
+            "Checking thing...",
             "✓ thing is current",
         ]
-        self.assertEqual(rendered.splitlines()[:len(expected)], expected)
+        self.assertEqual(rendered.splitlines()[: len(expected)], expected)
         self.assertNotIn("✓ b  Second", rendered)
         self.assertNotIn("✕ Stopped checking thing", rendered)
 
         code = (
             '. "$JSH_ROOT/lib/shell/output.sh"; jsh::group b Second; '
             'jsh::step check thing; jsh::ok "thing is current"; '
-            'jsh::event end 0 1'
+            "jsh::event end 0 1"
         )
         with tempfile.TemporaryDirectory(prefix="jsh-report-") as directory:
             plain = self.run_output_shell(
-                "/bin/bash", code, JSH_OUTPUT="plain", JSH_REPORT=directory,
+                "/bin/bash",
+                code,
+                JSH_OUTPUT="plain",
+                JSH_REPORT=directory,
             ).stdout.decode()
         self.assertEqual(plain.splitlines(), expected)
 
@@ -3552,34 +4225,43 @@ with output.session():
         code = (
             '. "$JSH_ROOT/lib/shell/output.sh"; '
             'jsh::group a First; jsh::fail "a failed (1)"; '
-            'jsh::group b Second; '
-            "bash -c '. \"$JSH_ROOT/lib/shell/output.sh\"; "
-            "jsh::step check thing; jsh::ok \"thing is current\"'; "
-            'jsh::event stepclose; jsh::event end 0 1'
+            "jsh::group b Second; "
+            'bash -c \'. "$JSH_ROOT/lib/shell/output.sh"; '
+            'jsh::step check thing; jsh::ok "thing is current"\'; '
+            "jsh::event stepclose; jsh::event end 0 1"
         )
         expected = [
-            "", "› a  First", "✕ a failed (1)", "",
-            "› b  Second", "Checking thing...", "✓ thing is current",
+            "",
+            "› a  First",
+            "✕ a failed (1)",
+            "",
+            "› b  Second",
+            "Checking thing...",
+            "✓ thing is current",
         ]
         outputs = {}
         for mode in ("plain", "renderer"):
             with tempfile.TemporaryDirectory(prefix="jsh-report-") as directory:
                 events = self.run_output_shell(
-                    "/bin/bash", code, JSH_OUTPUT=mode, JSH_REPORT=directory,
+                    "/bin/bash",
+                    code,
+                    JSH_OUTPUT=mode,
+                    JSH_REPORT=directory,
                 ).stdout
                 if mode == "plain":
                     outputs[mode] = events.decode()
                 else:
                     result = subprocess.run(
-                        ["python3", str(ROOT / "lib/output.py"), "render",
-                         "--report", directory],
-                        input=events, env=os.environ | {"NO_COLOR": "1"},
-                        capture_output=True, timeout=10,
+                        ["python3", str(ROOT / "lib/output.py"), "render", "--report", directory],
+                        input=events,
+                        env=os.environ | {"NO_COLOR": "1"},
+                        capture_output=True,
+                        timeout=10,
                     )
                     self.assertEqual(result.returncode, 0, result.stderr)
                     outputs[mode] = result.stdout.decode()
         self.assertEqual(outputs["plain"].splitlines(), expected)
-        self.assertEqual(outputs["renderer"].splitlines()[:len(expected)], expected)
+        self.assertEqual(outputs["renderer"].splitlines()[: len(expected)], expected)
         for output in outputs.values():
             self.assertNotIn("✕ a  First", output)
             self.assertNotIn("✓ b  Second", output)
@@ -3588,10 +4270,13 @@ with output.session():
         code = (
             '. "$JSH_ROOT/scripts/lib/common.sh"; '
             'bash() { jsh::step check thing; jsh::ok "thing is current"; }; '
-            'jsh::packages demo'
+            "jsh::packages demo"
         )
         events = self.run_output_shell(
-            "/bin/bash", code, JSH_OUTPUT="renderer", JSH_DRY_RUN="0",
+            "/bin/bash",
+            code,
+            JSH_OUTPUT="renderer",
+            JSH_DRY_RUN="0",
         ).stdout
         self.assertTrue(events.endswith(b"\x1estepclose\n"), events)
 
@@ -3603,7 +4288,11 @@ with output.session():
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         renderer = module.Renderer(
-            io.StringIO(), tty=False, color=True, preview=False, report=None,
+            io.StringIO(),
+            tty=False,
+            color=True,
+            preview=False,
+            report=None,
         )
         renderer._step = ("check", "thing")
         renderer._frames = lambda: "|"
@@ -3612,60 +4301,92 @@ with output.session():
 
     def test_interrupted_step_prints_stopped_without_group_result(self):
         with tempfile.TemporaryDirectory(prefix="jsh-report-") as directory:
-            out = self.render([
-                ("group", "links", "Dotfiles and commands"),
-                ("step", "check", "links"),
-                ("item", "ok", "one link is current"),
-                ("end", "0", "130"),
-            ], "--report", directory)
-        self.assertEqual(out.splitlines(), [
-            "", "› links  Dotfiles and commands", "Checking links...",
-            "✓ one link is current", "✕ Stopped checking links", "",
-            "Finished with errors  Everything is current  0m 00s",
-        ])
+            out = self.render(
+                [
+                    ("group", "links", "Dotfiles and commands"),
+                    ("step", "check", "links"),
+                    ("item", "ok", "one link is current"),
+                    ("end", "0", "130"),
+                ],
+                "--report",
+                directory,
+            )
+        self.assertEqual(
+            out.splitlines(),
+            [
+                "",
+                "› links  Dotfiles and commands",
+                "Checking links...",
+                "✓ one link is current",
+                "✕ Stopped checking links",
+                "",
+                "Finished with errors  Everything is current  0m 00s",
+            ],
+        )
 
     def test_renderer_preview_shows_drift_with_planned_action(self):
-        out = self.render([
-            ("step", "check", "prerequisites"),
-            ("item", "added", "jq installed", "jq is not installed"),
-            ("end", "0"),
-        ], "--preview")
+        out = self.render(
+            [
+                ("step", "check", "prerequisites"),
+                ("item", "added", "jq installed", "jq is not installed"),
+                ("end", "0"),
+            ],
+            "--preview",
+        )
         self.assertIn("! jq is not installed  would add", out.splitlines())
 
     def test_renderer_streams_items_before_stopped_step_at_eof(self):
-        out = self.render([
-            ("step", "check", "links"),
-            ("item", "ok", "$HOME/.zshrc linked"),
-        ])
-        self.assertEqual(out.splitlines(), [
-            "Checking links...",
-            "✓ ~/.zshrc linked",
-            "✕ Stopped checking links",
-        ])
+        out = self.render(
+            [
+                ("step", "check", "links"),
+                ("item", "ok", "$HOME/.zshrc linked"),
+            ]
+        )
+        self.assertEqual(
+            out.splitlines(),
+            [
+                "Checking links...",
+                "✓ ~/.zshrc linked",
+                "✕ Stopped checking links",
+            ],
+        )
 
     def test_renderer_shows_stray_lines_as_output(self):
-        out = self.render([
-            ("step", "run", "command"),
-            ("raw", "boom"),
-            ("end", "0"),
-        ])
+        out = self.render(
+            [
+                ("step", "run", "command"),
+                ("raw", "boom"),
+                ("end", "0"),
+            ]
+        )
         self.assertEqual(out.splitlines(), ["Running command...", "    boom"])
 
     def test_renderer_survives_unknown_step_verb_and_item_kind(self):
         with tempfile.TemporaryDirectory(prefix="jsh-output-") as directory:
-            out = self.render([
-                ("step", "check", "links"),
-                ("item", "ok", "held item"),
-                ("step", "verify", "thing"),
-                ("item", "mystery", "unknown payload"),
-                ("item", "ok", "after"),
-                ("end", "inf"),
-            ], "--report", directory)
-        self.assertEqual(out.splitlines(), [
-            "Checking links...", "✓ held item", "verify thing...",
-            "    unknown payload", "✓ after", "",
-            "Ready  Everything is current  0m 00s",
-        ])
+            out = self.render(
+                [
+                    ("step", "check", "links"),
+                    ("item", "ok", "held item"),
+                    ("step", "verify", "thing"),
+                    ("item", "mystery", "unknown payload"),
+                    ("item", "ok", "after"),
+                    ("end", "inf"),
+                ],
+                "--report",
+                directory,
+            )
+        self.assertEqual(
+            out.splitlines(),
+            [
+                "Checking links...",
+                "✓ held item",
+                "verify thing...",
+                "    unknown payload",
+                "✓ after",
+                "",
+                "Ready  Everything is current  0m 00s",
+            ],
+        )
 
     def test_renderer_summary_matches_report(self):
         with tempfile.TemporaryDirectory(prefix="jsh-output-") as directory:
@@ -3745,16 +4466,35 @@ with output.session():
     def test_terminal_task_failure_shows_saved_log_tail(self):
         with tempfile.TemporaryDirectory(prefix="jsh-output-") as directory:
             saved = Path(directory) / "saved.log"
-            saved.write_text("\n".join([
-                "drop one", "drop two", "three", "four", "\x1b[31mred\x1b[0m",
-                "a\tb", "seven", "eight", "nine", "ten", "eleven", "twelve",
-            ]) + "\n")
-            display = self.render_terminal([
-                ("step", "install", "package"),
-                ("task", "build", str(Path(directory) / "active.log")),
-                ("taskend", "7", str(saved)),
-                ("end", "0"),
-            ], LANG="en_US.UTF-8", LC_ALL="en_US.UTF-8")
+            saved.write_text(
+                "\n".join(
+                    [
+                        "drop one",
+                        "drop two",
+                        "three",
+                        "four",
+                        "\x1b[31mred\x1b[0m",
+                        "a\tb",
+                        "seven",
+                        "eight",
+                        "nine",
+                        "ten",
+                        "eleven",
+                        "twelve",
+                    ]
+                )
+                + "\n"
+            )
+            display = self.render_terminal(
+                [
+                    ("step", "install", "package"),
+                    ("task", "build", str(Path(directory) / "active.log")),
+                    ("taskend", "7", str(saved)),
+                    ("end", "0"),
+                ],
+                LANG="en_US.UTF-8",
+                LC_ALL="en_US.UTF-8",
+            )
         self.assertNotIn("\x1b[31m", display)
         lines = [line.split("\r\x1b[K")[-1] for line in display.split("\r\n")]
         self.assertEqual([line for line in lines if line], [
@@ -3772,39 +4512,55 @@ with output.session():
         )
         for name, environment in cases:
             with self.subTest(name):
-                display = self.render_terminal([
-                    ("step", "check", "prerequisites"),
-                    ("wait", "Checking prerequisites"),
-                    ("end", "0"),
-                ], **environment)
+                display = self.render_terminal(
+                    [
+                        ("step", "check", "prerequisites"),
+                        ("wait", "Checking prerequisites"),
+                        ("end", "0"),
+                    ],
+                    **environment,
+                )
                 self.assertIn("| Checking prerequisites", display)
                 self.assertNotIn("⠋", display)
 
-        display = self.render_terminal([
-            ("step", "check", "prerequisites"),
-            ("wait", "Checking prerequisites"),
-            ("end", "0"),
-        ], LANG="en_US.UTF-8")
+        display = self.render_terminal(
+            [
+                ("step", "check", "prerequisites"),
+                ("wait", "Checking prerequisites"),
+                ("end", "0"),
+            ],
+            LANG="en_US.UTF-8",
+        )
         self.assertIn("⠋ Checking prerequisites", display)
 
     def test_terminal_sigint_streams_items_before_stopped_step(self):
-        display = self.render_terminal([
-            ("step", "check", "links"),
-            ("item", "ok", "$HOME/.zshrc linked"),
-            ("wait", "Checking links"),
-            ("interrupt",),
-        ], LANG="en_US.UTF-8", LC_ALL="en_US.UTF-8")
+        display = self.render_terminal(
+            [
+                ("step", "check", "links"),
+                ("item", "ok", "$HOME/.zshrc linked"),
+                ("wait", "Checking links"),
+                ("interrupt",),
+            ],
+            LANG="en_US.UTF-8",
+            LC_ALL="en_US.UTF-8",
+        )
         lines = [line.split("\r\x1b[K")[-1] for line in display.split("\r\n")]
-        self.assertEqual([line for line in lines if line], [
-            "✓ ~/.zshrc linked", "✕ Stopped checking links",
-        ])
+        self.assertEqual(
+            [line for line in lines if line],
+            [
+                "✓ ~/.zshrc linked",
+                "✕ Stopped checking links",
+            ],
+        )
 
     def run_output_shell(self, shell, code, *arguments, **environment):
         env = os.environ | {"JSH_ROOT": str(ROOT), "NO_COLOR": "1", "TERM": "dumb"}
         env.update(environment)
         result = subprocess.run(
-            [shell, "-c", code, "jsh-output-check", *arguments], env=env,
-            capture_output=True, timeout=10,
+            [shell, "-c", code, "jsh-output-check", *arguments],
+            env=env,
+            capture_output=True,
+            timeout=10,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         return result
@@ -3815,48 +4571,76 @@ with output.session():
         spec = importlib.util.spec_from_file_location("jsh_output", ROOT / "lib/output.py")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        cases = [(kind, f"{kind} text", "") for kind in
-                 ("ok", "drift", "fail", "info", "notice", "output")]
+        cases = [
+            (kind, f"{kind} text", "")
+            for kind in ("ok", "drift", "fail", "info", "notice", "output")
+        ]
         cases.append(("skip", "Skipping skip text", ""))
-        cases.extend((kind, f"{kind} text", was) for kind in
-                     ("added", "changed", "removed") for was in ("", f"{kind} before"))
-        cases.extend([
-            ("ok", "$HOME/.zshrc linked", ""),
-            ("ok", str(Path.home() / ".zshrc linked"), ""),
-            ("added", "$HOME/.config/jsh added", ""),
-            ("changed", "$HOME/.config/jsh linked", "$HOME/.config/jsh was elsewhere"),
-        ])
-        code = ('. "$JSH_ROOT/lib/shell/output.sh"; case $1 in '
-                'added|changed|removed) "jsh::$1" "$2" "$3" ;; '
-                'skip) jsh::event item skip "$2" ;; '
-                '*) "jsh::$1" "$2" ;; esac')
+        cases.extend(
+            (kind, f"{kind} text", was)
+            for kind in ("added", "changed", "removed")
+            for was in ("", f"{kind} before")
+        )
+        cases.extend(
+            [
+                ("ok", "$HOME/.zshrc linked", ""),
+                ("ok", str(Path.home() / ".zshrc linked"), ""),
+                ("added", "$HOME/.config/jsh added", ""),
+                ("changed", "$HOME/.config/jsh linked", "$HOME/.config/jsh was elsewhere"),
+            ]
+        )
+        code = (
+            '. "$JSH_ROOT/lib/shell/output.sh"; case $1 in '
+            'added|changed|removed) "jsh::$1" "$2" "$3" ;; '
+            'skip) jsh::event item skip "$2" ;; '
+            '*) "jsh::$1" "$2" ;; esac'
+        )
         for shell in SHELLS:
             for preview in (False, True):
                 for kind, text, was in cases:
                     with self.subTest(shell=shell, preview=preview, kind=kind, was=was):
                         result = self.run_output_shell(
-                            shell, code, kind, text, was, JSH_OUTPUT="plain",
+                            shell,
+                            code,
+                            kind,
+                            text,
+                            was,
+                            JSH_OUTPUT="plain",
                             JSH_DRY_RUN="1" if preview else "0",
                         )
-                        expected = "\n".join(module.format_item(
-                            kind, text, was, preview=preview,
-                        )) + "\n"
-                        self.assertEqual((result.stdout, result.stderr),
-                                         (expected.encode(), b""))
+                        expected = (
+                            "\n".join(
+                                module.format_item(
+                                    kind,
+                                    text,
+                                    was,
+                                    preview=preview,
+                                )
+                            )
+                            + "\n"
+                        )
+                        self.assertEqual((result.stdout, result.stderr), (expected.encode(), b""))
 
     def test_events_survive_hostile_text(self):
         payload = "a\tb\nc\x1ed\x1b[31m"
         code = '. "$JSH_ROOT/lib/shell/output.sh"; jsh::ok "$1"'
         event = self.run_output_shell(
-            "/bin/bash", code, payload, JSH_OUTPUT="renderer",
+            "/bin/bash",
+            code,
+            payload,
+            JSH_OUTPUT="renderer",
         ).stdout
         self.assertEqual(event.count(b"\n"), 1)
         result = subprocess.run(
-            ["python3", str(ROOT / "lib/output.py"), "render"], input=event,
-            env=os.environ | {"NO_COLOR": "1"}, capture_output=True, timeout=10,
+            ["python3", str(ROOT / "lib/output.py"), "render"],
+            input=event,
+            env=os.environ | {"NO_COLOR": "1"},
+            capture_output=True,
+            timeout=10,
         )
-        self.assertEqual((result.returncode, result.stdout, result.stderr),
-                         (0, "✓ a b cd\n".encode(), b""))
+        self.assertEqual(
+            (result.returncode, result.stdout, result.stderr), (0, "✓ a b cd\n".encode(), b"")
+        )
         self.assertNotIn(b"\x1e", result.stdout)
 
     def test_plain_output_strips_terminal_controls(self):
@@ -3871,12 +4655,13 @@ with output.session():
             for name, payload, expected in cases:
                 with self.subTest(shell=shell, case=name):
                     result = self.run_output_shell(shell, code, payload, JSH_OUTPUT="plain")
-                    self.assertEqual((result.stdout, result.stderr),
-                                     (expected.encode(), b""))
+                    self.assertEqual((result.stdout, result.stderr), (expected.encode(), b""))
 
     def test_sessionless_failures_go_to_stderr(self):
-        code = ('. "$JSH_ROOT/lib/shell/output.sh"; '
-                'jsh::fail x; jsh::drift y; jsh::notice z; jsh::ok current')
+        code = (
+            '. "$JSH_ROOT/lib/shell/output.sh"; '
+            "jsh::fail x; jsh::drift y; jsh::notice z; jsh::ok current"
+        )
         for shell in SHELLS:
             with self.subTest(shell=shell):
                 result = self.run_output_shell(shell, code)
@@ -3884,28 +4669,37 @@ with output.session():
                 self.assertEqual(result.stderr, "✕ x\n! y\n! z\n".encode())
 
     def test_report_records_items_skips_changes_failures_and_unique_notices(self):
-        code = ('. "$JSH_ROOT/lib/shell/output.sh"; '
-                'jsh::added a; jsh::changed b; jsh::removed c; '
-                'jsh::fail "bad\nthing"; jsh::skipped optional; '
-                'jsh::notice restart; jsh::notice restart')
+        code = (
+            '. "$JSH_ROOT/lib/shell/output.sh"; '
+            "jsh::added a; jsh::changed b; jsh::removed c; "
+            'jsh::fail "bad\nthing"; jsh::skipped optional; '
+            "jsh::notice restart; jsh::notice restart"
+        )
         for mode in ("plain", "renderer"):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory(
-                    prefix="jsh-report-") as directory:
+                prefix="jsh-report-"
+            ) as directory:
                 self.run_output_shell(
-                    "/bin/bash", code, JSH_OUTPUT=mode, JSH_REPORT=directory,
+                    "/bin/bash",
+                    code,
+                    JSH_OUTPUT=mode,
+                    JSH_REPORT=directory,
                 )
                 report = Path(directory)
-                self.assertEqual((report / "items").read_text(),
-                                 "added\nchanged\nremoved\nfail\nskip\nnotice\nnotice\n")
-                self.assertEqual((report / "events").read_text(),
-                                 "added\nchanged\nremoved\n")
+                self.assertEqual(
+                    (report / "items").read_text(),
+                    "added\nchanged\nremoved\nfail\nskip\nnotice\nnotice\n",
+                )
+                self.assertEqual((report / "events").read_text(), "added\nchanged\nremoved\n")
                 self.assertEqual((report / "failures").read_text(), "bad thing\n")
                 self.assertEqual((report / "skips").read_text(), "Skipping optional\n")
                 self.assertEqual((report / "notices").read_text(), "restart\n")
 
     def test_plain_steps_load_and_cache_verbs_with_raw_fallback(self):
-        cached = ('. "$JSH_ROOT/lib/shell/output.sh"; jsh::step check one; '
-                  'JSH_ROOT=/missing; jsh::step check two')
+        cached = (
+            '. "$JSH_ROOT/lib/shell/output.sh"; jsh::step check one; '
+            "JSH_ROOT=/missing; jsh::step check two"
+        )
         fallback = 'unset JSH_ROOT; . "$1"; jsh::step check things'
         for shell in SHELLS:
             with self.subTest(shell=shell, mode="cached"):
@@ -3913,23 +4707,37 @@ with output.session():
                 self.assertEqual(result.stdout, b"Checking one...\nChecking two...\n")
             with self.subTest(shell=shell, mode="fallback"):
                 result = self.run_output_shell(
-                    shell, fallback, str(ROOT / "lib/shell/output.sh"), JSH_OUTPUT="plain",
+                    shell,
+                    fallback,
+                    str(ROOT / "lib/shell/output.sh"),
+                    JSH_OUTPUT="plain",
                 )
                 self.assertEqual(result.stdout, b"check things...\n")
 
     def test_no_legacy_output_helpers_remain(self):
         excluded = {
-            ROOT / "bin/git", ROOT / "bin/kubectx", ROOT / "bin/kubens",
-            ROOT / "bin/kubecolor", ROOT / "bin/colours",
+            ROOT / "bin/git",
+            ROOT / "bin/kubectx",
+            ROOT / "bin/kubens",
+            ROOT / "bin/kubecolor",
+            ROOT / "bin/colours",
         }
         paths = [ROOT / "install.sh"]
-        paths.extend(path for path in (ROOT / "scripts").rglob("*")
-                     if path.is_file() and "__pycache__" not in path.parts)
-        paths.extend(path for path in (ROOT / "lib").rglob("*")
-                     if path.is_file() and "__pycache__" not in path.parts
-                     and ROOT / "lib/git" not in path.parents)
-        paths.extend(path for path in (ROOT / "bin").iterdir()
-                     if path.is_file() and path not in excluded)
+        paths.extend(
+            path
+            for path in (ROOT / "scripts").rglob("*")
+            if path.is_file() and "__pycache__" not in path.parts
+        )
+        paths.extend(
+            path
+            for path in (ROOT / "lib").rglob("*")
+            if path.is_file()
+            and "__pycache__" not in path.parts
+            and ROOT / "lib/git" not in path.parents
+        )
+        paths.extend(
+            path for path in (ROOT / "bin").iterdir() if path.is_file() and path not in excluded
+        )
         paths.extend(path for path in (ROOT / "dotfiles").rglob("*") if path.is_file())
         patterns = (
             re.compile(r"jsh::" + r"log_"),
@@ -3946,14 +4754,13 @@ with output.session():
                 text = text.split(compatibility, 1)[0]
             for pattern in patterns:
                 for match in pattern.finditer(text):
-                    line = text[:match.start()].count("\n") + 1
+                    line = text[: match.start()].count("\n") + 1
                     offenders.append(f"{path.relative_to(ROOT)}:{line}: {match.group()}")
         self.assertEqual(offenders, [])
 
     def test_compat_info_alias_rechecks_color_after_redirection(self):
         alias = "jsh::" + "log_info"
-        code = (". \"$JSH_ROOT/lib/shell/output.sh\"; "
-                f"_jsh_color_1=1; {alias} redirected >&2")
+        code = '. "$JSH_ROOT/lib/shell/output.sh"; ' f"_jsh_color_1=1; {alias} redirected >&2"
         result = self.run_output_shell("/bin/bash", code)
         self.assertEqual((result.stdout, result.stderr), (b"", "› redirected\n".encode()))
 
@@ -4010,7 +4817,9 @@ class AnsibleChecks(unittest.TestCase):
         return root
 
     def mock_uv(self):
-        self.tool("uv", r'''printf '%s|%s\n' "${UV_PYTHON_PREFERENCE:-}" "$*" >> "$HOME/uv.log"
+        self.tool(
+            "uv",
+            r"""printf '%s|%s\n' "${UV_PYTHON_PREFERENCE:-}" "$*" >> "$HOME/uv.log"
 case $1 in
   venv)
     for argument; do directory=$argument; done
@@ -4029,16 +4838,22 @@ case $1 in
     printf '#!/bin/sh\nexit 0\n' > "$bin/ansible-playbook"
     printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "$HOME/galaxy.log"\n' > "$bin/ansible-galaxy"
     chmod +x "$bin/ansible-playbook" "$bin/ansible-galaxy" ;;
-esac''')
+esac""",
+        )
 
     def bootstrap(self, root, *arguments, **environment):
         return subprocess.run(
             ["bash", str(root / "scripts/ansible.sh"), *arguments],
-            env=self.env | {
+            env=self.env
+            | {
                 "JSH_ANSIBLE_HOME": str(self.home / "ansible"),
                 "JSH_UV": str(self.tools / "uv"),
-            } | environment,
-            cwd=self.home, capture_output=True, text=True, timeout=60,
+            }
+            | environment,
+            cwd=self.home,
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
 
     def test_ansible_bootstrap_installs_then_reports_current(self):
@@ -4110,12 +4925,16 @@ esac''')
         return path
 
     def ansible_env(self, **environment):
-        return self.env | {
-            "ANSIBLE_CONFIG": str(ROOT / "ansible/ansible.cfg"),
-            "ANSIBLE_CACHE_PLUGIN_CONNECTION": str(self.home / "facts"),
-            "ANSIBLE_NOCOLOR": "1",
-            "JSH_ROOT": str(ROOT),
-        } | environment
+        return (
+            self.env
+            | {
+                "ANSIBLE_CONFIG": str(ROOT / "ansible/ansible.cfg"),
+                "ANSIBLE_CACHE_PLUGIN_CONNECTION": str(self.home / "facts"),
+                "ANSIBLE_NOCOLOR": "1",
+                "JSH_ROOT": str(ROOT),
+            }
+            | environment
+        )
 
     def playbook(self, playbook, *arguments, limit="localhost", **environment):
         # defaults writes the real user's preferences whatever HOME is, so osx_defaults gets a
@@ -4124,30 +4943,56 @@ esac''')
         if not blocked.is_dir():
             blocked.mkdir()
             stub = blocked / "defaults"
-            stub.write_text("#!/bin/sh\necho 'checks must not write real macOS preferences' >&2\nexit 1\n")
+            stub.write_text(
+                "#!/bin/sh\necho 'checks must not write real macOS preferences' >&2\nexit 1\n"
+            )
             stub.chmod(0o755)
         guard = json.dumps({"macos_defaults_path": str(blocked)})
         return subprocess.run(
-            [str(self.venv("ansible-playbook")), str(playbook), "-e", guard,
-             *(["--limit", limit] if limit else []), *arguments],
-            env=self.ansible_env(**environment), cwd=self.home, stdin=subprocess.DEVNULL,
-            capture_output=True, text=True, timeout=180,
+            [
+                str(self.venv("ansible-playbook")),
+                str(playbook),
+                "-e",
+                guard,
+                *(["--limit", limit] if limit else []),
+                *arguments,
+            ],
+            env=self.ansible_env(**environment),
+            cwd=self.home,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=180,
         )
 
     def test_playbook_uses_the_venv_python(self):
         # Only an explicit inventory host can lose the controller's Python to discovery.
         inventory = subprocess.run(
             [str(self.venv("ansible-inventory")), "--list"],
-            env=self.ansible_env(), cwd=self.home, stdin=subprocess.DEVNULL,
-            capture_output=True, text=True, timeout=120,
+            env=self.ansible_env(),
+            cwd=self.home,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=120,
         )
         self.assertEqual(inventory.returncode, 0, inventory.stdout + inventory.stderr)
         self.assertIn("localhost", json.loads(inventory.stdout)["ungrouped"]["hosts"])
         result = subprocess.run(
-            [str(self.venv("ansible")), "localhost", "-m", "ansible.builtin.setup",
-             "-a", "filter=ansible_python"],
-            env=self.ansible_env(), cwd=self.home, stdin=subprocess.DEVNULL,
-            capture_output=True, text=True, timeout=120,
+            [
+                str(self.venv("ansible")),
+                "localhost",
+                "-m",
+                "ansible.builtin.setup",
+                "-a",
+                "filter=ansible_python",
+            ],
+            env=self.ansible_env(),
+            cwd=self.home,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=120,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         facts = json.loads(result.stdout.split("=>", 1)[1])
@@ -4157,8 +5002,17 @@ esac''')
     def test_playbook_detects_platform_desktop_and_host(self):
         site = ROOT / "ansible/site.yml"
         # No role has the facts tag, so only the always-tagged detection tasks run.
-        named = self.playbook(site, "--check", "--tags", "facts", "-e", "jsh_debug_facts=true",
-                              JSH_PLATFORM="rhel", JSH_DESKTOP="xfce", JSH_HOST="colossus")
+        named = self.playbook(
+            site,
+            "--check",
+            "--tags",
+            "facts",
+            "-e",
+            "jsh_debug_facts=true",
+            JSH_PLATFORM="rhel",
+            JSH_DESKTOP="xfce",
+            JSH_HOST="colossus",
+        )
         self.assertEqual(named.returncode, 0, named.stdout + named.stderr)
         self.assertIn("rhel xfce colossus", named.stdout)
         detected = self.playbook(site, "--check", "--tags", "facts", "-e", "jsh_debug_facts=true")
@@ -4171,13 +5025,19 @@ esac''')
     def test_inventory_hosts_match_host_vars(self):
         result = subprocess.run(
             [str(self.venv("ansible-inventory")), "--list"],
-            env=self.ansible_env(), cwd=self.home, stdin=subprocess.DEVNULL,
-            capture_output=True, text=True, timeout=120,
+            env=self.ansible_env(),
+            cwd=self.home,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=120,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         inventory = json.loads(result.stdout)
         hosts = set(inventory["_meta"]["hostvars"])
-        expected = {"localhost"} | {path.stem for path in (ROOT / "ansible/host_vars").glob("*.yml")}
+        expected = {"localhost"} | {
+            path.stem for path in (ROOT / "ansible/host_vars").glob("*.yml")
+        }
         self.assertEqual(hosts, expected)
         self.assertTrue({"archon", "colossus"} <= hosts)
         for name in ("archon.yml", "colossus.yml"):
@@ -4193,14 +5053,24 @@ esac''')
         (checkout / "ansible/host_vars").mkdir(parents=True)
         (checkout / "ansible/host_vars/colossus.yml").write_text("---\n{}\n")
         self.mock_playbook()
-        for host, limit in (("newbox", "localhost"), ("colossus", "colossus"),
-                            ("Colossus", "colossus")):
+        for host, limit in (
+            ("newbox", "localhost"),
+            ("colossus", "colossus"),
+            ("Colossus", "colossus"),
+        ):
             with self.subTest(host=host):
                 result = subprocess.run(
                     ["bash", str(checkout / "scripts/configure.sh"), "--dry-run", "desktop"],
-                    env=self.env | {"JSH_PLATFORM": "darwin", "JSH_HOST": host,
-                                    "JSH_ANSIBLE_HOME": str(self.home / "ansible")},
-                    cwd=self.home, capture_output=True, text=True, timeout=60,
+                    env=self.env
+                    | {
+                        "JSH_PLATFORM": "darwin",
+                        "JSH_HOST": host,
+                        "JSH_ANSIBLE_HOME": str(self.home / "ansible"),
+                    },
+                    cwd=self.home,
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
                 )
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 call = (self.home / "playbook.log").read_text().splitlines()[-1]
@@ -4232,33 +5102,43 @@ esac''')
         )
         result = subprocess.run(
             [str(self.venv("python")), "-c", script, str(ROOT)],
-            capture_output=True, text=True, timeout=60,
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         groups = json.loads(result.stdout)
         self.assertEqual(len({name for name, _, _, _ in groups}), len(groups))
         self.assertTrue({"app", "link"}.isdisjoint(name for name, _, _, _ in groups))
         names = [name for name, _, _, _ in groups]
-        owners = list(self.yaml_file(ROOT / "ansible/group_vars/all/packages.yml")["packages_roles"])
+        owners = list(
+            self.yaml_file(ROOT / "ansible/group_vars/all/packages.yml")["packages_roles"]
+        )
         self.assertIn("packages", names)
         for owner in owners:
-            self.assertIn(owner, names[names.index("packages") + 1:], owner)
+            self.assertIn(owner, names[names.index("packages") + 1 :], owner)
         for name, platform, purpose, task in groups:
             self.assertNotEqual(purpose, "", name)
             tags = ["packages"] + owners if name == "packages" else [name]
             self.assertEqual(task.get("tags"), tags, name)
-            self.assertEqual(task["ansible.builtin.include_role"].get("apply"),
-                             {"tags": tags}, name)
-            expected = {"all": None, "darwin": "jsh_platform == 'darwin'",
-                        "linux": "jsh_platform != 'darwin'"}[platform]
+            self.assertEqual(
+                task["ansible.builtin.include_role"].get("apply"), {"tags": tags}, name
+            )
+            expected = {
+                "all": None,
+                "darwin": "jsh_platform == 'darwin'",
+                "linux": "jsh_platform != 'darwin'",
+            }[platform]
             self.assertEqual(task.get("when"), expected, name)
 
     def test_config_roles_have_no_package_dependency(self):
         roles = ROOT / "ansible/roles"
         for meta in roles.glob("*/meta/main.yml"):
             data = self.yaml_file(meta)
-            dependencies = [entry.get("role") if isinstance(entry, dict) else entry
-                            for entry in data.get("dependencies") or []]
+            dependencies = [
+                entry.get("role") if isinstance(entry, dict) else entry
+                for entry in data.get("dependencies") or []
+            ]
             self.assertNotIn("packages", dependencies, meta)
         for defaults in roles.glob("*/defaults/main.yml"):
             keys = self.yaml_file(defaults) or {}
@@ -4267,7 +5147,7 @@ esac''')
             self.assertNotIn("app_apply", path.read_text(), path)
 
     def test_role_file_paths_exist(self):
-        script = r'''
+        script = r"""
 import json, re, subprocess, sys, yaml
 from pathlib import Path
 root = Path(sys.argv[1])
@@ -4309,14 +5189,18 @@ for role in sorted((root / "ansible/roles").iterdir()):
                 if source and "{{" not in source and not (role / folder / source).exists():
                     missing.append(f"{path.relative_to(root)}: {folder}/{source}")
 print(json.dumps(missing))
-'''
-        result = subprocess.run([str(self.venv("python")), "-c", script, str(ROOT)],
-                                capture_output=True, text=True, timeout=60)
+"""
+        result = subprocess.run(
+            [str(self.venv("python")), "-c", script, str(ROOT)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), [])
 
     def test_role_includes_target_existing_roles_and_their_variables(self):
-        script = r'''
+        script = r"""
 import json, sys, yaml
 from pathlib import Path
 roles = Path(sys.argv[1]) / "ansible/roles"
@@ -4345,40 +5229,63 @@ for path in sorted(roles.glob("*/tasks/**/*.yml")):
             if not key.startswith(name + "_"):
                 problems.append(f"{where}: {key} is not a {name}_ variable")
 print(json.dumps(problems))
-'''
-        result = subprocess.run([str(self.venv("python")), "-c", script, str(ROOT)],
-                                capture_output=True, text=True, timeout=60)
+"""
+        result = subprocess.run(
+            [str(self.venv("python")), "-c", script, str(ROOT)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), [])
 
     def test_desktop_role_runs_all_areas_in_order(self):
         tasks = self.yaml_file(ROOT / "ansible/roles/desktop/tasks/main.yml")
-        includes = [(task["ansible.builtin.include_tasks"], task.get("when"))
-                    for task in tasks if "ansible.builtin.include_tasks" in task]
+        includes = [
+            (task["ansible.builtin.include_tasks"], task.get("when"))
+            for task in tasks
+            if "ansible.builtin.include_tasks" in task
+        ]
         linux = "jsh_platform != 'darwin'"
-        self.assertEqual(includes, [
-            ("fonts/main.yml", None), ("appearance/main.yml", linux), ("dock/main.yml", linux),
-            ("display/main.yml", None), ("keybindings/main.yml", None),
-            ("audio/main.yml", linux), ("wallpaper/main.yml", None)])
+        self.assertEqual(
+            includes,
+            [
+                ("fonts/main.yml", None),
+                ("appearance/main.yml", linux),
+                ("dock/main.yml", linux),
+                ("display/main.yml", None),
+                ("keybindings/main.yml", None),
+                ("audio/main.yml", linux),
+                ("wallpaper/main.yml", None),
+            ],
+        )
         meta = self.yaml_file(ROOT / "ansible/roles/desktop/meta/main.yml")
-        self.assertEqual([item["name"] for item in meta["galaxy_info"]["platforms"]],
-                         ["MacOSX", "Debian", "EL"])
+        self.assertEqual(
+            [item["name"] for item in meta["galaxy_info"]["platforms"]], ["MacOSX", "Debian", "EL"]
+        )
 
     def test_patches_role_runs_areas_in_order(self):
         tasks = self.yaml_file(ROOT / "ansible/roles/patches/tasks/main.yml")
-        self.assertEqual([(task.get("ansible.builtin.include_tasks"), task.get("when"))
-                          for task in tasks],
-                         [("vscode/main.yml", None), ("sublime/main.yml", None),
-                          ("helium/main.yml", None), ("waterfox/main.yml", None)])
+        self.assertEqual(
+            [(task.get("ansible.builtin.include_tasks"), task.get("when")) for task in tasks],
+            [
+                ("vscode/main.yml", None),
+                ("sublime/main.yml", None),
+                ("helium/main.yml", None),
+                ("waterfox/main.yml", None),
+            ],
+        )
 
     def test_patches_owns_its_four_apps_packages(self):
         data = ROOT / "ansible/group_vars/all/packages.yml"
         result = self.packages_filter(
             f"data = yaml.safe_load(open({str(data)!r}))\n"
             "print(json.dumps(selection('darwin', 'darwin', ['patches'], data['packages_common'],\n"
-            "                           data['packages_roles'])))\n")
-        self.assertEqual(result, {"casks": ["visual-studio-code", "sublime-text",
-                                            "helium-browser", "waterfox"]})
+            "                           data['packages_roles'])))\n"
+        )
+        self.assertEqual(
+            result, {"casks": ["visual-studio-code", "sublime-text", "helium-browser", "waterfox"]}
+        )
 
     def test_merged_roles_never_end_the_role(self):
         for role in ("desktop", "patches", "agentics"):
@@ -4399,15 +5306,18 @@ print(json.dumps(problems))
             "        apply: {tags: [beta]}\n      tags: [beta]\n"
             "      when: jsh_platform == 'darwin'\n"
             "    - name: alpha\n      ansible.builtin.include_role:\n        name: alpha\n"
-            "        apply: {tags: [alpha]}\n      tags: [alpha]\n")
+            "        apply: {tags: [alpha]}\n      tags: [alpha]\n"
+        )
         (root / "ansible/roles/beta/meta/main.yml").write_text(
             "---\ngalaxy_info:\n  description: Beta purpose\n  platforms:\n"
-            "    - name: MacOSX\n      versions: [all]\ndependencies: []\n")
+            "    - name: MacOSX\n      versions: [all]\ndependencies: []\n"
+        )
         (root / "ansible/roles/alpha/meta/main.yml").write_text(
             "---\ngalaxy_info:\n  description: Alpha purpose\n  platforms:\n"
             "    - name: MacOSX\n      versions: [all]\n"
             "    - name: Debian\n      versions: [all]\n"
-            "    - name: EL\n      versions: [all]\ndependencies: []\n")
+            "    - name: EL\n      versions: [all]\ndependencies: []\n"
+        )
         expected = {
             ("darwin", ""): "beta\nalpha\n",
             ("darwin", "here"): "beta\nalpha\n",
@@ -4417,15 +5327,20 @@ print(json.dumps(problems))
         for (platform, view), output in expected.items():
             with self.subTest(platform=platform, view=view):
                 result = subprocess.run(
-                    ["bash", "-c",
-                     ". \"$JSH_ROOT/scripts/lib/common.sh\"; jsh::roles \"$1\"",
-                     "test", view],
-                    env=self.env | {"JSH_ROOT": str(root), "JSH_OUTPUT": "plain",
-                                    "JSH_PLATFORM": platform},
-                    capture_output=True, text=True, timeout=20,
+                    [
+                        "bash",
+                        "-c",
+                        '. "$JSH_ROOT/scripts/lib/common.sh"; jsh::roles "$1"',
+                        "test",
+                        view,
+                    ],
+                    env=self.env
+                    | {"JSH_ROOT": str(root), "JSH_OUTPUT": "plain", "JSH_PLATFORM": platform},
+                    capture_output=True,
+                    text=True,
+                    timeout=20,
                 )
-                self.assertEqual((result.returncode, result.stdout, result.stderr),
-                                 (0, output, ""))
+                self.assertEqual((result.returncode, result.stdout, result.stderr), (0, output, ""))
 
     def run_play(self, tasks, *arguments, roles=None, **environment):
         """Run a playbook with the jsh callback and return (result, events)."""
@@ -4435,14 +5350,23 @@ print(json.dumps(problems))
             (play / "roles" / name / "tasks/main.yml").write_text(body)
         play.mkdir(exist_ok=True)
         (play / "site.yml").write_text(
-            "- hosts: localhost\n  gather_facts: false\n  tasks:\n" + tasks)
+            "- hosts: localhost\n  gather_facts: false\n  tasks:\n" + tasks
+        )
         result = self.playbook(
-            play / "site.yml", *arguments,
-            **{"ANSIBLE_STDOUT_CALLBACK": "jsh", "ANSIBLE_ROLES_PATH": str(play / "roles"),
-               "JSH_OUTPUT": "renderer", "JSH_PLATFORM": "darwin"} | environment)
+            play / "site.yml",
+            *arguments,
+            **{
+                "ANSIBLE_STDOUT_CALLBACK": "jsh",
+                "ANSIBLE_ROLES_PATH": str(play / "roles"),
+                "JSH_OUTPUT": "renderer",
+                "JSH_PLATFORM": "darwin",
+            }
+            | environment,
+        )
         # str.splitlines() also splits at the \x1e marker itself.
-        events = [line[1:].split("\t") for line in result.stdout.split("\n")
-                  if line.startswith("\x1e")]
+        events = [
+            line[1:].split("\t") for line in result.stdout.split("\n") if line.startswith("\x1e")
+        ]
         return result, [event for event in events if event[0] != "progress"]
 
     def purpose(self, group):
@@ -4470,19 +5394,24 @@ print(json.dumps(problems))
 """
         result, events = self.run_play(
             "    - name: macos\n      ansible.builtin.include_role: {name: macos}\n",
-            "--diff", roles={"macos": role})
+            "--diff",
+            roles={"macos": role},
+        )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(events, [
-            ["group", "macos", self.purpose("macos")],
-            ["step", "check", "macos"],
-            ["item", "added", "new file exists"],
-            ["item", "ok", "new file is current"],
-            ["item", "changed", "new file has y"],
-            ["item", "removed", "new file is gone"],
-            ["item", "ok", "a"],
-            ["item", "ok", "b"],
-            ["stepclose"],
-        ])
+        self.assertEqual(
+            events,
+            [
+                ["group", "macos", self.purpose("macos")],
+                ["step", "check", "macos"],
+                ["item", "added", "new file exists"],
+                ["item", "ok", "new file is current"],
+                ["item", "changed", "new file has y"],
+                ["item", "removed", "new file is gone"],
+                ["item", "ok", "a"],
+                ["item", "ok", "b"],
+                ["stepclose"],
+            ],
+        )
 
     def test_callback_check_mode_reports_drift_and_diff_lines(self):
         target = self.home / "file"
@@ -4492,7 +5421,10 @@ print(json.dumps(problems))
 """
         result, events = self.run_play(
             "    - name: macos\n      ansible.builtin.include_role: {name: macos}\n",
-            "--check", "--diff", roles={"macos": role})
+            "--check",
+            "--diff",
+            roles={"macos": role},
+        )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn(["item", "changed", "file has b"], events)
         outputs = [event[2] for event in events if event[:2] == ["item", "output"]]
@@ -4505,7 +5437,8 @@ print(json.dumps(problems))
         started = time.monotonic()
         result, events = self.run_play(
             "    - name: macos\n      ansible.builtin.include_role: {name: macos}\n",
-            roles={"macos": role})
+            roles={"macos": role},
+        )
         self.assertLess(time.monotonic() - started, 30)
         self.assertNotEqual(result.returncode, 0)
         kinds = [event[1] for event in events if event[0] == "item"]
@@ -4520,7 +5453,8 @@ print(json.dumps(problems))
 """
         result, events = self.run_play(
             "    - name: macos\n      ansible.builtin.include_role: {name: macos}\n",
-            roles={"macos": role})
+            roles={"macos": role},
+        )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         items = [event for event in events if event[0] == "item"]
         self.assertEqual(items, [["item", "added", "x installed", ""]])
@@ -4529,26 +5463,36 @@ print(json.dumps(problems))
         import ast
 
         tree = ast.parse((ROOT / "ansible/plugins/callback/jsh.py").read_text())
-        callback = next(node for node in tree.body
-                        if isinstance(node, ast.ClassDef) and node.name == "CallbackModule")
-        handler = next(node for node in callback.body
-                       if isinstance(node, ast.FunctionDef)
-                       and node.name == "v2_playbook_on_handler_task_start")
+        callback = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "CallbackModule"
+        )
+        handler = next(
+            node
+            for node in callback.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name == "v2_playbook_on_handler_task_start"
+        )
         self.assertEqual([argument.arg for argument in handler.args.args], ["self", "task"])
 
     def test_callback_skipped_include_prints_platform_skip(self):
         result, events = self.run_play(
             "    - name: services\n      ansible.builtin.include_role: {name: services}\n"
-            "      when: jsh_platform != 'darwin'\n")
+            "      when: jsh_platform != 'darwin'\n"
+        )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn(["item", "skip", "Skipping services on macOS: Linux only"], events)
 
     def test_callback_notice_task_adds_notice(self):
-        role = ("- name: notice\n  ansible.builtin.debug: {msg: quit X}\n"
-                "- name: ok\n  ansible.builtin.debug: {msg: \"{{ item }}\"}\n  loop: [jq, git]\n")
+        role = (
+            "- name: notice\n  ansible.builtin.debug: {msg: quit X}\n"
+            '- name: ok\n  ansible.builtin.debug: {msg: "{{ item }}"}\n  loop: [jq, git]\n'
+        )
         result, events = self.run_play(
             "    - name: macos\n      ansible.builtin.include_role: {name: macos}\n",
-            roles={"macos": role})
+            roles={"macos": role},
+        )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn(["item", "notice", "quit X"], events)
         self.assertIn(["item", "ok", "jq"], events)
@@ -4558,15 +5502,21 @@ print(json.dumps(problems))
         checkout = self.home / "checkout"
         for name in ("scripts/lib", "lib/shell", "bin", "dotfiles", "ansible/roles/desktop/tasks"):
             (checkout / name).mkdir(parents=True)
-        for name in ("scripts/lib/common.sh", "lib/shell/output.sh", "lib/output.py",
-                     "lib/verbs.tsv", "install.sh", "scripts/configure.sh"):
+        for name in (
+            "scripts/lib/common.sh",
+            "lib/shell/output.sh",
+            "lib/output.py",
+            "lib/verbs.tsv",
+            "install.sh",
+            "scripts/configure.sh",
+        ):
             shutil.copy2(ROOT / name, checkout / name)
         copy_group_sources(checkout)
         (self.home / ".jsh").symlink_to(checkout)
         (checkout / "scripts/packages.sh").write_text("exit 0\n")
         (checkout / "scripts/shell.sh").write_text("exit 0\n")
         (checkout / "scripts/ansible.sh").write_text("exit 0\n")
-        (checkout / "scripts/desktop.sh").write_text("touch \"$HOME/desktop-script-ran\"\n")
+        (checkout / "scripts/desktop.sh").write_text('touch "$HOME/desktop-script-ran"\n')
         (checkout / "ansible/roles/desktop/tasks/main.yml").write_text("[]\n")
         return checkout
 
@@ -4574,15 +5524,18 @@ print(json.dumps(problems))
         bin_dir = self.home / "ansible/venv/bin"
         bin_dir.mkdir(parents=True)
         path = bin_dir / "ansible-playbook"
-        path.write_text("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$HOME/playbook.log\"\n")
+        path.write_text('#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$HOME/playbook.log"\n')
         path.chmod(0o755)
 
     def configure(self, checkout, *arguments):
         return subprocess.run(
             ["bash", str(checkout / "scripts/configure.sh"), *arguments],
-            env=self.env | {"JSH_PLATFORM": "darwin",
-                            "JSH_ANSIBLE_HOME": str(self.home / "ansible")},
-            cwd=self.home, capture_output=True, text=True, timeout=60,
+            env=self.env
+            | {"JSH_PLATFORM": "darwin", "JSH_ANSIBLE_HOME": str(self.home / "ansible")},
+            cwd=self.home,
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
 
     def test_configure_runs_ansible_for_ported_groups(self):
@@ -4610,10 +5563,21 @@ print(json.dumps(problems))
     def settings(self, **arguments):
         preview = ["--check", "--diff"] if arguments.pop("_check", False) else []
         result = subprocess.run(
-            [str(self.venv("ansible")), "localhost", "-m", "settings", "-a", json.dumps(arguments),
-             *preview],
-            env=self.ansible_env(), cwd=self.home, stdin=subprocess.DEVNULL,
-            capture_output=True, text=True, timeout=120,
+            [
+                str(self.venv("ansible")),
+                "localhost",
+                "-m",
+                "settings",
+                "-a",
+                json.dumps(arguments),
+                *preview,
+            ],
+            env=self.ansible_env(),
+            cwd=self.home,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=120,
         )
         # Ad-hoc output prints any diff first, then "localhost | STATUS => {json}".
         return result, json.loads(result.stdout.rsplit("=>", 1)[1])
@@ -4639,10 +5603,20 @@ print(json.dumps(problems))
         target = self.home / "settings.json"
         target.write_bytes(b'{"a":')
         result = subprocess.run(
-            [str(self.venv("ansible")), "localhost", "-m", "settings", "-a",
-             json.dumps({"path": str(target), "values": {"b": 1}})],
-            env=self.ansible_env(), cwd=self.home, stdin=subprocess.DEVNULL,
-            capture_output=True, text=True, timeout=120,
+            [
+                str(self.venv("ansible")),
+                "localhost",
+                "-m",
+                "settings",
+                "-a",
+                json.dumps({"path": str(target), "values": {"b": 1}}),
+            ],
+            env=self.ansible_env(),
+            cwd=self.home,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=120,
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("left unchanged", result.stdout + result.stderr)
@@ -4654,8 +5628,11 @@ print(json.dumps(problems))
         overlay = self.home / "overlay.json"
         overlay.write_text('{"a": 2}\n')
         target = self.home / "settings.json"
-        result, output = self.settings(path=str(target), source=str(source),
-                                       overlays=[str(overlay), str(self.home / "missing.json")])
+        result, output = self.settings(
+            path=str(target),
+            source=str(source),
+            overlays=[str(overlay), str(self.home / "missing.json")],
+        )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(json.loads(target.read_text()), {"a": 2})
 
@@ -4679,13 +5656,15 @@ print(json.dumps(problems))
     def test_settings_removes_absent_paths(self):
         target = self.home / "settings.json"
         target.write_text('{"mcp": {"notion": {"url": "x"}, "rea": {}}, "a": 1}\n')
-        result, output = self.settings(path=str(target), values={"a": 1},
-                                       absent=[["mcp", "notion"], ["missing", "key"]])
+        result, output = self.settings(
+            path=str(target), values={"a": 1}, absent=[["mcp", "notion"], ["missing", "key"]]
+        )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue(output["changed"])
         self.assertEqual(json.loads(target.read_text()), {"mcp": {"rea": {}}, "a": 1})
-        result, output = self.settings(path=str(target), values={"a": 1},
-                                       absent=[["mcp", "notion"]])
+        result, output = self.settings(
+            path=str(target), values={"a": 1}, absent=[["mcp", "notion"]]
+        )
         self.assertFalse(output["changed"], result.stdout)
 
     def app_play(self, target, *arguments, apply_fails=False, **environment):
@@ -4695,27 +5674,35 @@ print(json.dumps(problems))
         self.tool("helium-launch", 'rm -f "$HOME/closed"\ntouch "$HOME/launched"')
         settings = f'  settings: {{path: "{target}", values: {{managed: true}}}}\n'
         main = (
-            "- name: Helium settings are pending\n" + settings +
-            "  check_mode: true\n  register: pending\n"
+            "- name: Helium settings are pending\n"
+            + settings
+            + "  check_mode: true\n  register: pending\n"
             "- name: Helium restarts for its settings\n"
             "  ansible.builtin.include_role:\n    name: app\n"
             "  vars:\n    app_label: Helium\n    app_process: Helium\n"
-            f"    app_launch: [\"{self.tools}/helium-launch\"]\n"
+            f'    app_launch: ["{self.tools}/helium-launch"]\n'
             "    app_role: patches\n    app_tasks: apply.yml\n"
-            "    app_pending: \"{{ pending is changed }}\"\n"
+            '    app_pending: "{{ pending is changed }}"\n'
         )
-        apply = (("- name: Helium settings fail\n"
-                  "  ansible.builtin.command: /usr/bin/false\n"
-                  "  changed_when: false\n") if apply_fails else
-                 "- name: Helium settings\n" + settings)
+        apply = (
+            (
+                "- name: Helium settings fail\n"
+                "  ansible.builtin.command: /usr/bin/false\n"
+                "  changed_when: false\n"
+            )
+            if apply_fails
+            else "- name: Helium settings\n" + settings
+        )
         play = self.home / "play/roles/patches/tasks"
         play.mkdir(parents=True)
         (play / "apply.yml").write_text(apply)
         return self.run_play(
             "    - name: patches\n      ansible.builtin.include_role: {name: patches}\n",
-            *arguments, roles={"patches": main},
+            *arguments,
+            roles={"patches": main},
             ANSIBLE_ROLES_PATH=f"{self.home / 'play/roles'}:{ROOT / 'ansible/roles'}",
-            **environment)
+            **environment,
+        )
 
     def test_app_role_closes_applies_and_reopens(self):
         target = self.home / "settings.json"
@@ -4723,8 +5710,15 @@ print(json.dumps(problems))
         result, events = self.app_play(target)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         items = [event[1:3] for event in events if event[0] == "item"]
-        self.assertEqual(items, [["info", "Closing Helium"], ["changed", "Helium settings"],
-                                 ["info", "Reopening Helium"], ["changed", "Helium restarted"]])
+        self.assertEqual(
+            items,
+            [
+                ["info", "Closing Helium"],
+                ["changed", "Helium settings"],
+                ["info", "Reopening Helium"],
+                ["changed", "Helium restarted"],
+            ],
+        )
         self.assertTrue((self.home / "launched").exists())
         self.assertEqual(json.loads(target.read_text()), {"user": 1, "managed": True})
 
@@ -4733,8 +5727,9 @@ print(json.dumps(problems))
         target.write_text('{"user": 1}\n')
         result, events = self.app_play(target, JSH_KEEP_APPS="1")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn(["item", "notice", "quit Helium, then run `jsh update` to apply its settings"],
-                      events)
+        self.assertIn(
+            ["item", "notice", "quit Helium, then run `jsh update` to apply its settings"], events
+        )
         self.assertEqual(target.read_text(), '{"user": 1}\n')
         self.assertFalse((self.home / "osascript.log").exists())
 
@@ -4744,8 +5739,13 @@ print(json.dumps(problems))
         result, events = self.app_play(target, "--check")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         items = [event[1:3] for event in events if event[0] == "item"]
-        self.assertEqual(items, [["notice", "Helium must close and reopen for pending changes"],
-                                 ["changed", "Helium settings"]])
+        self.assertEqual(
+            items,
+            [
+                ["notice", "Helium must close and reopen for pending changes"],
+                ["changed", "Helium settings"],
+            ],
+        )
         self.assertEqual(target.read_text(), '{"user": 1}\n')
 
     def personalization_play(self, group, variables, *arguments, tasks_from=None, **environment):
@@ -4764,47 +5764,68 @@ print(json.dumps(problems))
                 "JSH_OUTPUT": "renderer",
             },
         } | variables
-        target = f"{{name: {group}, tasks_from: {tasks_from}}}" if tasks_from else f"{{name: {group}}}"
-        include = (f"    - name: {group}\n"
-                   f"      ansible.builtin.include_role: {target}\n")
+        target = (
+            f"{{name: {group}, tasks_from: {tasks_from}}}" if tasks_from else f"{{name: {group}}}"
+        )
+        include = f"    - name: {group}\n" f"      ansible.builtin.include_role: {target}\n"
         return self.run_play(
-            include, *arguments, "-e", json.dumps(variables),
-            ANSIBLE_ROLES_PATH=str(ROOT / "ansible/roles"), **environment)
+            include,
+            *arguments,
+            "-e",
+            json.dumps(variables),
+            ANSIBLE_ROLES_PATH=str(ROOT / "ansible/roles"),
+            **environment,
+        )
 
     @unittest.skipUnless(os.uname().sysname == "Darwin", "writes LaunchServices defaults")
     def test_apps_role_replaces_only_stale_markdown_handlers(self):
         import plistlib
+
         domain = str(self.home / "launch-services")
         plist = self.home / "handlers.plist"
         handlers = [
             {"LSHandlerContentType": "public.text", "LSHandlerRoleAll": "other.app"},
-            {"LSHandlerContentTag": "mdx", "LSHandlerContentTagClass":
-             "public.filename-extension", "LSHandlerRoleAll": "other.app"},
+            {
+                "LSHandlerContentTag": "mdx",
+                "LSHandlerContentTagClass": "public.filename-extension",
+                "LSHandlerRoleAll": "other.app",
+            },
         ]
         with plist.open("wb") as stream:
             plistlib.dump({"LSHandlers": handlers}, stream)
         subprocess.run(["defaults", "import", domain, str(plist)], check=True)
         macdown = self.home / "MacDown 3000.app"
         macdown.mkdir()
-        result, events = self.personalization_play("apps", {
-            "apps_macdown_application": str(macdown),
-            "apps_launchservices_domain": domain,
-            "apps_decoder_enabled": False,
-            "apps_restart_launchservices": False,
-        })
+        result, events = self.personalization_play(
+            "apps",
+            {
+                "apps_macdown_application": str(macdown),
+                "apps_launchservices_domain": domain,
+                "apps_decoder_enabled": False,
+                "apps_restart_launchservices": False,
+            },
+        )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         exported = subprocess.run(
-            ["defaults", "export", domain, "-"], check=True, capture_output=True).stdout
+            ["defaults", "export", domain, "-"], check=True, capture_output=True
+        ).stdout
         updated = plistlib.loads(exported)["LSHandlers"]
-        self.assertEqual(next(item for item in updated
-                              if item.get("LSHandlerContentType") == "public.text"), handlers[0])
+        self.assertEqual(
+            next(item for item in updated if item.get("LSHandlerContentType") == "public.text"),
+            handlers[0],
+        )
         mdx = [item for item in updated if item.get("LSHandlerContentTag") == "mdx"]
-        self.assertEqual(mdx, [{
-            "LSHandlerContentTag": "mdx",
-            "LSHandlerContentTagClass": "public.filename-extension",
-            "LSHandlerPreferredVersions": {"LSHandlerRoleAll": "-"},
-            "LSHandlerRoleAll": "app.macdown.macdown3000",
-        }])
+        self.assertEqual(
+            mdx,
+            [
+                {
+                    "LSHandlerContentTag": "mdx",
+                    "LSHandlerContentTagClass": "public.filename-extension",
+                    "LSHandlerPreferredVersions": {"LSHandlerRoleAll": "-"},
+                    "LSHandlerRoleAll": "app.macdown.macdown3000",
+                }
+            ],
+        )
         changed = [event[2] for event in events if event[:2] == ["item", "changed"]]
         self.assertEqual(len(changed), 1)
         self.assertIn(".mdx", changed[0])
@@ -4818,25 +5839,35 @@ print(json.dumps(problems))
             "desktop_keybindings_keyboard": {"KeyRepeat": 2},
             "desktop_keybindings_menu_shortcuts": {"Test Menu": "@x"},
         }
-        result, events = self.personalization_play("desktop", variables, tasks_from="keybindings/main.yml")
+        result, events = self.personalization_play(
+            "desktop", variables, tasks_from="keybindings/main.yml"
+        )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         items = [event[1:3] for event in events if event[0] == "item"]
-        self.assertEqual(items, [["changed", "KeyRepeat is 2"],
-                                 ["changed", "Test Menu shortcut is @x"]])
-        result, events = self.personalization_play("desktop", variables, tasks_from="keybindings/main.yml")
+        self.assertEqual(
+            items, [["changed", "KeyRepeat is 2"], ["changed", "Test Menu shortcut is @x"]]
+        )
+        result, events = self.personalization_play(
+            "desktop", variables, tasks_from="keybindings/main.yml"
+        )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual([event[1:3] for event in events if event[0] == "item"],
-                         [["ok", "KeyRepeat is 2"],
-                          ["ok", "Test Menu shortcut is @x"]])
+        self.assertEqual(
+            [event[1:3] for event in events if event[0] == "item"],
+            [["ok", "KeyRepeat is 2"], ["ok", "Test Menu shortcut is @x"]],
+        )
 
     def test_display_role_reports_resolution_profile(self):
         self.tool("displayplacer", "exit 0")
-        self.tool("xcrun", "if [ \"$1\" = --find ]; then exit 0; fi\nprintf \"id:1 res:1728x1117 scaling:on\\tBuilt-in display 1\\t300x200 mm\\t1728x1117\\t3456x2234\\ton\\t110.0\\t1728x1117\\t3456x2234\\ton\\t110.0\\n\"")
+        self.tool(
+            "xcrun",
+            'if [ "$1" = --find ]; then exit 0; fi\nprintf "id:1 res:1728x1117 scaling:on\\tBuilt-in display 1\\t300x200 mm\\t1728x1117\\t3456x2234\\ton\\t110.0\\t1728x1117\\t3456x2234\\ton\\t110.0\\n"',
+        )
         result, events = self.personalization_play("desktop", {}, tasks_from="display/main.yml")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn(["item", "ok",
-                       "Built-in display 1 resolution is 1728x1117 (3456x2234, scaling on)"],
-                      events)
+        self.assertIn(
+            ["item", "ok", "Built-in display 1 resolution is 1728x1117 (3456x2234, scaling on)"],
+            events,
+        )
 
     def test_wox_disables_clipboard_shortcut_without_changing_other_settings(self):
         database = self.home / "wox.db"
@@ -4846,41 +5877,51 @@ print(json.dumps(problems))
         ]
         with sqlite3.connect(database) as db:
             db.execute("CREATE TABLE wox_settings (key TEXT PRIMARY KEY, value TEXT)")
-            db.executemany("INSERT INTO wox_settings VALUES (?, ?)", [
-                ("MainHotkey@darwin", "cmd+space"),
-                ("QueryHotkeys@darwin", json.dumps(entries)),
-            ])
+            db.executemany(
+                "INSERT INTO wox_settings VALUES (?, ?)",
+                [
+                    ("MainHotkey@darwin", "cmd+space"),
+                    ("QueryHotkeys@darwin", json.dumps(entries)),
+                ],
+            )
         application = self.home / "Wox.app"
         application.mkdir()
         self.tool("pgrep", "echo 123")
-        result, _ = self.personalization_play("wox", {
-            "wox_application": str(application),
-            "wox_agent_path": str(self.home / "jsh.wox.plist"),
-            "wox_database": str(database),
-            "wox_native_shortcuts": False,
-            "jsh_keep_apps": True,
-        })
+        result, _ = self.personalization_play(
+            "wox",
+            {
+                "wox_application": str(application),
+                "wox_agent_path": str(self.home / "jsh.wox.plist"),
+                "wox_database": str(database),
+                "wox_native_shortcuts": False,
+                "jsh_keep_apps": True,
+            },
+        )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         with sqlite3.connect(database) as db:
-            value = db.execute("SELECT value FROM wox_settings WHERE key = ?",
-                               ("QueryHotkeys@darwin",)).fetchone()[0]
+            value = db.execute(
+                "SELECT value FROM wox_settings WHERE key = ?", ("QueryHotkeys@darwin",)
+            ).fetchone()[0]
         self.assertEqual(json.loads(value), [entries[0] | {"Disabled": True}, entries[1]])
 
     def test_wox_dry_run_reports_required_start(self):
         database = self.home / "wox.db"
         with sqlite3.connect(database) as db:
             db.execute("CREATE TABLE wox_settings (key TEXT PRIMARY KEY, value TEXT)")
-            db.execute("INSERT INTO wox_settings VALUES (?, ?)",
-                       ("MainHotkey@darwin", "cmd+space"))
+            db.execute("INSERT INTO wox_settings VALUES (?, ?)", ("MainHotkey@darwin", "cmd+space"))
         application = self.home / "Wox.app"
         application.mkdir()
         self.tool("pgrep", "exit 1")
-        result, events = self.personalization_play("wox", {
-            "wox_application": str(application),
-            "wox_agent_path": str(self.home / "jsh.wox.plist"),
-            "wox_database": str(database),
-            "wox_native_shortcuts": False,
-        }, "--check")
+        result, events = self.personalization_play(
+            "wox",
+            {
+                "wox_application": str(application),
+                "wox_agent_path": str(self.home / "jsh.wox.plist"),
+                "wox_database": str(database),
+                "wox_native_shortcuts": False,
+            },
+            "--check",
+        )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn(["item", "changed", "Wox started"], events)
 
@@ -4888,12 +5929,16 @@ print(json.dumps(problems))
         application = self.home / "Wox.app"
         application.mkdir()
         self.tool("pgrep", "echo 123")
-        result, events = self.personalization_play("wox", {
-            "wox_application": str(application),
-            "wox_agent_path": str(self.home / "jsh.wox.plist"),
-            "wox_database": str(self.home / "missing.db"),
-            "wox_native_shortcuts": False,
-        }, "--check")
+        result, events = self.personalization_play(
+            "wox",
+            {
+                "wox_application": str(application),
+                "wox_agent_path": str(self.home / "jsh.wox.plist"),
+                "wox_database": str(self.home / "missing.db"),
+                "wox_native_shortcuts": False,
+            },
+            "--check",
+        )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn(["item", "changed", "Wox hotkey is cmd+space"], events)
         self.assertFalse((self.home / "missing.db").exists())
@@ -4901,29 +5946,35 @@ print(json.dumps(problems))
     def test_wallpaper_role_rejects_a_missing_image(self):
         missing = self.home / "missing.jpg"
         result, events = self.personalization_play(
-            "desktop", {"jsh_wallpaper": str(missing)}, tasks_from="wallpaper/main.yml")
+            "desktop", {"jsh_wallpaper": str(missing)}, tasks_from="wallpaper/main.yml"
+        )
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn(["item", "fail", f"JSH_WALLPAPER is not a file: {missing} failed"],
-                      events)
+        self.assertIn(["item", "fail", f"JSH_WALLPAPER is not a file: {missing} failed"], events)
 
     def browser_play(self, area, variables, **environment):
-        variables = {"jsh_script_env": {
-            "JSH_ROOT": str(ROOT),
-            "JSH_PLATFORM": environment.get("JSH_PLATFORM", "darwin"),
-            "JSH_DESKTOP": "",
-            "JSH_HOST": "test",
-            "JSH_UPDATE": "0",
-            "JSH_KEEP_APPS": "0",
-            "JSH_DRY_RUN": "0",
-            "JSH_OUTPUT": "renderer",
-        }} | variables
+        variables = {
+            "jsh_script_env": {
+                "JSH_ROOT": str(ROOT),
+                "JSH_PLATFORM": environment.get("JSH_PLATFORM", "darwin"),
+                "JSH_DESKTOP": "",
+                "JSH_HOST": "test",
+                "JSH_UPDATE": "0",
+                "JSH_KEEP_APPS": "0",
+                "JSH_DRY_RUN": "0",
+                "JSH_OUTPUT": "renderer",
+            }
+        } | variables
         include = (
             "    - name: patches\n"
             f"      ansible.builtin.include_role: {{name: patches, tasks_from: {area}/main.yml}}\n"
         )
         return self.run_play(
-            include, "-e", json.dumps(variables),
-            ANSIBLE_ROLES_PATH=str(ROOT / "ansible/roles"), **environment)
+            include,
+            "-e",
+            json.dumps(variables),
+            ANSIBLE_ROLES_PATH=str(ROOT / "ansible/roles"),
+            **environment,
+        )
 
     def test_helium_policy_reports_restart_and_missing_extension(self):
         import plistlib
@@ -4933,20 +5984,24 @@ print(json.dumps(problems))
         profile.mkdir(parents=True)
         role = ROOT / "ansible/roles/patches/files/helium"
         prefs = json.loads((role / "preferences.json").read_text())
-        prefs["extensions"] = {"pinned_extensions": [
-            "blockjmkbacgjkknlgpkjjiijinjdanf", "jplgfhpmjnbigmhklmmbgecoobifkmpa",
-            "nngceckbapebfimnlniiiahkandclblb"]}
+        prefs["extensions"] = {
+            "pinned_extensions": [
+                "blockjmkbacgjkknlgpkjjiijinjdanf",
+                "jplgfhpmjnbigmhklmmbgecoobifkmpa",
+                "nngceckbapebfimnlniiiahkandclblb",
+            ]
+        }
         (profile / "Preferences").write_text(json.dumps(prefs))
         state = json.loads((role / "state.json").read_text())
-        state["browser"] = {"enabled_labs_experiments": [
-            "enable-experimental-web-platform-features"]}
+        state["browser"] = {
+            "enabled_labs_experiments": ["enable-experimental-web-platform-features"]
+        }
         (profile_root / "Local State").write_text(json.dumps(state))
-        (profile / "Secure Preferences").write_text(
-            json.dumps({"extensions": {"settings": {}}}))
+        (profile / "Secure Preferences").write_text(json.dumps({"extensions": {"settings": {}}}))
         manifest = self.home / "manifest.plist"
         manifest.write_text(
-            json.dumps({"pfm_name":
-                        "ExtensionForceInstallWithSearchOrNewTabOverridesEnabled"}))
+            json.dumps({"pfm_name": "ExtensionForceInstallWithSearchOrNewTabOverridesEnabled"})
+        )
         policy = self.home / "policy.plist"
         onepassword = "aeblfdkhhhdcdjpifhhbdiojplfjncoa"
         stale_policy = plistlib.dumps({"ExtensionInstallForcelist": [onepassword]})
@@ -4961,10 +6016,10 @@ print(json.dumps(problems))
             '[ "$#" -gt 0 ] || exit 1\n'
             'exec "$@"',
         )
-        self.tool("pgrep", "[ -e \"$HOME/closed\" ] && exit 1\necho 123")
-        self.tool("osascript", "touch \"$HOME/closed\"")
-        self.tool("open", "rm -f \"$HOME/closed\"\ntouch \"$HOME/launched\"")
-        self.tool("plutil", "cat \"$5\"")
+        self.tool("pgrep", '[ -e "$HOME/closed" ] && exit 1\necho 123')
+        self.tool("osascript", 'touch "$HOME/closed"')
+        self.tool("open", 'rm -f "$HOME/closed"\ntouch "$HOME/launched"')
+        self.tool("plutil", 'cat "$5"')
         self.tool("killall", "exit 0")
         variables = {
             "patches_helium_profile_root": str(profile_root),
@@ -4985,13 +6040,18 @@ print(json.dumps(problems))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         written = plistlib.loads(policy.read_bytes())
         self.assertTrue(written["ExtensionForceInstallWithSearchOrNewTabOverridesEnabled"])
-        self.assertIn("fgmjlmbojbkmdpofahffgcpkhkngfpef",
-                      written["ExtensionInstallForcelist"])
+        self.assertIn("fgmjlmbojbkmdpofahffgcpkhkngfpef", written["ExtensionInstallForcelist"])
         self.assertIn("nngceckbapebfimnlniiiahkandclblb", written["ExtensionInstallForcelist"])
         self.assertNotIn(onepassword, written["ExtensionInstallForcelist"])
         self.assertIn(
-            ["item", "notice", "Startpage extension is missing or disabled; restart Helium, "
-             "enable extension downloads, and check helium://extensions"], events)
+            [
+                "item",
+                "notice",
+                "Startpage extension is missing or disabled; restart Helium, "
+                "enable extension downloads, and check helium://extensions",
+            ],
+            events,
+        )
         self.assertIn(["item", "changed", "Helium restarted"], events)
         self.assertTrue((self.home / "launched").exists())
         self.assertNotIn(["item", "changed", str(profile / "Preferences")], events)
@@ -5000,11 +6060,9 @@ print(json.dumps(problems))
         profile_root = self.home / "Helium"
         profile = profile_root / "Default"
         profile.mkdir(parents=True)
-        (profile / "Preferences").write_text(
-            json.dumps({"extensions": {"pinned_extensions": []}}))
+        (profile / "Preferences").write_text(json.dumps({"extensions": {"pinned_extensions": []}}))
         (profile_root / "Local State").write_text("{}\n")
-        (profile / "Secure Preferences").write_text(
-            json.dumps({"extensions": {"settings": {}}}))
+        (profile / "Secure Preferences").write_text(json.dumps({"extensions": {"settings": {}}}))
         self.tool("helium", "exit 0")
         self.tool("pgrep", "exit 1")
         variables = {
@@ -5013,13 +6071,18 @@ print(json.dumps(problems))
             "patches_helium_policy_become": False,
         }
 
-        result, events = self.browser_play(
-            "helium", variables, JSH_PLATFORM="linux")
+        result, events = self.browser_play("helium", variables, JSH_PLATFORM="linux")
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertNotIn(
-            ["item", "notice", "Startpage extension is missing or disabled; restart Helium, "
-             "enable extension downloads, and check helium://extensions"], events)
+            [
+                "item",
+                "notice",
+                "Startpage extension is missing or disabled; restart Helium, "
+                "enable extension downloads, and check helium://extensions",
+            ],
+            events,
+        )
 
     def test_helium_profile_matches_bash_merge_inputs(self):
         defaults = (ROOT / "ansible/roles/patches/defaults/main.yml").read_text()
@@ -5030,30 +6093,48 @@ print(json.dumps(problems))
         profile = profile_root / "Default"
         profile.mkdir(parents=True)
         policy_values = json.loads(
-            (ROOT / "ansible/roles/patches/files/helium/policy.json").read_text())
+            (ROOT / "ansible/roles/patches/files/helium/policy.json").read_text()
+        )
         policy_values["ExtensionForceInstallWithSearchOrNewTabOverridesEnabled"] = True
-        policy_values["ExtensionInstallForcelist"].append(
-            "fgmjlmbojbkmdpofahffgcpkhkngfpef")
+        policy_values["ExtensionInstallForcelist"].append("fgmjlmbojbkmdpofahffgcpkhkngfpef")
         preferences = json.loads(
-            (ROOT / "ansible/roles/patches/files/helium/preferences.json").read_text())
+            (ROOT / "ansible/roles/patches/files/helium/preferences.json").read_text()
+        )
         toolbar_order = list(reversed(policy_values["ExtensionSettings"]))
         preferences["extensions"] = {"pinned_extensions": [*toolbar_order, "personal", "other"]}
-        existing = preferences | {"extensions": {"pinned_extensions": [
-            "personal", "aeblfdkhhhdcdjpifhhbdiojplfjncoa", *reversed(toolbar_order), "other"]}}
+        existing = preferences | {
+            "extensions": {
+                "pinned_extensions": [
+                    "personal",
+                    "aeblfdkhhhdcdjpifhhbdiojplfjncoa",
+                    *reversed(toolbar_order),
+                    "other",
+                ]
+            }
+        }
         state = json.loads((ROOT / "ansible/roles/patches/files/helium/state.json").read_text())
-        state["browser"] = {"enabled_labs_experiments": [
-            "custom", "enable-experimental-web-platform-features"]}
+        state["browser"] = {
+            "enabled_labs_experiments": ["custom", "enable-experimental-web-platform-features"]
+        }
         (profile / "Preferences").write_text(json.dumps(existing))
         (profile_root / "Local State").write_text(json.dumps(state))
-        (profile / "Secure Preferences").write_text(json.dumps({
-            "extensions": {"settings": {
-                "fgmjlmbojbkmdpofahffgcpkhkngfpef": {"disable_reasons": []}}}}))
+        (profile / "Secure Preferences").write_text(
+            json.dumps(
+                {
+                    "extensions": {
+                        "settings": {"fgmjlmbojbkmdpofahffgcpkhkngfpef": {"disable_reasons": []}}
+                    }
+                }
+            )
+        )
         manifest = self.home / "manifest.plist"
-        manifest.write_text(json.dumps({
-            "policy": {"pfm_name":
-                       "ExtensionForceInstallWithSearchOrNewTabOverridesEnabled"}}))
+        manifest.write_text(
+            json.dumps(
+                {"policy": {"pfm_name": "ExtensionForceInstallWithSearchOrNewTabOverridesEnabled"}}
+            )
+        )
         self.tool("pgrep", "exit 1")
-        self.tool("plutil", "cat \"$5\"")
+        self.tool("plutil", 'cat "$5"')
         self.tool("killall", "exit 0")
         variables = {
             "patches_helium_profile_root": str(profile_root),
@@ -5095,13 +6176,16 @@ print(json.dumps(problems))
 
         result = subprocess.run(
             ["bash", str(ROOT / "ansible/roles/patches/files/helium/unpacked.sh"), str(profile)],
-            env=self.env | {
+            env=self.env
+            | {
                 "JSH_ROOT": str(ROOT),
                 "JSH_PLATFORM": "darwin",
                 "JSH_DRY_RUN": "1",
                 "XDG_CONFIG_HOME": str(config),
             },
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -5125,89 +6209,105 @@ print(json.dumps(problems))
                 "jsh_waterfox_profile": requested,
                 "patches_waterfox_policy_become": False,
             }
-            result, events = self.browser_play(
-                "waterfox", variables, JSH_PLATFORM="linux")
+            result, events = self.browser_play("waterfox", variables, JSH_PLATFORM="linux")
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             if expected is None:
                 self.assertIn(
-                    ["item", "notice",
-                     "open Waterfox once to create a profile, then rerun"], events)
+                    ["item", "notice", "open Waterfox once to create a profile, then rerun"], events
+                )
             else:
-                self.assertIn(
-                    ["item", "ok", f"Waterfox profile is {root / expected}"], events)
+                self.assertIn(["item", "ok", f"Waterfox profile is {root / expected}"], events)
 
-        run("single", "[Profile0]\nName=single\nIsRelative=1\nPath=Profiles/single\n",
-            ["Profiles/single"], "Profiles/single")
-        multiple = ("[Profile0]\nName=first\nIsRelative=1\nPath=Profiles/first\n"
-                    "[Profile1]\nName=second\nIsRelative=1\nPath=Profiles/second\n"
-                    "Default=1\n[InstallA]\nDefault=Profiles/first\n"
-                    "[InstallB]\nDefault=Profiles/second\n")
-        run("install-defaults", multiple,
-            ["Profiles/first", "Profiles/second"], "Profiles/second")
-        run("override", multiple,
-            ["Profiles/first", "Profiles/second"], "Profiles/first", "first")
+        run(
+            "single",
+            "[Profile0]\nName=single\nIsRelative=1\nPath=Profiles/single\n",
+            ["Profiles/single"],
+            "Profiles/single",
+        )
+        multiple = (
+            "[Profile0]\nName=first\nIsRelative=1\nPath=Profiles/first\n"
+            "[Profile1]\nName=second\nIsRelative=1\nPath=Profiles/second\n"
+            "Default=1\n[InstallA]\nDefault=Profiles/first\n"
+            "[InstallB]\nDefault=Profiles/second\n"
+        )
+        run("install-defaults", multiple, ["Profiles/first", "Profiles/second"], "Profiles/second")
+        run("override", multiple, ["Profiles/first", "Profiles/second"], "Profiles/first", "first")
         run("missing", "[Profile0]\nName=missing\nPath=Profiles/missing\n", [])
-        installs = ("[Profile0]\nName=old\nIsRelative=1\nPath=Profiles/old\n"
-                    "[Profile1]\nName=new\nIsRelative=1\nPath=Profiles/new\n"
-                    "[Profile2]\nName=stale\nIsRelative=1\nPath=Profiles/stale\n"
-                    "Default=1\n[InstallA]\nDefault=Profiles/new\n"
-                    "[InstallB]\nDefault=Profiles/old\n")
-        run("newest-build", installs,
-            ["Profiles/old", "Profiles/new", "Profiles/stale"], "Profiles/new",
+        installs = (
+            "[Profile0]\nName=old\nIsRelative=1\nPath=Profiles/old\n"
+            "[Profile1]\nName=new\nIsRelative=1\nPath=Profiles/new\n"
+            "[Profile2]\nName=stale\nIsRelative=1\nPath=Profiles/stale\n"
+            "Default=1\n[InstallA]\nDefault=Profiles/new\n"
+            "[InstallB]\nDefault=Profiles/old\n"
+        )
+        run(
+            "newest-build",
+            installs,
+            ["Profiles/old", "Profiles/new", "Profiles/stale"],
+            "Profiles/new",
             files={
-                "Profiles/old/compatibility.ini":
-                    "[Compatibility]\nLastVersion=153.1.0_20260827164222/20260827164222\n",
-                "Profiles/new/compatibility.ini":
-                    "[Compatibility]\nLastVersion=153.5.0_20261013130543/20261013130543\n",
-            })
+                "Profiles/old/compatibility.ini": "[Compatibility]\nLastVersion=153.1.0_20260827164222/20260827164222\n",
+                "Profiles/new/compatibility.ini": "[Compatibility]\nLastVersion=153.5.0_20261013130543/20261013130543\n",
+            },
+        )
 
     def test_waterfox_keeps_bash_user_js_bytes_and_rewrites_toolbar(self):
         root = self.home / "Waterfox"
         profile = root / "Profiles/default"
         profile.mkdir(parents=True)
         (root / "profiles.ini").write_text(
-            "[Profile0]\nName=default\nIsRelative=1\nPath=Profiles/default\n")
+            "[Profile0]\nName=default\nIsRelative=1\nPath=Profiles/default\n"
+        )
         config = self.home / "config"
         overlay_path = config / "jsh/waterfox/user.js"
         overlay_path.parent.mkdir(parents=True)
-        overlay = "/* local preferences */\nuser_pref(\"overlay.pref\", true);\n"
+        overlay = '/* local preferences */\nuser_pref("overlay.pref", true);\n'
         overlay_path.write_text(overlay)
         base = (ROOT / "ansible/roles/patches/files/waterfox/user.js").read_text()
         managed = (base + "\n" + overlay).rstrip()
         expected_user = (
-            "/* unmanaged */\nuser_pref(\"personal.pref\", true);\n\n"
-            "// BEGIN jsh preferences\n" + managed + "\n// END jsh preferences\n")
+            '/* unmanaged */\nuser_pref("personal.pref", true);\n\n'
+            "// BEGIN jsh preferences\n" + managed + "\n// END jsh preferences\n"
+        )
         (profile / "user.js").write_bytes(expected_user.encode())
-        layout = {"placements": {
-            "nav-bar": ["back-button", "addon_darkreader_org-browser-action",
-                        "unified-extensions-button",
-                        "ublock0_raymondhill_net-browser-action"],
-            "widget-overflow-fixed-list": ["vpn_proton_ch-browser-action"],
-        }}
-        encoded = json.dumps(json.dumps(layout, separators=(",", ":")),
-                             separators=(",", ":"))
+        layout = {
+            "placements": {
+                "nav-bar": [
+                    "back-button",
+                    "addon_darkreader_org-browser-action",
+                    "unified-extensions-button",
+                    "ublock0_raymondhill_net-browser-action",
+                ],
+                "widget-overflow-fixed-list": ["vpn_proton_ch-browser-action"],
+            }
+        }
+        encoded = json.dumps(json.dumps(layout, separators=(",", ":")), separators=(",", ":"))
         (profile / "prefs.js").write_text(
-            "user_pref(\"browser.uiCustomization.state\", " + encoded + ");\n")
+            'user_pref("browser.uiCustomization.state", ' + encoded + ");\n"
+        )
         self.tool("pgrep", "exit 1")
-        self.tool("stat", """if [ "$1" = -L ] && [ "$2" = -c ] && [ "$3" = %a ]; then
+        self.tool(
+            "stat",
+            """if [ "$1" = -L ] && [ "$2" = -c ] && [ "$3" = %a ]; then
   shift 3
   exec /usr/bin/stat -L -f %Lp "$@"
 fi
 exec /usr/bin/stat "$@"
-""")
+""",
+        )
         variables = {
             "patches_waterfox_roots": [str(root)],
             "patches_waterfox_policy_become": False,
         }
 
         result, _ = self.browser_play(
-            "waterfox", variables, JSH_PLATFORM="linux", XDG_CONFIG_HOME=str(config))
+            "waterfox", variables, JSH_PLATFORM="linux", XDG_CONFIG_HOME=str(config)
+        )
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual((profile / "user.js").read_bytes(), expected_user.encode())
         line = (profile / "prefs.js").read_text().strip()
-        value = line.removeprefix(
-            "user_pref(\"browser.uiCustomization.state\", ").removesuffix(");")
+        value = line.removeprefix('user_pref("browser.uiCustomization.state", ').removesuffix(");")
         rewritten = json.loads(json.loads(value))
         expected_pinned = [
             "ublock0_raymondhill_net-browser-action",
@@ -5216,8 +6316,10 @@ exec /usr/bin/stat "$@"
             "addon_darkreader_org-browser-action",
             "_ce9f4b1f-24b8-4e9a-9051-b9e472b1b2f2_-browser-action",
         ]
-        self.assertEqual(rewritten["placements"]["nav-bar"],
-                         ["back-button", *expected_pinned, "unified-extensions-button"])
+        self.assertEqual(
+            rewritten["placements"]["nav-bar"],
+            ["back-button", *expected_pinned, "unified-extensions-button"],
+        )
         self.assertEqual(rewritten["placements"]["widget-overflow-fixed-list"], [])
 
     def packages_filter(self, script):
@@ -5229,18 +6331,27 @@ exec /usr/bin/stat "$@"
             "packages = module.FilterModule().filters()['packages']\n"
             "selection = module.FilterModule().filters().get('packages_selection')\n"
         )
-        result = subprocess.run([str(self.venv("python")), "-c", prelude + script],
-                                capture_output=True, text=True, timeout=60)
+        result = subprocess.run(
+            [str(self.venv("python")), "-c", prelude + script],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
 
     def test_packages_filter_merges_platform_and_extra(self):
-        spec = {"all": {"brew": ["a"]}, "linux": {"flatpak": ["f"]},
-                "debian": {"apt": ["p"]}, "darwin": {"casks": ["c"]}}
+        spec = {
+            "all": {"brew": ["a"]},
+            "linux": {"flatpak": ["f"]},
+            "debian": {"apt": ["p"]},
+            "darwin": {"casks": ["c"]},
+        }
         result = self.packages_filter(
             f"spec = {spec!r}\n"
             "print(json.dumps([packages(spec, 'debian', {'debian': {'apt': ['q', 'p']}}),\n"
-            "                  packages(spec, 'darwin')]))\n")
+            "                  packages(spec, 'darwin')]))\n"
+        )
         self.assertEqual(result[0], {"brew": ["a"], "flatpak": ["f"], "apt": ["p", "q"]})
         self.assertEqual(result[1], {"brew": ["a"], "casks": ["c"]})
 
@@ -5248,9 +6359,16 @@ exec /usr/bin/stat "$@"
         spec = {"all": {"apt": ["p"], "dnf": ["d"], "casks": ["c"], "mas": ["1"]}}
         result = self.packages_filter(
             f"spec = {spec!r}\n"
-            "print(json.dumps({p: packages(spec, p) for p in ('darwin', 'debian', 'rhel')}))\n")
-        self.assertEqual(result, {"darwin": {"casks": ["c"], "mas": ["1"]},
-                                  "debian": {"apt": ["p"]}, "rhel": {"dnf": ["d"]}})
+            "print(json.dumps({p: packages(spec, p) for p in ('darwin', 'debian', 'rhel')}))\n"
+        )
+        self.assertEqual(
+            result,
+            {
+                "darwin": {"casks": ["c"], "mas": ["1"]},
+                "debian": {"apt": ["p"]},
+                "rhel": {"dnf": ["d"]},
+            },
+        )
 
     def test_packages_selection_installs_only_selected_role_packages(self):
         roles = {"patches": {"darwin": {"casks": ["helium-browser"]}}}
@@ -5258,22 +6376,29 @@ exec /usr/bin/stat "$@"
         result = self.packages_filter(
             f"roles = {roles!r}\ncommon = {common!r}\n"
             "print(json.dumps({tag: selection('darwin', 'darwin', [tag], common, roles)\n"
-            "                  for tag in ('patches', 'desktop', 'packages', 'all')}))\n")
+            "                  for tag in ('patches', 'desktop', 'packages', 'all')}))\n"
+        )
         self.assertEqual(result["patches"], {"casks": ["helium-browser"]})
         self.assertEqual(result["desktop"], {})
         for tag in ("packages", "all"):
             self.assertEqual(result[tag], {"brew": ["jq"], "casks": ["helium-browser"]}, tag)
 
     def test_packages_selection_uses_desktop_selector(self):
-        roles = {"desktop": {"xfce": {"apt": ["arc-theme"], "dnf": ["arc-theme"]},
-                             "darwin": {"casks": ["font-jetbrains-mono-nerd-font"]}}}
+        roles = {
+            "desktop": {
+                "xfce": {"apt": ["arc-theme"], "dnf": ["arc-theme"]},
+                "darwin": {"casks": ["font-jetbrains-mono-nerd-font"]},
+            }
+        }
         result = self.packages_filter(
             f"roles = {roles!r}\n"
             "cases = [('debian', 'xfce', ['desktop']), ('debian', 'gnome', ['desktop']),\n"
             "         ('rhel', '', ['all']), ('darwin', 'darwin', ['desktop'])]\n"
-            "print(json.dumps([selection(p, d, t, {}, roles) for p, d, t in cases]))\n")
-        self.assertEqual(result, [{"apt": ["arc-theme"]}, {}, {},
-                                  {"casks": ["font-jetbrains-mono-nerd-font"]}])
+            "print(json.dumps([selection(p, d, t, {}, roles) for p, d, t in cases]))\n"
+        )
+        self.assertEqual(
+            result, [{"apt": ["arc-theme"]}, {}, {}, {"casks": ["font-jetbrains-mono-nerd-font"]}]
+        )
 
     def test_packages_selection_rejects_unknown_role_and_selector(self):
         result = self.packages_filter(
@@ -5282,7 +6407,8 @@ exec /usr/bin/stat "$@"
             "             lambda: selection('darwin', '', ['all'], {'ubuntu': {}}, {})):\n"
             "    try:\n        call(); out.append(None)\n"
             "    except ValueError as error:\n        out.append(str(error))\n"
-            "print(json.dumps(out))\n")
+            "print(json.dumps(out))\n"
+        )
         self.assertEqual(result, ["unknown package role: nope", "unknown package selector: ubuntu"])
 
     def test_uv_update_preview_reports_outdated_managed_tools(self):
@@ -5290,30 +6416,38 @@ exec /usr/bin/stat "$@"
             self.tool(command, "exit 0")
         self.tool(
             "uv",
-            "if [ \"$*\" = \"tool list --outdated\" ]; then\n"
-            "  echo \"pkg-outdated v1.0.0\"\n"
-            "elif [ \"$*\" = \"tool list\" ]; then\n"
-            "  printf \"%s\\n\" \"pkg-current v1.0.0\" \"pkg-outdated v1.0.0\"\n"
-            "elif [ \"$1 $2\" = \"tool upgrade\" ]; then\n"
-            "  touch \"$HOME/uv-upgraded\"\n"
-            "fi")
-        variables = json.dumps({
-            "jsh_platform": "debian",
-            "jsh_update": True,
-            "packages_roles": {},
-            "packages_common": {"debian": {"uv": [
-                {"command": "current-tool", "package": "pkg-current"},
-                {"command": "outdated-tool", "package": "pkg-outdated"},
-                {"command": "external-tool", "package": "pkg-external"}]}},
-            "packages_extra": {},
-        })
+            'if [ "$*" = "tool list --outdated" ]; then\n'
+            '  echo "pkg-outdated v1.0.0"\n'
+            'elif [ "$*" = "tool list" ]; then\n'
+            '  printf "%s\\n" "pkg-current v1.0.0" "pkg-outdated v1.0.0"\n'
+            'elif [ "$1 $2" = "tool upgrade" ]; then\n'
+            '  touch "$HOME/uv-upgraded"\n'
+            "fi",
+        )
+        variables = json.dumps(
+            {
+                "jsh_platform": "debian",
+                "jsh_update": True,
+                "packages_roles": {},
+                "packages_common": {
+                    "debian": {
+                        "uv": [
+                            {"command": "current-tool", "package": "pkg-current"},
+                            {"command": "outdated-tool", "package": "pkg-outdated"},
+                            {"command": "external-tool", "package": "pkg-external"},
+                        ]
+                    }
+                },
+                "packages_extra": {},
+            }
+        )
         roles = {"macos": "- name: Packages\n  ansible.builtin.include_role: {name: packages}\n"}
         include = "    - name: macos\n      ansible.builtin.include_role: {name: macos}\n"
         role_paths = str(self.home / "play/roles") + ":" + str(ROOT / "ansible/roles")
 
         result, events = self.run_play(
-            include, "--check", "-e", variables, roles=roles,
-            **{"ANSIBLE_ROLES_PATH": role_paths})
+            include, "--check", "-e", variables, roles=roles, **{"ANSIBLE_ROLES_PATH": role_paths}
+        )
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn(["item", "ok", "current-tool"], events)
@@ -5324,28 +6458,38 @@ exec /usr/bin/stat "$@"
     def test_flatpak_update_preview_reports_only_outdated_and_missing_apps(self):
         self.tool(
             "flatpak",
-            "case \" $* \" in\n"
-            "  *\" --version \"*) echo \"Flatpak 1.16.0\" ;;\n"
-            "  *\" remote-ls \"*) echo \"com.example.Outdated\" ;;\n"
-            "  *\" list \"*) printf \"%s\\n\" com.example.Current com.example.Outdated ;;\n"
-            "  *\" remotes \"*) echo \"flathub\" ;;\n"
-            "  *\" update \"*) touch \"$HOME/flatpak-updated\" ;;\n"
-            "esac")
-        variables = json.dumps({
-            "jsh_platform": "debian",
-            "jsh_update": True,
-            "packages_roles": {},
-            "packages_common": {"debian": {"flatpak": [
-                "com.example.Current", "com.example.Outdated", "com.example.Missing"]}},
-            "packages_extra": {},
-        })
+            'case " $* " in\n'
+            '  *" --version "*) echo "Flatpak 1.16.0" ;;\n'
+            '  *" remote-ls "*) echo "com.example.Outdated" ;;\n'
+            '  *" list "*) printf "%s\\n" com.example.Current com.example.Outdated ;;\n'
+            '  *" remotes "*) echo "flathub" ;;\n'
+            '  *" update "*) touch "$HOME/flatpak-updated" ;;\n'
+            "esac",
+        )
+        variables = json.dumps(
+            {
+                "jsh_platform": "debian",
+                "jsh_update": True,
+                "packages_roles": {},
+                "packages_common": {
+                    "debian": {
+                        "flatpak": [
+                            "com.example.Current",
+                            "com.example.Outdated",
+                            "com.example.Missing",
+                        ]
+                    }
+                },
+                "packages_extra": {},
+            }
+        )
         roles = {"macos": "- name: Packages\n  ansible.builtin.include_role: {name: packages}\n"}
         include = "    - name: macos\n      ansible.builtin.include_role: {name: macos}\n"
         role_paths = str(self.home / "play/roles") + ":" + str(ROOT / "ansible/roles")
 
         result, events = self.run_play(
-            include, "--check", "-e", variables, roles=roles,
-            **{"ANSIBLE_ROLES_PATH": role_paths})
+            include, "--check", "-e", variables, roles=roles, **{"ANSIBLE_ROLES_PATH": role_paths}
+        )
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn(["item", "ok", "com.example.Current"], events)
@@ -5360,63 +6504,88 @@ exec /usr/bin/stat "$@"
             "arm": "arm64",
             "amd": "amd64",
         }
-        variables = json.dumps({
-            "jsh_platform": "debian",
-            "jsh_update": False,
-            "packages_roles": {},
-            "packages_common": {"debian": {"appimage": [package]}},
-            "packages_extra": {},
-        })
+        variables = json.dumps(
+            {
+                "jsh_platform": "debian",
+                "jsh_update": False,
+                "packages_roles": {},
+                "packages_common": {"debian": {"appimage": [package]}},
+                "packages_extra": {},
+            }
+        )
         roles = {"macos": "- name: Packages\n  ansible.builtin.include_role: {name: packages}\n"}
         include = "    - name: macos\n      ansible.builtin.include_role: {name: macos}\n"
         role_paths = str(self.home / "play/roles") + ":" + str(ROOT / "ansible/roles")
 
         result, events = self.run_play(
-            include, "--check", "-e", variables, roles=roles,
-            **{"ANSIBLE_ROLES_PATH": role_paths})
+            include, "--check", "-e", variables, roles=roles, **{"ANSIBLE_ROLES_PATH": role_paths}
+        )
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn(
-            ["item", "info", "would download verified missing-appimage AppImage"], events)
+        self.assertIn(["item", "info", "would download verified missing-appimage AppImage"], events)
         self.assertFalse((self.home / ".local").exists())
-        self.assertFalse(any(event[1] in ("added", "changed", "removed")
-                             for event in events if event[0] == "item"), events)
+        self.assertFalse(
+            any(
+                event[1] in ("added", "changed", "removed")
+                for event in events
+                if event[0] == "item"
+            ),
+            events,
+        )
 
     def test_full_package_selection_matches_previous_lists(self):
-        tools = ("bash gum jq unzip zip zsh age ansible atuin bat btop bun coreutils curl "
-                 "diffutils direnv eza fd ffmpeg fnm fzf gawk gettext gh git git-lfs gnu-sed gnupg "
-                 "go go-task grc grep hugo just kew lazygit leaf-markdown-viewer libtiff libxcrypt "
-                 "make mpv ncdu neovim netcat nmap node parallel pnpm poetry readline ripgrep rsync "
-                 "rtk sops speedtest-go sshpass stow summarize syncthing tmux tree uv watch "
-                 "xguot/difi/difi xorriso xz zoxide").split()
-        tools_apt = ("jq make ripgrep rsync tmux unzip zip age ansible bat btop direnv fzf gh "
-                     "git-lfs golang-go grc hugo mpv ncdu netcat-openbsd nmap parallel python3-poetry "
-                     "sshpass stow syncthing yamllint zoxide build-essential bzip2 cargo cifs-utils "
-                     "desktop-file-utils dconf-cli dkms earlyoom eza fd-find flatpak gnome-keyring "
-                     "gnupg libarchive-tools libnotify-bin net-tools nfs-common nodejs ntfs-3g "
-                     "nvme-cli openssh-client openssh-server pipewire-pulse python3-yaml sqlite3 tar "
-                     "wireplumber xbindkeys xclip xdg-utils x11-xserver-utils xz-utils yq "
-                     "systemd-zram-generator").split()
-        tools_dnf = ("jq make rsync tmux unzip zip bzip2 cargo cifs-utils desktop-file-utils "
-                     "dconf dkms earlyoom eza fd-find flatpak gcc gcc-c++ gnome-keyring gnupg2 "
-                     "libarchive libnotify mpv net-tools nfs-utils nodejs ntfs-3g nvme-cli "
-                     "openssh-clients openssh-server pipewire-pulseaudio python3-pyyaml readline "
-                     "ripgrep sqlite syncthing tar wireplumber xbindkeys xclip xdg-utils xrandr xz yq "
-                     "zram-generator").split()
-        tools_uv = [{"command": "just", "package": "rust-just"},
-                    {"command": "tmail", "package": "tmail-cli"}]
-        dev = ("actionlint autopep8 bats-core black commitizen commitlint eslint gitleaks hadolint "
-               "markdownlint-cli pre-commit prettier pylint shellcheck shfmt yamllint").split()
+        tools = (
+            "bash gum jq unzip zip zsh age ansible atuin bat btop bun coreutils curl "
+            "diffutils direnv eza fd ffmpeg fnm fzf gawk gettext gh git git-lfs gnu-sed gnupg "
+            "go go-task grc grep hugo just kew lazygit leaf-markdown-viewer libtiff libxcrypt "
+            "make mpv ncdu neovim netcat nmap node parallel pnpm poetry readline ripgrep rsync "
+            "rtk sops speedtest-go sshpass stow summarize syncthing tmux tree uv watch "
+            "xguot/difi/difi xorriso xz zoxide"
+        ).split()
+        tools_apt = (
+            "jq make ripgrep rsync tmux unzip zip age ansible bat btop direnv fzf gh "
+            "git-lfs golang-go grc hugo mpv ncdu netcat-openbsd nmap parallel python3-poetry "
+            "sshpass stow syncthing yamllint zoxide build-essential bzip2 cargo cifs-utils "
+            "desktop-file-utils dconf-cli dkms earlyoom eza fd-find flatpak gnome-keyring "
+            "gnupg libarchive-tools libnotify-bin net-tools nfs-common nodejs ntfs-3g "
+            "nvme-cli openssh-client openssh-server pipewire-pulse python3-yaml sqlite3 tar "
+            "wireplumber xbindkeys xclip xdg-utils x11-xserver-utils xz-utils yq "
+            "systemd-zram-generator"
+        ).split()
+        tools_dnf = (
+            "jq make rsync tmux unzip zip bzip2 cargo cifs-utils desktop-file-utils "
+            "dconf dkms earlyoom eza fd-find flatpak gcc gcc-c++ gnome-keyring gnupg2 "
+            "libarchive libnotify mpv net-tools nfs-utils nodejs ntfs-3g nvme-cli "
+            "openssh-clients openssh-server pipewire-pulseaudio python3-pyyaml readline "
+            "ripgrep sqlite syncthing tar wireplumber xbindkeys xclip xdg-utils xrandr xz yq "
+            "zram-generator"
+        ).split()
+        tools_uv = [
+            {"command": "just", "package": "rust-just"},
+            {"command": "tmail", "package": "tmail-cli"},
+        ]
+        dev = (
+            "actionlint autopep8 bats-core black commitizen commitlint eslint gitleaks hadolint "
+            "markdownlint-cli pre-commit prettier pylint shellcheck shfmt yamllint"
+        ).split()
         dev_uv = [{"command": "check-yaml", "package": "pre-commit-hooks"}]
         containers = "colima docker docker-buildx docker-compose lima".split()
-        ghostty = [{"name": "ghostty", "arm": "aarch64", "amd": "x86_64",
-                    "release": "https://api.github.com/repos/pkgforge-dev/ghostty-appimage/releases/latest"}]
+        ghostty = [
+            {
+                "name": "ghostty",
+                "arm": "aarch64",
+                "amd": "x86_64",
+                "release": "https://api.github.com/repos/pkgforge-dev/ghostty-appimage/releases/latest",
+            }
+        ]
 
-        xfce = ("fontconfig xfce4-appfinder arc-theme papirus-icon-theme pavucontrol "
-                "xfce4-clipman-plugin xfce4-cpugraph-plugin xfce4-docklike-plugin "
-                "xfce4-fsguard-plugin xfce4-genmon-plugin xfce4-netload-plugin "
-                "xfce4-pulseaudio-plugin xfce4-screensaver xfce4-systemload-plugin "
-                "xfce4-taskmanager xfce4-terminal").split()
+        xfce = (
+            "fontconfig xfce4-appfinder arc-theme papirus-icon-theme pavucontrol "
+            "xfce4-clipman-plugin xfce4-cpugraph-plugin xfce4-docklike-plugin "
+            "xfce4-fsguard-plugin xfce4-genmon-plugin xfce4-netload-plugin "
+            "xfce4-pulseaudio-plugin xfce4-screensaver xfce4-systemload-plugin "
+            "xfce4-taskmanager xfce4-terminal"
+        ).split()
         graphify = [{"command": "graphify", "package": "graphifyy"}]
 
         def linux(**managers):
@@ -5424,36 +6593,70 @@ exec /usr/bin/stat "$@"
 
         expected = {
             "dev": {p: {"brew": dev, "uv": dev_uv} for p in ("darwin", "debian", "rhel")},
-            "kube": {p: {"brew": "helm helmfile k9s kubernetes-cli".split()}
-                     for p in ("darwin", "debian", "rhel")},
-            "containers": {"darwin": {"brew": containers},
-                           "debian": {"brew": containers, "apt": ["podman"]},
-                           "rhel": {"brew": containers, "dnf": ["podman"]}},
-            "password": {"darwin": {"casks": ["bitwarden"]},
-                         **linux(flatpak=["com.bitwarden.desktop"])},
-            "fonts": {"darwin": {"casks": ["font-jetbrains-mono-nerd-font"]},
-                      "debian": {}, "rhel": {}},
+            "kube": {
+                p: {"brew": "helm helmfile k9s kubernetes-cli".split()}
+                for p in ("darwin", "debian", "rhel")
+            },
+            "containers": {
+                "darwin": {"brew": containers},
+                "debian": {"brew": containers, "apt": ["podman"]},
+                "rhel": {"brew": containers, "dnf": ["podman"]},
+            },
+            "password": {
+                "darwin": {"casks": ["bitwarden"]},
+                **linux(flatpak=["com.bitwarden.desktop"]),
+            },
+            "fonts": {
+                "darwin": {"casks": ["font-jetbrains-mono-nerd-font"]},
+                "debian": {},
+                "rhel": {},
+            },
             "ghostty": {"darwin": {"casks": ["ghostty"]}, **linux(appimage=ghostty)},
             "apps": {
-                "darwin": {"brew": ["spicetify-cli"],
-                           "casks": "android-platform-tools citrix-workspace foobar2000 macdown-3000 signal spotify tailscale-app todoist-app vorssaint zoom".split()},
+                "darwin": {
+                    "brew": ["spicetify-cli"],
+                    "casks": "android-platform-tools citrix-workspace foobar2000 macdown-3000 signal spotify tailscale-app todoist-app vorssaint zoom".split(),
+                },
                 **linux(flatpak=["com.spotify.Client", "com.todoist.Todoist"]),
             },
-            "display": {"darwin": {"brew": ["displayplacer"]},
-                        "debian": {}, "rhel": {}},
+            "display": {"darwin": {"brew": ["displayplacer"]}, "debian": {}, "rhel": {}},
             "wox": {
                 "darwin": {"casks": ["wox"]},
-                "debian": {"apt": ["sqlite3"], "appimage": [{
-                    "name": "wox", "arm": "arm64", "amd": "amd64",
-                    "release": "https://api.github.com/repos/Wox-launcher/Wox/releases/latest"}]},
-                "rhel": {"dnf": ["sqlite"], "appimage": [{
-                    "name": "wox", "arm": "arm64", "amd": "amd64",
-                    "release": "https://api.github.com/repos/Wox-launcher/Wox/releases/latest"}]},
+                "debian": {
+                    "apt": ["sqlite3"],
+                    "appimage": [
+                        {
+                            "name": "wox",
+                            "arm": "arm64",
+                            "amd": "amd64",
+                            "release": "https://api.github.com/repos/Wox-launcher/Wox/releases/latest",
+                        }
+                    ],
+                },
+                "rhel": {
+                    "dnf": ["sqlite"],
+                    "appimage": [
+                        {
+                            "name": "wox",
+                            "arm": "arm64",
+                            "amd": "amd64",
+                            "release": "https://api.github.com/repos/Wox-launcher/Wox/releases/latest",
+                        }
+                    ],
+                },
             },
             "helium": {
                 "darwin": {"casks": ["helium-browser"]},
-                **linux(appimage=[{"name": "helium", "arm": "arm64", "amd": "x86_64",
-                                   "release": "https://api.github.com/repos/imputnet/helium-linux/releases/latest"}]),
+                **linux(
+                    appimage=[
+                        {
+                            "name": "helium",
+                            "arm": "arm64",
+                            "amd": "x86_64",
+                            "release": "https://api.github.com/repos/imputnet/helium-linux/releases/latest",
+                        }
+                    ]
+                ),
             },
             "waterfox": {
                 "darwin": {"casks": ["waterfox"]},
@@ -5468,9 +6671,12 @@ exec /usr/bin/stat "$@"
                         **linux(flatpak=["com.sublimetext.three"])},
             "vscode": {"darwin": {"casks": ["visual-studio-code"]}, "debian": {}, "rhel": {}},
             "tools": {
-                "darwin": {"taps": ["gromgit/fuse", "xguot/difi"], "uv": tools_uv,
-                           "brew": "bash-completion duti gromgit/fuse/ntfs-3g-mac imagemagick mas".split()
-                           + tools},
+                "darwin": {
+                    "taps": ["gromgit/fuse", "xguot/difi"],
+                    "uv": tools_uv,
+                    "brew": "bash-completion duti gromgit/fuse/ntfs-3g-mac imagemagick mas".split()
+                    + tools,
+                },
                 "debian": {"taps": ["xguot/difi"], "brew": tools, "apt": tools_apt, "uv": tools_uv},
                 "rhel": {"taps": ["xguot/difi"], "brew": tools, "dnf": tools_dnf, "uv": tools_uv},
             },
@@ -5481,7 +6687,8 @@ exec /usr/bin/stat "$@"
             f"data = yaml.safe_load(open({str(data)!r}))\n"
             f"cases = {cases!r}\n"
             "print(json.dumps([selection(p, d, ['all'], data['packages_common'],\n"
-            "                            data['packages_roles']) for p, d in cases]))\n")
+            "                            data['packages_roles']) for p, d in cases]))\n"
+        )
 
         def key(value):
             return json.dumps(value, sort_keys=True)
@@ -5496,15 +6703,23 @@ exec /usr/bin/stat "$@"
                     merged += [name for name in names if name not in merged]
             self.assertEqual(sorted(actual), sorted(wanted), f"{platform} {desktop}")
             for manager, names in wanted.items():
-                self.assertEqual(sorted(actual[manager], key=key), sorted(names, key=key),
-                                 f"{platform} {desktop} {manager}")
+                self.assertEqual(
+                    sorted(actual[manager], key=key),
+                    sorted(names, key=key),
+                    f"{platform} {desktop} {manager}",
+                )
 
     def test_archon_adds_only_the_apps_casks(self):
         path = ROOT / "ansible/host_vars/archon.yml"
-        data = self.packages_filter(
-            f"print(json.dumps(yaml.safe_load(open({str(path)!r}))))\n")
-        self.assertEqual(data, {"packages_extra": {"darwin": {"casks": [
-            "bambu-studio", "elgato-stream-deck", "macfuse", "mounty"]}}})
+        data = self.packages_filter(f"print(json.dumps(yaml.safe_load(open({str(path)!r}))))\n")
+        self.assertEqual(
+            data,
+            {
+                "packages_extra": {
+                    "darwin": {"casks": ["bambu-studio", "elgato-stream-deck", "macfuse", "mounty"]}
+                }
+            },
+        )
 
     @unittest.skipUnless(os.uname().sysname == "Darwin", "writes a plist with defaults")
     def test_macos_role_reports_each_preference_and_restarts(self):
@@ -5512,20 +6727,26 @@ exec /usr/bin/stat "$@"
         subprocess.run(["defaults", "write", domain, "A", "-bool", "true"], check=True)
         subprocess.run(["defaults", "write", domain, "B", "-array", "x"], check=True)
         self.tool("killall", 'printf "%s\\n" "$1" >> "$HOME/killall-calls"')
-        settings = json.dumps({
-            "macos_defaults_path": "/usr/bin",
-            "macos_restarts": {domain: "Finder"},
-            "macos_preferences": [{"domain": domain, "key": "A", "type": "bool", "value": False},
-                                  {"domain": domain, "key": "B", "type": "array", "value": []}],
-        })
+        settings = json.dumps(
+            {
+                "macos_defaults_path": "/usr/bin",
+                "macos_restarts": {domain: "Finder"},
+                "macos_preferences": [
+                    {"domain": domain, "key": "A", "type": "bool", "value": False},
+                    {"domain": domain, "key": "B", "type": "array", "value": []},
+                ],
+            }
+        )
         include = "    - name: macos\n      ansible.builtin.include_role: {name: macos}\n"
         roles = {"ANSIBLE_ROLES_PATH": str(ROOT / "ansible/roles")}
 
         result, events = self.run_play(include, "-e", settings, **roles)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         items = [event[1:3] for event in events if event[0] == "item"]
-        self.assertEqual(items, [["changed", "A is false"], ["changed", "B is empty"],
-                                 ["changed", "Finder restarted"]])
+        self.assertEqual(
+            items,
+            [["changed", "A is false"], ["changed", "B is empty"], ["changed", "Finder restarted"]],
+        )
         self.assertEqual((self.home / "killall-calls").read_text(), "Finder\n")
 
         (self.home / "killall-calls").unlink()
@@ -5536,15 +6757,16 @@ exec /usr/bin/stat "$@"
 
         subprocess.run(["defaults", "write", domain, "A", "-bool", "true"], check=True)
         result, events = self.run_play(include, "-e", settings, JSH_KEEP_APPS="1", **roles)
-        self.assertIn(["item", "notice", "restart Finder to apply its settings: killall Finder"],
-                      events)
+        self.assertIn(
+            ["item", "notice", "restart Finder to apply its settings: killall Finder"], events
+        )
         self.assertFalse((self.home / "killall-calls").exists())
+
     def test_settings_merges_values_over_source(self):
         source = self.home / "source.json"
         source.write_text('{"a": 1, "b": {"x": 1}}\n')
         target = self.home / "settings.json"
-        result, output = self.settings(path=str(target), source=str(source),
-                                       values={"b": {"y": 2}})
+        result, output = self.settings(path=str(target), source=str(source), values={"b": {"y": 2}})
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(json.loads(target.read_text()), {"a": 1, "b": {"x": 1, "y": 2}})
 
@@ -5567,7 +6789,9 @@ exec /usr/bin/stat "$@"
         self.assertEqual([backup.read_text() for backup in backups], ["mine\n"])
         result, events = self.run_play(include, "-e", items, **roles)
         self.assertIn(["item", "ok", str(target)], [event[:3] for event in events])
-        directory = json.dumps({"link_items": [{"src": str(source), "dest": str(self.home / "dir")}]})
+        directory = json.dumps(
+            {"link_items": [{"src": str(source), "dest": str(self.home / "dir")}]}
+        )
         result, events = self.run_play(include, "-e", directory, **roles)
         self.assertNotEqual(result.returncode, 0)
         self.assertTrue((self.home / "dir").is_dir())
@@ -5577,29 +6801,47 @@ exec /usr/bin/stat "$@"
         source.mkdir()
         local = self.home / "skills.tsv"
         local.write_text("custom skill\tlocal-skill\n")
-        variables = json.dumps({
-            "jsh_root": str(ROOT),
-            "agentics_skills_home": str(self.home),
-            "agentics_skills_vendor": str(self.home / "vendor"),
-            "agentics_skills_repos": [],
-            "agentics_skills_links": [],
-            "agentics_skills_bundled": [],
-            "agentics_skills_local_lists": [str(local)],
-        })
-        include = ("    - name: agentics\n"
-                   "      ansible.builtin.include_role: {name: agentics, tasks_from: skills/main.yml}\n")
+        variables = json.dumps(
+            {
+                "jsh_root": str(ROOT),
+                "agentics_skills_home": str(self.home),
+                "agentics_skills_vendor": str(self.home / "vendor"),
+                "agentics_skills_repos": [],
+                "agentics_skills_links": [],
+                "agentics_skills_bundled": [],
+                "agentics_skills_local_lists": [str(local)],
+            }
+        )
+        include = (
+            "    - name: agentics\n"
+            "      ansible.builtin.include_role: {name: agentics, tasks_from: skills/main.yml}\n"
+        )
         result, events = self.run_play(
-            include, "-e", variables,
-            **{"ANSIBLE_ROLES_PATH": str(ROOT / "ansible/roles")})
+            include, "-e", variables, **{"ANSIBLE_ROLES_PATH": str(ROOT / "ansible/roles")}
+        )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         target = self.home / ".agents/skills/local-skill"
         self.assertEqual(target.readlink(), source)
         self.assertIn(["item", "changed", str(target)], events)
 
     def test_no_ai_role_references(self):
-        tracked = subprocess.run(["git", "-C", str(ROOT), "grep", "-l", "-E",
-                                  r"roles/(ai|skills)(/|\b)", "--", ".", ":!docs", ":!tmp"],
-                                 capture_output=True, text=True)
+        tracked = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(ROOT),
+                "grep",
+                "-l",
+                "-E",
+                r"roles/(ai|skills)(/|\b)",
+                "--",
+                ".",
+                ":!docs",
+                ":!tmp",
+            ],
+            capture_output=True,
+            text=True,
+        )
         self.assertEqual(tracked.stdout.split(), [])
         self.assertFalse((ROOT / "ansible/roles/ai").exists())
         self.assertFalse((ROOT / "ansible/roles/skills").exists())
@@ -5613,49 +6855,67 @@ exec /usr/bin/stat "$@"
             "print(json.dumps([links([{'source': 'repo/skills/a', 'name': 'a'}, ['b/src', 'b'], 'c'],"
             " '/vendor', '/home/.agents/skills')]))\n"
         )
-        result = subprocess.run([str(self.venv("python")), "-c", script],
-                                capture_output=True, text=True, timeout=60)
+        result = subprocess.run(
+            [str(self.venv("python")), "-c", script], capture_output=True, text=True, timeout=60
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout)[0], [
-            {"src": "/vendor/repo/skills/a", "dest": "/home/.agents/skills/a"},
-            {"src": "/vendor/b/src", "dest": "/home/.agents/skills/b"},
-            {"src": "/vendor/c", "dest": "/home/.agents/skills/c"},
-        ])
+        self.assertEqual(
+            json.loads(result.stdout)[0],
+            [
+                {"src": "/vendor/repo/skills/a", "dest": "/home/.agents/skills/a"},
+                {"src": "/vendor/b/src", "dest": "/home/.agents/skills/b"},
+                {"src": "/vendor/c", "dest": "/home/.agents/skills/c"},
+            ],
+        )
 
     def test_configure_runs_one_playbook_for_all_groups(self):
         checkout = self.installer_fixture()
         for name in ("macos", "tools", "services"):
             (checkout / "ansible/roles" / name / "tasks").mkdir(parents=True)
             (checkout / "ansible/roles" / name / "tasks/main.yml").write_text("[]\n")
-        write_group_sources(checkout, [
-            ("macos", "darwin", "Mac settings"),
-            ("fonts", "all", "Fonts"),
-            ("tools", "all", "Tools"),
-            ("services", "linux", "Services"),
-            ("legacy", "linux", "A fixture group without a role directory"),
-        ])
-        (checkout / "scripts/legacy.sh").write_text(
-            "touch \"$HOME/legacy-script-ran\"\n")
+        write_group_sources(
+            checkout,
+            [
+                ("macos", "darwin", "Mac settings"),
+                ("fonts", "all", "Fonts"),
+                ("tools", "all", "Tools"),
+                ("services", "linux", "Services"),
+                ("legacy", "linux", "A fixture group without a role directory"),
+            ],
+        )
+        (checkout / "scripts/legacy.sh").write_text('touch "$HOME/legacy-script-ran"\n')
         self.mock_playbook()
         result = subprocess.run(
-            ["bash", str(checkout / "scripts/configure.sh"), "--dry-run", "macos", "fonts",
-             "tools", "services", "legacy"],
-            env=self.env | {"JSH_PLATFORM": "debian",
-                            "JSH_ANSIBLE_HOME": str(self.home / "ansible")},
-            cwd=self.home, capture_output=True, text=True, timeout=60,
+            [
+                "bash",
+                str(checkout / "scripts/configure.sh"),
+                "--dry-run",
+                "macos",
+                "fonts",
+                "tools",
+                "services",
+                "legacy",
+            ],
+            env=self.env
+            | {"JSH_PLATFORM": "debian", "JSH_ANSIBLE_HOME": str(self.home / "ansible")},
+            cwd=self.home,
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         calls = (self.home / "playbook.log").read_text().splitlines()
         self.assertEqual(len(calls), 1, calls)
-        self.assertIn(
-            "--tags macos,fonts,tools,services,legacy --check --diff", calls[0])
+        self.assertIn("--tags macos,fonts,tools,services,legacy --check --diff", calls[0])
         self.assertFalse((self.home / "legacy-script-ran").exists())
 
     def yaml_file(self, path):
         script = "import json, sys, yaml; print(json.dumps(yaml.safe_load(open(sys.argv[1]))))"
         result = subprocess.run(
             [str(self.venv("python")), "-c", script, str(path)],
-            capture_output=True, text=True, timeout=60,
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
@@ -5676,17 +6936,25 @@ exec /usr/bin/stat "$@"
     def run_sudo_fixture(self):
         return self.run_play(
             "    - name: linux\n      ansible.builtin.include_role: {name: sudo_fixture}\n",
-            "-e", json.dumps({"linux_user": "jay", "linux_state": str(self.home / "state"),
-                              "ansible_date_time": {"epoch": "1700000000"}}),
+            "-e",
+            json.dumps(
+                {
+                    "linux_user": "jay",
+                    "linux_state": str(self.home / "state"),
+                    "ansible_date_time": {"epoch": "1700000000"},
+                }
+            ),
         )[0]
 
     def test_audio_headless_preview_stops_after_the_session_notice(self):
         result, events = self.run_play(
             "    - name: desktop\n"
             "      ansible.builtin.include_role: {name: desktop, tasks_from: audio/main.yml}\n",
-            "--check", "-e", json.dumps({"jsh_desktop": "", "jsh_host": "test",
-                                          "jsh_audio_policy": ""}),
-            ANSIBLE_ROLES_PATH=str(ROOT / "ansible/roles"), JSH_PLATFORM="debian",
+            "--check",
+            "-e",
+            json.dumps({"jsh_desktop": "", "jsh_host": "test", "jsh_audio_policy": ""}),
+            ANSIBLE_ROLES_PATH=str(ROOT / "ansible/roles"),
+            JSH_PLATFORM="debian",
             JSH_DESKTOP="",
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -5695,8 +6963,12 @@ exec /usr/bin/stat "$@"
 
     def test_desktop_audio_skip_keeps_later_areas(self):
         result, events = self.personalization_play(
-            "desktop", {"jsh_wallpaper": "", "jsh_desktop": ""}, "--check",
-            JSH_PLATFORM="debian", JSH_DESKTOP="")
+            "desktop",
+            {"jsh_wallpaper": "", "jsh_desktop": ""},
+            "--check",
+            JSH_PLATFORM="debian",
+            JSH_DESKTOP="",
+        )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         audio = ["item", "info", "audio policy: no GNOME or XFCE session"]
         wallpaper = ["item", "info", "Skipping wallpaper: JSH_WALLPAPER is not set"]
@@ -5706,15 +6978,18 @@ exec /usr/bin/stat "$@"
 
     def test_xfce_screensaver_starts_detached_with_a_display(self):
         tasks = self.yaml_file(ROOT / "ansible/roles/desktop/tasks/appearance/xfce.yml")
-        start = next(task for task in tasks
-                     if task.get("name") == "XFCE screensaver process is running")
+        start = next(
+            task for task in tasks if task.get("name") == "XFCE screensaver process is running"
+        )
         command = start.get("ansible.builtin.shell", "")
         self.assertIn("nohup", command)
         self.assertIn("setsid", command)
         self.assertIn("xfce4-screensaver", command)
         self.assertIn("&", command)
-        self.assertEqual(start["environment"]["DISPLAY"],
-                         "{{ lookup('ansible.builtin.env', 'DISPLAY') or ':0' }}")
+        self.assertEqual(
+            start["environment"]["DISPLAY"],
+            "{{ lookup('ansible.builtin.env', 'DISPLAY') or ':0' }}",
+        )
         self.assertFalse(start["failed_when"])
         self.assertIn("not ansible_check_mode", start["when"])
 
@@ -5729,21 +7004,26 @@ exec /usr/bin/stat "$@"
             "  ansible.builtin.command:\n"
             "    argv: [/usr/bin/true]\n"
             "  changed_when: true\n"
-            "  notify: test handler\n")
+            "  notify: test handler\n"
+        )
         (macos / "handlers/main.yml").write_text(
-            "- name: test handler\n"
-            f"  ansible.builtin.copy: {{content: ran, dest: '{marker}'}}\n")
+            "- name: test handler\n" f"  ansible.builtin.copy: {{content: ran, dest: '{marker}'}}\n"
+        )
         later = roles / "desktop/tasks"
         later.mkdir(parents=True)
         (later / "main.yml").write_text(
-            "- name: later group fails\n"
-            "  ansible.builtin.fail: {msg: expected failure}\n")
+            "- name: later group fails\n" "  ansible.builtin.fail: {msg: expected failure}\n"
+        )
         site = self.home / "handler-site.yml"
         shutil.copy2(ROOT / "ansible/site.yml", site)
         result = self.playbook(
-            site, "--tags", "macos,desktop", "-e",
+            site,
+            "--tags",
+            "macos,desktop",
+            "-e",
             '{"jsh_platform":"darwin","jsh_host":"test"}',
-            ANSIBLE_ROLES_PATH=str(roles), JSH_PLATFORM="darwin",
+            ANSIBLE_ROLES_PATH=str(roles),
+            JSH_PLATFORM="darwin",
         )
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue(marker.is_file(), result.stdout + result.stderr)
@@ -5773,78 +7053,121 @@ exec /usr/bin/stat "$@"
         second = self.run_sudo_fixture()
         self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
         backups = sorted((self.home / "state/jsh/backups").glob("*/sudoers"))
-        self.assertEqual(sorted(backup.read_text() for backup in backups),
-                         ["first original\n", "second original\n"])
+        self.assertEqual(
+            sorted(backup.read_text() for backup in backups),
+            ["first original\n", "second original\n"],
+        )
         self.assertEqual(len({backup.parent for backup in backups}), 2)
 
     def test_linux_dry_run_skips_failed_timezone_query(self):
         self.tool("timedatectl", "exit 1")
-        tasks = ("    - name: linux\n"
-                 "      ansible.builtin.include_role:\n"
-                 "        name: linux\n"
-                 "        tasks_from: timezone\n")
+        tasks = (
+            "    - name: linux\n"
+            "      ansible.builtin.include_role:\n"
+            "        name: linux\n"
+            "        tasks_from: timezone\n"
+        )
         result, events = self.run_play(
-            tasks, "--check",
-            **{"ANSIBLE_ROLES_PATH": str(ROOT / "ansible/roles"),
-               "JSH_PLATFORM": "linux"})
+            tasks,
+            "--check",
+            **{"ANSIBLE_ROLES_PATH": str(ROOT / "ansible/roles"), "JSH_PLATFORM": "linux"},
+        )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn(["item", "info", "timezone: timedatectl failed"], events)
 
     def test_linux_sysctl_keeps_minimums_but_sets_memory_exactly(self):
         tasks = self.yaml_file(ROOT / "ansible/roles/linux/tasks/sysctl.yml")
-        minimum = next(task for task in tasks if task.get("name") == "Minimum kernel settings apply")
+        minimum = next(
+            task for task in tasks if task.get("name") == "Minimum kernel settings apply"
+        )
         exact = next(task for task in tasks if task.get("name") == "Exact kernel settings apply")
         probe = next(task for task in tasks if task.get("name") == "Kernel settings are read")
         self.assertFalse(probe["changed_when"])
         self.assertFalse(probe["check_mode"])
-        self.assertEqual(minimum["loop_control"]["label"],
-                         "{{ item.item.key }} is at least {{ item.item.value }}")
+        self.assertEqual(
+            minimum["loop_control"]["label"],
+            "{{ item.item.key }} is at least {{ item.item.value }}",
+        )
         self.assertIn("max", minimum["ansible.posix.sysctl"]["value"])
         self.assertEqual(exact["ansible.posix.sysctl"]["value"], "{{ item.value }}")
 
     def test_linux_files_notify_only_the_required_reloads_and_restart(self):
         defaults = self.yaml_file(ROOT / "ansible/roles/linux/defaults/main.yml")
         files = {item["dest"]: item["notify"] for item in defaults["linux_system_files"]}
-        self.assertEqual(files["/etc/default/earlyoom"],
-                         ["Systemd configuration reloads", "earlyoom.service restarts"])
-        self.assertEqual(files["/etc/systemd/coredump.conf.d/99-jsh-storage.conf"],
-                         ["Systemd configuration reloads"])
-        self.assertEqual(files["/etc/systemd/logind.conf.d/99-jsh-sleep.conf"],
-                         ["systemd-logind reloads"])
-        self.assertEqual(files["/etc/udev/rules.d/90-jsh-usb-wakeup.rules"],
-                         ["USB udev rules reload"])
+        self.assertEqual(
+            files["/etc/default/earlyoom"],
+            ["Systemd configuration reloads", "earlyoom.service restarts"],
+        )
+        self.assertEqual(
+            files["/etc/systemd/coredump.conf.d/99-jsh-storage.conf"],
+            ["Systemd configuration reloads"],
+        )
+        self.assertEqual(
+            files["/etc/systemd/logind.conf.d/99-jsh-sleep.conf"], ["systemd-logind reloads"]
+        )
+        self.assertEqual(
+            files["/etc/udev/rules.d/90-jsh-usb-wakeup.rules"], ["USB udev rules reload"]
+        )
 
     def test_linux_desktop_roles_keep_package_and_audio_contracts(self):
         common = [
-            "fontconfig", "xfce4-appfinder", "arc-theme", "papirus-icon-theme",
-            "pavucontrol", "xfce4-clipman-plugin", "xfce4-cpugraph-plugin",
-            "xfce4-docklike-plugin", "xfce4-fsguard-plugin", "xfce4-genmon-plugin",
-            "xfce4-netload-plugin", "xfce4-pulseaudio-plugin", "xfce4-screensaver",
-            "xfce4-systemload-plugin", "xfce4-taskmanager", "xfce4-terminal",
+            "fontconfig",
+            "xfce4-appfinder",
+            "arc-theme",
+            "papirus-icon-theme",
+            "pavucontrol",
+            "xfce4-clipman-plugin",
+            "xfce4-cpugraph-plugin",
+            "xfce4-docklike-plugin",
+            "xfce4-fsguard-plugin",
+            "xfce4-genmon-plugin",
+            "xfce4-netload-plugin",
+            "xfce4-pulseaudio-plugin",
+            "xfce4-screensaver",
+            "xfce4-systemload-plugin",
+            "xfce4-taskmanager",
+            "xfce4-terminal",
         ]
         packages = self.yaml_file(ROOT / "ansible/group_vars/all/packages.yml")
         self.assertEqual(packages["packages_roles"]["desktop"]["xfce"]["apt"], common)
         self.assertEqual(packages["packages_roles"]["desktop"]["xfce"]["dnf"], common)
         colossus = self.yaml_file(ROOT / "ansible/host_vars/colossus.yml")
-        self.assertEqual(colossus["packages_roles_extra"]["desktop"]["xfce"]["apt"], [
-            "build-essential", "pkg-config", "patch", "gettext", "meson",
-            "libgtk-3-dev", "libpulse-dev", "libxfce4panel-2.0-dev",
-            "libxfce4ui-2-dev", "libxfconf-0-dev", "libkeybinder-3.0-dev",
-            "libnotify-dev", "libwnck-3-dev", "libexo-2-dev",
-            "libxfce4windowing-0-dev",
-        ])
+        self.assertEqual(
+            colossus["packages_roles_extra"]["desktop"]["xfce"]["apt"],
+            [
+                "build-essential",
+                "pkg-config",
+                "patch",
+                "gettext",
+                "meson",
+                "libgtk-3-dev",
+                "libpulse-dev",
+                "libxfce4panel-2.0-dev",
+                "libxfce4ui-2-dev",
+                "libxfconf-0-dev",
+                "libkeybinder-3.0-dev",
+                "libnotify-dev",
+                "libwnck-3-dev",
+                "libexo-2-dev",
+                "libxfce4windowing-0-dev",
+            ],
+        )
         audio = self.yaml_file(ROOT / "ansible/roles/desktop/tasks/audio/main.yml")
         audio = [task for top in audio for task in (top, *top.get("block", []))]
         wave = next(task for task in audio if task.get("name") == "Wave:3 udev rules are current")
-        self.assertEqual(wave["ansible.builtin.copy"]["dest"],
-                         "/etc/udev/rules.d/70-jsh-wave3.rules")
+        self.assertEqual(
+            wave["ansible.builtin.copy"]["dest"], "/etc/udev/rules.d/70-jsh-wave3.rules"
+        )
         self.assertEqual(wave["notify"], "Wave:3 udev rules reload")
-        autostart = next(task for task in audio
-                         if task.get("name") == "Microphone startup mute is configured")
-        self.assertEqual(autostart["ansible.builtin.template"]["src"],
-                         "audio/microphone.desktop.j2")
-        policy = next(task for task in audio
-                      if task.get("name") == "WirePlumber audio policy is current")
+        autostart = next(
+            task for task in audio if task.get("name") == "Microphone startup mute is configured"
+        )
+        self.assertEqual(
+            autostart["ansible.builtin.template"]["src"], "audio/microphone.desktop.j2"
+        )
+        policy = next(
+            task for task in audio if task.get("name") == "WirePlumber audio policy is current"
+        )
         self.assertEqual(policy["notify"], "WirePlumber restarts")
 
     def test_linux_without_cached_sudo_keeps_the_action_notice(self):
@@ -5856,19 +7179,26 @@ exec /usr/bin/stat "$@"
             f"- name: unsafe role task\n"
             f"  ansible.builtin.file: {{path: '{marker}', state: touch}}\n"
             "- name: preflight\n"
-            "  ansible.builtin.include_tasks: preflight.yml\n")
+            "  ansible.builtin.include_tasks: preflight.yml\n"
+        )
         shutil.copy2(ROOT / "ansible/roles/linux/tasks/preflight.yml", role / "preflight.yml")
-        tasks = ("    - name: linux preflight\n"
-                 "      ansible.builtin.include_role:\n"
-                 "        name: linux\n"
-                 "        tasks_from: preflight\n")
+        tasks = (
+            "    - name: linux preflight\n"
+            "      ansible.builtin.include_role:\n"
+            "        name: linux\n"
+            "        tasks_from: preflight\n"
+        )
         result, events = self.run_play(
-            tasks, "-e", json.dumps({"linux_user": "jay"}), JSH_PLATFORM="linux")
+            tasks, "-e", json.dumps({"linux_user": "jay"}), JSH_PLATFORM="linux"
+        )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertFalse(marker.exists(), events)
         self.assertIn(
-            ["item", "notice",
-             "Linux system configuration needs sudo; run `sudo -v` first, then rerun"],
+            [
+                "item",
+                "notice",
+                "Linux system configuration needs sudo; run `sudo -v` first, then rerun",
+            ],
             events,
         )
 
@@ -5876,7 +7206,8 @@ exec /usr/bin/stat "$@"
         self.tool("systemctl", '[ "$1" = --version ] && exit 0\nexit 1')
         result, events = self.run_play(
             "    - name: services\n      ansible.builtin.include_role: {name: services}\n",
-            "--check", ANSIBLE_ROLES_PATH=str(ROOT / "ansible/roles"),
+            "--check",
+            ANSIBLE_ROLES_PATH=str(ROOT / "ansible/roles"),
             JSH_PLATFORM="debian",
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -5885,23 +7216,29 @@ exec /usr/bin/stat "$@"
 
     def test_services_restarts_only_when_retiring_legacy_agent_files(self):
         tasks = self.yaml_file(ROOT / "ansible/roles/services/tasks/ssh.yml")
-        installed = next(task for task in tasks
-                         if task.get("name") == "Legacy SSH agent files are installed")
-        removed = next(task for task in tasks
-                       if task.get("name") == "Legacy SSH agent files are absent")
+        installed = next(
+            task for task in tasks if task.get("name") == "Legacy SSH agent files are installed"
+        )
+        removed = next(
+            task for task in tasks if task.get("name") == "Legacy SSH agent files are absent"
+        )
         self.assertEqual(installed["notify"], "User systemd configuration reloads")
-        self.assertEqual(removed["notify"],
-                         ["User systemd configuration reloads", "SSH agent restarts"])
+        self.assertEqual(
+            removed["notify"], ["User systemd configuration reloads", "SSH agent restarts"]
+        )
 
     def test_uv_update_only_upgrades_uv_managed_tools(self):
         self.tool("just", "exit 0")
-        self.tool("uv", r'''printf '%s\n' "$*" >> "$HOME/uv-tools.log"
+        self.tool(
+            "uv",
+            r"""printf '%s\n' "$*" >> "$HOME/uv-tools.log"
 case "$*" in
   "tool list") printf 'tmail-cli v1.0.0\n- tmail\n' ;;
   "tool upgrade rust-just") printf 'rust-just is not installed\n' >&2; exit 1 ;;
   "tool upgrade tmail-cli") printf 'Nothing to upgrade\n' ;;
-esac''')
-        role = '''- name: uv packages
+esac""",
+        )
+        role = """- name: uv packages
   ansible.builtin.include_role:
     name: packages
   vars:
@@ -5911,11 +7248,13 @@ esac''')
         uv:
           - {command: just, package: rust-just}
           - {command: tmail, package: tmail-cli}
-'''
+"""
         self.tool("tmail", "exit 0")
         result, _ = self.run_play(
             "    - name: tools\n      ansible.builtin.include_role: {name: tools}\n",
-            "-e", '{"jsh_platform":"darwin","jsh_update":true}', roles={"tools": role},
+            "-e",
+            '{"jsh_platform":"darwin","jsh_update":true}',
+            roles={"tools": role},
             ANSIBLE_ROLES_PATH=f"{self.home / 'play/roles'}:{ROOT / 'ansible/roles'}",
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -5936,13 +7275,19 @@ esac''')
         site = self.home / "site.yml"
         shutil.copy2(ROOT / "ansible/site.yml", site)
         result = self.playbook(
-            site, "--tags", "macos,desktop", "-e",
+            site,
+            "--tags",
+            "macos,desktop",
+            "-e",
             '{"jsh_platform":"darwin","jsh_host":"test"}',
-            ANSIBLE_STDOUT_CALLBACK="jsh", ANSIBLE_ROLES_PATH=str(roles),
-            JSH_OUTPUT="renderer", JSH_PLATFORM="darwin",
+            ANSIBLE_STDOUT_CALLBACK="jsh",
+            ANSIBLE_ROLES_PATH=str(roles),
+            JSH_OUTPUT="renderer",
+            JSH_PLATFORM="darwin",
         )
-        events = [line[1:].split("\t") for line in result.stdout.split("\n")
-                  if line.startswith("\x1e")]
+        events = [
+            line[1:].split("\t") for line in result.stdout.split("\n") if line.startswith("\x1e")
+        ]
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn(["group", "desktop", self.purpose("desktop")], events)
         self.assertIn(["item", "ok", "group B still runs"], events)
@@ -5956,41 +7301,64 @@ esac''')
         for role, prefix in (("helium", "Helium"), ("waterfox", "Waterfox")):
             tasks = self.yaml_file(ROOT / f"ansible/roles/patches/tasks/{role}/main.yml")
             flattened = []
+
             def collect(items):
                 for item in items:
                     flattened.append(item)
                     collect(item.get("block", []))
                     collect(item.get("rescue", []))
                     collect(item.get("always", []))
+
             collect(tasks)
-            probe = next(item for item in flattened if item.get("name") == f"{prefix} policy is checked")
+            probe = next(
+                item for item in flattened if item.get("name") == f"{prefix} policy is checked"
+            )
             self.assertIn("settings", probe)
             self.assertTrue(probe["check_mode"])
             self.assertFalse(probe.get("failed_when", False))
             self.assertNotIn("become", probe)
-            preview = next(item for item in flattened
-                           if item.get("changed_when") is True
-                           and "ansible.builtin.command" in item)
+            preview = next(
+                item
+                for item in flattened
+                if item.get("changed_when") is True and "ansible.builtin.command" in item
+            )
             self.assertIn("ansible_check_mode", str(preview["when"]))
-            admin = next(item for item in flattened
-                         if item.get("name") == f"{prefix} policy admin access is checked")
+            admin = next(
+                item
+                for item in flattened
+                if item.get("name") == f"{prefix} policy admin access is checked"
+            )
             self.assertEqual(admin["ansible.builtin.command"]["argv"], ["sudo", "-n", "true"])
             self.assertFalse(admin["failed_when"])
-            write = next(item for item in flattened
-                         if "settings" in item and item.get("check_mode") is not True)
+            write = next(
+                item
+                for item in flattened
+                if "settings" in item and item.get("check_mode") is not True
+            )
             self.assertEqual(write["become"], f"{{{{ patches_{role}_policy_become | bool }}}}")
             for task in (admin, write):
                 self.assertIs(task["vars"]["ansible_worker_session_isolation"], False)
             self.assertIn("not ansible_check_mode", str(write["when"]))
             # Helium stops with a failure; Waterfox skips the write and leaves a notice.
-            stop = next((item for item in flattened if "ansible.builtin.fail" in item
-                         and "needs sudo" in str(item["ansible.builtin.fail"])), None)
+            stop = next(
+                (
+                    item
+                    for item in flattened
+                    if "ansible.builtin.fail" in item
+                    and "needs sudo" in str(item["ansible.builtin.fail"])
+                ),
+                None,
+            )
             if stop is not None:
                 self.assertIn(f"{role}_policy_admin.rc", str(stop["when"]))
                 continue
             self.assertIn(f"{role}_policy_admin.rc", str(write["when"]))
-            notice = next(item for item in flattened if item.get("name") == "notice"
-                          and "needs sudo" in str(item.get("ansible.builtin.debug", {})))
+            notice = next(
+                item
+                for item in flattened
+                if item.get("name") == "notice"
+                and "needs sudo" in str(item.get("ansible.builtin.debug", {}))
+            )
             self.assertIn("msg", notice["ansible.builtin.debug"])
 
     def test_playbook_repairs_ansible_before_every_real_run(self):
@@ -6001,10 +7369,18 @@ esac''')
         script.chmod(0o755)
         result = subprocess.run(
             ["bash", "-c", '. "$JSH_ROOT/scripts/lib/common.sh"; jsh::playbook desktop'],
-            env=self.env | {"JSH_ROOT": str(root), "JSH_PLATFORM": "darwin",
-                            "JSH_ANSIBLE_HOME": str(self.home / "ansible"),
-                            "JSH_DRY_RUN": "0", "JSH_OUTPUT": "plain"},
-            cwd=self.home, capture_output=True, text=True, timeout=60,
+            env=self.env
+            | {
+                "JSH_ROOT": str(root),
+                "JSH_PLATFORM": "darwin",
+                "JSH_ANSIBLE_HOME": str(self.home / "ansible"),
+                "JSH_DRY_RUN": "0",
+                "JSH_OUTPUT": "plain",
+            },
+            cwd=self.home,
+            capture_output=True,
+            text=True,
+            timeout=60,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual((self.home / "ansible-bootstrap.log").read_text(), "called\n")
@@ -6024,8 +7400,9 @@ esac''')
         target.write_text('{"mine": true}\n')
         result, _ = self.settings(path=str(target), values={"managed": True}, merge="replace")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        backups = list((self.home / ".local/state/jsh/backups").glob(
-            "*/.config/example/settings.json"))
+        backups = list(
+            (self.home / ".local/state/jsh/backups").glob("*/.config/example/settings.json")
+        )
         self.assertEqual([backup.read_text() for backup in backups], ['{"mine": true}\n'])
 
     def test_codex_settings_are_backed_up_in_the_jsh_state_tree(self):
@@ -6037,8 +7414,10 @@ esac''')
         self.assertIn("{{ agentics_home }}/.codex/config.toml", command)
         self.assertFalse(backup["changed_when"])
         current = names["ok"]
-        self.assertEqual(current["ansible.builtin.debug"]["msg"],
-                         "{{ item.item.option }} is {{ item.item.value }}")
+        self.assertEqual(
+            current["ansible.builtin.debug"]["msg"],
+            "{{ item.item.option }} is {{ item.item.value }}",
+        )
         self.assertIn("ansible_check_mode", str(current["when"]))
 
     def test_app_reopens_after_settings_apply_fails(self):
@@ -6061,16 +7440,21 @@ esac''')
         self.tool("xrandr", "exit 0")
         self.tool("flock", "exit 0")
         result = subprocess.run(
-            ["bash", str(toggle), "--dry-run"], env=self.env,
-            cwd=self.home, capture_output=True, text=True, timeout=20,
+            ["bash", str(toggle), "--dry-run"],
+            env=self.env,
+            cwd=self.home,
+            capture_output=True,
+            text=True,
+            timeout=20,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("would toggle the ultrawide display split", result.stdout)
 
     def test_flatpak_update_argv_uses_literal_strings(self):
         tasks = self.yaml_file(ROOT / "ansible/roles/packages/tasks/flatpak.yml")
-        update = next(task for task in tasks[2]["block"]
-                      if task.get("name") == "Flatpak apps are updated")
+        update = next(
+            task for task in tasks[2]["block"] if task.get("name") == "Flatpak apps are updated"
+        )
         self.assertEqual(
             update["ansible.builtin.command"]["argv"],
             ["flatpak", "update", "--noninteractive", "-y", "{{ item }}"],
@@ -6085,70 +7469,104 @@ esac''')
         download = next(task for task in block if "ansible.builtin.get_url" in task)
         self.assertIn("patches_vscode_download.path", download["ansible.builtin.get_url"]["dest"])
         self.assertIn("not ansible_check_mode", str(download["when"]))
-        installs = [task for task in block
-                    if "ansible.builtin.apt" in task or "ansible.builtin.dnf" in task]
+        installs = [
+            task for task in block if "ansible.builtin.apt" in task or "ansible.builtin.dnf" in task
+        ]
         self.assertEqual(len(installs), 2)
         self.assertTrue(all("not ansible_check_mode" in str(task["when"]) for task in installs))
         planned = next(task for task in block if task.get("name") == "VS Code install is planned")
-        self.assertIn("ansible_check_mode", str(planned["ansible.builtin.set_fact"]["patches_vscode_planned"]))
+        self.assertIn(
+            "ansible_check_mode", str(planned["ansible.builtin.set_fact"]["patches_vscode_planned"])
+        )
         preview = next(
-            task for task in block
-            if task.get("ansible.builtin.debug", {}).get("msg") ==
-            "VS Code update is unchecked in preview")
+            task
+            for task in block
+            if task.get("ansible.builtin.debug", {}).get("msg")
+            == "VS Code update is unchecked in preview"
+        )
         self.assertIn("jsh_update", str(preview["when"]))
         self.assertIn("ansible_check_mode", str(preview["when"]))
 
     @unittest.skipUnless(os.uname().sysname == "Darwin", "reads macOS LaunchServices")
     def test_apps_role_preserves_launchservices_integer_types(self):
         import plistlib
+
         domain = str(self.home / "typed-launch-services")
         plist = self.home / "typed-handlers.plist"
-        handlers = [{"LSHandlerContentType": "public.text", "LSHandlerRoleAll": "other.app",
-                     "LSHandlerModificationDate": 123456789}]
+        handlers = [
+            {
+                "LSHandlerContentType": "public.text",
+                "LSHandlerRoleAll": "other.app",
+                "LSHandlerModificationDate": 123456789,
+            }
+        ]
         with plist.open("wb") as stream:
             plistlib.dump({"LSHandlers": handlers}, stream)
         subprocess.run(["defaults", "import", domain, str(plist)], check=True)
         macdown = self.home / "MacDown 3000.app"
         macdown.mkdir()
-        result, _ = self.personalization_play("apps", {"apps_macdown_application": str(macdown),
-            "apps_launchservices_domain": domain, "apps_decoder_enabled": False,
-            "apps_restart_launchservices": False,
-        })
+        result, _ = self.personalization_play(
+            "apps",
+            {
+                "apps_macdown_application": str(macdown),
+                "apps_launchservices_domain": domain,
+                "apps_decoder_enabled": False,
+                "apps_restart_launchservices": False,
+            },
+        )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         exported = subprocess.run(
-            ["defaults", "export", domain, "-"], check=True, capture_output=True).stdout
+            ["defaults", "export", domain, "-"], check=True, capture_output=True
+        ).stdout
         updated = plistlib.loads(exported)["LSHandlers"]
-        unmanaged = next(item for item in updated
-                         if item.get("LSHandlerContentType") == "public.text")
+        unmanaged = next(
+            item for item in updated if item.get("LSHandlerContentType") == "public.text"
+        )
         self.assertEqual(unmanaged["LSHandlerModificationDate"], 123456789)
         self.assertIs(type(unmanaged["LSHandlerModificationDate"]), int)
 
     def test_apps_role_stops_when_launchservices_export_fails(self):
-        self.tool("defaults", r'''printf '%s\n' "$*" >> "$HOME/defaults.log"
+        self.tool(
+            "defaults",
+            r"""printf '%s\n' "$*" >> "$HOME/defaults.log"
 [ "$1" != export ] || exit 7
-exit 0''')
+exit 0""",
+        )
         macdown = self.home / "MacDown 3000.app"
         macdown.mkdir()
-        result, _ = self.personalization_play("apps", {"apps_macdown_application": str(macdown),
-            "apps_launchservices_domain": "broken", "apps_decoder_enabled": False,
-            "apps_restart_launchservices": False,
-        })
+        result, _ = self.personalization_play(
+            "apps",
+            {
+                "apps_macdown_application": str(macdown),
+                "apps_launchservices_domain": "broken",
+                "apps_decoder_enabled": False,
+                "apps_restart_launchservices": False,
+            },
+        )
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         calls = (self.home / "defaults.log").read_text().splitlines()
         self.assertEqual(calls, ["export broken -"])
 
     @unittest.skipUnless(os.uname().sysname == "Darwin", "guards the real defaults domain")
     def test_checks_cannot_write_real_macos_preferences(self):
-        before = subprocess.run(["defaults", "read", "com.apple.screencapture", "location"],
-                                capture_output=True, text=True).stdout
+        before = subprocess.run(
+            ["defaults", "read", "com.apple.screencapture", "location"],
+            capture_output=True,
+            text=True,
+        ).stdout
         result, events = self.run_play(
             "    - name: macos\n      ansible.builtin.include_role: {name: macos}\n",
-            ANSIBLE_ROLES_PATH=str(ROOT / "ansible/roles"))
+            ANSIBLE_ROLES_PATH=str(ROOT / "ansible/roles"),
+        )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("checks must not write real macOS preferences", result.stdout + result.stderr)
-        after = subprocess.run(["defaults", "read", "com.apple.screencapture", "location"],
-                               capture_output=True, text=True).stdout
+        after = subprocess.run(
+            ["defaults", "read", "com.apple.screencapture", "location"],
+            capture_output=True,
+            text=True,
+        ).stdout
         self.assertEqual(after, before)
+
 
 if __name__ == "__main__":
     unittest.main()

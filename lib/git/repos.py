@@ -139,8 +139,14 @@ def operation(gitdir):
 def summarize(git, repo):
     """Returns a dict describing repo's branch, upstream distance, changes, state, and stashes."""
     result = git_output(
-        git, repo, "status", "--porcelain=v2", "--branch", "--show-stash",
-        "--untracked-files=normal", "--ignore-submodules=dirty",
+        git,
+        repo,
+        "status",
+        "--porcelain=v2",
+        "--branch",
+        "--show-stash",
+        "--untracked-files=normal",
+        "--ignore-submodules=dirty",
     )
     if result.returncode != 0:
         lines = result.stderr.strip().splitlines()
@@ -194,7 +200,7 @@ def mode():
     """Returns the prompt's symbol set: JSH_PROMPT_MODE, or ascii outside a UTF-8 locale."""
     chosen = os.environ.get("JSH_PROMPT_MODE", "nerdfont-v3")
     chosen = chosen if chosen in ICONS else "nerdfont-v3"
-    locale = (os.environ.get("LC_ALL") or os.environ.get("LC_CTYPE") or os.environ.get("LANG"))
+    locale = os.environ.get("LC_ALL") or os.environ.get("LC_CTYPE") or os.environ.get("LANG")
     if not re.search(r"utf-?8", (locale or "C").lower()):
         chosen = "ascii"
     return ICONS[chosen]

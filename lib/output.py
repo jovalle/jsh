@@ -44,8 +44,7 @@ def verbs() -> Dict[str, Tuple[str, str]]:
                     continue
                 fields = row.split("\t")
                 if len(fields) != 3 or not all(fields):
-                    raise ValueError(
-                        f"{path}:{number}: expected verb, ing, and past")
+                    raise ValueError(f"{path}:{number}: expected verb, ing, and past")
                 table[fields[0]] = (fields[1], fields[2])
     except OSError:
         return {}
@@ -105,15 +104,16 @@ def _sanitize(text: str) -> str:
 
 def _display_path(text: str) -> str:
     if text.startswith("$HOME/"):
-        return "~/" + text[len("$HOME/"):]
+        return "~/" + text[len("$HOME/") :]
     home = os.environ.get("HOME", "").rstrip("/")
     if home and text.startswith(home + "/"):
-        return "~/" + text[len(home) + 1:]
+        return "~/" + text[len(home) + 1 :]
     return text
 
 
-def format_item(kind: str, text: str, was: str = "", preview: bool = False,
-                color: bool = False) -> List[str]:
+def format_item(
+    kind: str, text: str, was: str = "", preview: bool = False, color: bool = False
+) -> List[str]:
     """Format one item event as one or more display lines."""
     text = _display_path(_sanitize(text))
     was = _display_path(_sanitize(was))
@@ -143,8 +143,9 @@ def format_item(kind: str, text: str, was: str = "", preview: bool = False,
 class Renderer:
     """Consume event lines and render the jsh output layout."""
 
-    def __init__(self, out: TextIO, *, tty: bool, color: bool, preview: bool,
-                 report: Optional[Path]):
+    def __init__(
+        self, out: TextIO, *, tty: bool, color: bool, preview: bool, report: Optional[Path]
+    ):
         self.out = out
         self.tty = tty
         self.color = color
@@ -184,8 +185,11 @@ class Renderer:
         lc_ctype = os.environ.get("LC_CTYPE", "").lower()
         lang = os.environ.get("LANG")
         coerced = lc_ctype in ("c.utf-8", "c.utf8", "utf-8")
-        if not os.environ.get("LC_ALL") and coerced and (
-                lang is None or lang.upper() in ("C", "POSIX")):
+        if (
+            not os.environ.get("LC_ALL")
+            and coerced
+            and (lang is None or lang.upper() in ("C", "POSIX"))
+        ):
             return ASCII_FRAMES
         try:
             locale.setlocale(locale.LC_CTYPE, "")
@@ -233,8 +237,9 @@ class Renderer:
                 return line
         return ""
 
-    def _spinner_line(self, task: Optional[Tuple[str, Optional[Path]]],
-                      latest: str) -> Optional[str]:
+    def _spinner_line(
+        self, task: Optional[Tuple[str, Optional[Path]]], latest: str
+    ) -> Optional[str]:
         if self._step is None:
             return None
         verb, obj = self._step
@@ -328,8 +333,11 @@ class Renderer:
         if self.report is None:
             return []
         try:
-            return [_sanitize(line) for line in
-                    (self.report / name).read_text(encoding="utf-8").splitlines() if line]
+            return [
+                _sanitize(line)
+                for line in (self.report / name).read_text(encoding="utf-8").splitlines()
+                if line
+            ]
         except FileNotFoundError:
             return []
 
@@ -387,7 +395,7 @@ class Renderer:
         if not line.startswith(MARKER):
             self._item("output", line)
             return True
-        fields = line[len(MARKER):].split("\t")
+        fields = line[len(MARKER) :].split("\t")
         event = fields[0]
         values = fields[1:]
         if event == "group":
@@ -463,7 +471,7 @@ class Renderer:
             self._ended = True
             return False
         else:
-            self._item("output", line[len(MARKER):])
+            self._item("output", line[len(MARKER) :])
         return True
 
     def close(self) -> None:
@@ -493,8 +501,7 @@ _active_renderer: Optional[Renderer] = None
 
 
 def _wire_field(value: str) -> str:
-    return (value.replace("\t", " ").replace("\r", " ")
-            .replace("\n", " ").replace(MARKER, ""))
+    return value.replace("\t", " ").replace("\r", " ").replace("\n", " ").replace(MARKER, "")
 
 
 def _event(event: str, *values: str) -> bool:
@@ -518,10 +525,16 @@ def _print_item(kind: str, text: str, was: str = "") -> None:
     if _event("item", kind, text, was):
         return
     stream = sys.stderr if kind in ("drift", "fail", "notice") else sys.stdout
-    _write_lines(stream, format_item(
-        kind, text, was, preview=os.environ.get("JSH_DRY_RUN") == "1",
-        color=_color_enabled(stream),
-    ))
+    _write_lines(
+        stream,
+        format_item(
+            kind,
+            text,
+            was,
+            preview=os.environ.get("JSH_DRY_RUN") == "1",
+            color=_color_enabled(stream),
+        ),
+    )
 
 
 def group(name: str, purpose: str = "") -> None:
@@ -592,8 +605,11 @@ def session() -> Iterator[Renderer]:
 
     stream = sys.stdout
     renderer = Renderer(
-        stream, tty=stream.isatty(), color=_color_enabled(stream),
-        preview=os.environ.get("JSH_DRY_RUN") == "1", report=None,
+        stream,
+        tty=stream.isatty(),
+        color=_color_enabled(stream),
+        preview=os.environ.get("JSH_DRY_RUN") == "1",
+        report=None,
     )
     _active_renderer = renderer
     try:
@@ -612,8 +628,7 @@ def _render(args: argparse.Namespace) -> int:
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     tty = sys.stdout.isatty()
     color = _color_enabled(sys.stdout)
-    renderer = Renderer(sys.stdout, tty=tty, color=color,
-                        preview=args.preview, report=args.report)
+    renderer = Renderer(sys.stdout, tty=tty, color=color, preview=args.preview, report=args.report)
     for line in sys.stdin:
         if not renderer.feed(line):
             break

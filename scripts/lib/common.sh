@@ -19,7 +19,7 @@ if [[ -n ${JSH_REPORT:-} && ! -d ${JSH_REPORT} ]]; then unset JSH_REPORT; fi
 . "${JSH_ROOT}/lib/shell/output.sh"
 
 # Options apply to the outermost script; other arguments, such as group names, stay with it.
-_jsh_script=${BASH_SOURCE[${#BASH_SOURCE[@]} - 1]}
+_jsh_script=${BASH_SOURCE[${#BASH_SOURCE[@]}-1]}
 JSH_SCRIPT_NAME=${_jsh_script##*/}
 JSH_SCRIPT_NAME=${JSH_SCRIPT_NAME%.sh}
 for _jsh_arg in "$@"; do
@@ -483,8 +483,7 @@ jsh::summary() {
   fi
   if ((failed)) || [[ ${status} != 0 ]]; then
     label=$(jsh::paint 1 '1;31' "Finished with errors")
-  elif [[ ${JSH_DRY_RUN} == 1 ]]; then
-    label="Preview complete"
+  elif [[ ${JSH_DRY_RUN} == 1 ]]; then label="Preview complete"
   else label=$(jsh::paint 1 '1;32' Ready); fi
   printf "\n%s" "${label}"
   if [[ ${JSH_DRY_RUN} == 1 ]]; then

@@ -43,13 +43,37 @@ from ansible.plugins.callback import CallbackBase
 
 MARKER = "\x1e"
 SILENT = {
-    "add_host", "assert", "command_info", "debug", "find", "gather_facts", "group_by",
-    "import_role", "import_tasks", "include_role", "include_tasks", "include_vars", "meta",
-    "package_facts", "service_facts", "set_fact", "setup", "slurp", "stat",
+    "add_host",
+    "assert",
+    "command_info",
+    "debug",
+    "find",
+    "gather_facts",
+    "group_by",
+    "import_role",
+    "import_tasks",
+    "include_role",
+    "include_tasks",
+    "include_vars",
+    "meta",
+    "package_facts",
+    "service_facts",
+    "set_fact",
+    "setup",
+    "slurp",
+    "stat",
 }
 PACKAGES = {
-    "apt", "dnf", "flatpak", "flatpak_remote", "homebrew", "homebrew_cask", "homebrew_tap", "mas",
-    "package", "pip",
+    "apt",
+    "dnf",
+    "flatpak",
+    "flatpak_remote",
+    "homebrew",
+    "homebrew_cask",
+    "homebrew_tap",
+    "mas",
+    "package",
+    "pip",
 }
 SUDO_ERRORS = ("a password is required", "Missing sudo password", "incorrect sudo password")
 
@@ -112,8 +136,9 @@ def _diff_lines(diff: dict) -> list:
             return value.splitlines()
         return json.dumps(value, indent=2, sort_keys=True, default=str).splitlines()
 
-    lines = difflib.unified_diff(text(diff.get("before", "")), text(diff.get("after", "")),
-                                 lineterm="", n=0)
+    lines = difflib.unified_diff(
+        text(diff.get("before", "")), text(diff.get("after", "")), lineterm="", n=0
+    )
     return [line for line in lines if not line.startswith(("---", "+++", "@@"))]
 
 
@@ -139,12 +164,15 @@ class CallbackModule(CallbackBase):
     def v2_playbook_on_start(self, playbook):
         self._check = bool(context.CLIARGS.get("check"))
         if not self._wire:
-            spec = importlib.util.spec_from_file_location("jsh_output", self._root / "lib/output.py")
+            spec = importlib.util.spec_from_file_location(
+                "jsh_output", self._root / "lib/output.py"
+            )
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
             color = getattr(module, "_color_enabled", lambda stream: False)(sys.stdout)
-            self._renderer = module.Renderer(sys.stdout, tty=False, color=color,
-                                             preview=self._check, report=None)
+            self._renderer = module.Renderer(
+                sys.stdout, tty=False, color=color, preview=self._check, report=None
+            )
 
     def _write(self, line: str) -> None:
         if self._wire:
@@ -177,7 +205,10 @@ class CallbackModule(CallbackBase):
             self._append("failures", text)
         elif item == "notice":
             notices = self._report / "notices"
-            if not notices.is_file() or text not in notices.read_text(encoding="utf-8").splitlines():
+            if (
+                not notices.is_file()
+                or text not in notices.read_text(encoding="utf-8").splitlines()
+            ):
                 self._append("notices", text)
 
     def _append(self, name: str, line: str) -> None:
@@ -227,9 +258,17 @@ class CallbackModule(CallbackBase):
     def _skip_text(self, group: str) -> str:
         platform = self._groups[group][0]
         if platform == "linux":
-            return "Linux configuration on macOS" if group == "linux" else f"{group} on macOS: Linux only"
+            return (
+                "Linux configuration on macOS"
+                if group == "linux"
+                else f"{group} on macOS: Linux only"
+            )
         if platform == "darwin":
-            return "macOS configuration on Linux" if group == "macos" else f"{group} on Linux: macOS only"
+            return (
+                "macOS configuration on Linux"
+                if group == "macos"
+                else f"{group} on Linux: macOS only"
+            )
         return f"{group}: not needed here"
 
     # Results
@@ -285,7 +324,9 @@ class CallbackModule(CallbackBase):
                 self._emit("item", "output", line)
 
     def _change_kind(self, action: str, raw: dict, args: dict) -> str:
-        state = (raw.get("invocation") or {}).get("module_args", {}).get("state") or args.get("state")
+        state = (raw.get("invocation") or {}).get("module_args", {}).get("state") or args.get(
+            "state"
+        )
         if state == "absent":
             return "removed"
         if action in PACKAGES:
@@ -308,8 +349,9 @@ class CallbackModule(CallbackBase):
         for key in ("msg", "stderr", "module_stderr", "stdout"):
             value = raw.get(key)
             if isinstance(value, str) and value.strip():
-                details.extend(line for line in value.split("\n")
-                               if line.strip() and MARKER not in line)
+                details.extend(
+                    line for line in value.split("\n") if line.strip() and MARKER not in line
+                )
                 if key != "msg":
                     break
         for line in details[-10:]:

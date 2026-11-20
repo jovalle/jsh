@@ -83,7 +83,7 @@ jsh::brew_trust_directory() {
   else
     mode=$(stat -c '%a' "${directory}") || return
   fi
-  if (((8#${mode} & 8#022) != 0)); then
+  if (( (8#${mode} & 8#022) != 0 )); then
     case ${directory} in -*) directory=./${directory} ;; *) ;; esac
     jsh::run chmod go-w "${directory}" || return
     jsh::changed "${directory} is not group-writable" "${directory} is group-writable"

@@ -62,7 +62,7 @@
   ansible.builtin.command:
     argv: >-
       {{ ['/usr/bin/true'] if ansible_check_mode else
-         ['bash', '-c', 'mkdir -p -- \"$1\" && chmod u+rwx \"$1\"', 'jsh-wox-directory',
+         ['bash', '-c', 'mkdir -p -- "$1" && chmod u+rwx "$1"', 'jsh-wox-directory',
           (wox_agent_path if jsh_platform == 'darwin' else wox_autostart_path) | dirname] }}
   changed_when: false
   check_mode: false
