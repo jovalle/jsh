@@ -1,15 +1,19 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "git-submodules": {
+  "extends": ["config:recommended"],
+  "pre-commit": {
     "enabled": true
   },
+  "platformAutomerge": false,
   "packageRules": [
     {
-      "description": "Automerge submodule updates",
-      "matchManagers": ["git-submodules"],
+      "matchPackageNames": ["/(^|/)gitleaks/gitleaks$/"],
+      "groupName": "gitleaks"
+    },
+    {
+      "matchUpdateTypes": ["minor", "patch", "digest", "pin"],
       "automerge": true,
-      "automergeType": "pr",
-      "platformAutomerge": false
+      "matchCurrentVersion": "!/^0/"
     }
   ]
 }
