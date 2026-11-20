@@ -95,6 +95,7 @@ dotfiles/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-power-manager.xml
 dotfiles/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-screensaver.xml
 dotfiles/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-screenshooter.xml
 dotfiles/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-taskmanager.xml
+dotfiles/.gitconfig
 dotfiles/.zsh_sessions/
 git.json
 mounts.json

@@ -47,21 +47,6 @@
 [lfs]
   fetchinclude = *
 
-# =============================================================================
-# User Identity & Signing
-# =============================================================================
-# Configure via ~/.gitconfig.local or gitx profile:
-#
-#   [user]
-#       name = Your Name
-#       email = your@email.com
-#       signingkey = YOUR_GPG_KEY_ID
-#
-#   [gpg]
-#       program = gpg
-#
-#   [commit]
-#       gpgsign = true
 [credential "https://github.com"]
 	helper =
   helper = !gh auth git-credential

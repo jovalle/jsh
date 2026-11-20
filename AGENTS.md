@@ -46,7 +46,7 @@ prompts stay in VS Code Settings Sync, not here.
 - `lib/shell/`: commands, navigation, prompt, and completion sourced by `.zshrc`/`.bashrc`.
   `lib/shell/output.sh` is shared by the runtime, `bin/` commands, and setup.
   `lib/git/`: Python helpers run by `bin/git`, and `hooks/`, the global Git hooks
-  `dotfiles/.gitconfig` sets as `core.hooksPath` (one `dispatch.sh` linked under each hook name;
+  `examples/gitconfig` sets as `core.hooksPath` (one `dispatch.sh` linked under each hook name;
   it runs a repository's tracked `.githooks/` after `git config jsh.hooks true`, then
   `.git/hooks`).
 - `ansible/`: host configuration. `site.yml` defines setup role order; each included role's
@@ -60,7 +60,8 @@ prompts stay in VS Code Settings Sync, not here.
   versions from `ansible/requirements.*` into `local/ansible/`. To run it directly, set `ANSIBLE_CONFIG=ansible/ansible.cfg` and run
   `local/ansible/venv/bin/ansible-playbook ansible/site.yml --limit localhost --tags ROLE --check --diff`.
 - `bin/`: everyday commands and the isolated `jsh` runtime.
-- `dotfiles/`: home-relative configuration.
+- `dotfiles/`: home-relative configuration. `dotfiles/.gitconfig` is an ignored local copy
+  of `examples/gitconfig`.
 - `Makefile`: one-line shortcuts and checks.
 - `scripts/check.py`: `unittest` smoke checks for interactive Bash and Zsh.
 - Generated or machine-local, never edit: `local/`, `archive/`, `.venv/`, `tmp/`.
