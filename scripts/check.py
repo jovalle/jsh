@@ -3245,6 +3245,29 @@ esac""",
         self.assertNotIn("Homebrew install: one two failed", failed.stdout)
         self.assertIn("1 failed", failed.stdout)
 
+    def test_brew_restart_notice_only_for_running_app_executables(self):
+        self.tool("brew", "exit 0")
+        self.tool("jq", "echo 'Google Chrome.app'")
+        self.tool("ps", r'''case "$*" in
+  "-axo command=") printf '%s\n' "$PROCESS_COMMAND" ;;
+  "-axo comm=") printf '%s\n' "$PROCESS_EXECUTABLE" ;;
+  *) exit 1 ;;
+esac''')
+        code = ('. "$JSH_ROOT/scripts/lib/packages.sh"; '
+                'jsh::notice() { printf "%s\\n" "$*"; }; jsh::brew_running google-chrome')
+        path = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+        for executable, command, expected in (
+            ('/bin/sh', f'/bin/sh -c grep -F -- {path}', ''),
+            (path, path + ' --flag', 'restart Google Chrome to use the updated version\n'),
+        ):
+            with self.subTest(executable=executable):
+                result = subprocess.run(
+                    ['bash', '-c', code],
+                    env=self.env | {'PROCESS_EXECUTABLE': executable, 'PROCESS_COMMAND': command},
+                    capture_output=True, text=True, timeout=10,
+                )
+                self.assertEqual((result.returncode, result.stdout, result.stderr), (0, expected, ''))
+
     def test_brew_caveats_become_notices_without_completion_paths(self):
         self.tool(
             "brew-batch",

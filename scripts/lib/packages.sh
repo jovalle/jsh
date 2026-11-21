@@ -13,7 +13,7 @@ jsh::brew_running() {
   while IFS= read -r app; do
     [[ -n ${app} ]] || continue
     # shellcheck disable=SC2009 # pgrep has no fixed-string match; app names can hold regex characters.
-    if ps -axo command= | grep -F -- "/${app}/Contents/MacOS/" >/dev/null; then
+    if ps -axo comm= | grep -F -- "/${app}/Contents/MacOS/" >/dev/null; then
       jsh::notice "restart ${app%.app} to use the updated version"
     fi
   done < <(brew info --json=v2 --cask "${name}" 2>/dev/null |
