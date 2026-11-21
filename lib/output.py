@@ -77,23 +77,23 @@ def _code_spans(text: str, color: bool) -> List[Tuple[str, int]]:
 
 
 def format_notice(text: str, width: int = 0, color: bool = False) -> List[str]:
-    """Format one Action needed entry as a flush-left bullet."""
-    prefix = _paint("•", "1;33", color) + " "
+    """Format one Action needed entry as a bullet with a hanging indent."""
+    bullet = "  " + _paint("•", "1;33", color) + " "
+    indent = "    "
     lines: List[str] = []
-    line, used = "", 2
-    limit = max(width, 20) if width else 0
+    line, used = "", 0
+    limit = max(width - len(indent), 20) if width else 0
     for shown, size in _code_spans(_display_path(_sanitize(text)), color):
         if line and limit and used + 1 + size > limit:
-            lines.append(prefix + line)
-            prefix = ""
+            lines.append(line)
             line, used = "", 0
         if line:
             line += " "
             used += 1
         line += shown
         used += size
-    lines.append(prefix + line)
-    return lines
+    lines.append(line)
+    return [(bullet if index == 0 else indent) + line for index, line in enumerate(lines)]
 
 
 def _sanitize(text: str) -> str:
@@ -162,6 +162,7 @@ class Renderer:
         self._ended = False
         self._closed = False
         self._frame = 0
+        self._displayed_lines = 0
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -172,13 +173,24 @@ class Renderer:
     def _write(self, line: str = "") -> None:
         with self._lock:
             if self.tty:
-                self.out.write("\r\x1b[K")
+                self._clear_spinner()
             self.out.write(line + "\n")
             if self.tty:
                 spinner = self._spinner_line(self._task, "")
                 if spinner is not None:
-                    self.out.write("\r\x1b[K" + spinner)
+                    self._draw_spinner(spinner)
             self.out.flush()
+
+    def _clear_spinner(self) -> None:
+        for index in range(self._displayed_lines):
+            self.out.write("\r\x1b[K")
+            if index + 1 < self._displayed_lines:
+                self.out.write("\x1b[1A")
+        self._displayed_lines = 0
+
+    def _draw_spinner(self, line: str) -> None:
+        self.out.write(line)
+        self._displayed_lines = line.count("\n") + 1
 
     @staticmethod
     def _frames() -> str:
@@ -254,13 +266,12 @@ class Renderer:
         frame = frames[self._frame % len(frames)]
         self._frame += 1
         base = f"{frame} {ing} {obj}..."
-        suffix = f"  {progress}" if progress else ""
         limit = self._width() - 1
         shown_base = base[:limit]
-        shown_suffix = suffix[:max(0, limit - len(shown_base))]
+        shown_suffix = f"  {progress}"[:limit] if progress else ""
         line = _paint(shown_base, "1", self.color)
         if shown_suffix:
-            line += _paint(shown_suffix, "2", self.color)
+            line = _paint(shown_suffix, "2", self.color) + "\n" + line
         return line
 
     def _spin(self) -> None:
@@ -272,7 +283,8 @@ class Renderer:
                 line = self._spinner_line(task, latest)
                 if line is not None:
                     try:
-                        self.out.write("\r\x1b[K" + line)
+                        self._clear_spinner()
+                        self._draw_spinner(line)
                         self.out.flush()
                     except OSError:
                         self._stop.set()
@@ -288,7 +300,7 @@ class Renderer:
         if self.tty:
             with self._lock:
                 try:
-                    self.out.write("\r\x1b[K")
+                    self._clear_spinner()
                     self.out.flush()
                 except OSError:
                     pass
@@ -297,6 +309,8 @@ class Renderer:
         with self._lock:
             if self._step is None:
                 return
+            if self.tty:
+                self._clear_spinner()
             verb, obj = self._step
             ing = self._verbs.get(verb, (verb, verb))[0]
             self._step = None
@@ -448,16 +462,20 @@ class Renderer:
                 with self._lock:
                     line = self._spinner_line(task, latest)
                     if line is not None:
-                        self.out.write("\r\x1b[K" + line)
+                        self._clear_spinner()
+                        self._draw_spinner(line)
                         self.out.flush()
             with self._lock:
                 self._task = None
                 self._progress = ""
             if status != "0":
                 self._item("fail", f"{label} failed ({_sanitize(status)})")
-                saved = Path(saved_text)
-                for output in self._log_lines(saved)[-10:]:
-                    self._item("output", output)
+                tail = self._log_lines(Path(saved_text))[-10:]
+                indent = min(
+                    (len(line) - len(line.lstrip(" ")) for line in tail if line.strip()), default=0
+                )
+                for output in tail:
+                    self._item("output", output[indent:])
                 self._item("output", f"Log: {_sanitize(saved_text)}")
         elif event == "end":
             status = values[1] if len(values) > 1 else None

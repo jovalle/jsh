@@ -25,7 +25,7 @@ It excludes `bin/git`, `lib/git/`, `bin/kubecolor`, `bin/kubectx`, `bin/kubens`,
 | none        | info    | Context or detection                       | gray      |
 | none        | skip    | Text starts with `Skipping` plus one space | gray      |
 | `!`         | notice  | Action the user must take                  | yellow    |
-| four spaces | output  | Command output under its work              | gray      |
+| four spaces | output  | Command output under its work, dedented    | gray      |
 
 ## Line formats
 
@@ -82,12 +82,12 @@ Checking macOS settings...
 ✓ ShowHardDrivesOnDesktop is false
 ```
 
-The closing summary lists notices under `Action needed` as yellow `•` bullets. A run with no changes reports `Everything is current`, or `No changes made` when notices are pending. On a terminal, long notices wrap at the window width and continue at the left margin. Write commands in a notice between backticks: wrapping never splits a code span, and with color it is shown in cyan without the backticks.
+The closing summary lists notices under `Action needed` as yellow `•` bullets. A run with no changes reports `Everything is current`, or `No changes made` when notices are pending. On a terminal, long notices wrap at the window width with a four-space hanging indent. Write commands in a notice between backticks: wrapping never splits a code span, and with color it is shown in cyan without the backticks.
 
 ```text
 Action needed
-• Configuration needs sudo; run `sudo -v`
-first, then rerun `make configure`
+  • Configuration needs sudo; run `sudo -v`
+    first, then rerun `make configure`
 ```
 
 ## APIs
@@ -108,7 +108,7 @@ Plain sessions use the shared `JSH_REPORT` records to track item, skip, and fail
 
 `jsh::step VERB OBJECT` and `step(verb, obj)` begin a step. The next step, group, or session end completes it. `jsh::status TEXT` updates progress. `lib/verbs.tsv` is the single table of -ing and past forms. Every verb passed to `jsh::step` must be present there.
 
-On terminals, a step is the transient bottom line `FRAME ING OBJECT...`; progress or task text follows after two spaces in gray. Items print immediately above it. A step never prints a permanent success line. Without a terminal, the step prints once as `ING OBJECT...` in gray and items follow immediately.
+On terminals, a step is the transient bottom line `FRAME ING OBJECT...`; progress or task text appears on a separate indented gray line above it. Items print immediately above the transient lines. Both lines clear together, and a step never prints a permanent success line. Without a terminal, the step prints once as `ING OBJECT...` in gray and items follow immediately.
 
 Steps do not nest: a `step` event ends the current step. Open a step only after calls that open their own steps, including package handlers and child setup scripts. A step that checks state and acts only on drift uses the `check` verb; use `configure`, `set`, or `apply` only when the step always acts. Action facts such as starts, restarts, and reloads include a `WAS` field that states why the action was needed.
 

@@ -3181,10 +3181,8 @@ printf 'last output without newline'
         self.assertEqual((result.returncode, result.stderr), (0, ""))
         self.assertIn("Checking settings...\n~ app settings\n", result.stdout)
         display = self.run_on_terminal(code, env)
-        self.assertIn("Checking settings...  policy", display)
-        lines = [line.split("\r\x1b[K")[-1] for line in display.split("\r\n")]
-        self.assertFalse(any("Checking settings" in line for line in lines), lines)
-        self.assertIn("~ app settings", lines)
+        self.assertIn("  policy\r\n", display)
+        self.assertIn("Checking settings...\r\x1b[K\x1b[1A\r\x1b[K~ app settings", display)
 
     def test_app_settings_parse_large_json_quickly_and_still_accept_jsonc(self):
         (self.home / "large.json").write_text(
@@ -3291,10 +3289,9 @@ EOF""",
         self.assertEqual(result.stdout.count("foo: foo needs a restart."), 2, result.stdout)
         self.assertIn("! tool: Run tool init before first use.", result.stdout)
         self.assertIn("! foo: foo needs a restart.", result.stdout)
-        self.assertIn("\nAction needed\n• tool: Run tool init before first use.\n"
-                      "• foo: foo needs a restart.\n", result.stdout)
         self.assertNotIn("site-functions", result.stdout)
         self.assertNotIn("bash_completion.d", result.stdout)
+        self.assertIn("Action needed", result.stdout)
 
     def _run_app_reopen(self, restart_visible):
         self.tool("jq", "exit 0")
@@ -3458,12 +3455,15 @@ esac""",
         self.assertNotIn("up to date", result.stdout + result.stderr)
 
     def test_task_failure_preserves_log_and_sanitizes_terminal_output(self):
-        self.tool("progress-fail", r'''printf 'safe\033[2Jtext\n'
+        self.tool(
+            "progress-fail",
+            r"""printf '  safe\033[2Jtext\n    nested\n'
 exit 7
-''')
-        code = r'''. "$JSH_ROOT/scripts/lib/common.sh"
+""",
+        )
+        code = r""". "$JSH_ROOT/scripts/lib/common.sh"
 jsh::task "failing task" progress-fail
-'''
+"""
         for terminal in (False, True):
             with self.subTest(terminal=terminal):
                 if terminal:
@@ -3504,6 +3504,9 @@ jsh::task "failing task" progress-fail
                 self.assertNotIn("\x1b[2J", display)
                 self.assertNotIn("\x1b[36m", display)
                 self.assertIn("✕ failing task failed (7)", display)
+                lines = display.replace("\r\x1b[K", "").replace("\r", "").split("\n")
+                self.assertIn("    safetext", lines)
+                self.assertIn("      nested", lines)
                 self.assertIn("    Log: ", display)
                 logs = list((self.home / ".local/state/jsh/logs").iterdir())
                 self.assertTrue(any(b"safe\x1b[2Jtext" in path.read_bytes() for path in logs))
@@ -4324,6 +4327,24 @@ with output.session():
         ).stdout
         self.assertTrue(events.endswith(b"\x1estepclose\n"), events)
 
+    def test_spinner_places_task_details_above_step(self):
+        import importlib.util
+        import io
+
+        spec = importlib.util.spec_from_file_location("jsh_output", ROOT / "lib/output.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        renderer = module.Renderer(
+            io.StringIO(), tty=False, color=False, preview=False, report=None,
+        )
+        renderer._step = ("check", "Homebrew formulae")
+        renderer._task = ("Homebrew upgrade: gnutls", None)
+        renderer._frames = lambda: "|"
+        renderer._width = lambda: 80
+        line = renderer._spinner_line(renderer._task, "Pouring gnutls--3.8.10.bottle.tar.gz")
+        self.assertEqual(line, "  Homebrew upgrade: gnutls  Pouring gnutls--3.8.10.bottle.tar.gz\n"
+                         "| Checking Homebrew formulae...")
+
     def test_spinner_omits_empty_dim_suffix(self):
         import importlib.util
         import io
@@ -4442,7 +4463,10 @@ with output.session():
         lines = out.splitlines()
         for line in (
             "Finished with errors  1 changed  1 failed  0m 40s",
-            "Failed", "  ✕ just failed (1)", "Action needed", "• Restart Ghostty",
+            "Failed",
+            "  ✕ just failed (1)",
+            "Action needed",
+            "  • Restart Ghostty",
         ):
             self.assertIn(line, lines)
 
@@ -4454,58 +4478,79 @@ with output.session():
         self.assertIn("Ready  No changes made  0m 06s", out.splitlines())
         self.assertNotIn("Everything is current", out)
 
-    def test_notice_wraps_without_indent_and_keeps_code_whole(self):
+    def test_notice_wraps_with_hanging_indent_and_keeps_code_whole(self):
         import importlib.util
 
         spec = importlib.util.spec_from_file_location("jsh_output", ROOT / "lib/output.py")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         text = "Configuration needs sudo; run `sudo -v` first, then rerun `make configure`"
-        self.assertEqual(module.format_notice(text, 41), [
-            "• Configuration needs sudo; run `sudo -v`",
-            "first, then rerun `make configure`",
-        ])
+        self.assertEqual(
+            module.format_notice(text, 40),
+            [
+                "  • Configuration needs sudo; run",
+                "    `sudo -v` first, then rerun",
+                "    `make configure`",
+            ],
+        )
         colored = module.format_notice("run `sudo -v` now", 0, color=True)
-        self.assertEqual(colored, [
-            "\x1b[1;33m•\x1b[0m run \x1b[36msudo -v\x1b[0m now",
-        ])
+        self.assertEqual(
+            colored,
+            [
+                "  \x1b[1;33m•\x1b[0m run \x1b[36msudo -v\x1b[0m now",
+            ],
+        )
         common = (ROOT / "scripts/lib/common.sh").read_text()
-        function = re.search(r"^jsh::_notice_lines\(\) \{\n.*?^\}\n", common,
-                             re.M | re.S)[0]
-        code = (f'. "{ROOT}/lib/shell/output.sh"; {function}'
-                f'jsh::_notice_lines {shlex.quote(text)} 41')
-        result = subprocess.run(["bash", "-c", code], env=os.environ | {"NO_COLOR": "1"},
-                                capture_output=True, text=True, timeout=20)
-        self.assertEqual(result.stdout.splitlines(), module.format_notice(text, 41))
+        function = re.search(r"^jsh::_notice_lines\(\) \{\n.*?^\}\n", common, re.M | re.S)[0]
+        code = (
+            f'. "{ROOT}/lib/shell/output.sh"; {function}'
+            f"jsh::_notice_lines {shlex.quote(text)} 36"
+        )
+        result = subprocess.run(
+            ["bash", "-c", code],
+            env=os.environ | {"NO_COLOR": "1"},
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        self.assertEqual(result.stdout.splitlines(), module.format_notice(text, 40))
 
     def test_renderer_sanitizes_all_terminal_event_text(self):
-        display = self.render_terminal([
-            ("step", "check", "links"),
-            ("progress", "x\x1b[2Jy"),
-            ("wait", "Checking links...  xy"),
-            ("item", "ok", "x\x1b[2Jy"),
-            ("group", "co\x1b[2Jre", "purpose"),
-            ("raw", "\x1b]0;x\x07boom"),
-            ("end", "0"),
-        ], LANG="en_US.UTF-8", LC_ALL="en_US.UTF-8")
-        cleaned = display.replace("\r\x1b[K", "")
+        display = self.render_terminal(
+            [
+                ("step", "check", "links"),
+                ("progress", "x\x1b[2Jy"),
+                ("wait", "  xy\r\n"),
+                ("item", "ok", "x\x1b[2Jy"),
+                ("group", "co\x1b[2Jre", "purpose"),
+                ("raw", "\x1b]0;x\x07boom"),
+                ("end", "0"),
+            ],
+            LANG="en_US.UTF-8",
+            LC_ALL="en_US.UTF-8",
+        )
+        cleaned = display.replace("\r\x1b[K", "").replace("\x1b[1A", "")
         self.assertNotIn("\x1b", cleaned)
-        self.assertIn("Checking links...  xy", cleaned)
+        self.assertIn("  xy\r\n", cleaned)
         self.assertIn("✓ xy", cleaned)
         self.assertIn("› core  purpose", cleaned)
         self.assertIn("    boom", cleaned)
 
     def test_terminal_spinner_clears_without_a_completion_line(self):
-        display = self.render_terminal([
-            ("step", "check", "prerequisites"),
-            ("progress", "jq"),
-            ("wait", "Checking prerequisites...  jq"),
-            ("item", "ok", "jq is installed"),
-            ("end", "0"),
-        ], LANG="en_US.UTF-8", LC_ALL="en_US.UTF-8")
-        self.assertIn("Checking prerequisites...  jq", display)
-        lines = [line.split("\r\x1b[K")[-1] for line in display.split("\r\n")]
-        self.assertEqual([line for line in lines if line], ["✓ jq is installed"])
+        display = self.render_terminal(
+            [
+                ("step", "check", "prerequisites"),
+                ("progress", "jq"),
+                ("wait", "  jq\r\n"),
+                ("item", "ok", "jq is installed"),
+                ("end", "0"),
+            ],
+            LANG="en_US.UTF-8",
+            LC_ALL="en_US.UTF-8",
+        )
+        self.assertIn("  jq\r\n", display)
+        self.assertIn("Checking prerequisites...\r\x1b[K\x1b[1A\r\x1b[K✓ jq is installed", display)
+        self.assertNotIn("Checked prerequisites", display)
 
     def test_terminal_task_failure_shows_saved_log_tail(self):
         with tempfile.TemporaryDirectory(prefix="jsh-output-") as directory:
@@ -4541,11 +4586,48 @@ with output.session():
             )
         self.assertNotIn("\x1b[31m", display)
         lines = [line.split("\r\x1b[K")[-1] for line in display.split("\r\n")]
-        self.assertEqual([line for line in lines if line], [
-            "✕ build failed (7)", "    three", "    four",
-            "    red", "    ab", "    seven", "    eight", "    nine", "    ten",
-            "    eleven", "    twelve", f"    Log: {saved}",
-        ])
+        self.assertEqual(
+            [line for line in lines if line],
+            [
+                "✕ build failed (7)",
+                "    three",
+                "    four",
+                "    red",
+                "    ab",
+                "    seven",
+                "    eight",
+                "    nine",
+                "    ten",
+                "    eleven",
+                "    twelve",
+                f"    Log: {saved}",
+            ],
+        )
+
+    def test_terminal_task_failure_dedents_saved_log_tail(self):
+        with tempfile.TemporaryDirectory(prefix="jsh-output-") as directory:
+            saved = Path(directory) / "saved.log"
+            saved.write_text("  x No solution\n  > Because\n      wrapped\n")
+            display = self.render_terminal(
+                [
+                    ("task", "build", str(Path(directory) / "active.log")),
+                    ("taskend", "1", str(saved)),
+                    ("end", "0"),
+                ],
+                LANG="en_US.UTF-8",
+                LC_ALL="en_US.UTF-8",
+            )
+        lines = [line.split("\r\x1b[K")[-1] for line in display.split("\r\n")]
+        self.assertEqual(
+            [line for line in lines if line],
+            [
+                "✕ build failed (1)",
+                "    x No solution",
+                "    > Because",
+                "        wrapped",
+                f"    Log: {saved}",
+            ],
+        )
 
     def test_terminal_selects_frames_from_the_user_locale(self):
         cases = (

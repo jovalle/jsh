@@ -168,10 +168,16 @@ jsh::task() {
     fi
   elif ((status && record_failure)); then
     jsh::plain item fail "${label} failed (${status})"
-    LC_ALL=C sed $'s/\r$//; s/.*\r//' "${JSH_TASK_LOG}" | jsh::task_text | tail -n 10 |
-      while IFS= read -r line; do
-        [[ -z ${line} ]] || jsh::plain item output "${line}"
-      done
+    local lines=() indent=-1 lead
+    while IFS= read -r line; do
+      [[ -n ${line// /} ]] || continue
+      lead=${line%%[! ]*}
+      ((indent >= 0 && ${#lead} >= indent)) || indent=${#lead}
+      lines+=("${line}")
+    done < <(LC_ALL=C sed $'s/\r$//; s/.*\r//' "${JSH_TASK_LOG}" | jsh::task_text | tail -n 10)
+    for line in ${lines[@]+"${lines[@]}"}; do
+      jsh::plain item output "${line:indent}"
+    done
     jsh::plain item output "Log: ${saved}"
   fi
   if ((status && record_failure)) && [[ -d ${JSH_REPORT:-} ]]; then
@@ -537,7 +543,7 @@ jsh::summary() {
   if [[ -s ${JSH_REPORT:-}/notices ]]; then
     printf "\n%s\n" "$(jsh::paint 1 '1;33' 'Action needed')"
     local width=0
-    [[ ! -t 1 ]] || width=$(tput cols 2>/dev/null || echo 80)
+    [[ ! -t 1 ]] || width=$(($(tput cols 2>/dev/null || echo 80) - 4))
     ((width <= 0 || width >= 20)) || width=20
     while IFS= read -r event; do
       [[ -z ${event} ]] || jsh::_notice_lines "${event}" "${width}"
@@ -545,10 +551,10 @@ jsh::summary() {
   fi
 }
 
-# Usage: jsh::_notice_lines TEXT WIDTH. Prints a flush-left bullet, wrapping at
+# Usage: jsh::_notice_lines TEXT WIDTH. Prints a bullet with a hanging indent, wrapping at
 # WIDTH (0 disables wrapping) without splitting `code` spans, which are shown in cyan.
 jsh::_notice_lines() {
-  local text=$1 width=$2 line='' token shown size used=2 prefix
+  local text=$1 width=$2 line='' token shown size used=0 prefix
   local -a tokens=()
   while [[ -n ${text} ]]; do
     text=${text#"${text%%[! ]*}"}
@@ -563,7 +569,7 @@ jsh::_notice_lines() {
       text=${text:${#token}}
     fi
   done
-  prefix="$(jsh::paint 1 '1;33' '•') "
+  prefix="  $(jsh::paint 1 '1;33' '•') "
   for token in "${tokens[@]}"; do
     shown=${token}
     if [[ ${token} == \`?*\` && ${_jsh_color_1:-0} == 1 ]]; then
@@ -574,13 +580,10 @@ jsh::_notice_lines() {
     fi
     if [[ -n ${line} ]] && ((width && used + 1 + size > width)); then
       printf '%s%s\n' "${prefix}" "${line}"
-      prefix=''
+      prefix='    '
       line='' used=0
     fi
-    if [[ -n ${line} ]]; then
-      line+=' '
-      used=$((used + 1))
-    fi
+    if [[ -n ${line} ]]; then line+=' '; used=$((used + 1)); fi
     line+=${shown}
     used=$((used + size))
   done
