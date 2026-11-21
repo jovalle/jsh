@@ -15,7 +15,7 @@ while IFS=' ' read -r name url; do
   jsh::status "${name}"
   destination=${vendor}/${name}
   if [[ -d ${destination}/.git ]]; then
-    if ((update)); then
+    if ((update)) && jsh::internet "${name} update"; then
       before=$(git -C "${destination}" rev-parse HEAD)
       if [[ ${JSH_DRY_RUN:-0} == 1 ]]; then
         if remote=$(GIT_TERMINAL_PROMPT=0 git -C "${destination}" ls-remote origin HEAD) &&
@@ -44,6 +44,7 @@ while IFS=' ' read -r name url; do
     jsh::notice "${destination} is not a Git checkout; leaving it alone"
     exit 1
   else
+    jsh::internet "${name}" || continue
     jsh::run mkdir -p -- "${vendor}"
     jsh::task "installing ${name}" git clone --depth 1 -- "${url}" "${destination}"
     jsh::added "${name} cloned" "${name} is missing"
@@ -60,14 +61,16 @@ jsh::step check "fzf binary"
 if [[ -r ${installer} ]]; then
   pinned=$(sed -n 's/^version=//p' "${installer}" | head -n 1)
   if [[ ! -x ${vendor}/fzf/bin/fzf ]]; then
-    jsh::task "installing fzf binary" "${installer}" --bin
-    jsh::added "fzf installed" "fzf is not installed"
+    if jsh::internet "fzf binary"; then
+      jsh::task "installing fzf binary" "${installer}" --bin
+      jsh::added "fzf installed" "fzf is not installed"
+    fi
   else
     current=$("${vendor}/fzf/bin/fzf" --version)
     current=${current%% *}
     if [[ -n ${pinned} && ${current} == "${pinned}" ]]; then
       jsh::ok "fzf is ${pinned}"
-    else
+    elif jsh::internet "fzf ${pinned}"; then
       jsh::task "installing fzf binary" "${installer}" --bin
       jsh::changed "fzf set ${pinned}" "fzf is ${current}"
     fi

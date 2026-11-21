@@ -40,6 +40,9 @@ for _jsh_arg in "$@"; do
 done
 unset _jsh_arg _jsh_script
 export JSH_DRY_RUN=${JSH_DRY_RUN:-0}
+# Mirrors-only hosts install only from package managers' configured (internal) indexes.
+export JSH_MIRRORS_ONLY=${JSH_MIRRORS_ONLY:-0}
+[[ ${JSH_MIRRORS_ONLY} != 1 ]] || export UV_PYTHON_DOWNLOADS=never
 if [[ -z ${JSH_PLATFORM:-} ]]; then
   if [[ $(uname -s) == Darwin ]]; then
     JSH_PLATFORM=darwin
@@ -85,6 +88,12 @@ jsh::root() {
   fi
 }
 jsh::admin() { [[ ${EUID} == 0 ]] || sudo -n true >/dev/null 2>&1; }
+# Usage: jsh::internet NAME. Fails, reporting NAME as skipped, on mirrors-only hosts.
+jsh::internet() {
+  [[ ${JSH_MIRRORS_ONLY:-0} == 1 ]] || return 0
+  jsh::skipped "$*: not on an internal mirror"
+  return 1
+}
 jsh::skip() {
   jsh::skipped "$*"
   exit 0
@@ -267,6 +276,10 @@ jsh::download() {
   local url=$1 destination=$2
   [[ ${url} == https://* ]] || {
     jsh::fail "downloads require HTTPS: ${url}"
+    return 1
+  }
+  [[ ${JSH_MIRRORS_ONLY:-0} != 1 ]] || {
+    jsh::fail "internal mirrors only; refusing to download ${url}"
     return 1
   }
   jsh::need curl || return

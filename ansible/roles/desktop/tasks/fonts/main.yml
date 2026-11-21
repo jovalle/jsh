@@ -6,9 +6,16 @@
   register: desktop_fonts_present
   when: jsh_platform != 'darwin'
 
+- name: skip
+  ansible.builtin.debug:
+    msg: "Skipping JetBrains Mono Nerd Font: not on an internal mirror"
+  when: >-
+    jsh_mirrors_only | bool and jsh_platform != 'darwin'
+    and (jsh_update | bool or desktop_fonts_present.results | rejectattr('stat.exists') | list | length > 0)
+
 - name: Font release
   when: >-
-    jsh_platform != 'darwin'
+    jsh_platform != 'darwin' and not jsh_mirrors_only | bool
     and (jsh_update | bool or desktop_fonts_present.results | rejectattr('stat.exists') | list | length > 0)
   block:
     - name: JetBrains Mono Nerd Font

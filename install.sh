@@ -46,6 +46,11 @@ if [[ -z ${source_path} || ! -f ${source_path} || ! -d $(dirname -- "${source_pa
     printf 'jsh: install Git first\n' >&2
     exit 1
   }
+  [[ ${JSH_MIRRORS_ONLY:-0} != 1 ]] || {
+    printf 'jsh: GitHub is not an internal mirror; clone jsh from one into %s and run its install.sh\n' \
+      "${target}" >&2
+    exit 1
+  }
   if [[ ${JSH_DRY_RUN:-0} == 1 ]]; then
     printf '+ would clone  %s\n\nPreview complete\nNo settings changed\n' "${target}"
     exit 0

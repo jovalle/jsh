@@ -5,9 +5,25 @@
       {{ jsh_platform | packages_selection(jsh_desktop, ansible_run_tags, packages_common,
                                            packages_roles, packages_extra, packages_roles_extra) }}
 
+# Mirrors-only hosts install only from the native and uv indexes they configure.
+- name: skip
+  ansible.builtin.debug:
+    msg: "Skipping {{ item }}: not on an internal mirror"
+  loop: >-
+    {{ (['Homebrew packages (' ~ (packages_selected | dict2items
+          | selectattr('key', 'in', ['brew', 'casks', 'mas']) | map(attribute='value')
+          | map('length') | sum) ~ ')']
+        if packages_selected.keys() | intersect(['taps', 'brew', 'casks', 'mas']) | length > 0 else [])
+       + (packages_selected.flatpak | default([]) | map('regex_replace', '^', 'Flatpak ') | list)
+       + (packages_selected.appimage | default([]) | map(attribute='name')
+          | map('regex_replace', '$', ' AppImage') | list) }}
+  when: jsh_mirrors_only | bool
+
 - name: Homebrew packages are installed
   ansible.builtin.include_tasks: brew.yml
-  when: packages_selected.keys() | intersect(['taps', 'brew', 'casks', 'mas']) | length > 0
+  when:
+    - not jsh_mirrors_only | bool
+    - packages_selected.keys() | intersect(['taps', 'brew', 'casks', 'mas']) | length > 0
 
 - name: Native packages are installed
   ansible.builtin.include_tasks: native.yml
@@ -15,7 +31,7 @@
 
 - name: Flatpak apps are installed
   ansible.builtin.include_tasks: flatpak.yml
-  when: packages_selected.flatpak is defined
+  when: packages_selected.flatpak is defined and not jsh_mirrors_only | bool
 
 - name: uv tools are installed
   ansible.builtin.include_tasks: uv.yml
@@ -23,7 +39,7 @@
 
 - name: AppImages are installed
   ansible.builtin.include_tasks: appimage.yml
-  loop: "{{ packages_selected.appimage | default([]) }}"
+  loop: "{{ [] if jsh_mirrors_only | bool else packages_selected.appimage | default([]) }}"
   loop_control:
     loop_var: packages_appimage
     label: "{{ packages_appimage.name }}"

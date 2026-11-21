@@ -307,7 +307,7 @@ class CallbackModule(CallbackBase):
         if self._group is None or (not item and "results" in raw):
             return
         action = _short(task.action)
-        if action == "debug" and task.name in ("notice", "info", "ok"):
+        if action == "debug" and task.name in ("notice", "info", "ok", "skip"):
             if not raw.get("skipped"):
                 self._item(task.name, raw.get("msg", ""))
             return

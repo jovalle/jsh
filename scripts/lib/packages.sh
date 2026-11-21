@@ -181,6 +181,7 @@ jsh::brew() {
     jsh::skipped "Homebrew casks: macOS only"
     return 0
   fi
+  jsh::internet "${object}" || return 0
   jsh::step check "${object}"
   [[ ${kind} != casks ]] || flag=--cask
   if ! command -v brew >/dev/null 2>&1; then
@@ -243,6 +244,7 @@ jsh::brew() {
 jsh::mas() {
   local listing id name status=0
   [[ ${JSH_UPDATE:-0} == 1 && ${JSH_PLATFORM} == darwin ]] || return 0
+  jsh::internet "App Store apps" || return 0
   jsh::step check "App Store apps"
   if ! command -v mas >/dev/null 2>&1; then
     jsh::skipped "App Store apps: mas is unavailable"

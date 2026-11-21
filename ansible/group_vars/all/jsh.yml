@@ -3,6 +3,8 @@
 jsh_root: "{{ lookup('ansible.builtin.env', 'JSH_ROOT') or (playbook_dir | dirname) }}"
 jsh_update: "{{ lookup('ansible.builtin.env', 'JSH_UPDATE') == '1' }}"
 jsh_keep_apps: "{{ lookup('ansible.builtin.env', 'JSH_KEEP_APPS') == '1' }}"
+# Only package managers' configured (internal) indexes; public downloads are skipped.
+jsh_mirrors_only: "{{ lookup('ansible.builtin.env', 'JSH_MIRRORS_ONLY') == '1' }}"
 jsh_wallpaper: "{{ lookup('ansible.builtin.env', 'JSH_WALLPAPER') }}"
 jsh_audio_policy: "{{ lookup('ansible.builtin.env', 'JSH_AUDIO_POLICY') }}"
 jsh_waterfox_profile: "{{ lookup('ansible.builtin.env', 'JSH_WATERFOX_PROFILE') }}"
@@ -35,5 +37,6 @@ jsh_script_env:
   JSH_HOST: "{{ jsh_host }}"
   JSH_UPDATE: "{{ jsh_update | int }}"
   JSH_KEEP_APPS: "{{ jsh_keep_apps | int }}"
+  JSH_MIRRORS_ONLY: "{{ jsh_mirrors_only | int }}"
   JSH_DRY_RUN: "{{ ansible_check_mode | int }}"
   JSH_OUTPUT: renderer

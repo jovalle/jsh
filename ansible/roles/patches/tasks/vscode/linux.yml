@@ -4,13 +4,24 @@
   ansible.builtin.package_facts:
     manager: auto
 
+- name: skip
+  ansible.builtin.debug:
+    msg: "Skipping VS Code package: not on an internal mirror"
+  vars:
+    patches_vscode_current: "{{ (ansible_facts.packages.code | default([{}]))[0].version | default('') }}"
+  when:
+    - jsh_mirrors_only | bool
+    - (patches_vscode_current == '' and not jsh_update | bool) or (patches_vscode_current != '' and jsh_update | bool)
+
 - name: VS Code package
   vars:
     patches_vscode_channel: "{{ 'deb' if jsh_platform == 'debian' else 'rpm' }}"
     patches_vscode_arch: "{{ 'arm64' if ansible_facts.architecture in ['aarch64', 'arm64'] else 'x64' }}"
     patches_vscode_api: https://update.code.visualstudio.com/api/update
     patches_vscode_current: "{{ (ansible_facts.packages.code | default([{}]))[0].version | default('') }}"
-  when: (patches_vscode_current == '' and not jsh_update | bool) or (patches_vscode_current != '' and jsh_update | bool)
+  when:
+    - not jsh_mirrors_only | bool
+    - (patches_vscode_current == '' and not jsh_update | bool) or (patches_vscode_current != '' and jsh_update | bool)
   block:
     - name: VS Code install is planned
       ansible.builtin.set_fact:

@@ -75,7 +75,9 @@ prompts stay in VS Code Settings Sync, not here.
 - Steps must be idempotent: check current state, change only what differs, and report each
   unit once with `jsh::ok`, `jsh::drift`, `jsh::added`, `jsh::changed`, or `jsh::removed`. Use
   `jsh::notice` only for something the user must act on. Honor `JSH_DRY_RUN` through
-  `jsh::run`/`jsh::root`/`jsh::task`, and `JSH_UPDATE` for upgrades.
+  `jsh::run`/`jsh::root`/`jsh::task`, and `JSH_UPDATE` for upgrades. Honor `JSH_MIRRORS_ONLY`:
+  anything fetched from a public URL (not a package manager's configured index) goes behind
+  `jsh::internet NAME` in Bash or `jsh_mirrors_only` with a `skip` debug task in Ansible.
 - Output follows `lib/output.md`: items stream as facts, the active step is a transient
   bottom line, and groups close with ✓/✕/–.
 - `bin/` commands load `lib/shell/output.sh`, never `scripts/lib/`.

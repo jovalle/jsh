@@ -106,6 +106,7 @@ fi
   jsh::skip "foobar2000 decoder update: no decoder is installed"
 installed=''
 [[ ! -e ${target} || ! -f ${state} ]] || installed=$(<"${state}")
+jsh::internet "foobar2000 SACD decoder" || exit 0
 if [[ ${JSH_DRY_RUN:-0} == 1 ]]; then
   if ((existing)); then
     jsh::info "foobar2000 decoder update is unchecked in preview"

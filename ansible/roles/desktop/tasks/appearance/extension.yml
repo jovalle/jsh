@@ -6,6 +6,15 @@
     get_checksum: false
   register: desktop_extension_metadata
 
+- name: skip
+  ansible.builtin.debug:
+    msg: "Skipping {{ desktop_extension_uuid }}: not on an internal mirror"
+  when:
+    - jsh_mirrors_only | bool
+    - >-
+      desktop_extension_uuid not in desktop_gnome_extensions_present | default([])
+      or (jsh_update | bool and desktop_extension_metadata.stat.isreg | default(false))
+
 - name: ok
   ansible.builtin.debug:
     msg: "{{ desktop_extension_uuid }} is installed"
@@ -20,6 +29,7 @@
     - desktop_extension_metadata.stat.isreg | default(false)
     - jsh_update | bool
     - ansible_check_mode
+    - not jsh_mirrors_only | bool
 
 - name: "{{ desktop_extension_uuid }} would be installed"
   ansible.builtin.command:
@@ -30,6 +40,7 @@
   when:
     - desktop_extension_uuid not in desktop_gnome_extensions_present | default([])
     - ansible_check_mode
+    - not jsh_mirrors_only | bool
 
 - name: "{{ desktop_extension_uuid }} release is read"
   ansible.builtin.uri:
@@ -41,6 +52,7 @@
   register: desktop_extension_release
   when:
     - not ansible_check_mode
+    - not jsh_mirrors_only | bool
     - >-
       desktop_extension_uuid not in desktop_gnome_extensions_present | default([])
       or (jsh_update | bool and desktop_extension_metadata.stat.isreg | default(false))

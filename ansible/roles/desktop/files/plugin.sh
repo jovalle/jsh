@@ -45,6 +45,7 @@ if [[ -n ${installed} && ${JSH_UPDATE:-0} != 1 ]]; then
     exit 0
   fi
 fi
+jsh::internet "XFCE Wave:3 audio plugin" || exit 0
 if [[ ${JSH_DRY_RUN:-0} == 1 ]]; then
   if [[ -n ${installed} && ${JSH_UPDATE:-0} == 1 ]]; then
     jsh::info "XFCE Wave:3 audio plugin update is unchecked in preview"

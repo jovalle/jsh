@@ -577,6 +577,25 @@ exit "__DOLLAR__status"
         self.assertIn("would download https://example.invalid/file", result.stdout)
         self.assertNotIn("Downloaded file", result.stdout)
 
+    def test_mirrors_only_skips_public_sources_and_refuses_downloads(self):
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                '. "$JSH_ROOT/scripts/lib/common.sh"; jsh::step check assets; '
+                "jsh::internet fonts && exit 9; "
+                'jsh::download https://example.invalid/file "$HOME/file" && exit 8; exit 0',
+            ],
+            env=self.env | {"JSH_DRY_RUN": "1", "JSH_MIRRORS_ONLY": "1"},
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Skipping fonts: not on an internal mirror", result.stdout)
+        self.assertIn("refusing to download https://example.invalid/file", result.stdout)
+        self.assertNotIn("would download", result.stdout)
+
     def test_installer_links_follow_the_checkout_location(self):
         checkout = self.home / "checkout with spaces"
         for name in ("scripts/lib", "lib/shell", "bin", "dotfiles"):
@@ -1503,6 +1522,30 @@ esac""",
         missing = run()
         self.assertIn("! fzf is not installed", missing)
         self.assertIn("+ fzf installed", missing)
+
+    def test_shell_on_mirrors_only_hosts_clones_and_downloads_nothing(self):
+        vendor = self.home / "mirror-fixture"
+        (vendor / "fzf/.git").mkdir(parents=True)
+        installer = vendor / "fzf/install"
+        installer.write_text('#!/bin/sh\nversion=0.60.0\ntouch "$HOME/fzf-download"\n')
+        installer.chmod(0o755)
+        self.tool("git", 'printf "%s\\n" "$*" >> "$HOME/git.log"')
+        result = subprocess.run(
+            ["bash", str(ROOT / "scripts/shell.sh"), "--update"],
+            env=self.env | {"JSH_VENDOR": str(vendor), "JSH_MIRRORS_ONLY": "1"},
+            cwd=self.home,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Skipping fzf update: not on an internal mirror", result.stdout)
+        self.assertIn("Skipping zsh-completions: not on an internal mirror", result.stdout)
+        self.assertIn("Skipping fzf binary: not on an internal mirror", result.stdout)
+        log = self.home / "git.log"
+        self.assertNotIn("clone", log.read_text() if log.exists() else "")
+        self.assertNotIn("pull", log.read_text() if log.exists() else "")
+        self.assertFalse((self.home / "fzf-download").exists())
 
     def test_git_repository_updates_suppress_noop_messages(self):
         checkout = self.home / "checkout"
@@ -7462,7 +7505,7 @@ esac""",
 
     def test_vscode_linux_download_uses_private_tempdir_and_skips_in_check_mode(self):
         tasks = self.yaml_file(ROOT / "ansible/roles/patches/tasks/vscode/linux.yml")
-        package = tasks[1]
+        package = next(task for task in tasks if task.get("name") == "VS Code package")
         block = package["block"]
         temporary = next(task for task in block if "ansible.builtin.tempfile" in task)
         self.assertEqual(temporary["ansible.builtin.tempfile"]["state"], "directory")
