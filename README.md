@@ -21,7 +21,7 @@ This clones into `~/.jsh` (or `JSH_HOME`), installs Git, Zsh, and the shell plug
 Apps, agents, and system settings are configured separately, through the Ansible setup roles:
 
 ```sh
-make configure                   # every setup role (needs admin rights)
+make configure                   # every setup role (needs admin rights; otherwise only agentics)
 make configure desktop patches   # only the named roles
 ```
 

@@ -303,7 +303,7 @@ jsh::sha256() {
 jsh::_load_roles() {
   [[ ${_JSH_ROLES_LOADED:-0} != 1 ]] || return 0
   local output name meta description platform relative
-  local names='' table='' darwin='' linux=''
+  local names='' table='' darwin='' linux='' user=''
   if ! output=$(awk '
     /^[ \t]*ansible\.builtin\.include_role:[ \t]*$/ {
       if (pending) { bad = pending; exit 2 }
@@ -376,6 +376,15 @@ jsh::_load_roles() {
       jsh::fail "${relative}: expected MacOSX, Debian and EL platform metadata" >&2
       return 2
     fi
+    # galaxy_tags `unprivileged` marks a role that only touches the user's home.
+    if awk '
+      /^  galaxy_tags:/ { active = 1; if ($0 ~ /[[ ,]unprivileged[],]/) found = 1; next }
+      active && /^    - unprivileged[ \t]*$/ { found = 1 }
+      active && /^  [^ ]/ { active = 0 }
+      END { exit !found }
+    ' "${meta}"; then
+      user+=${name}$'\n'
+    fi
     names+=${name}$'\n'
     table+=${name}$'\t'${description}$'\n'
     [[ ${platform} == linux ]] || darwin+=${name}$'\n'
@@ -385,12 +394,14 @@ jsh::_load_roles() {
   _JSH_ROLES_TABLE=${table}
   _JSH_ROLES_DARWIN=${darwin}
   _JSH_ROLES_LINUX=${linux}
+  _JSH_ROLES_USER=${user}
   _JSH_ROLES_LOADED=1
 }
 jsh::roles() {
   jsh::_load_roles || return
   case ${1:-} in
     table) printf "%s" "${_JSH_ROLES_TABLE}" ;;
+    user) printf "%s" "${_JSH_ROLES_USER}" ;;
     here)
       if [[ ${JSH_PLATFORM} == darwin ]]; then
         printf "%s" "${_JSH_ROLES_DARWIN}"

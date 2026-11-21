@@ -3,7 +3,10 @@ galaxy_info:
   author: jsh
   description: Write global agent instructions, merge agent settings, and install agent skills
   license: MIT
-  min_ansible_version: "2.22"
+  # Runs without admin rights: everything it writes is under $HOME.
+  galaxy_tags:
+    - unprivileged
+  min_ansible_version: "2.21"
   platforms:
     - name: MacOSX
       versions:

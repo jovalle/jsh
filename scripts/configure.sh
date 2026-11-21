@@ -9,7 +9,8 @@ jsh::usage() {
   printf '%s\n' 'Usage: scripts/configure.sh [ROLE ...]' \
     '       scripts/configure.sh [--dry-run] [--update] [--list] [ROLE ...]' \
     '' 'With no roles, every setup role runs when the user has admin rights' \
-    '(sudo/root on Linux, the admin group on macOS). Named roles run only those.' \
+    '(sudo/root on Linux, the admin group on macOS); otherwise only roles that' \
+    'stay in $HOME (agentics) run. Named roles run only those.' \
     'Their ansible/roles/NAME roles run together in one playbook. Run ./install.sh first.' \
     '' 'Use --update to update software; Homebrew updates all installed packages and' \
     'removes deprecated or disabled packages. Configuration remains idempotent.'
@@ -88,6 +89,7 @@ if ((${#roles[@]} == 0)); then
     while IFS= read -r role; do roles+=("${role}"); done < <(jsh::roles)
   else
     skip_workstation=1
+    while IFS= read -r role; do roles+=("${role}"); done < <(jsh::roles user)
   fi
 fi
 [[ ${JSH_UPDATE:-0} != 1 ]] || export JSH_BREW_DEFER=1
@@ -102,7 +104,7 @@ jsh::session_open || :
 status=0
 if ((skip_workstation)); then
   jsh::group configure "Apps, agents, and system settings"
-  jsh::skipped "setup roles: needs admin rights"
+  jsh::skipped "other setup roles: needs admin rights"
 fi
 if [[ ${JSH_UPDATE:-0} == 1 ]]; then
   jsh::group maintenance

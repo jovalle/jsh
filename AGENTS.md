@@ -36,7 +36,8 @@ prompts stay in VS Code Settings Sync, not here.
   then links dotfiles and `bin/`. It runs no setup roles.
 - `scripts/configure.sh` (`make configure [ROLE ...]`): runs the setup roles through
   `ansible/site.yml`, limited to this host; with no roles, every role when the user has admin
-  rights.
+  rights, otherwise only roles whose metadata has `galaxy_tags: [unprivileged]` (they write only
+  under `$HOME`).
 - `scripts/`: bootstrap scripts (`shell.sh`, `ansible.sh`, and `packages.sh`), `lists.py` (run
   by `make fmt`), and the only test file, `check.py`. `scripts/lib/` holds Bash shared by the bootstrap;
   `ansible/helpers/` holds role libraries; `scripts/packages.sh` declares only `core` and global

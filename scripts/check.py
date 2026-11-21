@@ -843,7 +843,7 @@ exit "__DOLLAR__status"
         self.assertIn("Preview complete", result.stdout)
         self.assertNotIn(" failed", result.stdout)
 
-    def test_configure_without_admin_skips_setup_roles(self):
+    def test_configure_without_admin_runs_only_unprivileged_roles(self):
         checkout = self.configure_fixture()
         self.tool("id", 'if [ "$1" = -Gn ]; then echo staff; else exec /usr/bin/id "$@"; fi')
         result = subprocess.run(
@@ -856,7 +856,8 @@ exit "__DOLLAR__status"
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("› configure  Apps, agents, and system settings", result.stdout)
-        self.assertIn("Skipping setup roles: needs admin rights", result.stdout)
+        self.assertIn("Skipping other setup roles: needs admin rights", result.stdout)
+        self.assertIn("agentics", result.stdout)
         self.assertNotIn("› macos", result.stdout)
 
     def test_configure_without_cached_sudo_records_action_needed(self):
@@ -872,7 +873,7 @@ exit "__DOLLAR__status"
             timeout=20,
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("Skipping setup roles: needs admin rights", result.stdout)
+        self.assertIn("Skipping other setup roles: needs admin rights", result.stdout)
         self.assertIn(
             "Configuration needs sudo; run `sudo -v` first, then rerun `make configure`",
             result.stdout,
