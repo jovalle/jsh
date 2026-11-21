@@ -6838,12 +6838,19 @@ exec /usr/bin/stat "$@"
                 **linux(flatpak=["net.waterfox.waterfox"]),
             },
             "desktop": {"darwin": {}, "debian": {"apt": xfce}, "rhel": {"dnf": xfce}},
-            "ai": {"darwin": {"brew": ["opencode"], "uv": graphify,
-                              "casks": "antigravity-cli chatgpt codex copilot-cli".split()},
-                   "debian": {"brew": ["opencode"], "uv": graphify},
-                   "rhel": {"brew": ["opencode"], "uv": graphify}},
-            "sublime": {"darwin": {"casks": ["sublime-text"]},
-                        **linux(flatpak=["com.sublimetext.three"])},
+            "ai": {
+                "darwin": {
+                    "brew": ["opencode"],
+                    "uv": graphify,
+                    "casks": "antigravity antigravity-cli chatgpt codex copilot-cli".split(),
+                },
+                "debian": {"brew": ["opencode"], "uv": graphify},
+                "rhel": {"brew": ["opencode"], "uv": graphify},
+            },
+            "sublime": {
+                "darwin": {"casks": ["sublime-text"]},
+                **linux(flatpak=["com.sublimetext.three"]),
+            },
             "vscode": {"darwin": {"casks": ["visual-studio-code"]}, "debian": {}, "rhel": {}},
             "tools": {
                 "darwin": {
