@@ -297,9 +297,15 @@ class CallbackModule(CallbackBase):
         if not isinstance(stdout, str) or MARKER not in stdout:
             return False
         # str.splitlines() would also split at the marker, so split on newlines only.
+        opened = False
         for line in stdout.split("\n"):
             if line.startswith(MARKER):
                 self._write(line)
+                opened = opened or line[len(MARKER) :].startswith("step\t")
+        # The script's steps are its own; close them so later tasks report under the group.
+        if opened:
+            self._emit("stepclose")
+            self._step = False
         return True
 
     def _done(self, result, item: bool = False) -> None:

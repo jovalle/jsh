@@ -5503,6 +5503,32 @@ print(json.dumps(problems))
         items = [event for event in events if event[0] == "item"]
         self.assertEqual(items, [["item", "added", "x installed", ""]])
 
+    def test_callback_closes_helper_step_before_later_tasks(self):
+        role = r"""- name: helper ran
+  ansible.builtin.command: printf '\036step\tcheck\thelper thing\n\036item\tok\tthing\n'
+  register: helper
+  changed_when: false
+- name: later file is current
+  ansible.builtin.command: 'true'
+"""
+        result, events = self.run_play(
+            "    - name: macos\n      ansible.builtin.include_role: {name: macos}\n",
+            roles={"macos": role},
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(
+            events,
+            [
+                ["group", "macos", self.purpose("macos")],
+                ["step", "check", "helper thing"],
+                ["item", "ok", "thing"],
+                ["stepclose"],
+                ["step", "check", "macos"],
+                ["item", "changed", "later file is current"],
+                ["stepclose"],
+            ],
+        )
+
     def test_callback_handler_start_uses_ansibles_handler_signature(self):
         import ast
 
