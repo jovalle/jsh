@@ -1,7 +1,0 @@
----
-# Collections installed by scripts/ansible.sh into local/ansible/collections.
-collections:
-  - name: community.general
-    version: 14.0.1
-  - name: ansible.posix
-    version: 2.2.2

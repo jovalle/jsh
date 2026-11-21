@@ -3,7 +3,7 @@ galaxy_info:
   author: jsh
   description: Close a running app, apply its pending settings, and reopen it
   license: MIT
-  min_ansible_version: "2.22"
+  min_ansible_version: "2.21"
   platforms:
     - name: MacOSX
       versions:

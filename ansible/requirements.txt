@@ -1,3 +1,5 @@
 # Ansible for host configuration, installed by scripts/ansible.sh into local/ansible/venv.
-ansible-core==2.22.0
-ansible-lint==26.11.0
+# The ansible package bundles the collections the roles use, so nothing comes from Galaxy.
+ansible==14.5.0
+ansible-core==2.21.5
+ansible-lint==26.1.1

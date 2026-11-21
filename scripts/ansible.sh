@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
-# Install a pinned Ansible and its collections into the checkout.
+# Install a pinned Ansible, with its bundled collections, into the checkout.
 set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck source=scripts/lib/common.sh
 . "${SCRIPT_DIR}/lib/common.sh" "$@"
 
 python_version=3.13
+python_preference=only-managed
+# Managed Pythons come from GitHub; mirrors-only hosts use an installed one ansible-core supports.
+if [[ ${JSH_MIRRORS_ONLY} == 1 ]]; then
+  python_version='>=3.12'
+  python_preference=only-system
+fi
 uv_version=0.13.8
 home=${JSH_ANSIBLE_HOME:-${JSH_ROOT}/local/ansible}
 requirements=${JSH_ROOT}/ansible/requirements.txt
-collections=${JSH_ROOT}/ansible/requirements.yml
 
 # Linux has no uv package in apt or dnf; install the pinned release binary instead.
 install_uv() {
@@ -50,6 +55,9 @@ if [[ -z ${uv} ]]; then
   elif [[ ${JSH_PLATFORM} == darwin ]]; then
     jsh::fail "uv is required; run ./install.sh to install the core packages"
     exit 1
+  elif [[ ${JSH_MIRRORS_ONLY} == 1 ]]; then
+    jsh::notice 'uv is required and its release is not on an internal mirror; install uv from the internal PyPI with `python3 -m pip install --user uv`, then rerun'
+    exit 1
   elif [[ ${JSH_DRY_RUN} == 1 ]]; then
     jsh::info "would install uv ${uv_version}"
     uv=uv
@@ -62,8 +70,8 @@ fi
 jsh::status Ansible
 scratch=$(jsh::temp)
 {
-  cat "${requirements}" "${collections}"
-  printf 'python %s\nhome %s\n' "${python_version}" "${home}"
+  cat "${requirements}"
+  printf 'python %s %s\nhome %s\n' "${python_preference}" "${python_version}" "${home}"
 } >"${scratch}/stamp"
 wanted=$(jsh::sha256 "${scratch}/stamp")
 current=
@@ -88,12 +96,12 @@ fi
 # The stamp is written last, so an interrupted or failed install is retried on the next run.
 mkdir -p "${home}"
 rm -f -- "${home}/stamp"
-UV_PYTHON_PREFERENCE=only-managed jsh::task "Creating the Ansible environment" \
+# Collections installed from Galaxy by older versions would shadow the bundled ones.
+rm -rf -- "${home}/collections"
+UV_PYTHON_PREFERENCE=${python_preference} jsh::task "Creating the Ansible environment" \
   "${uv}" venv --quiet --clear --python "${python_version}" "${home}/venv"
-jsh::task "Installing ansible-core" \
+jsh::task "Installing Ansible" \
   "${uv}" pip install --quiet --python "${home}/venv/bin/python" -r "${requirements}"
-jsh::task "Installing Ansible collections" \
-  "${home}/venv/bin/ansible-galaxy" collection install --force -r "${collections}" -p "${home}/collections"
 printf '%s\n' "${wanted}" >"${home}/stamp"
 if ((installed)); then
   jsh::changed "Ansible updated" "Ansible is out of date"

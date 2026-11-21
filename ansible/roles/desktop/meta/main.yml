@@ -3,7 +3,7 @@ galaxy_info:
   author: jsh
   description: Configure fonts, desktop appearance, dock, displays, keybindings, audio, and wallpaper
   license: MIT
-  min_ansible_version: "2.22"
+  min_ansible_version: "2.21"
   platforms:
     - name: MacOSX
       versions:

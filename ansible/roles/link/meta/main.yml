@@ -3,7 +3,7 @@ galaxy_info:
   author: jsh
   description: Link managed files into place, backing up what they replace
   license: MIT
-  min_ansible_version: "2.22"
+  min_ansible_version: "2.21"
   platforms:
     - name: MacOSX
       versions:

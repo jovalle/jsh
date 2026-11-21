@@ -4906,7 +4906,7 @@ esac""",
         self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
         self.assertIn("+ Ansible installed", first.stdout)
         self.assertTrue((self.home / "ansible/stamp").is_file())
-        self.assertIn("collection install", (self.home / "galaxy.log").read_text())
+        self.assertFalse((self.home / "galaxy.log").exists())
         (self.home / "uv.log").unlink()
         second = self.bootstrap(root)
         self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
@@ -7436,6 +7436,28 @@ esac""",
         self.assertTrue(calls, calls)
         venv = next(line for line in calls if "|venv " in line)
         self.assertTrue(venv.startswith("only-managed|"), calls)
+
+    def test_ansible_bootstrap_on_mirrors_only_hosts_uses_a_system_python(self):
+        self.mock_uv()
+        stale = self.home / "ansible/collections/ansible_collections"
+        stale.mkdir(parents=True)
+        result = self.bootstrap(self.checkout(), JSH_MIRRORS_ONLY="1")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        calls = (self.home / "uv.log").read_text().splitlines()
+        venv = next(line for line in calls if "|venv " in line)
+        self.assertTrue(venv.startswith("only-system|"), calls)
+        self.assertIn("--python >=3.12 ", venv)
+        self.assertFalse(stale.parent.exists())
+
+    def test_ansible_bootstrap_on_mirrors_only_hosts_never_downloads_uv(self):
+        # A brew on PATH keeps common.sh from adding Homebrew's bin, which may hold a real uv.
+        self.tool("brew", "exit 1")
+        result = self.bootstrap(
+            self.checkout(), JSH_MIRRORS_ONLY="1", JSH_UV="", JSH_PLATFORM="debian"
+        )
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("not on an internal mirror", result.stdout + result.stderr)
+        self.assertFalse((self.home / ".local/bin/uv").exists())
 
     def test_settings_back_up_existing_home_files_before_replacing_them(self):
         target = self.home / ".config/example/settings.json"

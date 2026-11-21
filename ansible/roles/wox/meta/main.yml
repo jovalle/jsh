@@ -3,7 +3,7 @@ galaxy_info:
   author: jsh
   description: Install Wox, start it at login, and give it Command+Space or Super+Space
   license: MIT
-  min_ansible_version: "2.22"
+  min_ansible_version: "2.21"
   platforms:
     - name: MacOSX
       versions:
