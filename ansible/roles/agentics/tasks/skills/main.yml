@@ -1,4 +1,21 @@
 ---
+# Skill repositories come from GitHub, not a mirror, so they are cloned on mirrors-only hosts too.
+# A proxy without credentials in its URL (Kerberos) needs Git to negotiate; an empty user enables it.
+- name: Git proxy is resolved
+  ansible.builtin.set_fact:
+    agentics_skills_git_env: >-
+      {%- set proxy = lookup('env', 'https_proxy') or lookup('env', 'HTTPS_PROXY') -%}
+      {%- if proxy and '@' not in proxy -%}
+      {%- set scheme = proxy.split('://')[0] if '://' in proxy else 'http' -%}
+      {%- set hostport = proxy.split('://')[-1].rstrip('/') -%}
+      {{ {'GIT_TERMINAL_PROMPT': '0', 'GIT_CONFIG_COUNT': '2',
+          'GIT_CONFIG_KEY_0': 'http.proxy', 'GIT_CONFIG_VALUE_0': scheme ~ '://:@' ~ hostport,
+          'GIT_CONFIG_KEY_1': 'http.proxyAuthMethod', 'GIT_CONFIG_VALUE_1': 'negotiate'} }}
+      {%- else -%}
+      {{ {'GIT_TERMINAL_PROMPT': '0'} }}
+      {%- endif -%}
+  no_log: true
+
 # Skill repositories track their default branch; jsh update pulls them.
 - name: Skill repositories are cloned # noqa: latest[git]
   ansible.builtin.git:
@@ -9,8 +26,7 @@
   loop: "{{ agentics_skills_repos }}"
   loop_control:
     label: "{{ item.name }}"
-  environment:
-    GIT_TERMINAL_PROMPT: "0"
+  environment: "{{ agentics_skills_git_env }}"
 
 - name: Local skill lists are checked
   ansible.builtin.stat:
@@ -59,3 +75,87 @@
       {{ (agentics_skills_published if ansible_check_mode
           else agentics_skills_published | selectattr('src', 'directory'))
          + (agentics_skills_local | selectattr('src', 'directory')) + agentics_skills_own }}
+
+# Antigravity and Claude only read their own folders, so each skill there links to ~/.agents/skills.
+- name: Installed skills are listed
+  ansible.builtin.find:
+    paths: "{{ agentics_skills_home }}/.agents/skills"
+    file_type: any
+  register: agentics_skills_found
+  check_mode: false
+  when: (agentics_skills_home ~ '/.agents/skills') is directory
+
+- name: Agent-owned skill folders are listed
+  ansible.builtin.find:
+    paths: "{{ agentics_skills_mirrors | selectattr('dest', 'directory') | map(attribute='dest') | list }}"
+    file_type: directory
+  register: agentics_skills_mirror_found
+  check_mode: false
+  when: agentics_skills_mirrors | selectattr('dest', 'directory') | list | length > 0
+
+- name: Mirrored skill links are listed
+  ansible.builtin.set_fact:
+    agentics_skills_mirrored: >-
+      {%- set names = ((agentics_skills_found.files | default([]) | rejectattr('isreg') | map(attribute='path') | list)
+                       + (agentics_skills_published + agentics_skills_local + agentics_skills_own)
+                         | map(attribute='dest') | list) | map('basename') | unique | sort -%}
+      {%- set owned = agentics_skills_mirror_found.files | default([]) | map(attribute='path') | list -%}
+      {%- set ns = namespace(items=[]) -%}
+      {%- for mirror in agentics_skills_mirrors if mirror.agent is directory -%}
+      {%- set ns.items = ns.items + (names | links(agentics_skills_home ~ '/.agents/skills', mirror.dest)) -%}
+      {%- endfor -%}
+      {{ ns.items | rejectattr('dest', 'in', owned) | list }}
+
+- name: Skills are linked for other agents
+  ansible.builtin.include_role:
+    name: link
+  vars:
+    link_items: "{{ agentics_skills_mirrored }}"
+  when: agentics_skills_mirrored | length > 0
+
+# VS Code (Copilot), Codex, ChatGPT, and OpenCode load ~/.agents/skills/NAME/SKILL.md and match skills by the
+# frontmatter description; a broken link or missing description leaves the skill unusable.
+- name: Skills are checked
+  ansible.builtin.command:
+    argv:
+      - sh
+      - -c
+      - |
+        count=0
+        for path in "$1"/*; do
+          name=${path##*/}
+          if [ -L "$path" ] && [ ! -e "$path" ]; then
+            printf 'bad\t%s links to a missing folder\n' "$name"
+            continue
+          fi
+          [ -d "$path" ] || continue
+          count=$((count + 1))
+          if [ ! -f "$path/SKILL.md" ]; then
+            printf 'bad\t%s has no SKILL.md\n' "$name"
+          elif ! awk 'NR == 1 { if ($0 !~ /^---[ \t]*$/) exit 1; next }
+              /^---[ \t]*$/ { exit !found } /^description:/ { found = 1 } END { exit !found }' \
+              "$path/SKILL.md"; then
+            printf 'bad\t%s has no description in SKILL.md frontmatter\n' "$name"
+          fi
+        done
+        printf 'count\t%s\n' "$count"
+      - sh
+      - "{{ agentics_skills_home }}/.agents/skills"
+  register: agentics_skills_check
+  changed_when: false
+  check_mode: false
+  when: (agentics_skills_home ~ '/.agents/skills') is directory
+
+- name: notice
+  ansible.builtin.debug:
+    msg: "Skill {{ item.split('\t', 1)[1] }}"
+  loop: "{{ agentics_skills_check.stdout_lines | default([]) | select('match', 'bad\t') | list }}"
+
+- name: ok
+  ansible.builtin.debug:
+    msg: >-
+      {{ agentics_skills_check.stdout_lines | select('match', 'count\t') | first | regex_replace('^count\t', '') }}
+      skills load from ~/.agents/skills
+  when:
+    - agentics_skills_check.stdout_lines is defined
+    - agentics_skills_check.stdout_lines | select('match', 'bad\t') | list | length == 0

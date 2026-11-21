@@ -21,6 +21,10 @@ agentics_skills_vendor: >-
 agentics_skills_local_lists:
   - "{{ (lookup('ansible.builtin.env', 'XDG_CONFIG_HOME') or agentics_skills_home ~ '/.config') ~ '/jsh/skills.tsv' }}"
   - "{{ jsh_root }}/local/skills.tsv"
+# Agents that skip ~/.agents/skills (Antigravity, Claude) get a link per skill once AGENT exists.
+agentics_skills_mirrors:
+  - {agent: "{{ agentics_skills_home }}/.gemini", dest: "{{ agentics_skills_home }}/.gemini/config/skills"}
+  - {agent: "{{ agentics_skills_home }}/.claude", dest: "{{ agentics_skills_home }}/.claude/skills"}
 # The instructions area installs graphify and reverse-engineer-anything as real directories.
 agentics_skills_bundled:
   - github-actions-hardening
@@ -36,9 +40,11 @@ agentics_skills_repos:
   - {name: impeccable, url: "https://github.com/pbakaus/impeccable.git"}
   - {name: mattpocock-skills, url: "https://github.com/mattpocock/skills.git"}
   - {name: openai-skills, url: "https://github.com/openai/skills.git"}
+  - {name: stop-slop, url: "https://github.com/hardikpandya/stop-slop.git"}
   - {name: superpowers, url: "https://github.com/obra/superpowers.git"}
   - {name: thesysdev-skills, url: "https://github.com/thesysdev/skills.git"}
   - {name: ui-ux-pro-max-skill, url: "https://github.com/nextlevelbuilder/ui-ux-pro-max-skill.git"}
+  - {name: unslop, url: "https://github.com/theclaymethod/unslop.git"}
 # Published skills: SOURCE (relative to the vendor folder) and NAME under ~/.agents/skills.
 agentics_skills_links:
   - {source: anthropics-skills/skills/frontend-design, name: frontend-design}
@@ -69,10 +75,13 @@ agentics_skills_links:
   - {source: humanizer, name: humanizer}
   - {source: impeccable/.agents/skills/impeccable, name: impeccable}
   - {source: mattpocock-skills/skills/engineering/research, name: research}
+  - {source: mattpocock-skills/skills/productivity/grill-me, name: grill-me}
+  - {source: mattpocock-skills/skills/productivity/grilling, name: grilling} # grill-me loads it
   - {source: mattpocock-skills/skills/productivity/handoff, name: handoff}
   - {source: mattpocock-skills/skills/productivity/teach, name: teach}
   - {source: openai-skills/skills/.curated/gh-address-comments, name: gh-address-comments}
   - {source: openai-skills/skills/.curated/gh-fix-ci, name: gh-fix-ci}
+  - {source: stop-slop, name: stop-slop}
   - {source: superpowers/skills/brainstorming, name: brainstorming}
   - {source: superpowers/skills/dispatching-parallel-agents, name: dispatching-parallel-agents}
   - {source: superpowers/skills/executing-plans, name: executing-plans}
@@ -89,3 +98,4 @@ agentics_skills_links:
   - {source: superpowers/skills/writing-skills, name: writing-skills}
   - {source: thesysdev-skills/skills/openui, name: openui}
   - {source: ui-ux-pro-max-skill/.claude/skills/ui-ux-pro-max, name: ui-ux-pro-max}
+  - {source: unslop, name: unslop}
