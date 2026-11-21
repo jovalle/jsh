@@ -1,0 +1,29 @@
+---
+# Copilot denies every tool call when a command preToolUse hook cannot run, so the rtk hook is only
+# written once rtk is on PATH.
+- name: rtk is found
+  ansible.builtin.command:
+    argv:
+      - sh
+      - -c
+      - command -v rtk
+  register: agentics_rtk
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: Copilot hooks folder exists
+  ansible.builtin.file:
+    path: "{{ agentics_home }}/.copilot/hooks"
+    state: directory
+    mode: u+rwx
+  when: agentics_rtk.rc == 0 and (agentics_home ~ '/.copilot') is directory
+
+# Same name and content as `rtk init --copilot`, so the two never install the hook twice. rtk keeps
+# the PascalCase event name on purpose: Copilot CLI and VS Code both read it.
+- name: "{{ agentics_home }}/.copilot/hooks/rtk-rewrite.json"
+  ansible.builtin.copy:
+    src: rtk.json
+    dest: "{{ agentics_home }}/.copilot/hooks/rtk-rewrite.json"
+    mode: "0600"
+  when: agentics_rtk.rc == 0 and (agentics_home ~ '/.copilot') is directory

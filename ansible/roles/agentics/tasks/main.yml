@@ -2,5 +2,8 @@
 - name: Agent instructions and settings are managed
   ansible.builtin.include_tasks: instructions/main.yml
 
+- name: Agent hooks are installed
+  ansible.builtin.include_tasks: hooks/main.yml
+
 - name: Agent skills are installed
   ansible.builtin.include_tasks: skills/main.yml

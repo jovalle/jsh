@@ -1,7 +1,7 @@
 ---
 galaxy_info:
   author: jsh
-  description: Write global agent instructions, merge agent settings, and install agent skills
+  description: Write global agent instructions, merge agent settings, and install agent hooks and skills
   license: MIT
   # Runs without admin rights: everything it writes is under $HOME.
   galaxy_tags:
