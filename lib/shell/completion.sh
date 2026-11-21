@@ -31,7 +31,17 @@ _jsh_git_extra() {
     load) _jsh_reply '-f --force -h --help' "${current}" ;;
     handoff) _jsh_reply '-n --dry-run --clean -h --help' "${current}" ;;
     amend) _jsh_reply '-x -t -h --help' "${current}" ;;
-    save | refresh | get | commits | profiles) _jsh_reply '-h --help' "${current}" ;;
+    save)
+      if [[ ${current} == -* ]]; then
+        _jsh_reply '-h --help' "${current}"
+      else
+        while IFS= read -r i; do
+          if [[ -d ${i} ]]; then COMPREPLY+=("${i}/"); else COMPREPLY+=("${i} "); fi
+        done < <(compgen -f -- "${current}")
+        return 0
+      fi
+      ;;
+    refresh | get | commits | profiles) _jsh_reply '-h --help' "${current}" ;;
     *) return 1 ;;
   esac
   # Native git completions end in a space and the git spec has nospace.

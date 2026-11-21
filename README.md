@@ -46,6 +46,7 @@ needs an Apple Account signed in to the App Store and cached sudo credentials (`
 | ------------------------------- | --------------------------------------------------------------------------------- |
 | `git status`                    | Adds identity and branch notes and condenses file lists; `--raw` for plain output |
 | `git status -R [DIR]`           | Outside a repository, summarizes every repository below `DIR` (or `~/Projects`)   |
+| `git save`, `git load`          | Saves all uncommitted changes, or only `PATH ...`, to a secret gist; loads them   |
 | `git refresh`                   | Fetches origin and rebases onto the default branch                                |
 | `git create`, `git get`         | Creates or clones a project under `$GIT_BASE`                                     |
 | `git profile [NAME]`            | Switches identity, SSH key, and remotes from `local/git.json`                     |

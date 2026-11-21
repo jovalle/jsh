@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Git with extras; every other command runs the real git unchanged.
 #
-#   git save              Back up staged, unstaged, and untracked changes to a secret gist
+#   git save [PATH ...]   Back up staged, unstaged, and untracked changes to a secret gist
 #   git load [--force]    Apply the changes saved for this repository's origin
 #   git refresh           Fetch origin and rebase the current branch onto its default branch
 #   git create NAME [PROFILE]  Create a project under $GIT_BASE with an optional profile
@@ -430,7 +430,7 @@ find_gists() {
 }
 
 tree_patch() {
-	run_git diff-tree -p --binary --full-index --ignore-submodules=all "$1" "$2"
+	run_git diff-tree -p --binary --full-index --ignore-submodules=all "$1" "$2" -- "${@:3}"
 }
 
 open_repository() {
@@ -444,17 +444,35 @@ open_repository() {
 }
 
 save() {
-	local base branch index staged_tree worktree_tree url id stat
-	local -a old=() files=()
-	case ${1:-} in
-	'') ;;
-	-h | --help)
-		printf 'usage: git save\n\nBack up staged, unstaged, and untracked changes to a secret gist,\n'
-		printf 'replacing the previous save for this origin. Secret gists are unlisted, not encrypted.\n'
-		return
-		;;
-	*) die 'usage: git save' ;;
-	esac
+	local base branch index staged_tree worktree_tree url id stat prefix path
+	local -a old=() files=() paths=() named=()
+	while (($#)); do
+		case $1 in
+		-h | --help)
+			printf 'usage: git save [--] [PATH ...]\n\nBack up staged, unstaged, and untracked changes to a secret gist,\n'
+			printf 'replacing the previous save for this origin. Secret gists are unlisted, not encrypted.\n\n'
+			printf 'With PATHs, save only changes under them. A named file is saved even when ignored,\n'
+			printf 'and binary files such as images are saved whole.\n'
+			return
+			;;
+		--)
+			shift
+			paths+=("$@")
+			break
+			;;
+		-*) die 'usage: git save [--] [PATH ...]' ;;
+		*) paths+=("$1") ;;
+		esac
+		shift
+	done
+	prefix=$(run_git rev-parse --show-prefix 2>/dev/null) || prefix=''
+	for path in ${paths[@]+"${paths[@]}"}; do
+		[[ -n ${path} ]] || die 'empty path'
+		case ${path} in
+		/* | :*) named+=("${path}") ;;
+		*) named+=("${prefix}${path}") ;;
+		esac
+	done
 	open_repository save
 	base=$(run_git rev-parse --verify --quiet HEAD) || die 'save needs at least one commit'
 	[[ -z $(run_git ls-files --unmerged) ]] || die 'resolve merge conflicts before saving'
@@ -469,11 +487,20 @@ save() {
 		GIT_INDEX_FILE=${scratch}/index run_git read-tree "${staged_tree}"
 	fi
 	GIT_INDEX_FILE=${scratch}/index run_git -c advice.addEmbeddedRepo=false add --all
+	for path in ${named[@]+"${named[@]}"}; do
+		if [[ ${path} != :* && (-f ${path} || -L ${path}) ]]; then
+			GIT_INDEX_FILE=${scratch}/index run_git add --force -- "${path}"
+		fi
+	done
 	worktree_tree=$(GIT_INDEX_FILE=${scratch}/index run_git write-tree)
 	rm -f "${scratch}/index"
+	for path in ${named[@]+"${named[@]}"}; do
+		[[ -n $(run_git diff-tree -r --name-only --ignore-submodules=all "${base}" "${worktree_tree}" \
+			-- "${path}") ]] || jsh::log_warn "No changes to save in ${path}"
+	done
 
-	tree_patch "${base}" "${staged_tree}" >"${scratch}/staged.patch"
-	tree_patch "${staged_tree}" "${worktree_tree}" >"${scratch}/unstaged.patch"
+	tree_patch "${base}" "${staged_tree}" ${named[@]+"${named[@]}"} >"${scratch}/staged.patch"
+	tree_patch "${staged_tree}" "${worktree_tree}" ${named[@]+"${named[@]}"} >"${scratch}/unstaged.patch"
 	if [[ ! -s ${scratch}/staged.patch && ! -s ${scratch}/unstaged.patch ]]; then
 		jsh::log_note 'Nothing to save'
 		return
@@ -495,7 +522,8 @@ save() {
 	for id in ${old[@]+"${old[@]}"}; do
 		gh gist delete --yes "${id}" >/dev/null 2>&1 || jsh::log_warn "Could not delete old gist ${id}"
 	done
-	stat=$(run_git diff-tree --shortstat --ignore-submodules=all "${base}" "${worktree_tree}")
+	stat=$(run_git diff-tree --shortstat --ignore-submodules=all "${base}" "${worktree_tree}" \
+		-- ${named[@]+"${named[@]}"})
 	jsh::log_success "Saved${stat:+ ${stat# }} to ${url}"
 }
 

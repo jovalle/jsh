@@ -222,6 +222,13 @@ _jsh_git_extra() {
         _wanted options expl option compadd -- -x -t -h --help
       fi
       ;;
+    save)
+      if [[ ${PREFIX} == -* ]]; then
+        _wanted options expl option compadd -- -h --help
+      else
+        _files
+      fi
+      ;;
     *) _wanted options expl option compadd -- -h --help ;;
   esac
 }
