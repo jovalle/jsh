@@ -87,6 +87,7 @@ kubecolor_detect_mode() {
 		logs) KUBECOLOR_MODE=logs ;;
 		diff) KUBECOLOR_MODE='diff' ;;
 		explain) KUBECOLOR_MODE=explain ;;
+		cluster-info) KUBECOLOR_MODE=cluster ;;
 		*) KUBECOLOR_MODE=generic ;;
 		esac
 		;;
@@ -674,6 +675,10 @@ kubecolor_format() {
         else print semantic($0)
       } else if (mode == "stderr") {
         print stderr_line($0)
+      } else if (mode == "cluster" && match($0, / is running at /)) {
+        print paint(green, substr($0, 1, RSTART - 1)) substr($0, RSTART, RLENGTH) paint(yellow, substr($0, RSTART + RLENGTH))
+      } else if (mode == "cluster" && $0 != "") {
+        print paint(dim, $0)
       } else {
         print semantic($0)
       }
