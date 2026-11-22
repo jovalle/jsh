@@ -13,7 +13,9 @@
 #   git commit -t TIME    Commit with a chosen date (see `git commit -t --help`)
 #   git status            On a terminal, adds identity and branch notes and condenses file lists
 #   git status --raw      Plain git status, untouched
-#   git status [-R] [DIR] Outside a repository, summarize the repositories below (or ~/Projects)
+#   git status [-R] [-l] [DIR] Outside a repository, show DIR's repository or summarize those below
+#   git branch [OPTIONS]  Outside a repository, list the branches of each repository below
+#   git checkout [-b] BRANCH  In a jkp stack outside its repositories, move them all (jkp checkout)
 #   git handoff           Carry unpushed commits to another workstation through a Syncthing folder
 
 set -euo pipefail
@@ -59,6 +61,17 @@ status)
 	case " $* " in
 	*' --porcelain'* | *' -z '* | *' --null '* | *' -h '* | *' --help '*) exec "${git_bin}" "$@" ;;
 	esac
+	;;
+branch)
+	! "${git_bin}" rev-parse --git-dir >/dev/null 2>&1 || exec "${git_bin}" "$@"
+	;;
+checkout | switch)
+	if "${git_bin}" rev-parse --git-dir >/dev/null 2>&1 || ! command -v jkp >/dev/null; then
+		exec "${git_bin}" "$@"
+	fi
+	stack=${PWD}
+	until [[ -z ${stack} || -f ${stack}/stack.yaml || -f ${stack}/.jkp ]]; do stack=${stack%/*}; done
+	[[ -n ${stack} ]] || exec "${git_bin}" "$@"
 	;;
 *) exec "${git_bin}" "$@" ;;
 esac
@@ -1113,6 +1126,11 @@ __complete)
 	;;
 commit) commit_at "$@" ;;
 status)
+	if (($# == 1)) && [[ -d $1 ]] && ! run_git rev-parse --git-dir >/dev/null 2>&1 &&
+		[[ $(run_git -C "$1" rev-parse --is-inside-work-tree 2>/dev/null) == true ]]; then
+		cd "$1"
+		shift
+	fi
 	if ! run_git rev-parse --git-dir >/dev/null 2>&1; then
 		color=false
 		[[ -n ${NO_COLOR:-} ]] || color=$(run_git config --get-colorbool color.status true)
@@ -1123,5 +1141,24 @@ status)
 	status_history
 	(($#)) || condense_status
 	exec "${git_bin}" status "$@"
+	;;
+branch)
+	color=false
+	[[ -n ${NO_COLOR:-} || ! -t 1 ]] || color=$(run_git config --get-colorbool color.branch true)
+	JSH_GIT_BIN=${git_bin} exec python3 "${JSH_ROOT}/lib/git/repos.py" --branch "${color}" "$@"
+	;;
+checkout | switch)
+	target=''
+	for arg in "$@"; do
+		case ${arg} in
+		-b | -c | --create | --) ;;
+		-*) die "in a stack, git ${command} takes [-b] BRANCH and runs jkp checkout; see jkp help" ;;
+		*)
+			[[ -z ${target} ]] || die "in a stack, git ${command} takes one BRANCH"
+			target=${arg}
+			;;
+		esac
+	done
+	exec jkp checkout ${target:+"${target}"}
 	;;
 esac
