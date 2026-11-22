@@ -1890,6 +1890,12 @@ esac""",
                     [[ $_comps[p] == _jsh_jump ]] || exit 2
                 """,
                 )
+                (self.home / "Projects/alpha/.git").mkdir(parents=True, exist_ok=True)
+                (self.home / "Projects/bundle/repo/.git").mkdir(parents=True, exist_ok=True)
+                (self.home / "Stacks/deploy/tool/.git").mkdir(parents=True, exist_ok=True)
+                output = self.list_choices(shell, "j ")
+                for shown in ("• alpha", "• tool", "☰ bundle", "☰ deploy"):
+                    self.assertIn(shown, output)
 
     def test_zsh_lists_kube_contexts_and_git_profiles(self):
         self.tool("kubectl", "printf '%s\\n' dev prod")

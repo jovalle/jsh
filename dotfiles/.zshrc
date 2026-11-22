@@ -347,8 +347,8 @@ _jsh_jssh() {
 compdef _jsh_jssh jssh
 
 _jsh_jump() {
-  local -a names flags expl
-  local project
+  local -a stacks dirs stack_shown dir_shown flags expl
+  local project ret=1
   if [[ ${PREFIX} == -* ]]; then
     flags=(
       '-c:open the match in VS Code' '-v:show search details'
@@ -359,10 +359,23 @@ _jsh_jump() {
     _describe -t options 'option' flags
     return
   fi
-  for project in ${(f)"$(_j_get_projects 2>/dev/null)"}; do names+=("${project:t}"); done
-  _wanted projects expl project compadd -a names
+  for project in ${(f)"$(_j_get_projects 2>/dev/null)"}; do
+    # A stack is a J_STACKS child or a non-repo directory holding repos.
+    if [[ ${project:h} -ef ${J_STACKS} ]] ||
+      { [[ ! -e ${project}/.git ]] && () { (( $# )) } ${project}/*/.git(N[1]); }; then
+      stacks+=("${project:t}")
+      stack_shown+=("☰ ${project:t}")
+    else
+      dirs+=("${project:t}")
+      dir_shown+=("• ${project:t}")
+    fi
+  done
+  _wanted stacks expl stack compadd -d stack_shown -a stacks && ret=0
+  _wanted directories expl directory compadd -d dir_shown -a dirs && ret=0
+  return ret
 }
 compdef _jsh_jump j p
+zstyle ':completion:*:*:(j|p):*' group-name ''
 
 _jsh_proxy_presets() {
   local -a reply
