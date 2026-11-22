@@ -778,7 +778,9 @@ fi
 
 typeset -g _JSH_PROMPT_EXIT='' _JSH_PROMPT_STARTED='' _JSH_PROMPT_DURATION=0
 typeset -g _JSH_PROMPT_GIT_PWD='' _JSH_PROMPT_GIT_BRANCH='' _JSH_PROMPT_GIT_STATE=''
+typeset -g _JSH_PROMPT_GIT_DATA=''
 typeset -gi _JSH_PROMPT_GIT_VALID=0 _JSH_PROMPT_GIT_DIRTY=1 _JSH_PROMPT_GIT_FD=-1
+typeset -gi _JSH_PROMPT_GIT_QUEUED=0
 typeset -gi _JSH_PROMPT_GIT_STAGED=0 _JSH_PROMPT_GIT_UNSTAGED=0
 typeset -gi _JSH_PROMPT_GIT_UNTRACKED=0 _JSH_PROMPT_GIT_CONFLICTED=0
 typeset -gi _JSH_PROMPT_GIT_AHEAD=0 _JSH_PROMPT_GIT_BEHIND=0 _JSH_PROMPT_GIT_STASH=0
@@ -1147,6 +1149,7 @@ _jsh_prompt_git_worker() {
 }
 
 _jsh_prompt_git_async_stop() {
+	_JSH_PROMPT_GIT_QUEUED=0
 	(( _JSH_PROMPT_GIT_FD >= 0 )) || return
 	zle -F ${_JSH_PROMPT_GIT_FD} 2>/dev/null || true
 	exec {_JSH_PROMPT_GIT_FD}<&-
@@ -1161,8 +1164,14 @@ _jsh_prompt_git_async_callback() {
 	exec {descriptor}<&-
 	_JSH_PROMPT_GIT_FD=-1
 	[[ ${directory} == ${PWD} ]] || return
+	if (( _JSH_PROMPT_GIT_QUEUED )); then
+		_jsh_prompt_git_async_start
+	else
+		_JSH_PROMPT_GIT_DIRTY=0
+	fi
+	(( !_JSH_PROMPT_GIT_VALID )) || [[ ${data} != ${_JSH_PROMPT_GIT_DATA} ]] || return
 	_jsh_prompt_git_parse "${data}"
-	_JSH_PROMPT_GIT_VALID=1 _JSH_PROMPT_GIT_DIRTY=0
+	_JSH_PROMPT_GIT_DATA=${data} _JSH_PROMPT_GIT_VALID=1
 	_jsh_prompt_render
 	zle reset-prompt
 }
@@ -1186,11 +1195,17 @@ _jsh_prompt_git_update() {
 		_JSH_PROMPT_GIT_VALID=0 _JSH_PROMPT_GIT_DIRTY=1
 	fi
 	(( _JSH_PROMPT_GIT_DIRTY || !_JSH_PROMPT_GIT_VALID )) || return
-	if (( JSH_PROMPT_ASYNC )) && _jsh_prompt_git_async_start; then
-		return
+	if (( JSH_PROMPT_ASYNC )); then
+		# Keep one worker per shell; a refresh requested mid-run starts when it reports.
+		if (( _JSH_PROMPT_GIT_FD >= 0 )) && [[ ${_JSH_PROMPT_GIT_PWD} == ${PWD} ]]; then
+			_JSH_PROMPT_GIT_QUEUED=1
+			return
+		fi
+		_jsh_prompt_git_async_start && return
 	fi
 	data=$(_jsh_prompt_git_worker "${PWD}")
 	_jsh_prompt_git_parse "${data}"
+	_JSH_PROMPT_GIT_DATA=${data}
 	_JSH_PROMPT_GIT_PWD=${PWD} _JSH_PROMPT_GIT_VALID=1 _JSH_PROMPT_GIT_DIRTY=0
 }
 
@@ -1278,6 +1293,8 @@ _jsh_prompt_precmd() {
 		_JSH_PROMPT_DURATION=0
 	fi
 	_JSH_PROMPT_STARTED=''
+	# Async refreshes every prompt, so an empty Enter picks up changes made elsewhere.
+	(( !JSH_PROMPT_ASYNC )) || _JSH_PROMPT_GIT_DIRTY=1
 	_jsh_prompt_git_update
 	_jsh_prompt_node_update
 	if _jsh_prompt_kube_signature && [[ ${REPLY} != ${_JSH_PROMPT_KUBE_SIGNATURE} ]]; then
