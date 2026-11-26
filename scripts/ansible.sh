@@ -96,6 +96,15 @@ fi
 # The stamp is written last, so an interrupted or failed install is retried on the next run.
 mkdir -p "${home}"
 rm -f -- "${home}/stamp"
+# Privileged modules from older runs may have left root-owned bytecode directories.
+# Preserve an obstructed environment rather than trying to remove it with sudo.
+if [[ -d ${home}/venv ]] &&
+  [[ -n $(find "${home}/venv" -type d ! -exec test -w {} \; -print -quit) ]]; then
+  backup=${home}/venv.backup.$$
+  while [[ -e ${backup} || -L ${backup} ]]; do backup+=.1; done
+  mv -- "${home}/venv" "${backup}"
+  jsh::info "Preserved unwritable Ansible environment at ${backup}"
+fi
 # Collections installed from Galaxy by older versions would shadow the bundled ones.
 rm -rf -- "${home}/collections"
 UV_PYTHON_PREFERENCE=${python_preference} jsh::task "Creating the Ansible environment" \

@@ -6,6 +6,8 @@
   gather_facts: true
   gather_subset:
     - min
+  environment:
+    PYTHONDONTWRITEBYTECODE: '1'
   pre_tasks:
     - name: One host is selected
       ansible.builtin.fail:

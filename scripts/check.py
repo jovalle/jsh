@@ -5056,6 +5056,23 @@ esac""",
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("~ Ansible updated", result.stdout)
 
+    def test_ansible_bootstrap_preserves_unwritable_environment(self):
+        self.mock_uv()
+        root = self.checkout()
+        blocked = self.home / "ansible/venv/lib/blocked"
+        blocked.mkdir(parents=True)
+        (blocked / "sentinel").write_text("preserve")
+        blocked.chmod(0o555)
+        self.addCleanup(lambda: blocked.chmod(0o755) if blocked.exists() else None)
+        result = self.bootstrap(root)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        backups = list((self.home / "ansible").glob("venv.backup.*"))
+        self.assertEqual(len(backups), 1, result.stdout)
+        saved = backups[0] / "lib/blocked"
+        saved.chmod(0o755)
+        self.assertEqual((saved / "sentinel").read_text(), "preserve")
+        self.assertTrue((self.home / "ansible/venv/bin/ansible-playbook").exists())
+
     def test_ansible_bootstrap_failure_writes_no_stamp(self):
         self.mock_uv()
         root = self.checkout()
