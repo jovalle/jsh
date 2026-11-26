@@ -1,0 +1,287 @@
+#!/usr/bin/env python3
+"""List and play live channels directly from the active Xtream provider."""
+
+import argparse
+import configparser
+import fcntl
+import gzip
+import itertools
+import json
+import os
+from pathlib import Path
+import shutil
+import socket
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+from urllib.parse import quote, urlencode, urlsplit
+from urllib.request import Request, urlopen
+
+
+ACCOUNT_ENV = {
+    "url": "XTREAM_URL",
+    "username": "XTREAM_USERNAME",
+    "password": "XTREAM_PASSWORD",
+    "user_agent": "XTREAM_USER_AGENT",
+}
+
+
+def load_account():
+    overrides = {key: os.environ[var] for key, var in ACCOUNT_ENV.items() if var in os.environ}
+    account = {}
+    if not all(overrides.get(key) for key in ("url", "username", "password")):
+        config_home = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+        path = Path(os.environ.get("XTREAM_CONFIG") or config_home / "xtream" / "xtream.conf").expanduser()
+        settings = configparser.ConfigParser(interpolation=None)
+        try:
+            with path.open(encoding="utf-8") as config:
+                settings.read_file(config)
+            vault = settings["xtream"]["vault"]
+            reference = settings["xtream"]["account"]
+        except (OSError, KeyError, ValueError, configparser.Error):
+            raise SystemExit(
+                "Set XTREAM_URL, XTREAM_USERNAME and XTREAM_PASSWORD, or configure xtream.conf."
+            ) from None
+        if not reference.startswith("vault://technis/"):
+            raise SystemExit("xtream.conf needs a vault://technis/ account reference.")
+        try:
+            result = subprocess.run(
+                [os.path.expanduser(vault), "get", reference.removeprefix("vault://technis/")],
+                stdin=subprocess.DEVNULL, capture_output=True, text=True, check=True, timeout=10,
+            )
+            account = json.loads(result.stdout)
+            if not isinstance(account, dict):
+                raise ValueError("Invalid account")
+        except (OSError, subprocess.SubprocessError, ValueError):
+            raise SystemExit("Could not load the Xtream account from Infisical.") from None
+
+    account.update(overrides)
+    try:
+        url = urlsplit(account.get("url", ""))
+    except (ValueError, TypeError, AttributeError):
+        raise SystemExit("The Xtream account needs a provider base URL.") from None
+    if (url.scheme not in ("https", "http") or not url.hostname or url.username is not None
+            or url.query or url.fragment):
+        raise SystemExit("The Xtream account needs a provider base URL.")
+    if not all(isinstance(account.get(key), str) and account[key] for key in ("username", "password")):
+        raise SystemExit("The Xtream account is missing its username or password.")
+    account["url"] = account["url"].rstrip("/")
+    account["user_agent"] = account.get("user_agent") or ""
+    if not isinstance(account["user_agent"], str) or any(char in account["user_agent"] for char in "\r\n"):
+        raise SystemExit("The Xtream account has an invalid user agent.")
+    return account
+
+
+def refresh_catalog(cache):
+    account = load_account()
+    query = urlencode({
+        "username": account["username"],
+        "password": account["password"],
+        "action": "get_live_streams",
+    })
+    headers = {"Accept-Encoding": "gzip"}
+    if account["user_agent"]:
+        headers["User-Agent"] = account["user_agent"]
+    request = Request(f'{account["url"]}/player_api.php?{query}', headers=headers)
+    try:
+        with urlopen(request, timeout=15) as response:
+            if response.headers.get("Content-Encoding", "").lower() == "gzip":
+                with gzip.GzipFile(fileobj=response) as data:
+                    channels = json.load(data)
+            else:
+                channels = json.load(response)
+        if not isinstance(channels, list) or not channels:
+            raise ValueError("Invalid channel list")
+        lines = [
+            f'{int(channel["stream_id"])}\t{" ".join(channel["name"].split())}\n'
+            for channel in channels
+        ]
+    except (OSError, EOFError, ValueError, KeyError, TypeError):
+        raise SystemExit("Could not load the live channel list from the Xtream provider.") from None
+    cache.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=cache.parent,
+                                     delete=False) as pending:
+        path = Path(pending.name)
+        try:
+            pending.writelines(lines)
+            pending.close()
+            path.replace(cache)
+        finally:
+            path.unlink(missing_ok=True)
+    return len(lines)
+
+
+def read_catalog(cache, cached_only=False):
+    if not cache.is_file():
+        if cached_only:
+            return []
+        print("Loading the provider channel list for the first time…", file=sys.stderr)
+        refresh_catalog(cache)
+    return cache.read_text(encoding="utf-8").splitlines()
+
+
+def search_channels(channels, query):
+    terms = query.casefold().split()
+    by_id = query.isascii() and query.isdecimal()
+    for line in channels:
+        channel_id, _, name = line.partition("\t")
+        if by_id:
+            if channel_id.startswith(query):
+                yield line
+        else:
+            name = name.casefold()
+            if all(term in name for term in terms):
+                yield line
+
+
+def select_channel(channels, query):
+    matches = list(search_channels(channels, query))
+    if len(matches) == 1:
+        return matches[0]
+    if shutil.which("fzf") is None:
+        raise SystemExit("fzf is required for the picker. Run 'xtream search' and use a channel ID.")
+    result = subprocess.run(
+        ["fzf", "--no-multi", "--delimiter", "\t", "--with-nth=2..",
+         "--prompt=Channel> ", "--query", query, "--select-1", "--exit-0"],
+        input="\n".join(matches or channels), stdout=subprocess.PIPE, text=True,
+    )
+    if result.returncode in (1, 130):
+        return ""
+    result.check_returncode()
+    return result.stdout.strip()
+
+
+def connect_player(path):
+    client = socket.socket(socket.AF_UNIX)
+    client.settimeout(2)
+    try:
+        client.connect(str(path))
+    except (FileNotFoundError, ConnectionRefusedError):
+        client.close()
+        return None
+    except OSError:
+        client.close()
+        raise
+    return client
+
+
+def play_channel(player, account, channel_id, title):
+    username = quote(account["username"], safe="")
+    password = quote(account["password"], safe="")
+    url = f'{account["url"]}/live/{username}/{password}/{channel_id}.ts'
+    runtime = Path(os.environ.get("XDG_RUNTIME_DIR") or tempfile.gettempdir()) / f"xtream-{os.getuid()}"
+    runtime.mkdir(mode=0o700, exist_ok=True)
+    status = runtime.lstat()
+    if status.st_uid != os.getuid() or not stat.S_ISDIR(status.st_mode) or status.st_mode & 0o077:
+        raise SystemExit("Xtream needs a private directory for its mpv socket.")
+    path = runtime / "mpv"
+
+    # Concurrent requests share one player, including during its first launch.
+    with (runtime / "lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        client = connect_player(path)
+        if client is None:
+            if path.is_socket():
+                path.unlink()
+            env = {key: value for key, value in os.environ.items() if key not in ACCOUNT_ENV.values()}
+            process = subprocess.Popen(
+                [player, "--no-config", "--no-terminal", "--no-ytdl", "--no-autoload-files",
+                 "--no-save-position-on-quit", "--no-resume-playback",
+                 "--profile=low-latency", "--cache-secs=2", "--network-timeout=10",
+                 "--sid=no", "--secondary-sid=no", "--sub-auto=no", "--no-sub-visibility",
+                 "--idle=yes", "--force-window=immediate", f"--input-ipc-server={path}"],
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                start_new_session=True, env=env,
+            )
+            until = time.monotonic() + 3
+            while client is None and process.poll() is None and time.monotonic() < until:
+                time.sleep(0.03)
+                client = connect_player(path)
+            if client is None:
+                process.terminate()
+                raise SystemExit("mpv did not open its Xtream control socket.")
+
+        options = {
+            "force-media-title": title, "sid": "no", "secondary-sid": "no",
+            "sub-visibility": "no", "pause": "no",
+        }
+        if account["user_agent"]:
+            options["user-agent"] = account["user_agent"]
+        # Keep the authenticated stream URL inside the private IPC connection.
+        request = {"command": ["loadfile", url, "replace", -1, options], "request_id": 1}
+        with client, client.makefile("rb") as replies:
+            client.sendall(json.dumps(request).encode() + b"\n")
+            for line in replies:
+                reply = json.loads(line)
+                if reply.get("request_id") == 1:
+                    if reply.get("error") != "success":
+                        raise SystemExit("mpv could not switch to the selected channel.")
+                    return
+        raise SystemExit("mpv closed its Xtream control socket before switching channels.")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        epilog="Run xtream with no arguments to open the channel picker. Credentials come from "
+               "XTREAM_URL, XTREAM_USERNAME and XTREAM_PASSWORD or xtream/xtream.conf under the "
+               "user config directory. XTREAM_USER_AGENT overrides the account's user agent.",
+    )
+    commands = parser.add_subparsers(dest="command")
+    listing = commands.add_parser("search", aliases=["list"], help="Search the cached live lineup")
+    listing.add_argument("query", nargs="*", help="Words in a channel name or the start of its ID")
+    listing.add_argument("--limit", type=int, help="Maximum results")
+    listing.add_argument("--cached", action="store_true", help="Use only the local cache")
+    playing = commands.add_parser("play", help="Play a channel by name or ID")
+    playing.add_argument("channel", nargs="*", help="Channel name or numeric ID")
+    commands.add_parser("refresh", help="Download the current live lineup")
+    args = parser.parse_args()
+
+    cache_home = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+    cache = cache_home / "xtream" / "channels"
+    if args.command in ("search", "list"):
+        if args.limit is not None and args.limit < 1:
+            parser.error("--limit must be positive")
+        channels = read_catalog(cache, cached_only=args.cached)
+        matches = search_channels(channels, " ".join(args.query))
+        for line in itertools.islice(matches, args.limit):
+            print(line)
+    elif args.command == "refresh":
+        count = refresh_catalog(cache)
+        print(f"Cached {count:,} live channels.")
+    else:
+        player = shutil.which("mpv")
+        if player is None:
+            parser.exit(1, "mpv is required to play channels.\n")
+        query = " ".join(args.channel) if args.command == "play" else ""
+        title = ""
+        try:
+            channel_id = int(query)
+        except ValueError:
+            try:
+                selection = select_channel(read_catalog(cache), query)
+            except subprocess.CalledProcessError:
+                parser.exit(1, "Could not open the channel picker.\n")
+            if not selection:
+                return
+            value, _, title = selection.partition("\t")
+            channel_id = int(value)
+        if channel_id < 1:
+            parser.error("channel ID must be positive")
+        print(f"Opening {title or f'channel {channel_id}'}…", file=sys.stderr)
+        account = load_account()
+        try:
+            play_channel(player, account, channel_id, title or f"Xtream Live TV ({channel_id})")
+        except (OSError, ValueError):
+            parser.exit(1, "Could not send the selected channel to mpv.\n")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        raise SystemExit(130) from None
+    except OSError:
+        raise SystemExit("Could not read or update the local Xtream channel cache.") from None
