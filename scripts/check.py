@@ -215,6 +215,17 @@ exit "__DOLLAR__status"
             with self.subTest(shell=shell):
                 self.run_shell(shell, code, **env)
 
+    def test_commands_are_on_path_only_in_runtime(self):
+        for shell in SHELLS:
+            with self.subTest(shell=shell):
+                for runtime, expected in (("", "absent"), (str(self.home / "runtime"), "present")):
+                    output = self.run_shell(
+                        shell,
+                        'case ":$PATH:" in *:"$JSH/bin":*) echo present;; *) echo absent;; esac',
+                        JSH_RUNTIME_DIR=runtime,
+                    )
+                    self.assertIn(expected, output.splitlines())
+
     def run_terminal(self, shell, code, login=False, **env):
         environment = self.env | env
         if "zsh" in Path(shell).name:
@@ -613,6 +624,14 @@ exit "__DOLLAR__status"
             (checkout / "scripts" / name).write_text("exit 0\n")
         shutil.copy2(ROOT / "install.sh", checkout / "install.sh")
         shutil.copy2(ROOT / "bin/jsh", checkout / "bin/jsh")
+        (checkout / "bin/example").write_text("#!/bin/sh\n")
+        (checkout / "bin/example").chmod(0o755)
+        (checkout / "bin/other").write_text("#!/bin/sh\n")
+        (checkout / "bin/other").chmod(0o755)
+        local_bin = self.home / ".local/bin"
+        local_bin.mkdir(parents=True)
+        (local_bin / "example").symlink_to(checkout / "bin/example")
+        (local_bin / "other").symlink_to(self.home / "unrelated")
         self.mock_installer_playbook(checkout)
         (checkout / "dotfiles/.zshrc").write_text("# fixture\n")
         for location in (checkout, self.home / "moved checkout"):
@@ -627,6 +646,8 @@ exit "__DOLLAR__status"
                 timeout=20,
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertFalse((local_bin / "example").is_symlink())
+            self.assertEqual((local_bin / "other").readlink(), self.home / "unrelated")
             self.assertEqual((self.home / ".jsh").readlink(), location)
             for link, source in ((".zshrc", "dotfiles/.zshrc"), (".local/bin/jsh", "bin/jsh")):
                 self.assertEqual((self.home / link).readlink(), location / source)

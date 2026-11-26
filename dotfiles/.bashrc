@@ -18,8 +18,11 @@ export GIT_BASE=${GIT_BASE:-${HOME}/Projects} WORK_DIR=${WORK_DIR:-${HOME}/Proje
 export JSH_VENDOR=${JSH_VENDOR:-${XDG_DATA_HOME:-${HOME}/.local/share}/jsh/vendor}
 [[ -d ${JSH_VENDOR} || ! -d ${JSH}/local/vendor ]] || JSH_VENDOR=${JSH}/local/vendor
 export FZF_BASE=${JSH_VENDOR}/fzf
+_jsh_bin=
+[[ -z ${JSH_RUNTIME_DIR:-} ]] || _jsh_bin=${JSH}/bin:
 for _jsh_path in "${HOME}/.cargo/bin" "${HOME}/go/bin" "${FZF_BASE}/bin" \
-	"${JSH}/bin" "${JSH}/local/bin" "${HOME}/.local/bin"; do
+	"${_jsh_bin%:}" "${JSH}/local/bin" "${HOME}/.local/bin"; do
+	[[ -n ${_jsh_path} ]] || continue
 	case :${PATH}: in *:"${_jsh_path}":*) ;; *) PATH=${_jsh_path}:${PATH} ;; esac
 done
 export PATH
@@ -86,7 +89,7 @@ if [[ ${_JSH_BASH_TOOLS_LOADED:-0} != 1 ]]; then
 			_jsh_path=${PATH}
 			eval "$(command brew shellenv)"
 			# Keep jsh wrappers such as bin/git ahead of Homebrew, and Homebrew ahead of system tools.
-			_jsh_path=${HOME}/.local/bin:${JSH}/local/bin:${JSH}/bin:${FZF_BASE}/bin:${HOME}/go/bin:${HOME}/.cargo/bin:${HOMEBREW_PREFIX:-/opt/homebrew}/bin:${HOMEBREW_PREFIX:-/opt/homebrew}/sbin:${_jsh_path}
+			_jsh_path=${HOME}/.local/bin:${JSH}/local/bin:${_jsh_bin}${FZF_BASE}/bin:${HOME}/go/bin:${HOME}/.cargo/bin:${HOMEBREW_PREFIX:-/opt/homebrew}/bin:${HOMEBREW_PREFIX:-/opt/homebrew}/sbin:${_jsh_path}
 			IFS=: read -ra _jsh_dirs <<<"${_jsh_path}"
 			_jsh_path=
 			for _jsh_dir in "${_jsh_dirs[@]}"; do
@@ -130,6 +133,7 @@ if [[ ${_JSH_BASH_TOOLS_LOADED:-0} != 1 ]]; then
 		unset _JSH_BASH_COMPLETION_SHIM
 	fi
 fi
+unset _jsh_bin
 # shellcheck source=lib/shell/completion.sh
 . "${JSH}/lib/shell/completion.sh"
 

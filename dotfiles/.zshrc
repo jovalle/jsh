@@ -74,7 +74,9 @@ fi
 export FZF_BASE=${JSH_VENDOR}/fzf
 
 # Paths - ORDER MATTERS (priority: local > jsh local > jsh > vendored fzf > go > cargo)
-export PATH=${HOME}/.local/bin:${JSH}/local/bin:${JSH}/bin:${FZF_BASE}/bin:${HOME}/go/bin:${PATH}:${HOME}/.cargo/bin
+_jsh_bin=
+(( _jsh_runtime_active )) && _jsh_bin=${JSH}/bin:
+export PATH=${HOME}/.local/bin:${JSH}/local/bin:${_jsh_bin}${FZF_BASE}/bin:${HOME}/go/bin:${PATH}:${HOME}/.cargo/bin
 # Locate an existing Homebrew installation before shell hooks and completions.
 for _jsh_brew_bin in /opt/homebrew/bin /usr/local/bin /home/linuxbrew/.linuxbrew/bin; do
   [[ ! -x ${_jsh_brew_bin}/brew ]] || path+=(${_jsh_brew_bin})
@@ -153,9 +155,10 @@ if command -v brew &>/dev/null; then
   _jsh_path=${PATH}
   eval "$(brew shellenv)"
   # Keep jsh wrappers such as bin/git ahead of Homebrew, and Homebrew ahead of system tools.
-  export PATH=${HOME}/.local/bin:${JSH}/local/bin:${JSH}/bin:${FZF_BASE}/bin:${HOME}/go/bin:${HOMEBREW_PREFIX}/bin:${HOMEBREW_PREFIX}/sbin:${_jsh_path}
+  export PATH=${HOME}/.local/bin:${JSH}/local/bin:${_jsh_bin}${FZF_BASE}/bin:${HOME}/go/bin:${HOMEBREW_PREFIX}/bin:${HOMEBREW_PREFIX}/sbin:${_jsh_path}
   unset _jsh_path
 fi
+unset _jsh_bin
 
 # Add user and vendored completions to fpath.
 fpath=(~/.zsh/completions "${JSH_VENDOR}/zsh-completions/src" "${fpath[@]}")

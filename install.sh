@@ -7,7 +7,7 @@ export JSH_SESSION_START=$SECONDS
 
 jsh::usage() {
   printf '%s\n' 'Usage: ./install.sh [--dry-run] [--update]' \
-    '' 'Install core packages and shell plugins, then link dotfiles and commands.' \
+    '' 'Install core packages and shell plugins, then link dotfiles and the jsh launcher.' \
     'Apps, agents, and system settings are configured separately with make configure.' \
     '' 'Use --update to update core packages and shell plugins.'
 }
@@ -157,9 +157,14 @@ while IFS= read -r -d "" source; do
   jsh::link "${source}" "${HOME}/${relative}"
 done < <(find "${JSH_ROOT}/dotfiles" -type f -print0)
 jsh::step link commands
+[[ ! -x ${JSH_ROOT}/bin/jsh ]] || jsh::link "${JSH_ROOT}/bin/jsh" "${HOME}/.local/bin/jsh"
 for source in "${JSH_ROOT}"/bin/*; do
-  [[ -f ${source} && -x ${source} ]] || continue
-  jsh::link "${source}" "${HOME}/.local/bin/${source##*/}"
+  [[ ${source##*/} != jsh ]] || continue
+  destination=${HOME}/.local/bin/${source##*/}
+  if [[ -L ${destination} && $(readlink "${destination}") == "${source}" ]]; then
+    jsh::run rm -- "${destination}"
+    jsh::removed "${destination} unlinked" "${destination} links to a jsh command"
+  fi
 done
 
 jsh::info 'Run "make configure" to set up apps, agents, and system settings'
