@@ -1,5 +1,5 @@
 ---
-- name: XFCE shortcut is set
+- name: "XFCE shortcut for {{ desktop_keybindings_shortcut_name }} is {{ desktop_keybindings_shortcut_xfce }}"
   community.general.xfconf:
     channel: xfce4-keyboard-shortcuts
     property: "/commands/custom/{{ desktop_keybindings_shortcut_xfce }}"
