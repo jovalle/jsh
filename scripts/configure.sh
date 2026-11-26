@@ -97,8 +97,10 @@ fi
 action=Configure
 [[ ${JSH_UPDATE:-0} != 1 ]] || action=Update
 [[ ${JSH_DRY_RUN} != 1 ]] || action=Preview
-jsh_banner "${action}"
-printf "\n"
+if [[ ${JSH_BANNER_SHOWN:-0} != 1 ]]; then
+  jsh_banner "${action}"
+  printf "\n"
+fi
 jsh::session_open || :
 
 status=0

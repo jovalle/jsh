@@ -937,6 +937,18 @@ exit "__DOLLAR__status"
         self.assertNotIn("Scope:", result.stdout)
         self.assertLess(result.stdout.index("Update"), result.stdout.index("BREW_UPDATE"))
 
+    def test_update_prints_one_banner(self):
+        checkout = self.configure_fixture()
+        shutil.copy2(ROOT / "bin/jsh", checkout / "bin/jsh")
+        result = subprocess.run(
+            ["sh", str(checkout / "bin/jsh"), "update", "apps"],
+            env=self.env | {"JSH_PLATFORM": "debian"}, cwd=self.home,
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.stdout.count("=   :-=-:"), 1, result.stdout)
+        self.assertIn("› apps", result.stdout)
+
     def test_installer_shows_components_when_current(self):
         checkout = self.installer_scope_fixture()
         (checkout / "scripts/packages.sh").write_text("sleep 0.5\n")

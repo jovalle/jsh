@@ -27,6 +27,8 @@ update)
 	JSH_KEEP_APPS=1
 	export JSH_KEEP_APPS
 	bash "${JSH_ROOT}/install.sh" --update
+	JSH_BANNER_SHOWN=1
+	export JSH_BANNER_SHOWN
 	exec bash "${JSH_ROOT}/scripts/configure.sh" --update "$@"
 	;;
 '' | -*) ;;
