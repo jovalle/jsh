@@ -7,3 +7,7 @@
 
 - name: Agent skills are installed
   ansible.builtin.include_tasks: skills/main.yml
+
+- name: Antigravity is installed
+  ansible.builtin.include_tasks: antigravity/linux.yml
+  when: jsh_platform != 'darwin'

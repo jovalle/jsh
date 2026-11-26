@@ -1,0 +1,346 @@
+---
+# Linux has no Antigravity package. The App is Google's release tarball, unpacked under $HOME
+# when missing and replaced on update only when jsh installed it. agy updates itself.
+- name: Antigravity folder is checked
+  ansible.builtin.stat:
+    path: "{{ agentics_antigravity_dir }}"
+  register: agentics_antigravity_folder
+
+- name: Antigravity record is read
+  ansible.builtin.slurp:
+    src: "{{ agentics_antigravity_record }}"
+  register: agentics_antigravity_saved
+  failed_when: false
+
+- name: Antigravity CLI is found
+  ansible.builtin.command:
+    argv:
+      - sh
+      - -c
+      - 'command -v agy || test -e "$1"'
+      - sh
+      - "{{ agentics_antigravity_cli }}"
+  register: agentics_antigravity_cli_found
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: Antigravity App
+  vars:
+    agentics_antigravity_recorded: >-
+      {{ (agentics_antigravity_saved.content | b64decode | from_json).version
+         if agentics_antigravity_saved.content is defined else '' }}
+    agentics_antigravity_due: >-
+      {{ not agentics_antigravity_folder.stat.exists
+         or (jsh_update | bool and agentics_antigravity_saved.content is defined) }}
+  when: jsh_desktop != ''
+  block:
+    - name: skip
+      ansible.builtin.debug:
+        msg: "Skipping Antigravity: not on an internal mirror"
+      when: jsh_mirrors_only | bool and agentics_antigravity_due
+
+    - name: info
+      ansible.builtin.debug:
+        msg: >-
+          {{ 'would download Antigravity' if not agentics_antigravity_folder.stat.exists
+             else 'Antigravity update is unchecked in preview' }}
+      when: ansible_check_mode and not jsh_mirrors_only | bool and agentics_antigravity_due
+
+    # Steps inside run only outside preview, so they declare check_mode false to stay quiet;
+    # the install itself reports once as "Antigravity".
+    - name: Antigravity download
+      when: not ansible_check_mode and not jsh_mirrors_only | bool and agentics_antigravity_due
+      vars:
+        agentics_antigravity_arch: "{{ 'arm' if ansible_facts.architecture in ['aarch64', 'arm64'] else 'x64' }}"
+      block:
+        - name: Antigravity releases are read
+          ansible.builtin.uri:
+            url: "{{ agentics_antigravity_releases }}"
+            return_content: true
+          register: agentics_antigravity_releases_read
+          check_mode: false
+
+        - name: Antigravity release is selected
+          vars:
+            agentics_antigravity_latest: >-
+              {{ agentics_antigravity_releases_read.json | map(attribute='version')
+                 | community.general.version_sort | last }}
+          ansible.builtin.set_fact:
+            agentics_antigravity_release: >-
+              {{ agentics_antigravity_releases_read.json
+                 | selectattr('version', 'equalto', agentics_antigravity_latest) | first }}
+
+        - name: Antigravity release is valid
+          ansible.builtin.assert:
+            that:
+              - agentics_antigravity_release.version is match('^[0-9]+(\.[0-9]+)*$')
+              - agentics_antigravity_release.execution_id | string is match('^[0-9]+$')
+            fail_msg: "Antigravity: unexpected release {{ agentics_antigravity_release }}"
+
+        - name: Antigravity install
+          when: agentics_antigravity_recorded != agentics_antigravity_release.version
+          vars:
+            agentics_antigravity_url: >-
+              {{ agentics_antigravity_artifacts }}/{{ agentics_antigravity_release.version
+                 }}-{{ agentics_antigravity_release.execution_id
+                 }}/linux-{{ agentics_antigravity_arch }}/Antigravity.tar.gz
+          block:
+            - name: Antigravity directories exist
+              ansible.builtin.file:
+                path: "{{ item }}"
+                state: directory
+                mode: u+rwx
+              loop:
+                - "{{ agentics_antigravity_data }}/applications"
+                - "{{ agentics_antigravity_record | dirname }}"
+              changed_when: false
+              check_mode: false
+
+            # Unpack beside the install folder so the final rename stays on one filesystem.
+            - name: Antigravity private download folder exists
+              ansible.builtin.tempfile:
+                state: directory
+                path: "{{ agentics_antigravity_data }}"
+                prefix: .jsh-antigravity.
+              register: agentics_antigravity_download
+              changed_when: false
+              check_mode: false
+
+            - name: Antigravity archive is downloaded
+              ansible.builtin.get_url:
+                url: "{{ agentics_antigravity_url }}"
+                dest: "{{ agentics_antigravity_download.path }}/antigravity.tar.gz"
+                mode: "0600"
+              changed_when: false
+              check_mode: false
+
+            - name: Antigravity staging folder exists
+              ansible.builtin.file:
+                path: "{{ agentics_antigravity_download.path }}/app"
+                state: directory
+                mode: "0755"
+              changed_when: false
+              check_mode: false
+
+            - name: Antigravity archive is unpacked
+              ansible.builtin.unarchive:
+                src: "{{ agentics_antigravity_download.path }}/antigravity.tar.gz"
+                dest: "{{ agentics_antigravity_download.path }}/app"
+                remote_src: true
+                extra_opts:
+                  - --strip-components=1
+              changed_when: false
+              check_mode: false
+
+            # app.asar: uint32 header size at byte 4, JSON length at byte 12, JSON from byte 16;
+            # file offsets count from the end of the header. A missing icon only costs the dock
+            # its picture, so it never fails the install.
+            - name: Antigravity icon is extracted
+              ansible.builtin.command:
+                argv:
+                  - bash
+                  - -c
+                  - |
+                    set -euo pipefail
+                    asar=$1/resources/app.asar
+                    header=$(od -An -tu4 -j4 -N4 "${asar}" | tr -d ' ')
+                    length=$(od -An -tu4 -j12 -N4 "${asar}" | tr -d ' ')
+                    read -r offset size < <(tail -c +17 "${asar}" | head -c "${length}" |
+                      jq -er '.files["icon.png"] | "\(.offset) \(.size)"')
+                    tail -c +$((8 + header + offset + 1)) "${asar}" | head -c "${size}" >"$1/icon.png"
+                  - bash
+                  - "{{ agentics_antigravity_download.path }}/app"
+              changed_when: false
+              check_mode: false
+              failed_when: false
+
+            - name: Antigravity
+              ansible.builtin.command:
+                argv:
+                  - mv
+                  - -T
+                  - --
+                  - "{{ agentics_antigravity_download.path }}/app"
+                  - "{{ agentics_antigravity_dir }}"
+                creates: "{{ agentics_antigravity_dir }}"
+              when: not agentics_antigravity_folder.stat.exists
+
+            # The old App moves into the download folder, which is removed below; it comes back
+            # if the new one cannot take its place.
+            - name: Antigravity
+              ansible.builtin.command:
+                argv:
+                  - sh
+                  - -c
+                  - >-
+                    mv -T -- "$1" "$2/previous" &&
+                    { mv -T -- "$2/app" "$1" || { mv -T -- "$2/previous" "$1"; exit 1; }; }
+                  - sh
+                  - "{{ agentics_antigravity_dir }}"
+                  - "{{ agentics_antigravity_download.path }}"
+              changed_when: true
+              when: agentics_antigravity_folder.stat.exists
+
+            - name: Antigravity release is recorded
+              ansible.builtin.copy:
+                content: |
+                  {{ {'version': agentics_antigravity_release.version,
+                      'execution_id': agentics_antigravity_release.execution_id | string} | to_nice_json }}
+                dest: "{{ agentics_antigravity_record }}"
+                mode: "0644"
+              changed_when: false
+              check_mode: false
+
+            - name: Antigravity is installed by jsh
+              ansible.builtin.set_fact:
+                agentics_antigravity_installed: true
+
+            - name: Antigravity upgrade waits for a manual restart
+              when: agentics_antigravity_folder.stat.exists
+              block:
+                - name: Antigravity process is checked
+                  ansible.builtin.command:
+                    argv:
+                      - pgrep
+                      - -u
+                      - "{{ lookup('ansible.builtin.pipe', 'id -u') }}"
+                      - -x
+                      - antigravity
+                  register: agentics_antigravity_process
+                  changed_when: false
+                  check_mode: false
+                  failed_when: agentics_antigravity_process.rc not in [0, 1]
+
+                - name: notice
+                  ansible.builtin.debug:
+                    msg: "restart Antigravity to finish its update to {{ agentics_antigravity_release.version }}"
+                  when: agentics_antigravity_process.rc == 0
+
+          always:
+            - name: Antigravity private download folder is removed
+              ansible.builtin.file:
+                path: "{{ agentics_antigravity_download.path }}"
+                state: absent
+              changed_when: false
+              check_mode: false
+              when: agentics_antigravity_download.path is defined
+
+    - name: Antigravity desktop entry
+      vars:
+        # Desktop entry Exec quoting: escape backslash, quote, dollar, and backtick; double %.
+        agentics_antigravity_exec: >-
+          {{ (agentics_antigravity_dir ~ '/antigravity') | replace('\\', '\\\\') | replace('"', '\\"')
+             | replace('$', '\\$') | replace('`', '\\`') | replace('%', '%%') }}
+      ansible.builtin.copy:
+        dest: "{{ agentics_antigravity_data }}/applications/antigravity.desktop"
+        mode: "0644"
+        content: |
+          [Desktop Entry]
+          Type=Application
+          Name=Antigravity
+          Comment=Agent orchestration platform
+          Exec="{{ agentics_antigravity_exec }}" %U
+          Icon={{ agentics_antigravity_dir }}/icon.png
+          Terminal=false
+          Categories=Development;
+          StartupWMClass=Antigravity
+      when: >-
+        (agentics_antigravity_saved.content is defined and agentics_antigravity_folder.stat.exists)
+        or agentics_antigravity_installed | default(false)
+
+    # The desktop role pins docks before this role runs, so pin a new install now.
+    - name: Dock pins include Antigravity
+      ansible.builtin.include_role:
+        name: desktop
+        tasks_from: dock/main.yml
+      when: agentics_antigravity_installed | default(false) and not agentics_antigravity_folder.stat.exists
+
+- name: Antigravity CLI
+  when: agentics_antigravity_cli_found.rc != 0
+  block:
+    - name: skip
+      ansible.builtin.debug:
+        msg: "Skipping Antigravity CLI: not on an internal mirror"
+      when: jsh_mirrors_only | bool
+
+    - name: info
+      ansible.builtin.debug:
+        msg: would download verified Antigravity CLI
+      when: ansible_check_mode and not jsh_mirrors_only | bool
+
+    - name: Antigravity CLI download
+      when: not ansible_check_mode and not jsh_mirrors_only | bool
+      vars:
+        agentics_antigravity_cli_platform: >-
+          linux_{{ 'arm64' if ansible_facts.architecture in ['aarch64', 'arm64'] else 'amd64' }}
+      block:
+        - name: Antigravity CLI release is read
+          ansible.builtin.uri:
+            url: "{{ agentics_antigravity_cli_manifests }}/{{ agentics_antigravity_cli_platform }}.json"
+            return_content: true
+          register: agentics_antigravity_cli_release
+          check_mode: false
+
+        - name: Antigravity CLI release is valid
+          ansible.builtin.assert:
+            that:
+              - agentics_antigravity_cli_release.json.url.startswith(agentics_antigravity_artifacts | dirname ~ '/')
+              - agentics_antigravity_cli_release.json.sha512 is match('^[0-9a-f]{128}$')
+            fail_msg: "Antigravity CLI: unexpected release manifest"
+
+        - name: Antigravity CLI private download folder exists
+          ansible.builtin.tempfile:
+            state: directory
+            prefix: jsh-agy.
+          register: agentics_antigravity_cli_download
+          changed_when: false
+          check_mode: false
+
+        - name: Antigravity CLI archive is downloaded
+          ansible.builtin.get_url:
+            url: "{{ agentics_antigravity_cli_release.json.url }}"
+            dest: "{{ agentics_antigravity_cli_download.path }}/agy.tar.gz"
+            checksum: "sha512:{{ agentics_antigravity_cli_release.json.sha512 }}"
+            mode: "0600"
+          changed_when: false
+          check_mode: false
+
+        - name: Antigravity CLI archive is unpacked
+          ansible.builtin.unarchive:
+            src: "{{ agentics_antigravity_cli_download.path }}/agy.tar.gz"
+            dest: "{{ agentics_antigravity_cli_download.path }}"
+            remote_src: true
+            include:
+              - antigravity
+          changed_when: false
+          check_mode: false
+
+        - name: Antigravity CLI folder exists
+          ansible.builtin.file:
+            path: "{{ agentics_antigravity_cli | dirname }}"
+            state: directory
+            mode: u+rwx
+          changed_when: false
+          check_mode: false
+
+        # The upstream installer also runs `agy install`, which edits shell profiles; jsh's
+        # dotfiles already put ~/.local/bin on PATH.
+        - name: Antigravity CLI
+          ansible.builtin.command:
+            argv:
+              - install
+              - -m
+              - "0755"
+              - "{{ agentics_antigravity_cli_download.path }}/antigravity"
+              - "{{ agentics_antigravity_cli }}"
+            creates: "{{ agentics_antigravity_cli }}"
+
+      always:
+        - name: Antigravity CLI private download folder is removed
+          ansible.builtin.file:
+            path: "{{ agentics_antigravity_cli_download.path }}"
+            state: absent
+          changed_when: false
+          check_mode: false
+          when: agentics_antigravity_cli_download.path is defined

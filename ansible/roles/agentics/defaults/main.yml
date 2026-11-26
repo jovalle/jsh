@@ -11,6 +11,15 @@ agentics_instructions:
 agentics_helium: "{{ agentics_home }}/Library/Application Support/net.imput.helium"
 agentics_native_hosts: "{{ agentics_home }}/.codex/chrome-native-hosts-v2.json"
 
+# antigravity: Linux gets Google's App tarball and agy CLI; macOS gets both from casks.
+agentics_antigravity_data: "{{ lookup('ansible.builtin.env', 'XDG_DATA_HOME') or agentics_home ~ '/.local/share' }}"
+agentics_antigravity_dir: "{{ agentics_antigravity_data }}/antigravity"
+agentics_antigravity_record: "{{ agentics_state }}/jsh/antigravity.json"
+agentics_antigravity_releases: https://antigravity-hub-auto-updater-974169037036.us-central1.run.app/releases
+agentics_antigravity_artifacts: https://storage.googleapis.com/antigravity-public/antigravity-hub
+agentics_antigravity_cli: "{{ agentics_home }}/.local/bin/agy"
+agentics_antigravity_cli_manifests: https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests
+
 # skills
 agentics_skills_home: "{{ lookup('ansible.builtin.env', 'HOME') }}"
 agentics_skills_vendor: >-

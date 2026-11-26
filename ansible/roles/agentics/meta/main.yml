@@ -1,7 +1,9 @@
 ---
 galaxy_info:
   author: jsh
-  description: Write global agent instructions, merge agent settings, and install agent hooks and skills
+  description: >-
+    Write global agent instructions, merge agent settings, install agent hooks and skills,
+    and install Antigravity on Linux
   license: MIT
   # Runs without admin rights: everything it writes is under $HOME.
   galaxy_tags:
