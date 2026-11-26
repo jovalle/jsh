@@ -32,8 +32,8 @@ def load_account():
     overrides = {key: os.environ[var] for key, var in ACCOUNT_ENV.items() if var in os.environ}
     account = {}
     if not all(overrides.get(key) for key in ("url", "username", "password")):
-        config_home = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
-        path = Path(os.environ.get("XTREAM_CONFIG") or config_home / "xtream" / "xtream.conf").expanduser()
+        path = Path(os.environ.get("XTREAM_CONFIG") or Path(__file__).resolve().parent.parent
+                    / "local" / "xtream.conf").expanduser()
         settings = configparser.ConfigParser(interpolation=None)
         try:
             with path.open(encoding="utf-8") as config:
@@ -42,7 +42,7 @@ def load_account():
             reference = settings["xtream"]["account"]
         except (OSError, KeyError, ValueError, configparser.Error):
             raise SystemExit(
-                "Set XTREAM_URL, XTREAM_USERNAME and XTREAM_PASSWORD, or configure xtream.conf."
+                f"Set XTREAM_URL, XTREAM_USERNAME and XTREAM_PASSWORD, or configure {path}."
             ) from None
         if not reference.startswith("vault://technis/"):
             raise SystemExit("xtream.conf needs a vault://technis/ account reference.")
@@ -226,8 +226,9 @@ def main():
     parser = argparse.ArgumentParser(
         description=__doc__,
         epilog="Run xtream with no arguments to open the channel picker. Credentials come from "
-               "XTREAM_URL, XTREAM_USERNAME and XTREAM_PASSWORD or xtream/xtream.conf under the "
-               "user config directory. XTREAM_USER_AGENT overrides the account's user agent.",
+               "XTREAM_URL, XTREAM_USERNAME and XTREAM_PASSWORD or local/xtream.conf in the jsh "
+               "checkout. XTREAM_CONFIG selects another file; XTREAM_USER_AGENT overrides the "
+               "account's user agent.",
     )
     commands = parser.add_subparsers(dest="command")
     listing = commands.add_parser("search", aliases=["list"], help="Search the cached live lineup")
