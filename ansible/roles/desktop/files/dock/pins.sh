@@ -31,11 +31,24 @@ dock_pins() {
   desktop_file=$(find_desktop_file waterfox.desktop net.waterfox.waterfox.desktop) &&
     pins+="${desktop_file};"
   desktop_file=$(find_desktop_file helium.desktop) && pins+="${desktop_file};"
-  desktop_file=$(find_desktop_file code.desktop visual-studio-code.desktop \
-    com.visualstudio.code.desktop code-oss.desktop) && pins+="${desktop_file};"
   desktop_file=$(find_desktop_file com.spotify.Client.desktop) && pins+="${desktop_file};"
   desktop_file=$(find_desktop_file com.todoist.Todoist.desktop) && pins+="${desktop_file};"
+  desktop_file=$(find_desktop_file chatgpt.desktop) && pins+="${desktop_file};"
+  desktop_file=$(find_desktop_file antigravity.desktop) && pins+="${desktop_file};"
+  desktop_file=$(find_desktop_file code.desktop visual-studio-code.desktop \
+    com.visualstudio.code.desktop code-oss.desktop) && pins+="${desktop_file};"
   printf '%s\n' "${pins}"
+}
+
+# docklike 0.4 saves desktop IDs and rewrites any paths it loads, so write IDs to match it.
+dock_ids() {
+  local entry ids=''
+  while IFS= read -r entry; do
+    [[ -n ${entry} ]] || continue
+    entry=${entry##*/}
+    ids+="${entry%.desktop};"
+  done < <(tr ';' '\n' <<<"$1")
+  printf '%s\n' "${ids}"
 }
 
 managed_dock_target() {
@@ -222,7 +235,7 @@ case ${mode} in
       jsh::info "XFCE dock pins are unchecked in preview: ${desired_names}"
       exit 0
     fi
-    configure_xfce_dock "${pins}"
+    configure_xfce_dock "$(dock_ids "${pins}")"
     if ((dock_changed)); then
       jsh::changed "XFCE dock pins set ${desired_names}" \
         "XFCE dock pins are not ${desired_names}"

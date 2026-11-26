@@ -3733,8 +3733,12 @@ jsh::task "failing task" progress-fail
         desktop_ids = (
             "com.mitchellh.ghostty.desktop",
             "waterfox.desktop",
+            "helium.desktop",
             "com.visualstudio.code.desktop",
             "com.spotify.Client.desktop",
+            "com.todoist.Todoist.desktop",
+            "chatgpt.desktop",
+            "antigravity.desktop",
         )
         for desktop_id in desktop_ids:
             (applications / desktop_id).touch()
@@ -3756,10 +3760,66 @@ jsh::task "failing task" progress-fail
         ]
         self.assertEqual(
             dock_lines,
-            ["XFCE dock pins are unchecked in preview: Ghostty, Waterfox, VS Code, Spotify"],
+            [
+                "XFCE dock pins are unchecked in preview: "
+                "Ghostty, Waterfox, Helium, Spotify, Todoist, ChatGPT, Antigravity, VS Code"
+            ],
         )
         for hidden in (*desktop_ids, str(applications)):
             self.assertNotIn(hidden, display)
+
+    def test_dock_pins_use_docklike_ids_so_reruns_are_current(self):
+        applications = self.home / ".local/share/applications"
+        applications.mkdir(parents=True)
+        # Each app's first candidate, so system entries on the host never change the result.
+        ids = (
+            "com.mitchellh.ghostty waterfox helium com.spotify.Client com.todoist.Todoist "
+            "chatgpt antigravity code"
+        ).split()
+        for desktop_id in ids:
+            (applications / f"{desktop_id}.desktop").touch()
+        names = "Ghostty, Waterfox, Helium, Spotify, Todoist, ChatGPT, Antigravity, VS Code"
+        panel = self.home / ".config/xfce4/panel"
+        panel.mkdir(parents=True)
+        rc = panel / "docklike-19.rc"
+        # docklike 0.4 reads paths but saves IDs, so a path-format file must migrate once.
+        rc.write_text(f"[user]\npinned={applications}/com.mitchellh.ghostty.desktop;\n")
+        self.tool(
+            "xfconf-query",
+            'case " $* " in\n'
+            '  *" -lv "*) printf "/plugins/plugin-19 docklike\\n'
+            '/plugins/plugin-19/jsh-managed true\\n" ;;\n'
+            '  *" -s "*|*" -a "*|*" -n "*) ;;\n'
+            '  *" -p /panels "*) printf "Value is an array with 1 items:\\n\\n1\\n" ;;\n'
+            '  *" -p /panels/panel-1/position "*) echo "p=8;x=0;y=0" ;;\n'
+            '  *" -p /panels/panel-1/size "*) echo 48 ;;\n'
+            '  *" -p /panels/panel-1/plugin-ids "*) echo 19 ;;\n'
+            '  *" -p /plugins/plugin-19/jsh-managed "*) echo true ;;\n'
+            '  *" -p /plugins/plugin-19 "*) echo docklike ;;\n'
+            "  *) exit 1 ;;\n"
+            "esac",
+        )
+        self.tool("pgrep", "exit 1")
+
+        def apply():
+            result = subprocess.run(
+                ["bash", str(ROOT / "ansible/roles/desktop/files/dock/pins.sh"), "apply"],
+                env=self.env | {"JSH_DESKTOP": "xfce"},
+                cwd=self.home,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            return result.stdout + result.stderr
+
+        self.assertIn(f"XFCE dock pins set {names}", apply())
+        self.assertEqual(rc.read_text(), "[user]\npinned=" + "".join(f"{i};" for i in ids) + "\n")
+        written = rc.stat().st_mtime_ns
+        display = apply()
+        self.assertIn(f"XFCE dock pins are {names}", display)
+        self.assertNotIn("pins set", display)
+        self.assertEqual(rc.stat().st_mtime_ns, written)
 
     def test_interactive_shell_discards_inherited_output_session(self):
         for shell in SHELLS:

@@ -29,6 +29,8 @@ jsh::desktop_names() {
       code | visual-studio-code | com.visualstudio.code | code-oss) name='VS Code' ;;
       com.spotify.Client) name=Spotify ;;
       com.todoist.Todoist) name=Todoist ;;
+      chatgpt) name=ChatGPT ;;
+      antigravity) name=Antigravity ;;
     esac
     result+="${separator}${name}"
     separator=', '
