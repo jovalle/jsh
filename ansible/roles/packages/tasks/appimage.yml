@@ -104,7 +104,35 @@
             checksum: "{{ packages_appimage_assets[0].digest }}"
             mode: "0755"
             force: true
+          register: packages_appimage_download
           when: packages_appimage_recorded != packages_appimage_digest
+
+        # The AppImage runtime keeps the replaced file open, so its exe link reads "PATH (deleted)".
+        - name: "{{ packages_appimage_name }} upgrade waits for a manual restart"
+          when: packages_appimage_download is changed and packages_appimage_saved.content is defined
+          block:
+            - name: "{{ packages_appimage_name }} process is checked"
+              ansible.builtin.command:
+                argv:
+                  - sh
+                  - -c
+                  - |
+                    for pid in $(pgrep -u "$(id -u)" .); do
+                      exe=$(readlink "/proc/${pid}/exe" 2>/dev/null) || continue
+                      if [ "${exe}" = "$1" ] || [ "${exe}" = "$1 (deleted)" ]; then exit 0; fi
+                    done
+                    exit 1
+                  - sh
+                  - "{{ packages_appimage_path }}"
+              register: packages_appimage_process
+              changed_when: false
+              check_mode: false
+              failed_when: packages_appimage_process.rc not in [0, 1]
+
+            - name: notice
+              ansible.builtin.debug:
+                msg: "restart {{ packages_appimage_name | capitalize }} to use the updated version"
+              when: packages_appimage_process.rc == 0
 
         - name: "{{ packages_appimage_record }}"
           ansible.builtin.copy:

@@ -6728,6 +6728,49 @@ exec /usr/bin/stat "$@"
         self.assertIn(["item", "changed", "com.example.Missing"], events)
         self.assertFalse((self.home / "flatpak-updated").exists())
 
+    def test_flatpak_update_asks_to_restart_only_running_updated_apps(self):
+        self.tool(
+            "flatpak",
+            'case " $* " in\n'
+            '  *" remote-ls "*) printf "%s\\n" com.example.Open com.example.Closed ;;\n'
+            '  *" --columns=application,name "*)\n'
+            '    printf "%s\\t%s\\n" com.example.Open "Open App" com.example.Closed "Closed App"\n'
+            '    printf "%s\\t%s\\n" com.example.Current "Current App" ;;\n'
+            '  *" list "*) printf "%s\\n" com.example.Open com.example.Closed com.example.Current ;;\n'
+            '  *" ps "*) printf "%s\\n" com.example.Open com.example.Open com.example.Current ;;\n'
+            '  *" update "*) echo "$*" >> "$HOME/flatpak-updated" ;;\n'
+            "esac",
+        )
+        variables = json.dumps(
+            {
+                "jsh_platform": "debian",
+                "jsh_update": True,
+                "packages_roles": {},
+                "packages_common": {
+                    "debian": {
+                        "flatpak": ["com.example.Open", "com.example.Closed", "com.example.Current"]
+                    }
+                },
+                "packages_extra": {},
+            }
+        )
+        roles = {"macos": "- name: Packages\n  ansible.builtin.include_role: {name: packages}\n"}
+        include = "    - name: macos\n      ansible.builtin.include_role: {name: macos}\n"
+        role_paths = str(self.home / "play/roles") + ":" + str(ROOT / "ansible/roles")
+
+        result, events = self.run_play(
+            include, "-e", variables, roles=roles, **{"ANSIBLE_ROLES_PATH": role_paths}
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(
+            (self.home / "flatpak-updated").read_text().split(),
+            "update --noninteractive -y com.example.Open "
+            "update --noninteractive -y com.example.Closed".split(),
+        )
+        notices = [event[2] for event in events if event[:2] == ["item", "notice"]]
+        self.assertEqual(notices, ["restart Open App to use the updated version"])
+
     def test_appimage_preview_matches_bash_without_downloading_or_drift(self):
         package = {
             "name": "missing-appimage",

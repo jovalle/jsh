@@ -92,6 +92,42 @@
       loop_control:
         label: "{{ item }}"
       changed_when: true
+      register: packages_flatpak_updated
       when: >-
         jsh_update | bool and not ansible_check_mode
         and item in packages_flatpak_updates.stdout_lines
+
+    # A running Flatpak app keeps the previous version until it restarts.
+    - name: Flatpak upgrades wait for a manual restart
+      when: packages_flatpak_upgraded | length > 0
+      vars:
+        packages_flatpak_upgraded: >-
+          {{ packages_flatpak_updated.results | default([]) | selectattr('changed') | map(attribute='item') | list }}
+      block:
+        - name: Running Flatpak apps are listed
+          ansible.builtin.command:
+            argv:
+              - flatpak
+              - ps
+              - --columns=application
+          register: packages_flatpak_running
+          changed_when: false
+          check_mode: false
+
+        - name: Flatpak app names are listed
+          ansible.builtin.command:
+            argv:
+              - flatpak
+              - list
+              - --app
+              - --columns=application,name
+          register: packages_flatpak_names
+          changed_when: false
+          check_mode: false
+
+        - name: notice
+          ansible.builtin.debug:
+            msg: "restart {{ packages_flatpak_label[item] | default(item) }} to use the updated version"
+          loop: "{{ packages_flatpak_upgraded | select('in', packages_flatpak_running.stdout_lines) | list }}"
+          vars:
+            packages_flatpak_label: "{{ dict(packages_flatpak_names.stdout_lines | map('split', '\t')) }}"
